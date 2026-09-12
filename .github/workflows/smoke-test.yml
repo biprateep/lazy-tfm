@@ -1,0 +1,32 @@
+# Daily run against the *latest* resolvable dependencies rather than uv.lock.
+#
+# The locked job in testing-and-coverage.yml cannot see a new upstream release
+# that breaks us. This one can: it is the early warning that an upstream change
+# needs a lockfile bump. A failure here is not a failure of the merged code.
+# See https://lincc-ppt.readthedocs.io/en/latest/practices/ci_testing.html#version-culprit
+
+name: Unit test smoke test
+
+on:
+  schedule:
+    - cron: 45 6 * * *
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Install the newest resolvable environment
+      run: uv sync --upgrade --python ${{ matrix.python-version }}
+    - name: List dependencies
+      run: uv pip list
+    - name: Run unit tests with pytest
+      run: uv run --no-sync pytest

@@ -1,0 +1,142 @@
+[project]
+name = "lazy-photoz"
+version = "0.1.0.dev0"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [
+    { name = "Biprateep Dey", email = "biprateep@pitt.edu" },
+]
+description = "Lazy but Accurate photo-Z for Yin'z"
+keywords = ["photometric redshift", "astronomy", "foundation model", "tabular", "LSST"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+    "huggingface-hub>=0.24",
+]
+
+[project.urls]
+"Source Code" = "https://github.com/biprateep/lazy-photoz"
+"Documentation" = "https://lazy-photoz.readthedocs.io"
+"Bug Tracker" = "https://github.com/biprateep/lazy-photoz/issues"
+
+# Each backend is optional: `pip install lazy-photoz` on its own gives you the
+# grid, metrics, plotting and dataset machinery with no deep-learning stack.
+[project.optional-dependencies]
+tabfm = [
+    "tabfm[pytorch]>=1.0.1", # Google TabFM; its checkpoint is fetched from Hugging Face on first use
+    # huggingface_hub loads the checkpoint through `_load_as_safetensor`, which
+    # touches `safetensors.__version__` but only imports the module when it is
+    # installed -- and neither hub nor tabfm declares it. Without this the load
+    # dies with `NameError: name 'safetensors' is not defined`.
+    "safetensors>=0.4.3",
+]
+tabicl = [
+    "tabicl>=2.2.0", # TabICLv2; its checkpoint is fetched from Hugging Face on first use
+]
+all = [
+    "lazy-photoz[tabfm,tabicl]",
+]
+
+# PEP 735 groups: development tooling, never published in the wheel metadata.
+# `uv sync` installs the default group; `uv sync --group docs` adds the rest.
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+    "ipykernel>=6",
+    "jupyter>=1",
+    "jupytext>=1.16", # Notebooks are authored as py:percent scripts
+]
+docs = [
+    "sphinx>=7",
+    "sphinx-autoapi>=3",
+    "sphinx-copybutton>=0.5",
+    "sphinx-rtd-theme>=3.0",
+    "nbsphinx>=0.9",
+    "nbconvert>=7",
+    "ipython>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "lazy"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src", "docs"]
+addopts = "--doctest-modules --doctest-glob=*.rst"
+markers = [
+    "gpu: needs a CUDA device and a downloaded foundation-model checkpoint",
+]
+# Tests that load a multi-gigabyte checkpoint are opt-in:
+#   LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    "W",
+    # Pyflakes
+    "F",
+    # pep8-naming
+    "N",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # docstrings
+    "D101",
+    "D102",
+    "D103",
+    "D106",
+    "D206",
+    "D207",
+    "D208",
+    "D300",
+    "D417",
+    "D419",
+    # Numpy v2.0 compatibility
+    "NPY201",
+]
+ignore = [
+    "UP006", # Allow non standard library generics in type hints
+    "UP007", # Allow Union in type hints
+    "SIM114", # Allow if with same arms
+    "B028", # Allow default warning level
+    "SIM117", # Allow nested with
+    "UP015", # Allow redundant open parameters
+    "UP028", # Allow yield in for loop
+    "N803", # Allow the scikit-learn `X` argument name
+    "N806", # Allow the scikit-learn `X` local-variable name
+]
+
+[tool.coverage.run]
+source = ["src/lazy"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lazy"]

@@ -1,0 +1,35 @@
+"""The photo-z backends, and the name-based entry point to them.
+
+Two ways in, and they give you the same estimator::
+
+    from lazy import LazyModel
+    model = LazyModel("tabfm", n_estimators=4, n_dither=3)   # by name
+
+    from lazy.models import TabFMHistogram
+    model = TabFMHistogram(n_estimators=4, n_dither=3)       # by class
+
+Use :class:`~lazy.models.lazy_model.LazyModel` when the backend is a
+configuration value -- a CLI flag, a config file, a loop over methods -- and the
+concrete class when you want its parameters documented at your fingertips.
+
+Constructing either downloads nothing: the pretrained weights are fetched on the
+first prediction and cached from then on (:func:`download_checkpoint`).
+"""
+
+from lazy.models._hub import CHECKPOINTS, download_checkpoint, is_cached
+from lazy.models.lazy_model import LazyModel
+from lazy.models.registry import ESTIMATORS, get_estimator, list_estimators
+from lazy.models.tabfm import TabFMHistogram
+from lazy.models.tabicl import TabICLQuantile
+
+__all__ = [
+    "CHECKPOINTS",
+    "ESTIMATORS",
+    "LazyModel",
+    "TabFMHistogram",
+    "TabICLQuantile",
+    "download_checkpoint",
+    "get_estimator",
+    "is_cached",
+    "list_estimators",
+]

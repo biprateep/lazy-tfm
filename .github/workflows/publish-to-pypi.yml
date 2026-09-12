@@ -1,0 +1,38 @@
+# Publish to PyPI when a GitHub release is published, via trusted publishing
+# (no API token stored in the repository).
+#   https://docs.pypi.org/trusted-publishers/
+#
+# Before the first release, register this workflow as a trusted publisher for
+# the `lazy-photoz` project on PyPI.
+
+name: Upload Python Package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Build sdist and wheel
+      run: uv build
+    - name: Check the version matches the release tag
+      run: |
+        version=$(uv version --short)
+        tag="${GITHUB_REF_NAME#v}"
+        if [ "$version" != "$tag" ]; then
+          echo "pyproject version $version does not match release tag $tag" >&2
+          exit 1
+        fi
+    - name: Publish package
+      run: uv publish --trusted-publishing always
