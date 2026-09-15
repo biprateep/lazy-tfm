@@ -1,7 +1,7 @@
 # Reproducing the paper
 
-This directory will hold the production scripts behind the paper: the exact
-runs, in the exact order, that produce every number and figure in it.
+This directory is where the production code behind the paper lives: the
+exact runs, in the exact order, that produce every number and figure in it.
 
 It is empty on purpose. The research direction is not finalised, and freezing
 half-finished experiment drivers here would give a false promise of
