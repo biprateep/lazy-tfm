@@ -1,4 +1,4 @@
-"""LAZY -- Lazy but Accurate photo-Z for Yin'z.
+"""LAZY -- Lazy but Accurate photo-Z for Yinz.
 
 Photometric redshift PDFs from tabular foundation models. The models are
 pretrained and never fine-tuned: you hand them labelled galaxies as *context*
@@ -7,11 +7,9 @@ hyper-parameter search and no per-survey retraining -- hence lazy::
 
     from lazy import LazyModel, RedshiftGrid
     from lazy.datasets import fetch_dc1
-    from lazy.features import build_features
 
-    train, test = fetch_dc1("train"), fetch_dc1("test")
-    X_train = build_features(train.raw, "adjcolors_cerr")
-    X_test = build_features(test.raw, "adjcolors_cerr")
+    train, test = fetch_dc1(split=True)
+    X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     model.fit(X_train, train.redshift)
@@ -42,8 +40,10 @@ Layout
     :func:`~lazy.metrics.summarize` for the comparison table.
 :mod:`lazy.plotting`
     The publication style, and the standard diagnostic figures.
-:mod:`lazy.datasets`, :mod:`lazy.features`
-    The DC1 benchmark catalogue, and the photometry-to-features recipes.
+:mod:`lazy.datasets`
+    The DC1 benchmark catalogue, and :class:`~lazy.datasets.Catalog`, which
+    turns photometry -- DC1's or your own -- into the feature views a model
+    sees.
 
 Weights are fetched from the Hugging Face Hub on first use and cached
 thereafter; :func:`download_checkpoint` warms that cache ahead of time.

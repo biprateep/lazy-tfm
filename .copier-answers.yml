@@ -14,7 +14,7 @@ include_docs: true
 include_notebooks: true
 mypy_type_checking: none
 package_name: lazy
-project_description: Lazy but Accurate photo-Z for Yin'z
+project_description: Lazy but Accurate photo-Z for Yinz
 project_license: MIT
 project_name: lazy-photoz
 project_organization: biprateep

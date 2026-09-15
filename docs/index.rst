@@ -1,7 +1,7 @@
 LAZY
 ====
 
-**Lazy but Accurate photo-Z for Yin'z**
+**Lazy but Accurate photo-Z for Yinz**
 
 Photometric redshift PDFs from pretrained tabular foundation models. The models
 are never fine-tuned: you hand them labelled galaxies as *context* and they
@@ -47,11 +47,9 @@ Quickstart
 
    from lazy import LazyModel, RedshiftGrid
    from lazy.datasets import fetch_dc1
-   from lazy.features import build_features
 
-   train, test = fetch_dc1("train"), fetch_dc1("test")
-   X_train = build_features(train.raw, "adjcolors_cerr")
-   X_test = build_features(test.raw, "adjcolors_cerr")
+   train, test = fetch_dc1(split=True)
+   X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
    model = LazyModel("tabfm", n_estimators=4, n_dither=3)
    model.fit(X_train, train.redshift)
@@ -61,8 +59,21 @@ Quickstart
    print(model.evaluate(X_test, test.redshift))
 
 ``fetch_dc1`` downloads the LSST DESC PZ Data Challenge catalogue (about 1 GB,
-checksummed, cached). Any tabular features work -- the DC1 helpers are a
-convenience, not a requirement.
+checksummed, cached) in one call: ``split=True`` hands back the challenge's own
+train/test split, and the default hands back both files concatenated, with
+``source`` marking where each row came from, for when you want to make your own
+splits.
+
+:meth:`~lazy.datasets.Catalog.features` builds the tabular view the model sees
+-- ``"mag"`` for the magnitudes and their errors, ``"mag-color"`` (the default)
+for the reference magnitude and the adjacent colours with errors propagated in
+quadrature, ``"all"`` for every magnitude, every colour and all their errors. It
+is photometry-specific rather than general, which is why it lives on the
+catalogue; it acts on a plain :class:`~pandas.DataFrame`, so a catalogue you
+built yourself goes through the same code via
+:meth:`~lazy.datasets.Catalog.from_frame` or
+:meth:`~lazy.datasets.Catalog.build_features`. Any tabular features work -- the
+DC1 helpers are a convenience, not a requirement.
 
 The API
 -------
@@ -189,10 +200,10 @@ explicit error rather than a hang:
    from lazy.datasets import fetch_dc1
 
    download_checkpoint("tabicl")          # on the login node
-   fetch_dc1("train"); fetch_dc1("test")
+   fetch_dc1()
 
    is_cached("tabicl")                    # on the compute node: True
-   fetch_dc1("test", download_if_missing=False)
+   fetch_dc1(download_if_missing=False)
 
 The checkpoint a model loads is the one :func:`~lazy.download_checkpoint`
 fetches -- the pinned revision in :data:`lazy.models.CHECKPOINTS` is passed to

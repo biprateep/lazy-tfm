@@ -1,6 +1,6 @@
 # LAZY
 
-**L**azy but **A**ccurate photo-**Z** for **Y**in'z — photometric redshift PDFs
+**L**azy but **A**ccurate photo-**Z** for **Y**inz — photometric redshift PDFs
 from pretrained tabular foundation models.
 
 [![Unit test and code coverage](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml)
@@ -34,11 +34,9 @@ on first prediction and cached thereafter. TabFM's classification checkpoint is
 ```python
 from lazy import LazyModel, RedshiftGrid
 from lazy.datasets import fetch_dc1
-from lazy.features import build_features
 
-train, test = fetch_dc1("train"), fetch_dc1("test")
-X_train = build_features(train.raw, "adjcolors_cerr")
-X_test = build_features(test.raw, "adjcolors_cerr")
+train, test = fetch_dc1(split=True)        # or fetch_dc1() for both, concatenated
+X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
 model = LazyModel("tabfm", n_estimators=4, n_dither=3)
 model.fit(X_train, train.redshift)
@@ -112,8 +110,7 @@ little repeated context work.
 | `lazy.grid`      | `RedshiftGrid`: binning, normalisation, mass-conserving rebinning            |
 | `lazy.metrics`   | LSST DESC PZ Data Challenge point and PDF metrics, and `summarize`           |
 | `lazy.plotting`  | Publication figure style, and the standard diagnostic figures                |
-| `lazy.datasets`  | The DC1 benchmark catalogue: download, checksum, cache, load                 |
-| `lazy.features`  | Photometry → feature recipes (magnitudes, colours, propagated colour errors) |
+| `lazy.datasets`  | The DC1 catalogue (download, checksum, cache) and `Catalog.features`          |
 
 ## Develop
 
@@ -131,9 +128,8 @@ result. The test suite needs neither a GPU nor a checkpoint.
 ## Repository layout
 
 - `main` — this library. The public, installable package.
-- `research` — the live experiment code behind the paper: benchmark harness,
-  baselines, the biased-selection study, frozen splits, and the research log.
-  It does not follow this API and changes daily. See [research/](research/).
+- `paper` — the production code behind the paper: the exact runs, in the exact
+  order, that produce every number and figure in it. See [paper/](paper/).
 
 ## Citing
 

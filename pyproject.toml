@@ -7,7 +7,7 @@ readme = "README.md"
 authors = [
     { name = "Biprateep Dey", email = "biprateep@pitt.edu" },
 ]
-description = "Lazy but Accurate photo-Z for Yin'z"
+description = "Lazy but Accurate photo-Z for Yinz"
 keywords = ["photometric redshift", "astronomy", "foundation model", "tabular", "LSST"]
 classifiers = [
     "Development Status :: 3 - Alpha",
