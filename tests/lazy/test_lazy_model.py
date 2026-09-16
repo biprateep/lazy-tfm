@@ -7,22 +7,24 @@ import numpy as np
 import pytest
 from sklearn.base import clone
 
-from lazy import LazyModel, list_estimators
+from lazy import DEFAULT_VERSIONS, LazyModel, list_estimators
 from lazy.base import BasePhotoZEstimator
 from lazy.grid import DC1_GRID, RedshiftGrid
-from lazy.models import TabFMHistogram, TabICLQuantile
+from lazy.models import TabFMHistogram, TabICLQuantile, TabPFNBarDistribution
 
 
-@pytest.mark.parametrize("name", ["tabfm", "tabicl"])
+@pytest.mark.parametrize("name", ["tabfm", "tabicl", "tabpfn"])
 def test_every_registered_name_builds(name):
     model = LazyModel(name)
     assert isinstance(model, BasePhotoZEstimator)
-    assert model.name_ == name
+    assert model.model == name
+    assert model.name_ == f"{name}:{DEFAULT_VERSIONS[name]}"
 
 
 def test_the_backend_is_the_concrete_class():
     assert isinstance(LazyModel("tabfm").estimator, TabFMHistogram)
     assert isinstance(LazyModel("tabicl").estimator, TabICLQuantile)
+    assert isinstance(LazyModel("tabpfn").estimator, TabPFNBarDistribution)
 
 
 def test_parameters_reach_the_backend():
@@ -45,7 +47,15 @@ def test_a_missing_attribute_names_both_classes():
 
 def test_unknown_model_name_names_the_alternatives():
     with pytest.raises(ValueError, match="tabicl"):
-        LazyModel("tabpfn")
+        LazyModel("tabdpt")
+
+
+def test_the_version_reaches_the_backend_and_the_label():
+    """A results row has to say which model version produced it."""
+    model = LazyModel("tabpfn", version="v2.5")
+    assert model.version == "v2.5"
+    assert model.name_ == "tabpfn:v2.5"
+    assert model.get_params()["version"] == "v2.5"
 
 
 def test_a_parameter_the_backend_does_not_take_is_rejected_immediately():
@@ -90,7 +100,7 @@ def test_set_params_updates_the_backend_in_place():
 def test_set_params_can_switch_backend():
     model = LazyModel("tabfm", n_dither=3)
     model.set_params(model="tabicl", n_estimators=16)
-    assert model.name_ == "tabicl"
+    assert model.name_ == "tabicl:v2"
     assert isinstance(model.estimator, TabICLQuantile)
     assert model.estimator.n_estimators == 16
 

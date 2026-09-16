@@ -26,7 +26,7 @@ from numpy.typing import NDArray
 
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
-from lazy.models._hub import CHECKPOINTS
+from lazy.models._hub import get_checkpoint
 
 __all__ = ["TabICLQuantile", "quantile_levels"]
 
@@ -48,6 +48,9 @@ class TabICLQuantile(BasePhotoZEstimator):
 
     Parameters
     ----------
+    version
+        Which pinned TabICL checkpoint to load; see
+        :func:`lazy.list_versions`. Recorded in ``provenance_``.
     n_estimators
         TabICL ensemble members. Costs scale linearly; 8 is the value the
         benchmarks use.
@@ -76,6 +79,10 @@ class TabICLQuantile(BasePhotoZEstimator):
         The resolved output grid.
     checkpoint_ : pathlib.Path
         The pinned checkpoint file the weights were loaded from.
+    provenance_ : dict
+        Which weights and which code answered: backend, version, repository,
+        revision, package versions and device. See
+        :meth:`lazy.models._hub.Checkpoint.provenance`.
     regressor_ : object
         The fitted ``tabicl.TabICLRegressor``.
     n_quantiles_ : int
@@ -88,9 +95,12 @@ class TabICLQuantile(BasePhotoZEstimator):
     50000
     """
 
+    backend = "tabicl"
+
     def __init__(
         self,
         *,
+        version: str = "v2",
         n_estimators: int = 8,
         z_grid=None,
         device: str = "auto",
@@ -98,6 +108,7 @@ class TabICLQuantile(BasePhotoZEstimator):
         chunk_size: int = 16_384,
         verbose: bool = False,
     ):
+        self.version = version
         self.n_estimators = n_estimators
         self.z_grid = z_grid
         self.device = device
@@ -126,7 +137,9 @@ class TabICLQuantile(BasePhotoZEstimator):
         # one actually loaded -- silently breaking offline runs and silently
         # un-pinning the weights. This way there is one checkpoint and one
         # download path, and `CHECKPOINTS` is the authority on both.
-        self.checkpoint_ = CHECKPOINTS["tabicl"].download()
+        spec = get_checkpoint("tabicl", self.version)
+        self.checkpoint_ = spec.download()
+        self.provenance_ = spec.provenance(device=self.device_)
         self._log(f"fitting TabICL on {len(X)} context rows ({self.device_}), {self.checkpoint_.name}")
         regressor = TabICLRegressor(
             n_estimators=self.n_estimators,

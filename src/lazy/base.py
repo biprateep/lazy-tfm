@@ -29,7 +29,7 @@ Both receive a :class:`pandas.DataFrame` with the columns ``fit`` was given, and
 ``_predict_pdf`` is handed the :class:`~lazy.grid.RedshiftGrid` to answer on;
 the base class takes care of validation, grid resolution and normalisation.
 
-Note on "fitting" an in-context model: TabFM and TabICL do not update any
+Note on "fitting" an in-context model: none of the backends updates any
 weights. ``fit`` stores the labelled rows that become the model's *context*, and
 the cost of a prediction scales with how many there are. That is an
 implementation detail of the backends, not of this interface -- a classical
@@ -62,6 +62,10 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
     Subclasses must accept a ``z_grid`` parameter and pass it through
     unchanged; see the module docstring.
     """
+
+    #: The registered backend name (a key of :data:`lazy.ESTIMATORS`), set as a
+    #: class attribute by each backend. ``None`` on a subclass that is not one.
+    backend: str | None = None
 
     # -- to be provided by subclasses --------------------------------------
 
@@ -188,10 +192,23 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
             grid.centers,
             self.predict_proba(X, grid),
             point=_check_method(method),
-            label=getattr(self, "name_", type(self).__name__),
+            label=self.name_,
         )
 
     # -- helpers -----------------------------------------------------------
+
+    @property
+    def name_(self) -> str:
+        """``"<backend>:<version>"`` -- the label :meth:`evaluate` puts on its row.
+
+        The version is in the label on purpose: a foundation model's version is
+        part of the method, so two rows both called ``tabpfn`` that came from
+        different checkpoints would be a quietly wrong comparison.
+        """
+        if self.backend is None:
+            return type(self).__name__
+        version = getattr(self, "version", None)
+        return f"{self.backend}:{version}" if version else self.backend
 
     def point_estimates(self, pdfs: ArrayLike, z_grid=None) -> dict[str, NDArray[np.float64]]:
         """Every supported reduction of already-computed densities.

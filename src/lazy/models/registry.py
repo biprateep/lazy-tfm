@@ -13,6 +13,7 @@ from __future__ import annotations
 from lazy.base import BasePhotoZEstimator
 from lazy.models.tabfm import TabFMHistogram
 from lazy.models.tabicl import TabICLQuantile
+from lazy.models.tabpfn import TabPFNBarDistribution
 
 __all__ = ["ESTIMATORS", "get_estimator", "list_estimators"]
 
@@ -21,6 +22,7 @@ __all__ = ["ESTIMATORS", "get_estimator", "list_estimators"]
 ESTIMATORS: dict[str, type[BasePhotoZEstimator]] = {
     "tabfm": TabFMHistogram,
     "tabicl": TabICLQuantile,
+    "tabpfn": TabPFNBarDistribution,
 }
 
 
@@ -28,7 +30,7 @@ def list_estimators() -> list[str]:
     """The backend names, sorted.
 
     >>> list_estimators()
-    ['tabfm', 'tabicl']
+    ['tabfm', 'tabicl', 'tabpfn']
     """
     return sorted(ESTIMATORS)
 

@@ -21,7 +21,8 @@ Installation
    $ pip install lazy-photoz              # the grid, metrics, plots and datasets
    $ pip install 'lazy-photoz[tabfm]'     # + the TabFM backend
    $ pip install 'lazy-photoz[tabicl]'    # + the TabICLv2 backend
-   $ pip install 'lazy-photoz[all]'       # + both
+   $ pip install 'lazy-photoz[tabpfn]'    # + the TabPFN-3 backend
+   $ pip install 'lazy-photoz[all]'       # + all three
 
 The backends are optional so that the parts of the library that need no deep
 learning stack -- the metrics, the plots, the grid machinery -- install in
@@ -31,8 +32,11 @@ Pretrained weights are **not** bundled. They are fetched from the Hugging Face
 Hub the first time you predict and cached in the usual HF cache
 (``~/.cache/huggingface/hub``) from then on. TabFM's classification checkpoint
 is about 6.6 GB and is released by Google under a **non-commercial** licence;
-TabICLv2's is about 100 MB. To warm the cache before running somewhere without
-a network:
+TabICLv2's is about 100 MB; the TabPFN checkpoints run from 41 MB to 880 MB and
+are **non-commercial** from Prior Labs, apart from ``v2``, which is Apache-2.0
+with an attribution clause. Every licence is quoted in
+:data:`lazy.CHECKPOINTS`. To warm the cache before running somewhere without a
+network:
 
 .. code-block:: python
 
@@ -133,13 +137,16 @@ Name         Method                          Weights    Best for
 ``tabicl``   Quantiles of an in-context       ~100 MB    Fast baselines; modest hardware.
              regression head, differenced
              onto the grid.
+``tabpfn``   Bucket masses of the bar        41-880 MB  Sharp densities; small checkpoint.
+             distribution, rebinned onto
+             the grid.
 ===========  ==============================  =========  =======================================
 
-Neither backend needs a pinned or patched dependency. Peak memory is bounded by
-``chunk_size`` on both, and chunking is exact: the in-context stage builds its
-keys and values from the context rows alone, so a query row's answer never
-depends on which other query rows share its chunk. The test suite asserts the
-outputs are bit-identical rather than assuming it.
+No backend needs a pinned or patched dependency. Peak memory is bounded by
+``chunk_size`` on all of them, and chunking is exact: the in-context stage
+builds its keys and values from the context rows alone, so a query row's answer
+never depends on which other query rows share its chunk. The test suite asserts
+the outputs are bit-identical rather than assuming it.
 
 .. note::
 
@@ -151,7 +158,7 @@ outputs are bit-identical rather than assuming it.
 
       $ pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
 
-Both write onto whatever :class:`~lazy.grid.RedshiftGrid` you ask for --
+They all write onto whatever :class:`~lazy.grid.RedshiftGrid` you ask for --
 any number of bins, any spacing, any range:
 
 .. code-block:: python
@@ -164,6 +171,52 @@ any number of bins, any spacing, any range:
 
 TabFM's classifier is limited to ten classes, but that limit applies to each
 level of the internal bin hierarchy, never to the output grid.
+
+Which model, exactly
+--------------------
+
+A backbone is a family, not a model, so every backend takes a ``version`` and
+each version is a separately pinned checkpoint:
+
+.. code-block:: python
+
+   lazy.list_versions("tabpfn")
+   # ['v2', 'v2.5', 'v2.6', 'v3', 'v3.5', 'v3.5-fast']
+
+   model = LazyModel("tabpfn", version="v2.5")
+   model.name_          # 'tabpfn:v2.5' -- the label evaluate() puts on its row
+
+Sweeping ``version`` compares model versions on equal terms, and a results table
+then says which one produced each row rather than only which family. What
+actually answered is recorded on the fitted model, ready to be written out
+beside the numbers:
+
+.. code-block:: python
+
+   model.fit(X_train, z_train).provenance_
+   # {'backend': 'tabpfn', 'version': 'v3',
+   #  'repo_id': 'Prior-Labs/tabpfn_3',
+   #  'filename': 'tabpfn-v3-regressor-v3_default.ckpt',
+   #  'revision': '24a16a89d245878b846555110985634aa2e656d7',
+   #  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-photoz 0.1.0.dev0',
+   #  'device': 'cuda'}
+
+It holds the weights *and* the code that read them, and no local paths, so it
+means the same thing on another machine and survives a trip through JSON.
+Settings are not in it -- ``get_params()`` has those.
+
+:data:`lazy.CHECKPOINTS` is keyed ``"backend:version"`` and is the authority on
+what each name loads, so :func:`~lazy.download_checkpoint` warms exactly the
+file a run will read:
+
+.. code-block:: python
+
+   lazy.download_checkpoint("tabpfn", "v2.5")
+   lazy.get_checkpoint("tabpfn", "v2.5").license_note
+
+Versions are not interchangeable. TabPFN ``v2`` is pretrained for at most 10,000
+context rows and ``v2.5`` for 50,000, against a million for ``v3``; ``v2`` is
+also the only one under a commercial-use licence.
 
 Caches, and running without a network
 -------------------------------------
@@ -210,7 +263,7 @@ fetches -- the pinned revision in :data:`lazy.models.CHECKPOINTS` is passed to
 the backend rather than left to its own default, so warming the cache cannot
 prefetch the wrong file.
 
-Memory is bounded by default on both backends: ``chunk_size`` (16384 query rows)
+Memory is bounded by default on every backend: ``chunk_size`` (16384 query rows)
 caps the largest intermediate, and chunking is numerically exact, so the default
 costs nothing but a little repeated context work. Lower it on a small machine;
 set it to ``0`` for a single pass.
@@ -230,6 +283,7 @@ paraphrased, so the numbers are directly comparable with Schmidt et al. (2020):
    table = pd.concat([
        summarize(z_true, grid.centers, pdfs_a, label="TabFM"),
        summarize(z_true, grid.centers, pdfs_b, label="TabICLv2"),
+       summarize(z_true, grid.centers, pdfs_c, label="TabPFN-3"),
    ])
 
 :mod:`lazy.plotting` carries the publication figure style and the standard

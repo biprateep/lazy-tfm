@@ -16,20 +16,32 @@ Constructing either downloads nothing: the pretrained weights are fetched on the
 first prediction and cached from then on (:func:`download_checkpoint`).
 """
 
-from lazy.models._hub import CHECKPOINTS, download_checkpoint, is_cached
+from lazy.models._hub import (
+    CHECKPOINTS,
+    DEFAULT_VERSIONS,
+    download_checkpoint,
+    get_checkpoint,
+    is_cached,
+    list_versions,
+)
 from lazy.models.lazy_model import LazyModel
 from lazy.models.registry import ESTIMATORS, get_estimator, list_estimators
 from lazy.models.tabfm import TabFMHistogram
 from lazy.models.tabicl import TabICLQuantile
+from lazy.models.tabpfn import TabPFNBarDistribution
 
 __all__ = [
     "CHECKPOINTS",
+    "DEFAULT_VERSIONS",
     "ESTIMATORS",
     "LazyModel",
     "TabFMHistogram",
     "TabICLQuantile",
+    "TabPFNBarDistribution",
     "download_checkpoint",
+    "get_checkpoint",
     "get_estimator",
     "is_cached",
     "list_estimators",
+    "list_versions",
 ]
