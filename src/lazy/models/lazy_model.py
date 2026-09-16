@@ -6,13 +6,15 @@ between them is a string change rather than an import change::
 
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     model = LazyModel("tabicl", n_estimators=8)
+    model = LazyModel("tabpfn", n_estimators=8)
 
     model.fit(X_train, z_train)
     pdfs = model.predict_proba(X_test, z_grid)
     z = model.predict(X_test, method="z_peak")
 
 The concrete classes (:class:`lazy.models.tabfm.TabFMHistogram`,
-:class:`lazy.models.tabicl.TabICLQuantile`) remain importable and behave
+:class:`lazy.models.tabicl.TabICLQuantile`,
+:class:`lazy.models.tabpfn.TabPFNBarDistribution`) remain importable and behave
 identically -- ``LazyModel`` holds one and delegates to it. Use the concrete
 class when you want its parameters documented at your fingertips; use
 ``LazyModel`` when the backend is a configuration value, which is the usual case
@@ -45,16 +47,19 @@ class LazyModel(BasePhotoZEstimator):
     model
         Which backend to use; one of :func:`lazy.list_estimators`.
         ``"tabfm"`` builds the density from a hierarchy of in-context
-        classifiers, ``"tabicl"`` from a quantile regression head.
+        classifiers, ``"tabicl"`` from a quantile regression head, ``"tabpfn"``
+        from the bucket masses TabPFN-3 predicts natively.
     z_grid
         Default output grid for this model: a :class:`lazy.grid.RedshiftGrid`,
         an array of bin centres, or ``None`` for :data:`lazy.grid.DC1_GRID`.
         Every prediction method takes a ``z_grid`` that overrides it per call.
     **params
         Passed straight to the backend's constructor. See
-        :class:`lazy.models.tabfm.TabFMHistogram` and
-        :class:`lazy.models.tabicl.TabICLQuantile` for what each accepts; an
-        unrecognised name raises ``TypeError`` here, naming the class.
+        :class:`lazy.models.tabfm.TabFMHistogram`,
+        :class:`lazy.models.tabicl.TabICLQuantile` and
+        :class:`lazy.models.tabpfn.TabPFNBarDistribution` for what each
+        accepts; an unrecognised name raises ``TypeError`` here, naming the
+        class.
 
     Notes
     -----
@@ -68,11 +73,13 @@ class LazyModel(BasePhotoZEstimator):
     --------
     >>> model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     >>> model.name_
-    'tabfm'
+    'tabfm:v1.0'
     >>> model.estimator.n_dither
     3
     >>> LazyModel("tabicl", n_estimators=16).get_params()["n_estimators"]
     16
+    >>> LazyModel("tabpfn", version="v2.5").name_
+    'tabpfn:v2.5'
     """
 
     def __init__(self, model: str = "tabfm", *, z_grid=None, **params):
@@ -86,8 +93,15 @@ class LazyModel(BasePhotoZEstimator):
 
     @property
     def name_(self) -> str:
-        """The backend name, used to label rows in :meth:`evaluate`."""
-        return self.model
+        """``"<backend>:<version>"``: the name asked for, and the version it loads.
+
+        Built from ``self.model`` rather than delegated, so the label is the
+        name the caller used; the version is appended because a row saying only
+        ``tabpfn`` would not say which model produced it. A backend with no
+        ``version`` parameter is labelled by name alone.
+        """
+        version = getattr(self.estimator, "version", None)
+        return f"{self.model}:{version}" if version else self.model
 
     def __repr__(self) -> str:
         params = {

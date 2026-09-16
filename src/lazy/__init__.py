@@ -21,11 +21,11 @@ hyper-parameter search and no per-survey retraining -- hence lazy::
 
 The API is scikit-learn's, with ``predict_proba`` returning a density on a
 redshift grid rather than class probabilities, because that is the natural
-output of a photo-z model. Two backends ship today -- ``tabfm`` builds the
+output of a photo-z model. Three backends ship today -- ``tabfm`` builds the
 density from a hierarchy of in-context classifiers, ``tabicl`` from a quantile
-regression head -- and both write onto whatever
-:class:`~lazy.grid.RedshiftGrid` you pass, at prediction time, without
-refitting.
+regression head, ``tabpfn`` from the bucket masses TabPFN-3 predicts natively
+-- and all of them write onto whatever :class:`~lazy.grid.RedshiftGrid` you
+pass, at prediction time, without refitting.
 
 Layout
 ------
@@ -55,14 +55,18 @@ from lazy.base import POINT_ESTIMATORS, BasePhotoZEstimator
 from lazy.grid import DC1_GRID, RedshiftGrid, as_grid
 from lazy.models import (
     CHECKPOINTS,
+    DEFAULT_VERSIONS,
     ESTIMATORS,
     LazyModel,
     TabFMHistogram,
     TabICLQuantile,
+    TabPFNBarDistribution,
     download_checkpoint,
+    get_checkpoint,
     get_estimator,
     is_cached,
     list_estimators,
+    list_versions,
 )
 
 try:
@@ -73,6 +77,7 @@ except PackageNotFoundError:  # pragma: no cover - only when running from a sour
 __all__ = [
     "CHECKPOINTS",
     "DC1_GRID",
+    "DEFAULT_VERSIONS",
     "ESTIMATORS",
     "POINT_ESTIMATORS",
     "BasePhotoZEstimator",
@@ -80,10 +85,13 @@ __all__ = [
     "RedshiftGrid",
     "TabFMHistogram",
     "TabICLQuantile",
+    "TabPFNBarDistribution",
     "__version__",
     "as_grid",
     "download_checkpoint",
+    "get_checkpoint",
     "get_estimator",
     "is_cached",
     "list_estimators",
+    "list_versions",
 ]

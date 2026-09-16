@@ -2,7 +2,7 @@
 #
 # `uv sync --locked` fails if uv.lock is out of date with pyproject.toml, so a
 # dependency change that was not locked cannot merge. The backend extras
-# (tabfm, tabicl) are deliberately not installed: every test runs without a GPU
+# (tabfm, tabicl, tabpfn) are deliberately not installed: every test runs without a GPU
 # or a multi-gigabyte checkpoint, and the backends are imported lazily.
 
 name: Unit test and code coverage

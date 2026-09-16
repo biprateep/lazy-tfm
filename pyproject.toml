@@ -47,8 +47,11 @@ tabfm = [
 tabicl = [
     "tabicl>=2.2.0", # TabICLv2; its checkpoint is fetched from Hugging Face on first use
 ]
+tabpfn = [
+    "tabpfn>=9.0.0", # TabPFN-3; its checkpoint is fetched from Hugging Face on first use
+]
 all = [
-    "lazy-photoz[tabfm,tabicl]",
+    "lazy-photoz[tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.

@@ -39,7 +39,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
-from lazy.models._hub import CHECKPOINTS
+from lazy.models._hub import get_checkpoint
 
 __all__ = ["TabFMHistogram", "prior_shift_em", "quantile_edges"]
 
@@ -101,6 +101,9 @@ class TabFMHistogram(BasePhotoZEstimator):
 
     Parameters
     ----------
+    version
+        Which pinned TabFM checkpoint to load; see :func:`lazy.list_versions`.
+        Recorded in ``provenance_``.
     n_coarse_bins, n_fine_bins
         Classes at each hierarchy level; their product is the number of
         equal-mass bins the density is built on. Each is capped at ten by the
@@ -171,6 +174,14 @@ class TabFMHistogram(BasePhotoZEstimator):
         The resolved output grid.
     inference_ : str
         The inference path actually chosen: ``"stream"`` or ``"predict_proba"``.
+    provenance_ : dict
+        Which weights and which code answered: backend, version, repository,
+        revision, package versions and device. See
+        :meth:`lazy.models._hub.Checkpoint.provenance`.
+    checkpoint_ : pathlib.Path
+        The pinned checkpoint the weights were loaded from. Unlike the other
+        two backends TabFM loads its backbone on the first prediction rather
+        than at ``fit``, so this appears then.
     X_context_ : pandas.DataFrame
         The context rows, kept as given -- "fitting" an in-context model stores
         the context rather than learning weights.
@@ -187,9 +198,12 @@ class TabFMHistogram(BasePhotoZEstimator):
     100
     """
 
+    backend = "tabfm"
+
     def __init__(
         self,
         *,
+        version: str = "v1.0",
         n_coarse_bins: int = 10,
         n_fine_bins: int = 10,
         n_estimators: int = 4,
@@ -207,6 +221,7 @@ class TabFMHistogram(BasePhotoZEstimator):
         keep_cache_on_device: bool = True,
         verbose: bool = False,
     ):
+        self.version = version
         self.n_coarse_bins = n_coarse_bins
         self.n_fine_bins = n_fine_bins
         self.n_estimators = n_estimators
@@ -251,6 +266,7 @@ class TabFMHistogram(BasePhotoZEstimator):
                 f"{self.n_coarse_bins * self.n_fine_bins} bins asked for"
             )
         self.device_ = resolve_device(self.device)
+        self.provenance_ = get_checkpoint("tabfm", self.version).provenance(device=self.device_)
         self.X_context_ = X
         self.z_context_ = y
 
@@ -414,17 +430,21 @@ class TabFMHistogram(BasePhotoZEstimator):
         """The loaded TabFM classification model, cached on the instance.
 
         The checkpoint is several gigabytes, so it is loaded once per estimator
-        and reused across calls. It is dropped on pickling: an unpickled
-        estimator reloads it from the local cache on next use.
+        and reused across calls. The cache is keyed by ``version`` so that
+        changing it can never leave a prediction running on the previous
+        model's weights, and it is dropped on pickling: an unpickled estimator
+        reloads from the local cache on next use.
         """
-        model = getattr(self, "_backbone_cache", None)
-        if model is None:
+        cached_version, model = getattr(self, "_backbone_cache", (None, None))
+        if model is None or cached_version != self.version:
             from tabfm import tabfm_v1_0_0_pytorch as tabfm_v1
 
-            path = CHECKPOINTS["tabfm"].download()
-            self._log(f"loading TabFM classification checkpoint from {path}")
-            model = tabfm_v1.load(model_type="classification", device=self.device_, checkpoint_path=str(path))
-            self._backbone_cache = model
+            self.checkpoint_ = get_checkpoint("tabfm", self.version).download()
+            self._log(f"loading TabFM classification checkpoint from {self.checkpoint_}")
+            model = tabfm_v1.load(
+                model_type="classification", device=self.device_, checkpoint_path=str(self.checkpoint_)
+            )
+            self._backbone_cache = (self.version, model)
         return model
 
     def __getstate__(self) -> dict:
