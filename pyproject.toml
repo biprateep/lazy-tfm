@@ -38,8 +38,20 @@ dependencies = [
 # Each backend is optional: `pip install lazy-photoz` on its own gives you the
 # grid, metrics, plotting and dataset machinery with no deep-learning stack.
 [project.optional-dependencies]
+# Pinned to the repository build, by URL, because nothing weaker works. The
+# KV-cache API (`TabFM.prefill` / `TabFM.decode`) that `lazy.models._icl_stream`
+# needs exists only there, and without it TabFMHistogram re-encodes the training
+# context for every chunk of query rows -- ~13.7 ms per member-row against
+# ~0.53 ms, about 26x the compute, for identical answers. A version specifier
+# cannot express this: the repository build also calls itself 1.0.1, so
+# `tabfm>=1.0.1` is satisfied by the release that lacks the API. Hence the URL.
+#
+# Consequence worth knowing before publishing: PyPI refuses metadata containing
+# direct URLs, so uploading `lazy-photoz` to an index requires relaxing this back
+# to `tabfm[pytorch]>=1.0.1`. The runtime TabFMPerformanceWarning stays in place
+# for exactly that case, and for anyone who force-installs the release build.
 tabfm = [
-    "tabfm[pytorch]>=1.0.1", # Google TabFM; its checkpoint is fetched from Hugging Face on first use
+    "tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff",
     # huggingface_hub loads the checkpoint through `_load_as_safetensor`, which
     # touches `safetensors.__version__` but only imports the module when it is
     # installed -- and neither hub nor tabfm declares it. Without this the load
@@ -77,21 +89,6 @@ docs = [
     "nbconvert>=7",
     "ipython>=8",
 ]
-
-# Take TabFM from the repository rather than PyPI, pinned. This is not a
-# preference, it is a 26x difference in inference cost: the KV-cache API that
-# `lazy.models._icl_stream` needs (`TabFM.prefill` / `TabFM.decode`) exists only
-# in the repository build, and without it TabFMHistogram falls back to
-# re-encoding the training context for every chunk of query rows -- ~13.7 ms per
-# member-row against ~0.53 ms. The answers agree, so the only symptom is a run
-# that takes a day instead of an hour, which is how it went unnoticed here once.
-#
-# `tool.uv.sources` is not published in wheel metadata, so anyone installing
-# `lazy-photoz[tabfm]` from an index still resolves the PyPI release and gets a
-# TabFMPerformanceWarning saying exactly this. This section is what makes
-# `uv sync` in a checkout do the fast thing by default.
-[tool.uv.sources]
-tabfm = { git = "https://github.com/google-research/tabfm.git", rev = "fbb665569425fd2f490c6576b3af967876fe11ff" }
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]

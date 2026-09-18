@@ -1656,7 +1656,7 @@ requires-dist = [
     { name = "safetensors", marker = "extra == 'tabfm'", specifier = ">=0.4.3" },
     { name = "scikit-learn", specifier = ">=1.4" },
     { name = "scipy", specifier = ">=1.11" },
-    { name = "tabfm", extras = ["pytorch"], marker = "extra == 'tabfm'", git = "https://github.com/google-research/tabfm.git?rev=fbb665569425fd2f490c6576b3af967876fe11ff" },
+    { name = "tabfm", extras = ["pytorch"], marker = "extra == 'tabfm'", git = "https://github.com/google-research/tabfm?rev=fbb665569425fd2f490c6576b3af967876fe11ff" },
     { name = "tabicl", marker = "extra == 'tabicl'", specifier = ">=2.2.0" },
     { name = "tabpfn", marker = "extra == 'tabpfn'", specifier = ">=9.0.0" },
     { name = "tqdm", specifier = ">=4.66" },
@@ -3437,7 +3437,7 @@ wheels = [
 [[package]]
 name = "tabfm"
 version = "1.0.1"
-source = { git = "https://github.com/google-research/tabfm.git?rev=fbb665569425fd2f490c6576b3af967876fe11ff#fbb665569425fd2f490c6576b3af967876fe11ff" }
+source = { git = "https://github.com/google-research/tabfm?rev=fbb665569425fd2f490c6576b3af967876fe11ff#fbb665569425fd2f490c6576b3af967876fe11ff" }
 dependencies = [
     { name = "absl-py" },
     { name = "huggingface-hub" },

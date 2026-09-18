@@ -79,25 +79,30 @@ values from the context rows alone, so a query row's answer never depends on
 which other query rows share its chunk (asserted bit-identical in the test
 suite).
 
-### Install TabFM from the repository, not PyPI
+### TabFM's KV cache is pinned for you
 
-If you predict for more than a few thousand galaxies with `tabfm`, this matters
-more than anything else on this page:
+`lazy-photoz[tabfm]` installs TabFM from its repository at a pinned commit, not
+from PyPI, and that is deliberate rather than fussiness. The PyPI release has no
+KV-cache API, so every chunk of query rows re-encodes the entire training
+context: about **13.7 ms per member-row against 0.53 ms** on the cached path,
+roughly **26× the compute**.
+
+Both paths give the same answers, which is exactly what makes it dangerous — the
+only symptom is a prediction that takes a day instead of an hour, and there is
+nothing wrong with the result to tip you off. This project lost 17 GPU-hours to
+it on a run we had every reason to believe was simply large.
+
+A version specifier cannot express the requirement, because the repository build
+also calls itself `1.0.1`; only the URL distinguishes them. Nothing is needed
+from you:
 
 ```bash
-pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
+uv sync --extra all                  # or: pip install 'lazy-photoz[tabfm]'
 ```
 
-The PyPI release of `tabfm` has no KV-cache API, so every chunk of query rows
-re-encodes the entire training context: about **13.7 ms per member-row against
-0.53 ms** on the cached path, roughly **26× the compute**. Both paths give the
-same answers, which is exactly what makes this easy to miss — the only symptom
-is a prediction that takes a day instead of an hour. We lost 17 GPU-hours to it
-before noticing, on a run we had every reason to believe was simply large.
-
-`lazy` picks the cached path automatically when it is available and raises a
-`TabFMPerformanceWarning` when it is not, so you will be told rather than left
-guessing. To check directly:
+If you end up on the release build anyway — a stale lock, a deliberate override,
+or an index that strips direct URLs — the backend says so at `fit` time with a
+`TabFMPerformanceWarning` rather than silently taking 26× longer. To check:
 
 ```python
 from lazy.models._icl_stream import streaming_available
@@ -105,8 +110,7 @@ streaming_available()   # True means the fast path is in use
 ```
 
 Pass `inference="predict_proba"` to choose the slow path deliberately and
-silence the warning. A checkout of this repository pins the fast build through
-`[tool.uv.sources]`, so `uv sync --extra all` needs no special care.
+silence the warning.
 
 The same concern has a different name on `tabpfn`: `fit_mode="fit_with_cache"`
 keeps the context's key/value tensors so each chunk of queries skips the
