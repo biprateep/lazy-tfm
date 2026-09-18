@@ -1656,7 +1656,7 @@ requires-dist = [
     { name = "safetensors", marker = "extra == 'tabfm'", specifier = ">=0.4.3" },
     { name = "scikit-learn", specifier = ">=1.4" },
     { name = "scipy", specifier = ">=1.11" },
-    { name = "tabfm", extras = ["pytorch"], marker = "extra == 'tabfm'", specifier = ">=1.0.1" },
+    { name = "tabfm", extras = ["pytorch"], marker = "extra == 'tabfm'", git = "https://github.com/google-research/tabfm.git?rev=fbb665569425fd2f490c6576b3af967876fe11ff" },
     { name = "tabicl", marker = "extra == 'tabicl'", specifier = ">=2.2.0" },
     { name = "tabpfn", marker = "extra == 'tabpfn'", specifier = ">=9.0.0" },
     { name = "tqdm", specifier = ">=4.66" },
@@ -3437,7 +3437,7 @@ wheels = [
 [[package]]
 name = "tabfm"
 version = "1.0.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/google-research/tabfm.git?rev=fbb665569425fd2f490c6576b3af967876fe11ff#fbb665569425fd2f490c6576b3af967876fe11ff" }
 dependencies = [
     { name = "absl-py" },
     { name = "huggingface-hub" },
@@ -3447,10 +3447,6 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "typeguard" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/9a/c52b3d7e23ef8a79883cc1bedf749ba519fb2686c5a3d0c43ff704e0aad8/tabfm-1.0.1.tar.gz", hash = "sha256:77f0d871a6772560f1b0744c1822ac89f9c1eabe80768ac355df1aa48e116fbe", size = 74923, upload-time = "2026-07-21T18:17:59.966Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/83/50c0e4c8fb2a333075ae1419658a91a68453772a3f37c35fa0e8a07a5f81/tabfm-1.0.1-py3-none-any.whl", hash = "sha256:79f5873c0e44bc853d00e8e38e33b8263fa63c5408ad63833ebd60bab91df99e", size = 81014, upload-time = "2026-07-21T18:17:58.821Z" },
 ]
 
 [package.optional-dependencies]

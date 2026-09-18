@@ -59,6 +59,41 @@ class TestTabFM:
             with pytest.raises(RuntimeError, match="KV-cache API"):
                 est.fit(X, z)
 
+    def test_falling_back_to_the_slow_path_warns(self, tiny, monkeypatch):
+        """A silent 26x slowdown is the worst kind: both paths give the same answer.
+
+        Without the KV-cache API every chunk of query rows re-encodes the whole
+        context, so the only symptom is a prediction that takes a day instead of
+        an hour. The fallback must announce itself.
+        """
+        from lazy.models import tabfm as tabfm_module
+
+        X, z = tiny
+        monkeypatch.setattr(tabfm_module, "streaming_available", lambda: False, raising=False)
+        import lazy.models._icl_stream as icl_stream
+
+        monkeypatch.setattr(icl_stream, "streaming_available", lambda: False)
+
+        est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2)
+        with pytest.warns(tabfm_module.TabFMPerformanceWarning, match="KV-cache"):
+            est.fit(X, z)
+        assert est.inference_ == "predict_proba"
+
+    def test_choosing_the_slow_path_deliberately_does_not_warn(self, tiny):
+        """`inference='predict_proba'` is a decision, not an accident."""
+        import warnings
+
+        from lazy.models.tabfm import TabFMPerformanceWarning
+
+        X, z = tiny
+        est = get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba"
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", TabFMPerformanceWarning)
+            est.fit(X, z)
+        assert est.inference_ == "predict_proba"
+
     def test_fit_records_its_provenance_without_downloading(self, tiny):
         X, z = tiny
         est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2).fit(X, z)

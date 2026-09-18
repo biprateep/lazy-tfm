@@ -78,6 +78,21 @@ docs = [
     "ipython>=8",
 ]
 
+# Take TabFM from the repository rather than PyPI, pinned. This is not a
+# preference, it is a 26x difference in inference cost: the KV-cache API that
+# `lazy.models._icl_stream` needs (`TabFM.prefill` / `TabFM.decode`) exists only
+# in the repository build, and without it TabFMHistogram falls back to
+# re-encoding the training context for every chunk of query rows -- ~13.7 ms per
+# member-row against ~0.53 ms. The answers agree, so the only symptom is a run
+# that takes a day instead of an hour, which is how it went unnoticed here once.
+#
+# `tool.uv.sources` is not published in wheel metadata, so anyone installing
+# `lazy-photoz[tabfm]` from an index still resolves the PyPI release and gets a
+# TabFMPerformanceWarning saying exactly this. This section is what makes
+# `uv sync` in a checkout do the fast thing by default.
+[tool.uv.sources]
+tabfm = { git = "https://github.com/google-research/tabfm.git", rev = "fbb665569425fd2f490c6576b3af967876fe11ff" }
+
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]
 build-backend = "uv_build"

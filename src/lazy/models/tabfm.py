@@ -33,6 +33,8 @@ than the output bin cannot change a density tabulated on it.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
@@ -42,7 +44,22 @@ from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
 from lazy.models._progress import Progress, bar, check_progress
 
-__all__ = ["TabFMHistogram", "prior_shift_em", "quantile_edges"]
+__all__ = [
+    "TabFMHistogram",
+    "TabFMPerformanceWarning",
+    "prior_shift_em",
+    "quantile_edges",
+]
+
+
+class TabFMPerformanceWarning(UserWarning):
+    """The prediction will be correct but far slower than it needs to be.
+
+    Its own category so that it can be silenced on purpose --
+    ``warnings.filterwarnings("ignore", category=TabFMPerformanceWarning)`` --
+    without hiding anything else, and so that a test suite can assert it was
+    raised.
+    """
 
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
@@ -302,7 +319,31 @@ class TabFMHistogram(BasePhotoZEstimator):
                 "(pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm') "
                 "or use inference='auto'."
             )
-        if self.inference == "predict_proba" or not available:
+        if self.inference == "predict_proba":
+            return "predict_proba"  # asked for explicitly; say nothing
+        if not available:
+            # Warn, and do not be shy about it. The fallback is correct but it
+            # re-runs the context forward pass for every chunk of query rows,
+            # which measures ~13.7 ms per member-row against ~0.53 ms on the
+            # cached path -- around twenty-six times the work. On a large query
+            # set that is the difference between one hour and a day, and because
+            # both paths produce the same answer the only symptom is a run that
+            # never seems to end. Nothing else reports it, so this does.
+            warnings.warn(
+                "tabfm has no KV-cache API, so TabFMHistogram is falling back to "
+                "its uncached inference path, which re-encodes the training "
+                "context for every chunk of query rows -- roughly 26x the compute "
+                "per query row (13.7 ms vs 0.53 ms per member-row). The answers "
+                "are the same; only the runtime differs, so a large prediction "
+                "will simply take far longer than expected. The KV-cache API "
+                "ships in the repository build but not on PyPI:\n"
+                "    pip install 'tabfm[pytorch] @ "
+                "git+https://github.com/google-research/tabfm'\n"
+                "Pass inference='predict_proba' to accept the slow path and "
+                "silence this.",
+                TabFMPerformanceWarning,
+                stacklevel=3,
+            )
             return "predict_proba"
         return "stream"
 
