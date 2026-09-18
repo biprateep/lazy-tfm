@@ -15,6 +15,23 @@ reproducing its numbers::
 
     train, test = fetch_dc1(split=True)
 
+Neither split is a realistic training set: DC1 hands every training galaxy a
+redshift, and real spectroscopic samples are bright, incomplete, and cut in
+redshift by which features fall in the observed window. :func:`fetch_dc1_biased`
+builds that case. It merges both files, reshuffles them, and cuts the merged
+catalogue into a training set a HSC-like campaign would plausibly have produced
+and a hold-out that is distributed like the catalogue::
+
+    from lazy.datasets import fetch_dc1_biased
+
+    split = fetch_dc1_biased()
+    split.biased        # 35,011 galaxies the selection function kept
+    split.calibration   # 10,000 representative galaxies, for repairing the model
+    split.test          # 19,383 representative galaxies, to score on
+
+The selection function itself lives in :mod:`lazy.selection`; it acts on any
+photometry, so a catalogue of your own can be biased the same way.
+
 The two files total about 1 GB. They are downloaded once from Zenodo record
 10975874, checksummed, and cached under :func:`data_home` -- by default
 ``$XDG_CACHE_HOME/lazy-photoz`` or ``~/.cache/lazy-photoz``, overridable with
@@ -41,13 +58,27 @@ import itertools
 import os
 import urllib.request
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import pandas as pd
 
-__all__ = ["BANDS", "FEATURE_MODES", "Catalog", "data_home", "fetch_dc1", "load_trainz"]
+from lazy.selection import HSCGrid, grid_selection
+
+__all__ = [
+    "BANDS",
+    "FEATURE_MODES",
+    "Catalog",
+    "SelectionSplit",
+    "data_home",
+    "fetch_dc1",
+    "fetch_dc1_biased",
+    "fetch_hsc_grid",
+    "load_trainz",
+    "make_selection_split",
+]
 
 BANDS = ("U", "G", "R", "I", "Z", "Y")
 MAG_COLUMNS = BANDS
@@ -67,10 +98,25 @@ _ZENODO = "https://zenodo.org/records/10975874/files"
 _FILES = {"train": "trainz_train.npz", "test": "trainz_test.npz"}
 _CAT_KEYS = {"train": "train_cat", "test": "test_cat"}
 _CDE_KEYS = {"train": "cde_train", "test": "cde_test"}
+# The HSC spectroscopic success grid that drives the selection, taken from the
+# DESC repository the port in `lazy.selection` was written against, pinned to
+# the commit it was read from.
+_RAIL = (
+    "https://raw.githubusercontent.com/LSSTDESC/rail_astro_tools/9c176272"
+    "/src/rail/examples_data/creation_data/data"
+)
+_HSC_FILE = "hsc_ratios_and_specz.hdf5"
 _SHA256 = {
     "trainz_train.npz": "fe54d2034c554ec1f675e7d5789fd5ec4564a72d22bc5008fc218003bc6fb6dc",
     "trainz_test.npz": "a1b1a2b191d0edbcb83b3a5e87cc8f7c2cd0dc5c564a1bb37258f6e1588c98ce",
+    _HSC_FILE: "9621f9e30baeb87c53a2a8e803043f7c598479f93785a3707954e133074328de",
 }
+
+#: Defaults reproducing the paired split the paper reports: the biased training
+#: set is sized to the DC1 training file, and the calibration sample is stolen
+#: from the hold-out rather than added to it, so nothing is scored twice.
+N_TRAIN = 35_000
+N_CALIBRATION = 10_000
 
 
 @dataclass(frozen=True)
@@ -145,6 +191,37 @@ class Catalog:
                 f"frame has {len(raw)} rows but redshift has {len(z)} and object_id has {len(ids)}"
             )
         return cls(split=split, raw=raw, redshift=z, object_id=ids)
+
+    def take(self, rows: np.ndarray, *, split: str | None = None) -> Catalog:
+        """The rows named by ``rows``, as a catalogue of their own.
+
+        Parameters
+        ----------
+        rows
+            Integer positions, in the order you want them back, or a boolean
+            mask.
+        split
+            A label for the result; defaults to one naming the parent.
+
+        Examples
+        --------
+        >>> frame = pd.DataFrame({b: [20.0, 21.0] for b in BANDS} | {f"{b}ERR": [0.1, 0.2] for b in BANDS})
+        >>> catalog = Catalog.from_frame(frame, redshift=np.array([0.5, 1.5]))
+        >>> subset = catalog.take([1], split="bright")
+        >>> len(subset), subset.redshift, subset.split
+        (1, array([1.5]), 'bright')
+        """
+        rows = np.asarray(rows)
+        if rows.dtype == bool:
+            rows = np.flatnonzero(rows)
+        rows = rows.astype(np.int64, copy=False)
+        return Catalog(
+            split=split if split is not None else f"{self.split}[{len(rows)}]",
+            raw=self.raw.iloc[rows].reset_index(drop=True),
+            redshift=self.redshift[rows],
+            object_id=self.object_id[rows],
+            source=None if self.source is None else self.source[rows],
+        )
 
     def features(
         self,
@@ -368,15 +445,33 @@ def _load_trainz_split(
 
 
 def _cached_path(name: str, *, root: str | Path | None, download_if_missing: bool) -> Path:
-    dest = data_home(root) / _FILES[name]
+    return _cached_file(
+        _FILES[name],
+        f"{_ZENODO}/{_FILES[name]}",
+        root=root,
+        download_if_missing=download_if_missing,
+        hint="fetch_dc1()",
+    )
+
+
+def _cached_file(
+    filename: str,
+    url: str,
+    *,
+    root: str | Path | None,
+    download_if_missing: bool,
+    hint: str,
+) -> Path:
+    """The cached copy of one remote file, fetched on first use and checksummed."""
+    dest = data_home(root) / filename
     if dest.exists():
         return dest
     if not download_if_missing:
         raise FileNotFoundError(
             f"{dest} is not cached and download_if_missing=False. "
-            "Run fetch_dc1() on a machine with network access first."
+            f"Run {hint} on a machine with network access first."
         )
-    _download(f"{_ZENODO}/{_FILES[name]}", dest, _SHA256[_FILES[name]])
+    _download(url, dest, _SHA256[filename])
     return dest
 
 
@@ -393,3 +488,356 @@ def _download(url: str, dest: Path, sha256: str) -> None:
     finally:
         tmp.unlink(missing_ok=True)
     print(f"lazy.datasets: cached {dest} ({dest.stat().st_size / 1e6:.0f} MB)", flush=True)
+
+
+# -- the spectroscopically selected split ----------------------------------
+
+
+@dataclass(frozen=True)
+class SelectionSplit:
+    """A biased training set, and representative galaxies to calibrate and score with.
+
+    What :func:`make_selection_split` returns:
+
+    * :attr:`biased` -- the galaxies the selection function kept. Bright,
+      incomplete, and truncated in redshift: the training set.
+    * :attr:`calibration` -- a small sample distributed like the catalogue.
+      Not scored on: it is there to be *used*, as extra context, as importance
+      weights, or as a recalibration set.
+    * :attr:`test` -- the rest of the hold-out, distributed like the catalogue
+      and disjoint from everything above.
+    * :attr:`unbiased` -- ``None`` unless ``control=True`` was asked for, in
+      which case it holds exactly as many galaxies as :attr:`biased`, drawn at
+      random from the same pool. It is the control that separates the selection
+      from the sample size, for when that distinction is the question.
+
+    :attr:`rows` holds each subset's positions in the parent catalogue, so a
+    split can be frozen to disk and reproduced later, and :attr:`meta` records
+    how it was built.
+    """
+
+    #: The non-representative training set.
+    biased: Catalog
+    #: Representative galaxies, held out from everything else.
+    test: Catalog
+    #: A representative sample to repair the biased model with, or ``None``.
+    calibration: Catalog | None
+    #: The size-matched random control, or ``None`` if it was not asked for.
+    unbiased: Catalog | None
+    #: Subset name -> sorted positions in the catalogue the split was cut from.
+    rows: dict[str, np.ndarray]
+    #: How it was built: sizes, seeds, selection arguments, solver history.
+    meta: dict
+
+    def __repr__(self) -> str:
+        sizes = ", ".join(f"{name}={len(cat):,}" for name, cat in self.catalogs.items())
+        return f"SelectionSplit({sizes})"
+
+    @property
+    def catalogs(self) -> dict[str, Catalog]:
+        """The subsets by name, skipping any that were not asked for."""
+        named = {"biased": self.biased}
+        if self.unbiased is not None:
+            named["unbiased"] = self.unbiased
+        if self.calibration is not None:
+            named["calibration"] = self.calibration
+        named["test"] = self.test
+        return named
+
+    def summary(self, *, magnitude: str = "I", faint: float = 24.0) -> pd.DataFrame:
+        """One row per subset: how many, how bright, how deep in redshift.
+
+        The row labelled ``catalog`` is the catalogue the split was cut from.
+        Read it against ``test`` to see that the test set is representative, and
+        against ``biased`` to see that the training set is not: on DC1 the
+        selection moves the median magnitude about a magnitude brighter and cuts
+        the faint fraction by roughly an order of magnitude.
+        """
+        rows = [
+            _describe(cat, magnitude=magnitude, faint=faint) | {"set": name}
+            for name, cat in self.catalogs.items()
+        ]
+        rows.append(self.meta["catalog"] | {"set": "catalog"})
+        return pd.DataFrame(rows).set_index("set")
+
+
+def _describe(catalog: Catalog, *, magnitude: str = "I", faint: float = 24.0) -> dict:
+    """The handful of numbers that say whether two samples are drawn alike."""
+    mag = catalog.raw[magnitude].to_numpy(dtype=float)
+    return {
+        "n": len(catalog),
+        f"median_{magnitude}": float(np.median(mag)),
+        "median_z": float(np.median(catalog.redshift)),
+        "max_z": float(catalog.redshift.max()),
+        f"frac_{magnitude}_gt_{faint:g}": float((mag > faint).mean()),
+    }
+
+
+def fetch_hsc_grid(
+    *,
+    data_home: str | Path | None = None,
+    download_if_missing: bool = True,
+) -> HSCGrid:
+    """The HSC spectroscopic success grid, downloading and caching it on first use.
+
+    About 14 MB, from the DESC ``rail_astro_tools`` repository at the commit
+    :mod:`lazy.selection` was ported from. The loaded grid is memoised, so the
+    per-pixel redshift ceilings are computed once per process however many
+    splits you cut.
+    """
+    path = _cached_file(
+        _HSC_FILE,
+        f"{_RAIL}/{_HSC_FILE}",
+        root=data_home,
+        download_if_missing=download_if_missing,
+        hint="fetch_hsc_grid()",
+    )
+    return _load_hsc_grid(path)
+
+
+@lru_cache(maxsize=4)
+def _load_hsc_grid(path: Path) -> HSCGrid:
+    """Read a cached grid file once per process; the result is immutable."""
+    return HSCGrid.from_hdf5(path)
+
+
+def make_selection_split(
+    catalog: Catalog,
+    *,
+    n_train: int = N_TRAIN,
+    n_calibration: int = N_CALIBRATION,
+    control: bool = False,
+    holdout_rows: np.ndarray | None = None,
+    grid: HSCGrid | None = None,
+    seed: int = 1,
+    selection_seed: int = 12345,
+    tolerance: int = 50,
+    max_iterations: int = 8,
+    initial_rate: float = 0.0864,
+    **selection: object,
+) -> SelectionSplit:
+    """Cut a catalogue into a biased training set, a matched control, and a clean test set.
+
+    The recipe, in order:
+
+    1. shuffle the catalogue and cut it in two;
+    2. the first part is the *pool*: apply :func:`~lazy.selection.grid_selection`
+       to it, and what it keeps is :attr:`~SelectionSplit.biased`;
+    3. the second part is the *hold-out*: split it at random into the
+       calibration sample and the test set.
+
+    Where the cut in step 1 falls is what sets the training-set size, because
+    the selection keeps a near-fixed fraction of whatever it is shown. So the
+    cut is solved for rather than chosen: the first pass places it using
+    ``initial_rate``, measures what the selection actually kept, and re-places
+    it, usually converging in two passes.
+
+    The calibration sample comes *out* of the hold-out rather than on top of
+    it, so no galaxy is both handed to a model and scored on.
+
+    Parameters
+    ----------
+    catalog
+        The complete catalogue to cut up, typically ``fetch_dc1()`` -- both DC1
+        files merged, because the challenge's own division is far too small on
+        the training side to survive a selection.
+    n_train
+        How many galaxies the biased training set should end up with, to within
+        ``tolerance``. This, not the test fraction, is the knob worth turning:
+        it is the axis a photo-z method is usually judged along.
+    n_calibration
+        Size of the calibration sample, taken out of the hold-out. ``0`` leaves
+        the whole hold-out as the test set and
+        :attr:`SelectionSplit.calibration` as ``None``.
+    control
+        Also draw an unbiased training set of exactly the biased one's size
+        from the same pool. Off by default: it answers a different question --
+        whether a result is the selection or merely the smaller sample -- and
+        costs a second set of runs. It is drawn last, so turning it on leaves
+        every other subset unchanged.
+    holdout_rows
+        Restrict the hold-out to these rows. The default shuffles the whole
+        catalogue, as above. Passing the rows of one source file keeps a model
+        trained on the other file scorable on this test set without leakage.
+    grid
+        The selection function; defaults to the cached HSC grid.
+    seed
+        Seeds the hold-out draw, the control draw and the calibration steal.
+    selection_seed
+        Seeds the selection's own per-pixel subsampling, and nothing else.
+        Separate from ``seed`` so that the two questions -- which galaxies a
+        campaign got a redshift for, and which galaxies were held back from it
+        -- can be re-rolled independently. RAIL's default is kept.
+    tolerance, max_iterations, initial_rate
+        The hold-out solver: how close to ``n_train`` is close enough, how many
+        passes it may take, and the selection rate it starts from (0.0864 is
+        HSC's on a representative LSST-depth sample).
+    **selection
+        Forwarded to :func:`~lazy.selection.grid_selection`:
+        ``scaling_factor``, ``color_redshift_cut``, ``percentile_cut``,
+        ``redshift_cut``, ``magnitude`` and ``color``.
+
+    Returns
+    -------
+    SelectionSplit
+
+    Raises
+    ------
+    RuntimeError
+        If the hold-out solver cannot reach ``n_train``, which means the
+        catalogue is too small for a training set that size, or the selection
+        keeps too little of it.
+
+    Notes
+    -----
+    The cut in step 1 is placed from the *measured* selection rate, so changing
+    ``selection_seed`` or the selection arguments can move it by a few hundred
+    galaxies and with it the hold-out, the calibration sample and the test set.
+    When you are comparing selections, cut one split and carry
+    :attr:`SelectionSplit.rows` between the runs rather than re-cutting.
+
+    The training set cannot exceed what the selection returns on the whole
+    catalogue -- on DC1 that ceiling is 37,626 galaxies, and reaching it would
+    leave nothing to test on.
+    """
+    if grid is None:
+        grid = fetch_hsc_grid()
+    n = len(catalog)
+    holdout_rows = np.arange(n) if holdout_rows is None else np.asarray(holdout_rows, np.int64).ravel()
+    if n_calibration < 0 or n_train < 1:
+        raise ValueError("n_train must be positive and n_calibration non-negative")
+    if len(holdout_rows) <= n_calibration:
+        raise ValueError(
+            f"only {len(holdout_rows):,} rows may be held out, which leaves nothing to "
+            f"test on after a calibration sample of {n_calibration:,}"
+        )
+
+    rng = np.random.default_rng(seed)
+    candidates = rng.permutation(holdout_rows)
+    everything = np.arange(n)
+
+    rate, history = float(initial_rate), []
+    for iteration in range(max_iterations):
+        n_holdout = int(np.clip(round(n - n_train / rate), n_calibration + 1, len(candidates)))
+        holdout = candidates[:n_holdout]
+        pool = np.setdiff1d(everything, holdout, assume_unique=True)
+        keep, _ = grid_selection(
+            catalog.raw.iloc[pool],
+            catalog.redshift[pool],
+            grid=grid,
+            seed=selection_seed,
+            **selection,
+        )
+        biased_rows, n_selected = pool[keep], int(keep.sum())
+        history.append(
+            {
+                "iteration": iteration,
+                "n_holdout": n_holdout,
+                "n_pool": len(pool),
+                "n_biased": n_selected,
+                "rate": float(n_selected / len(pool)),
+            }
+        )
+        if abs(n_selected - n_train) <= tolerance:
+            break
+        if n_selected == 0:
+            raise RuntimeError(
+                "the selection kept nothing; check that the magnitude and colour columns "
+                "are the ones the grid was built for"
+            )
+        rate = n_selected / len(pool)
+    else:
+        best = max(row["n_biased"] for row in history)
+        raise RuntimeError(
+            f"could not size a training set of {n_train:,} within {max_iterations} passes; "
+            f"the best was {best:,}. The selection keeps about "
+            f"{history[-1]['rate']:.2%} of what it is shown, so this catalogue cannot "
+            f"supply more than ~{int(history[-1]['rate'] * n):,} however it is cut, "
+            "and a training set that size would leave nothing to test on."
+        )
+
+    # The hold-out is already a random draw; its split into calibration and test
+    # is another. The control comes last so that asking for it moves nothing else.
+    calibration_rows, test_rows = holdout[:n_calibration], holdout[n_calibration:]
+    unbiased_rows = rng.choice(pool, size=len(biased_rows), replace=False) if control else None
+
+    rows = {"biased": np.sort(biased_rows), "test": np.sort(test_rows)}
+    if n_calibration:
+        rows["calibration"] = np.sort(calibration_rows)
+    if control:
+        rows["unbiased"] = np.sort(unbiased_rows)
+    meta = {
+        "n_catalog": n,
+        "n_holdout": len(holdout),
+        "n_pool": len(pool),
+        "n_pool_unused": int(len(pool) - len(biased_rows)),
+        "n_biased_also_unbiased": (int(np.intersect1d(biased_rows, unbiased_rows).size) if control else None),
+        "seed": seed,
+        "selection": {"seed": selection_seed} | dict(selection),
+        "history": history,
+        "catalog": _describe(catalog),
+    }
+    return SelectionSplit(
+        biased=catalog.take(rows["biased"], split="biased"),
+        test=catalog.take(rows["test"], split="test"),
+        calibration=(catalog.take(rows["calibration"], split="calibration") if n_calibration else None),
+        unbiased=catalog.take(rows["unbiased"], split="unbiased") if control else None,
+        rows=rows,
+        meta=meta,
+    )
+
+
+def fetch_dc1_biased(
+    *,
+    n_train: int = N_TRAIN,
+    n_calibration: int = N_CALIBRATION,
+    control: bool = False,
+    seed: int = 1,
+    selection_seed: int = 12345,
+    data_home: str | Path | None = None,
+    download_if_missing: bool = True,
+    **selection: object,
+) -> SelectionSplit:
+    """Load DC1 and cut the spectroscopic-selection split from it, in one call.
+
+    Both DC1 files are merged and reshuffled first. The challenge's own
+    division cannot carry this experiment: the HSC selection keeps 3,186 of its
+    43,486 training galaxies, so a biased training set would also be a
+    twelve-times smaller one.
+
+    ``n_train`` cannot reach the 43,486 of the DC1 training file. The selection
+    keeps 8.66 per cent of a representative sample, so all 434,476 galaxies
+    yield at most 37,626 -- and that with nothing left to test on. The default
+    of 35,000 is the largest round number that still leaves a usable hold-out,
+    and it is the size the runs reported for this work used.
+
+    Parameters
+    ----------
+    n_train, n_calibration, control, seed, selection_seed, **selection
+        See :func:`make_selection_split`.
+    data_home, download_if_missing
+        See :func:`fetch_dc1`. Both DC1 files and the ~14 MB HSC grid must be
+        available; on a node with no network, warm the cache elsewhere first.
+
+    Returns
+    -------
+    SelectionSplit
+
+    Examples
+    --------
+    >>> split = fetch_dc1_biased()                          # doctest: +SKIP
+    >>> X = split.biased.features("mag-color")              # doctest: +SKIP
+    >>> model.fit(X, split.biased.redshift)                 # doctest: +SKIP
+    """
+    catalog = fetch_dc1(data_home=data_home, download_if_missing=download_if_missing)
+    grid = fetch_hsc_grid(data_home=data_home, download_if_missing=download_if_missing)
+    return make_selection_split(
+        catalog,
+        n_train=n_train,
+        n_calibration=n_calibration,
+        control=control,
+        grid=grid,
+        seed=seed,
+        selection_seed=selection_seed,
+        **selection,
+    )

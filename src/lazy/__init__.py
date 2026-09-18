@@ -43,7 +43,12 @@ Layout
 :mod:`lazy.datasets`
     The DC1 benchmark catalogue, and :class:`~lazy.datasets.Catalog`, which
     turns photometry -- DC1's or your own -- into the feature views a model
-    sees.
+    sees. :func:`~lazy.datasets.fetch_dc1_biased` cuts the harder benchmark:
+    a spectroscopically selected training set, and representative galaxies to
+    calibrate and score with.
+:mod:`lazy.selection`
+    The spectroscopic selection function behind that split -- RAIL's HSC
+    ``GridSelection``, ported -- for biasing a catalogue of your own.
 
 Weights are fetched from the Hugging Face Hub on first use and cached
 thereafter; :func:`download_checkpoint` warms that cache ahead of time.

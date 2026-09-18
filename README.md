@@ -85,6 +85,59 @@ They all write onto any `RedshiftGrid` you ask for — any number of bins, any
 spacing, any range. (TabFM's ten-class ceiling constrains its internal
 hierarchy, never your output grid.)
 
+## The harder benchmark: a biased training set
+
+DC1 hands every training galaxy a redshift. Real spectroscopic samples do not
+look like that — they are bright, incomplete, and cut in redshift by which
+features fall in the observed window — and that mismatch, not the estimator, is
+usually what limits a survey's redshifts. `fetch_dc1_biased` merges both DC1
+files and cuts the realistic case out of them:
+
+```python
+from lazy.datasets import fetch_dc1_biased
+
+split = fetch_dc1_biased()          # 35,011 biased / 10,000 calibration / 19,383 test
+split.biased                        # what a HSC-like campaign would have got
+split.calibration                   # representative, yours to repair the model with
+split.test                          # representative, held out from all of it
+print(split.summary())              # each subset against the parent catalogue
+```
+
+Both files are merged and reshuffled, then cut in two: the first part is run
+through the selection and what it keeps is the training set, the second is
+divided at random into the calibration sample and the test set. Where the cut
+falls is solved for, not chosen, because the selection keeps a near-fixed
+fraction of whatever it sees — `n_train` is the knob. The calibration sample
+comes *out* of the hold-out rather than on top of it, so no galaxy is both given
+to a model and scored on.
+
+`n_train` cannot reach the DC1 training file's 43,486: the selection keeps 8.66
+per cent of a representative sample, so all 434,476 galaxies yield at most
+37,626, and that with nothing left to test on. 35,000 is the largest round
+number that still leaves a usable hold-out.
+
+`control=True` adds `split.unbiased`, exactly as many galaxies drawn at random
+from the same pool — the control that separates the selection from the sample
+size. It is drawn last, so asking for it changes nothing else in the split.
+
+The selection is a port of RAIL's HSC `GridSelection`: each galaxy is kept with
+the HSC spectroscopic success rate of its (i, g−z) pixel, below a
+colour-dependent redshift ceiling. It is reproduced galaxy-for-galaxy against
+the runs this work reports. It also acts on any photometry, so a catalogue of
+your own can be biased the same way:
+
+```python
+from lazy.selection import grid_selection, selection_summary
+
+keep, diagnostics = grid_selection(catalog.raw, catalog.redshift)
+print(selection_summary(keep, catalog.raw["I"], catalog.redshift))
+#  i in [16.0, 20.0)  ...  fraction 0.661
+#  i in [24.0, 25.3)  ...  fraction 0.0005
+```
+
+`diagnostics` carries each galaxy's pixel success rate and redshift ceiling —
+everything the selection knew, for a method that tries to estimate it back.
+
 ## Which model, exactly
 
 A backbone is a family, not a model, so every backend takes a `version` and each
@@ -136,8 +189,9 @@ Nothing platform-specific is baked in: the wheel is pure Python
 
 For a compute node with no network, warm both on a login node first, then run
 with `download_checkpoint`/`is_cached` and `fetch_dc1(..., download_if_missing=False)`
-so a missing file fails immediately instead of hanging. The checkpoint a model
-loads is the one `download_checkpoint` fetches — the pinned revision is handed
+so a missing file fails immediately instead of hanging. The ~14 MB HSC selection
+grid caches beside the catalogues and `fetch_hsc_grid` takes the same flag. The
+checkpoint a model loads is the one `download_checkpoint` fetches — the pinned revision is handed
 to the backend rather than left to its default.
 
 Memory is bounded by default on every backend via `chunk_size` (16384 query
@@ -151,8 +205,9 @@ little repeated context work.
 | `lazy.models`    | `LazyModel`, the concrete backends, and the name registry                    |
 | `lazy.grid`      | `RedshiftGrid`: binning, normalisation, mass-conserving rebinning            |
 | `lazy.metrics`   | LSST DESC PZ Data Challenge point and PDF metrics, and `summarize`           |
+| `lazy.selection` | The HSC spectroscopic selection function, for biasing a catalogue of your own |
 | `lazy.plotting`  | Publication figure style, and the standard diagnostic figures                |
-| `lazy.datasets`  | The DC1 catalogue (download, checksum, cache) and `Catalog.features`          |
+| `lazy.datasets`  | The DC1 catalogue (download, checksum, cache), `Catalog.features`, `fetch_dc1_biased` |
 
 ## Develop
 
@@ -186,4 +241,7 @@ Built from the
 ## License
 
 MIT, for this code. The pretrained checkpoints carry their own licences; TabFM's
-is non-commercial.
+is non-commercial. The HSC selection grid is redistributed by DESC's
+[rail_astro_tools](https://github.com/LSSTDESC/rail_astro_tools) (MIT) and
+derives from HSC PDR2 (Aihara et al. 2019); `lazy.selection` downloads it from
+there, at a pinned commit, rather than bundling it.
