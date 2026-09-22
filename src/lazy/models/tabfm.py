@@ -40,6 +40,7 @@ from numpy.typing import ArrayLike, NDArray
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
+from lazy.models._progress import Progress, bar, check_progress
 
 __all__ = ["TabFMHistogram", "prior_shift_em", "quantile_edges"]
 
@@ -165,8 +166,16 @@ class TabFMHistogram(BasePhotoZEstimator):
         Further memory/throughput knobs for the streaming path. They trade host
         and device memory against the number of passes; none of them changes
         the result.
+    progress
+        A progress bar over the in-context stages: ``"auto"`` (the default)
+        shows it on a terminal or in a notebook and not when output goes to a
+        file, ``True`` always, ``False`` never. It counts stages rather than
+        galaxies because every stage -- per dither, one coarse classification
+        and then one fine one per coarse bin, ``n_dither * (1 + n_coarse_bins)``
+        in all -- runs over *every* query row, and shows which dither and level
+        is running and how many context rows that stage has.
     verbose
-        Print per-level progress to stdout.
+        Print per-level log messages to stdout.
 
     Attributes
     ----------
@@ -219,6 +228,7 @@ class TabFMHistogram(BasePhotoZEstimator):
         decode_chunk_rows: int = 16_384,
         query_block_rows: int = 262_144,
         keep_cache_on_device: bool = True,
+        progress: Progress = "auto",
         verbose: bool = False,
     ):
         self.version = version
@@ -237,6 +247,7 @@ class TabFMHistogram(BasePhotoZEstimator):
         self.decode_chunk_rows = decode_chunk_rows
         self.query_block_rows = query_block_rows
         self.keep_cache_on_device = keep_cache_on_device
+        self.progress = progress
         self.verbose = verbose
 
     # -- estimator protocol -------------------------------------------------
@@ -265,6 +276,7 @@ class TabFMHistogram(BasePhotoZEstimator):
                 f"context has {len(X)} rows, fewer than the "
                 f"{self.n_coarse_bins * self.n_fine_bins} bins asked for"
             )
+        check_progress(self.progress)
         self.device_ = resolve_device(self.device)
         self.provenance_ = get_checkpoint("tabfm", self.version).provenance(device=self.device_)
         self.X_context_ = X
@@ -298,26 +310,47 @@ class TabFMHistogram(BasePhotoZEstimator):
         model = self._backbone()
         shifts = [d / self.n_dither for d in range(self.n_dither)]
         densities = []
-        for i, shift in enumerate(shifts):
-            self._log(f"dither {i + 1}/{self.n_dither} (edge shift {shift:.2f} bins)")
-            probs, edges, prior = self._hierarchy(model, X, shift, grid)
-            if self.prior_shift == "em":
-                probs, _ = prior_shift_em(probs, prior)
-            densities.append(grid.rebin(probs, edges))
+        stages = self.n_dither * (1 + self.n_coarse_bins)
+        with bar(
+            self.progress, total=stages, desc=f"TabFM {self.version} ({len(X):,} gal)", unit="stage"
+        ) as progress:
+            for i, shift in enumerate(shifts):
+                self._log(f"dither {i + 1}/{self.n_dither} (edge shift {shift:.2f} bins)")
+                probs, edges, prior = self._hierarchy(
+                    model, X, shift, grid, progress=progress, dither=f"{i + 1}/{self.n_dither}"
+                )
+                if self.prior_shift == "em":
+                    probs, _ = prior_shift_em(probs, prior)
+                densities.append(grid.rebin(probs, edges))
         self.bin_prior_ = prior
         return np.mean(densities, axis=0)
 
     # -- the hierarchy ------------------------------------------------------
 
     def _hierarchy(
-        self, model, X_query: pd.DataFrame, shift: float, grid
+        self, model, X_query: pd.DataFrame, shift: float, grid, *, progress=None, dither: str = "1/1"
     ) -> tuple[NDArray, NDArray, NDArray]:
-        """``(probs, edges, context_bin_prior)`` for one set of dithered edges."""
+        """``(probs, edges, context_bin_prior)`` for one set of dithered edges.
+
+        ``progress`` is the bar :meth:`_predict_pdf` opened, advanced once per
+        in-context stage; ``None`` draws nothing.
+        """
+
+        def stage(level: str, n_context: int) -> None:
+            if progress is not None:
+                progress.set_postfix(dither=dither, level=level, context=n_context)
+
+        def done() -> None:
+            if progress is not None:
+                progress.update(1)
+
         z = self.z_context_
         span = grid.z_max - grid.z_min
         coarse_edges = quantile_edges(z, self.n_coarse_bins, grid.z_min, grid.z_max + 1e-6 * span, shift)
         coarse = np.clip(np.searchsorted(coarse_edges, z, side="right") - 1, 0, self.n_coarse_bins - 1)
+        stage("coarse", z.size)
         p_coarse = self._class_probabilities(model, self.X_context_, coarse, X_query, self.random_state)
+        done()
 
         edges: list[NDArray] = []
         prior: list[NDArray] = []
@@ -328,9 +361,11 @@ class TabFMHistogram(BasePhotoZEstimator):
                 z[rows], self.n_fine_bins, coarse_edges[j], coarse_edges[j + 1], shift
             )
             fine = np.clip(np.searchsorted(fine_edges, z[rows], side="right") - 1, 0, self.n_fine_bins - 1)
+            stage(f"fine {j + 1}/{self.n_coarse_bins}", int(rows.sum()))
             p_fine = self._class_probabilities(
                 model, self.X_context_.iloc[rows], fine, X_query, self.random_state + 1 + j
             )
+            done()
             edges.append(fine_edges[:-1])
             prior.append(np.bincount(fine, minlength=self.n_fine_bins) / max(z.size, 1))
             blocks.append(p_fine * p_coarse[:, [j]])

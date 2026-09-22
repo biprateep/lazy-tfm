@@ -27,6 +27,7 @@ dependencies = [
     "matplotlib>=3.8",
     "huggingface-hub>=0.24",
     "h5py>=3.10", # reads the HSC selection grid behind `fetch_dc1_biased`
+    "tqdm>=4.66", # prediction progress bars; already arrives via huggingface-hub
 ]
 
 [project.urls]

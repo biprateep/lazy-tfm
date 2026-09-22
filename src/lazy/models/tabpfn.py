@@ -40,6 +40,7 @@ from numpy.typing import NDArray
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
+from lazy.models._progress import Progress, bar, check_progress
 
 __all__ = ["FIT_MODES", "TabPFNBarDistribution", "bucket_masses", "path_for_tabpfn"]
 
@@ -100,8 +101,13 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
         are fitted on the context at ``fit`` time, so a query row's prediction
         never depends on which other query rows share its chunk -- and is
         verified bit-identical in the test suite.
+    progress
+        A progress bar over the query galaxies: ``"auto"`` (the default) shows
+        it on a terminal or in a notebook and not when output goes to a file,
+        ``True`` always, ``False`` never. It advances one chunk at a time and
+        shows the context size and how many buckets the bar distribution has.
     verbose
-        Print progress to stdout.
+        Print log messages to stdout.
 
     Attributes
     ----------
@@ -121,6 +127,8 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
         every chunk shares them.
     n_buckets_ : int
         How many buckets the bar distribution has, ``borders_.size - 1``.
+    n_context_ : int
+        Context rows ``fit`` was given.
 
     Examples
     --------
@@ -145,6 +153,7 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
         fit_mode: str = "fit_preprocessors",
         ignore_pretraining_limits: bool = False,
         chunk_size: int = 16_384,
+        progress: Progress = "auto",
         verbose: bool = False,
     ):
         self.version = version
@@ -156,6 +165,7 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
         self.fit_mode = fit_mode
         self.ignore_pretraining_limits = ignore_pretraining_limits
         self.chunk_size = chunk_size
+        self.progress = progress
         self.verbose = verbose
 
     # -- estimator protocol -------------------------------------------------
@@ -172,6 +182,7 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
             raise ValueError("chunk_size must be non-negative (0 means one pass)")
         if self.fit_mode not in FIT_MODES:
             raise ValueError(f"fit_mode must be one of {FIT_MODES}, got {self.fit_mode!r}")
+        check_progress(self.progress)
         self.device_ = resolve_device(self.device)
 
         # Fetch the weights ourselves and hand over the path, rather than
@@ -201,20 +212,25 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
         )
         regressor.fit(X.to_numpy(dtype=np.float64), np.asarray(y, dtype=np.float64))
         self.regressor_ = regressor
+        self.n_context_ = len(X)
 
     def _predict_pdf(self, X: pd.DataFrame, grid) -> NDArray[np.float64]:
         size = self.chunk_size if self.chunk_size > 0 else len(X)
         blocks = []
-        for start in range(0, len(X), size):
-            stop = min(start + size, len(X))
-            self._log(f"rows {start}:{stop} of {len(X)}")
-            output = self.regressor_.predict(
-                X.iloc[start:stop].to_numpy(dtype=np.float64), output_type="full"
-            )
-            borders, masses = bucket_masses(output)
-            self.borders_, self.n_buckets_ = borders, int(borders.size - 1)
-            blocks.append(grid.rebin(masses, borders))
-            del output, masses
+        with bar(self.progress, total=len(X), desc=f"TabPFN {self.version}", unit="gal") as progress:
+            progress.set_postfix(context=self.n_context_)
+            for start in range(0, len(X), size):
+                stop = min(start + size, len(X))
+                self._log(f"rows {start}:{stop} of {len(X)}")
+                output = self.regressor_.predict(
+                    X.iloc[start:stop].to_numpy(dtype=np.float64), output_type="full"
+                )
+                borders, masses = bucket_masses(output)
+                self.borders_, self.n_buckets_ = borders, int(borders.size - 1)
+                blocks.append(grid.rebin(masses, borders))
+                del output, masses
+                progress.set_postfix(context=self.n_context_, buckets=self.n_buckets_, refresh=False)
+                progress.update(stop - start)
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _log(self, message: str) -> None:

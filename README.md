@@ -85,6 +85,28 @@ They all write onto any `RedshiftGrid` you ask for — any number of bins, any
 spacing, any range. (TabFM's ten-class ceiling constrains its internal
 hierarchy, never your output grid.)
 
+### Progress bars
+
+Every backend draws a `tqdm` bar while it predicts, counting whatever that
+model's loop actually iterates over. For 20,000 DC1 test galaxies on a
+1,000-galaxy context (one GB10 GPU):
+
+```
+TabPFN v3.5: 100%|██████████| 20000/20000 [00:15<00:00, 1279.46gal/s, buckets=5000, context=1000]
+TabICL v2: 100%|██████████| 20000/20000 [00:10<00:00, 1968.82gal/s, context=1000, quantiles=999]
+TabFM v1.0 (20,000 gal): 100%|██████████| 33/33 [08:47<00:00, 16.00s/stage, context=34, dither=3/3, level=fine 10/10]
+```
+
+TabPFN and TabICL answer in chunks of query rows, so their bars count
+galaxies. TabFM is a hierarchy of in-context classifications, each over every
+query row, so its bar counts *stages* — `n_dither × (1 + n_coarse_bins)` of
+them — and shows which dither and level is running on how many context rows.
+
+`progress="auto"` (the default) shows the bar on a terminal or in a notebook and
+stays silent when output goes to a file, so batch logs stay clean. Pass
+`progress=True` to force it on or `progress=False` to turn it off. The bar goes
+to stderr; `verbose=True` log messages go to stdout.
+
 ## The harder benchmark: a biased training set
 
 DC1 hands every training galaxy a redshift. Real spectroscopic samples do not

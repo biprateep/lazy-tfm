@@ -27,6 +27,7 @@ from numpy.typing import NDArray
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
+from lazy.models._progress import Progress, bar, check_progress
 
 __all__ = ["TabICLQuantile", "quantile_levels"]
 
@@ -70,8 +71,13 @@ class TabICLQuantile(BasePhotoZEstimator):
         so a query row's prediction never depends on which other query rows
         share its chunk -- and is verified bit-identical in the test suite, so
         the default is bounded rather than fast-and-hopeful.
+    progress
+        A progress bar over the query galaxies: ``"auto"`` (the default) shows
+        it on a terminal or in a notebook and not when output goes to a file,
+        ``True`` always, ``False`` never. It advances one chunk at a time and
+        shows the context size and how many quantiles each galaxy is given.
     verbose
-        Print progress to stdout.
+        Print log messages to stdout.
 
     Attributes
     ----------
@@ -87,6 +93,8 @@ class TabICLQuantile(BasePhotoZEstimator):
         The fitted ``tabicl.TabICLRegressor``.
     n_quantiles_ : int
         How many quantiles the backbone actually returned.
+    n_context_ : int
+        Context rows ``fit`` was given.
 
     Examples
     --------
@@ -106,6 +114,7 @@ class TabICLQuantile(BasePhotoZEstimator):
         device: str = "auto",
         random_state: int = 42,
         chunk_size: int = 16_384,
+        progress: Progress = "auto",
         verbose: bool = False,
     ):
         self.version = version
@@ -114,6 +123,7 @@ class TabICLQuantile(BasePhotoZEstimator):
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
+        self.progress = progress
         self.verbose = verbose
 
     # -- estimator protocol -------------------------------------------------
@@ -128,6 +138,7 @@ class TabICLQuantile(BasePhotoZEstimator):
 
         if self.chunk_size < 0:
             raise ValueError("chunk_size must be non-negative (0 means one pass)")
+        check_progress(self.progress)
         self.device_ = resolve_device(self.device)
 
         # Fetch the weights ourselves and hand over the path, rather than
@@ -151,20 +162,25 @@ class TabICLQuantile(BasePhotoZEstimator):
         )
         regressor.fit(X.to_numpy(dtype=np.float32), np.asarray(y, dtype=np.float32))
         self.regressor_ = regressor
+        self.n_context_ = len(X)
 
     def _predict_pdf(self, X: pd.DataFrame, grid) -> NDArray[np.float64]:
         size = self.chunk_size if self.chunk_size > 0 else len(X)
         blocks = []
-        for start in range(0, len(X), size):
-            stop = min(start + size, len(X))
-            self._log(f"rows {start}:{stop} of {len(X)}")
-            quantiles = self.regressor_.predict(
-                X.iloc[start:stop].to_numpy(dtype=np.float32), output_type="raw_quantiles"
-            )
-            quantiles = np.asarray(quantiles, dtype=np.float64)
-            self.n_quantiles_ = int(quantiles.shape[1])
-            blocks.append(grid.from_quantiles(quantiles, quantile_levels(self.n_quantiles_)))
-            del quantiles
+        with bar(self.progress, total=len(X), desc=f"TabICL {self.version}", unit="gal") as progress:
+            progress.set_postfix(context=self.n_context_)
+            for start in range(0, len(X), size):
+                stop = min(start + size, len(X))
+                self._log(f"rows {start}:{stop} of {len(X)}")
+                quantiles = self.regressor_.predict(
+                    X.iloc[start:stop].to_numpy(dtype=np.float32), output_type="raw_quantiles"
+                )
+                quantiles = np.asarray(quantiles, dtype=np.float64)
+                self.n_quantiles_ = int(quantiles.shape[1])
+                blocks.append(grid.from_quantiles(quantiles, quantile_levels(self.n_quantiles_)))
+                del quantiles
+                progress.set_postfix(context=self.n_context_, quantiles=self.n_quantiles_, refresh=False)
+                progress.update(stop - start)
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _log(self, message: str) -> None:
