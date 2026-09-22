@@ -246,9 +246,9 @@ result. The test suite needs neither a GPU nor a checkpoint.
 
 ## Repository layout
 
-- `main` — this library. The public, installable package.
-- `paper` — the production code behind the paper: the exact runs, in the exact
-  order, that produce every number and figure in it. See [paper/](paper/).
+This repository is the library alone: the public, installable package, its
+tests and its documentation. The production runs behind the paper are not
+tracked here.
 
 ## Citing
 

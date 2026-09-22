@@ -35,3 +35,7 @@ data/
 # extensions, so this cannot hide one.
 *.ckpt
 *.safetensors
+
+# The paper's production code and results live beside a checkout, not in it:
+# this repository is the installable package only.
+paper/
