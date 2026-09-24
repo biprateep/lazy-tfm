@@ -1,58 +1,71 @@
-# Configuration file for the Sphinx documentation builder.
+# Sphinx configuration: https://www.sphinx-doc.org/en/master/usage/configuration.html
 #
-# For the full list of built-in configuration values, see the documentation:
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
+# Pages are MyST Markdown (via myst-nb, which also renders notebooks when the
+# tutorials arrive). The API reference is generated from the docstrings by
+# sphinx-autoapi, public names only.
 
-
-import os
-import sys
-from importlib.metadata import version
-
-# Define path to the code to be documented **relative to where conf.py (this file) is kept**
-sys.path.insert(0, os.path.abspath("../src/"))
-
-# -- Project information -----------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
+from importlib.metadata import version as _version
 
 project = "lazy-photoz"
-copyright = "2026, Biprateep Dey"
 author = "Biprateep Dey"
-release = version("lazy-photoz")
-# for example take major/minor
+copyright = "2026, Biprateep Dey"
+release = _version("lazy-photoz")
 version = ".".join(release.split(".")[:2])
 
-# -- General configuration ---------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
+extensions = [
+    "myst_nb",
+    "autoapi.extension",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.viewcode",
+    "sphinx_copybutton",
+    "sphinx_design",
+]
 
-extensions = ["sphinx.ext.mathjax", "sphinx.ext.napoleon", "sphinx.ext.viewcode"]
-
-extensions.append("autoapi.extension")
-extensions.append("nbsphinx")
-
-# -- sphinx-copybutton configuration ----------------------------------------
-extensions.append("sphinx_copybutton")
-## sets up the expected prompt text from console blocks, and excludes it from
-## the text that goes into the clipboard.
-copybutton_exclude = ".linenos, .gp"
-copybutton_prompt_text = ">> "
-
-## lets us suppress the copy button on select code blocks.
-copybutton_selector = "div:not(.no-copybutton) > div.highlight > pre"
-
-templates_path = []
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]
+root_doc = "index"
 
-# This assumes that sphinx-build is called from the root directory
-master_doc = "index"
-# Remove 'view source code' from top of page (for html, not python)
-html_show_sourcelink = False
-# Remove namespaces from class/method signatures
-add_module_names = False
+# -- MyST and notebooks ------------------------------------------------------
+myst_enable_extensions = ["colon_fence", "deflist"]
+myst_heading_anchors = 3
+# Notebooks will be committed with their outputs (they need a GPU), so the docs
+# build never executes them.
+nb_execution_mode = "off"
 
+# -- API reference -------------------------------------------------------------
 autoapi_type = "python"
 autoapi_dirs = ["../src"]
-autoapi_ignore = ["*/__main__.py", "*/_version.py"]
-autoapi_add_toc_tree_entry = False
-autoapi_member_order = "bysource"
+autoapi_root = "autoapi"
+autoapi_add_toctree_entry = False
+autoapi_member_order = "groupwise"
+# No private members or modules: the reference documents the public API only.
+autoapi_options = ["members", "undoc-members", "show-inheritance", "show-module-summary"]
+add_module_names = False
 
-html_theme = "sphinx_rtd_theme"
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
+    "pandas": ("https://pandas.pydata.org/docs", None),
+    "sklearn": ("https://scikit-learn.org/stable", None),
+}
+
+# -- Copy button: strip console prompts from copied commands -----------------
+copybutton_prompt_text = r"\$ |>>> |\.\.\. "
+copybutton_prompt_is_regexp = True
+
+# -- HTML ------------------------------------------------------------------------
+html_theme = "pydata_sphinx_theme"
+html_title = "lazy-photoz"
+html_show_sourcelink = False
+html_theme_options = {
+    "github_url": "https://github.com/biprateep/lazy-photoz",
+    "use_edit_page_button": True,
+    "navigation_with_keys": False,
+    "show_toc_level": 2,
+}
+html_context = {
+    "github_user": "biprateep",
+    "github_repo": "lazy-photoz",
+    "github_version": "main",
+    "doc_path": "docs",
+}

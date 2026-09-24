@@ -79,13 +79,12 @@ dev = [
     "jupytext>=1.16", # Notebooks are authored as py:percent scripts
 ]
 docs = [
-    "sphinx>=7",
+    "sphinx>=8",
     "sphinx-autoapi>=3",
     "sphinx-copybutton>=0.5",
-    "sphinx-rtd-theme>=3.0",
-    "nbsphinx>=0.9",
-    "nbconvert>=7",
-    "ipython>=8",
+    "sphinx-design>=0.6",
+    "pydata-sphinx-theme>=0.16",
+    "myst-nb>=1.1", # MyST Markdown pages, and the notebooks once there are tutorials
 ]
 
 # Development-only source overrides: honoured by `uv sync` in a checkout, never
