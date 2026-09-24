@@ -23,12 +23,14 @@ normalising any other way would leave ``trapz(p) != 1`` inside the loss.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 from numpy.typing import ArrayLike
 from numpy.typing import NDArray
 
-__all__ = ["DC1_GRID", "RedshiftGrid", "as_grid"]
+__all__ = ["DC1_GRID", "GridLike", "RedshiftGrid", "as_grid"]
 
 
 @dataclass(frozen=True)
@@ -243,6 +245,11 @@ class RedshiftGrid:
 #: ``0 < z < 2``. Reproducing the published DC1 numbers requires this grid;
 #: nothing else in the library does.
 DC1_GRID = RedshiftGrid.linear(0.0, 2.0, 200)
+
+
+#: What every ``z_grid`` argument accepts: a grid, an array of bin centres, or
+#: ``None`` for the default.
+GridLike: TypeAlias = RedshiftGrid | npt.ArrayLike | None
 
 
 def as_grid(grid: RedshiftGrid | ArrayLike | None) -> RedshiftGrid:
