@@ -3,6 +3,8 @@
 **L**azy but **A**ccurate photo-**Z** for **Y**inz — photometric redshift PDFs
 from pretrained tabular foundation models.
 
+[![PyPI](https://img.shields.io/pypi/v/lazy-photoz)](https://pypi.org/project/lazy-photoz/)
+[![Python](https://img.shields.io/pypi/pyversions/lazy-photoz)](https://pypi.org/project/lazy-photoz/)
 [![Unit test and code coverage](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml)
 [![Documentation](https://readthedocs.org/projects/lazy-photoz/badge/?version=latest)](https://lazy-photoz.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -12,7 +14,10 @@ as *context* and they answer queries in one forward pass — no training loop, n
 hyper-parameter search, no per-survey retraining. Hence lazy.
 
 > **Pre-release.** The API is still moving and the paper numbers are not final.
-> Pin a commit if you depend on this.
+> Pin a version if you depend on this.
+
+**Documentation:** [lazy-photoz.readthedocs.io](https://lazy-photoz.readthedocs.io) ·
+**Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Install
 
