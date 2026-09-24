@@ -35,3 +35,21 @@ jobs:
       uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+
+  # The same build and checks the release runs, on every push and pull request,
+  # so a packaging mistake surfaces here rather than on release day.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Build the sdist and wheel
+      run: uv build
+    - name: Check the metadata renders on PyPI
+      run: uvx twine check --strict dist/*
+    - name: Install the wheel into a clean environment and import it
+      run: |
+        uv venv --python 3.12 /tmp/smoke
+        VIRTUAL_ENV=/tmp/smoke uv pip install dist/*.whl
+        /tmp/smoke/bin/python -c "import lazy; print('lazy', lazy.__version__)"
