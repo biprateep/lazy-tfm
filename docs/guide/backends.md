@@ -57,7 +57,8 @@ the only one whose weights allow commercial use.
 ## Memory and speed
 
 Peak memory is bounded by `chunk_size` on every backend (16,384 query rows by
-default). Chunking is exact: the in-context stage builds its keys and values
+default), except on TabFM's streaming path, where `query_block_rows` and
+`decode_chunk_rows` do the same job. Chunking is exact: the in-context stage builds its keys and values
 from the context rows alone, so a galaxy's answer never depends on which other
 galaxies share its chunk. The test suite asserts this bit for bit. Lower
 `chunk_size` on a small GPU; set it to `0` for a single pass.

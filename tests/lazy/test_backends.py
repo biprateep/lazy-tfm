@@ -134,6 +134,34 @@ class TestTabFM:
         with pytest.raises(ValueError, match="fewer than the"):
             lazy.get_estimator("tabfm").fit(X.iloc[:10], z[:10])
 
+    def test_the_slow_path_hands_upstream_bounded_chunks(self, monkeypatch):
+        """`chunk_size` must reach `predict_proba`, not just the docstring."""
+        sizes = []
+
+        class Recording:
+            classes_ = np.array([0, 1])
+
+            def fit(self, X, y):
+                return self
+
+            def predict_proba(self, X):
+                sizes.append(len(X))
+                return np.column_stack([X["a"], 1.0 - X["a"]])
+
+        est = tabfm.TabFMHistogram(chunk_size=7)
+        est.inference_ = "predict_proba"
+        monkeypatch.setattr(est, "_classifier", lambda model, seed: Recording())
+        X_query = pd.DataFrame(
+            {"a": np.linspace(0.0, 1.0, 40)}, index=np.arange(100, 140)
+        )
+
+        probs = est._class_probabilities(
+            None, X_query.iloc[:4], np.array([0, 1, 0, 1]), X_query, seed=0
+        )
+
+        assert sizes == [7, 7, 7, 7, 7, 5]
+        assert np.array_equal(probs[:, 0], X_query["a"].to_numpy())
+
     def test_the_classifier_only_receives_supported_keywords(self, tiny):
         """Cache knobs exist on repository builds, not on the PyPI release."""
         upstream = pytest.importorskip("tabfm")
@@ -352,16 +380,25 @@ class TestTabPFN:
 
 
 @needs_checkpoint
-def test_chunking_the_query_rows_is_bit_identical():
+def test_chunking_the_query_rows_is_bit_identical(monkeypatch):
     """The claim that makes bounded memory free: chunking changes nothing.
 
     TabFM's in-context stage builds its keys and values from the context rows
     alone, so a query row's answer cannot depend on which other query rows
     share its chunk. If that ever stopped holding, `chunk_size` would silently
     change results instead of only peak memory, so it is asserted rather than
-    assumed.
+    assumed. The rows each upstream call receives are recorded too, so the
+    comparison cannot pass by never chunking at all.
     """
-    pytest.importorskip("tabfm")
+    upstream = pytest.importorskip("tabfm")
+    predict_proba = upstream.TabFMClassifier.predict_proba
+    sizes = []
+
+    def recording(self, X, *args, **kwargs):
+        sizes.append(len(X))
+        return predict_proba(self, X, *args, **kwargs)
+
+    monkeypatch.setattr(upstream.TabFMClassifier, "predict_proba", recording)
 
     generator = np.random.default_rng(0)
     z = generator.uniform(0.2, 1.8, 240)
@@ -384,9 +421,17 @@ def test_chunking_the_query_rows_is_bit_identical():
             inference="predict_proba",
             chunk_size=chunk_size,
         )
-        return model.fit(X_ctx, z_ctx).predict_proba(X_q)
+        sizes.clear()
+        pdfs = model.fit(X_ctx, z_ctx).predict_proba(X_q)
+        return pdfs, list(sizes)
 
-    assert np.array_equal(run(0), run(7))
+    whole, whole_sizes = run(0)
+    chunked, chunked_sizes = run(7)
+
+    assert set(whole_sizes) == {40}
+    assert max(chunked_sizes) == 7
+    assert len(chunked_sizes) == 6 * len(whole_sizes)
+    assert np.array_equal(whole, chunked)
 
 
 class TestMissingBackend:

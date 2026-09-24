@@ -52,4 +52,13 @@ The first release. Everything below is new.
   `style.binned_quantiles(x_values, y_values, ..., percentiles=...)` and
   `style.running_median(ax, x_values, y_values, ...)`.
 
+### Fixed
+
+- TabFM's `inference="predict_proba"` path (the PyPI `tabfm` release) now
+  honours `chunk_size`. It used to pass every query row to upstream
+  `predict_proba` at once, so peak memory grew with the query set. The
+  streaming path is bounded by `query_block_rows` and `decode_chunk_rows`, and
+  its documentation now says so. The chunking test checks that chunks are really
+  formed.
+
 [Unreleased]: https://github.com/biprateep/lazy-photoz/commits/main

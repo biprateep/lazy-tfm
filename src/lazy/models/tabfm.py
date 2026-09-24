@@ -220,15 +220,17 @@ class TabFMHistogram(base.BasePhotoZEstimator):
         softmax_temperature: Temperature applied to the classifier logits.
             The upstream default of 0.9 is deliberately not 1.0 and should
             rarely be changed.
-        chunk_size: Query rows pushed through the backbone at a time, on
-            either inference path. ``0`` does them in one pass. This is what
-            bounds peak memory: the released ``tabfm`` builds every ensemble
-            member's view of every query row up front, so a survey-sized
-            query set in one pass is tens of gigabytes. Chunking is
-            numerically exact -- the in-context stage builds its keys and
-            values from the context rows only, so a query row's prediction
-            never depends on which other query rows share its chunk -- and
-            is verified bit-identical in the test suite.
+        chunk_size: Query rows handed to the upstream ``predict_proba`` at a
+            time, on the ``"predict_proba"`` path. ``0`` does them in one
+            pass. This is what bounds peak memory there: the released
+            ``tabfm`` builds every ensemble member's view of every query row
+            up front, so a survey-sized query set in one pass is tens of
+            gigabytes. Chunking is numerically exact -- the in-context stage
+            builds its keys and values from the context rows only, so a
+            query row's prediction never depends on which other query rows
+            share its chunk -- and is verified bit-identical in the test
+            suite. The streaming path ignores it; ``query_block_rows`` and
+            ``decode_chunk_rows`` bound its memory instead.
         member_batch_size: Ensemble members processed together on the
             streaming path (and TabFM's own ``batch_size``). This and the
             next three are memory/throughput knobs: they trade host and
@@ -552,10 +554,7 @@ class TabFMHistogram(base.BasePhotoZEstimator):
                 logits["query"]["mean_logits"], self.softmax_temperature
             )
         else:
-            probs = np.asarray(
-                classifier.predict_proba(X_query.reset_index(drop=True)),
-                dtype=float,
-            )
+            probs = self._predict_proba_chunked(classifier, X_query)
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
