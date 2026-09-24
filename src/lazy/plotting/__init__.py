@@ -2,11 +2,14 @@
 # Copyright (c) 2025 Biprateep Dey
 """Publication figure style and the standard photo-z diagnostic plots.
 
-``lazy.plotting.style`` is general-purpose: journal geometry, house rcParams and
-figure helpers for any figure in the paper. ``lazy.plotting.diagnostics`` is
-photo-z specific: the accuracy, calibration and N(z) figures every method in the
-benchmark is judged by. Both are re-exported here.
+``lazy.plotting.style`` is general-purpose: journal geometry, house rcParams
+and figure helpers for any figure in the paper. ``lazy.plotting.diagnostics`` is
+photo-z specific: the accuracy, calibration and N(z) figures every method in
+the benchmark is judged by. Both are re-exported here.
 """
+
+# The re-exports below define the package's public API, so they name members.
+# ruff: noqa: GS001
 
 from lazy.plotting.diagnostics import diagnostic_panel
 from lazy.plotting.diagnostics import plot_coverage

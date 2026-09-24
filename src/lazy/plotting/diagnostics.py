@@ -10,10 +10,10 @@ makes one), returns it, and changes no global state -- call
 :func:`lazy.plotting.use_style` once in your preamble to get the publication
 rcParams::
 
-    from lazy.plotting import use_style, diagnostic_panel
+    from lazy import plotting
 
-    use_style()
-    fig = diagnostic_panel(z_true, grid.centers, pdfs)
+    plotting.use_style()
+    fig = plotting.diagnostic_panel(z_true, grid.centers, pdfs)
 
 Two families of diagnostic, and they answer different questions:
 
@@ -30,12 +30,19 @@ actually consume.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
+from matplotlib import axes as mpl_axes
+from matplotlib import colors as mcolors
+from matplotlib import figure as mpl_figure
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import ArrayLike
+import numpy.typing as npt
 
-from lazy.plotting.style import figsize
-from lazy.plotting.style import one_to_one
+from lazy import grid
+from lazy import metrics
+from lazy.plotting import style
 
 __all__ = [
     "diagnostic_panel",
@@ -51,36 +58,46 @@ __all__ = [
 _OUTLIER_FLOOR = 0.06
 
 
-def _axes(ax, **kwargs):
+def _axes(ax: mpl_axes.Axes | None, **kwargs: Any) -> mpl_axes.Axes:
+    """Returns ``ax``, or the axes of a new figure of ``style.figsize``."""
     if ax is not None:
         return ax
-    return plt.subplots(figsize=figsize(**kwargs))[1]
+    return plt.subplots(figsize=style.figsize(**kwargs))[1]
 
 
 def plot_zphot_ztrue(
-    z_true: ArrayLike,
-    z_pred: ArrayLike,
+    z_true: npt.ArrayLike,
+    z_pred: npt.ArrayLike,
     *,
-    ax=None,
+    ax: mpl_axes.Axes | None = None,
     bins: int = 200,
     z_max: float | None = None,
     outlier_lines: bool = True,
     cmap: str | None = None,
-    **kwargs,
-):
-    """Predicted against true redshift as a log-density image.
+    **kwargs: Any,
+) -> mpl_axes.Axes:
+    """Plots predicted against true redshift as a log-density image.
 
     A scatter plot of a survey-sized sample is a black blob, so this is a 2D
     histogram on a log colour scale -- which is also the only way the outlier
     islands (catastrophic failures at the wrong redshift) stay visible against
     the main locus.
 
-    ``outlier_lines`` draws the DC1 outlier boundary
-    ``|z_pred - z_true| = 0.06 (1 + z_true)``, so the fraction of points
-    outside it is readable by eye.
-    """
-    from matplotlib.colors import LogNorm
+    Args:
+        z_true: True redshifts, shape (n_galaxies,).
+        z_pred: Point-estimate redshifts, shape (n_galaxies,).
+        ax: The axes to draw into; a new column-width square figure if None.
+        bins: Number of histogram bins along each axis.
+        z_max: Upper limit of both axes; the largest redshift if None.
+        outlier_lines: Draw the DC1 outlier boundary
+            ``|z_pred - z_true| = 0.06 (1 + z_true)``, so the fraction of
+            points outside it is readable by eye.
+        cmap: Colormap name; the rcParams default if None.
+        **kwargs: Passed to ``ax.hist2d``.
 
+    Returns:
+        The axes drawn into.
+    """
     z_true = np.asarray(z_true, dtype=float)
     z_pred = np.asarray(z_pred, dtype=float)
     ax = _axes(ax, width="column", aspect="square")
@@ -90,11 +107,11 @@ def plot_zphot_ztrue(
         z_pred,
         bins=bins,
         range=[[0, hi], [0, hi]],
-        norm=LogNorm(),
+        norm=mcolors.LogNorm(),
         cmap=cmap or plt.rcParams["image.cmap"],
         **kwargs,
     )
-    one_to_one(ax, 0.0, hi)
+    style.one_to_one(ax, 0.0, hi)
     if outlier_lines:
         edge = np.array([0.0, hi])
         for sign in (+1, -1):
@@ -109,19 +126,31 @@ def plot_zphot_ztrue(
 
 
 def plot_residuals(
-    z_true: ArrayLike,
-    z_pred: ArrayLike,
+    z_true: npt.ArrayLike,
+    z_pred: npt.ArrayLike,
     *,
-    ax=None,
+    ax: mpl_axes.Axes | None = None,
     n_bins: int = 20,
     quantiles: tuple[float, float, float] = (16.0, 50.0, 84.0),
-):
-    """Scaled residual ``(z_phot - z_true) / (1 + z_true)`` against true redshift.
+) -> mpl_axes.Axes:
+    """Plots the scaled residual against true redshift.
 
-    The running median and its 16th-84th percentile band say where the bias
-    lives: a model can have a fine global bias and still be systematically high
-    at low redshift and low at high redshift, which this shows and a single
+    The scaled residual is ``(z_phot - z_true) / (1 + z_true)``. The running
+    median and its 16th-84th percentile band say where the bias lives: a
+    model can have a fine global bias and still be systematically high at
+    low redshift and low at high redshift, which this shows and a single
     number hides.
+
+    Args:
+        z_true: True redshifts, shape (n_galaxies,).
+        z_pred: Point-estimate redshifts, shape (n_galaxies,).
+        ax: The axes to draw into; a new column-width figure if None.
+        n_bins: Number of equal-count bins in true redshift.
+        quantiles: Lower edge, centre line and upper edge of the band, as
+            percentiles between 0 and 100.
+
+    Returns:
+        The axes drawn into.
     """
     z_true = np.asarray(z_true, dtype=float)
     ez = (np.asarray(z_pred, dtype=float) - z_true) / (1.0 + z_true)
@@ -148,18 +177,29 @@ def plot_residuals(
 
 
 def plot_pit(
-    pit: ArrayLike,
+    pit: npt.ArrayLike,
     *,
-    ax=None,
+    ax: mpl_axes.Axes | None = None,
     n_bins: int = 20,
     label: str | None = None,
-    **kwargs,
-):
-    """Histogram of the PIT values against the uniform distribution they should follow.
+    **kwargs: Any,
+) -> mpl_axes.Axes:
+    """Plots a histogram of the PIT values against the expected uniform.
 
     The shape names the failure: a U means the PDFs are too narrow
     (over-confident), a dome means they are too wide, a slope means they are
     biased, and a spike at 0 or 1 counts catastrophic outliers.
+
+    Args:
+        pit: Probability integral transform of each galaxy, in [0, 1],
+            shape (n_galaxies,).
+        ax: The axes to draw into; a new column-width figure if None.
+        n_bins: Number of histogram bins on [0, 1].
+        label: Legend label.
+        **kwargs: Passed to ``ax.hist``.
+
+    Returns:
+        The axes drawn into.
     """
     pit = np.asarray(pit, dtype=float)
     ax = _axes(ax, width="column", aspect="golden")
@@ -180,19 +220,35 @@ def plot_pit(
     return ax
 
 
-def plot_pit_qq(pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs):
+def plot_pit_qq(
+    pit: npt.ArrayLike,
+    *,
+    ax: mpl_axes.Axes | None = None,
+    label: str | None = None,
+    **kwargs: Any,
+) -> mpl_axes.Axes:
     """Quantile-quantile plot of the PIT sample against U(0, 1).
 
     Harder to misread than the histogram: perfect calibration is the diagonal,
     above it means too wide, below means too narrow, and the deviation is in
     the same units as the probability itself.
+
+    Args:
+        pit: Probability integral transform of each galaxy, in [0, 1],
+            shape (n_galaxies,).
+        ax: The axes to draw into; a new column-width square figure if None.
+        label: Legend label.
+        **kwargs: Passed to ``ax.plot``.
+
+    Returns:
+        The axes drawn into.
     """
     pit = np.asarray(pit, dtype=float)
     ax = _axes(ax, width="column", aspect="square")
     ordered = np.sort(pit)
     uniform = (np.arange(1, ordered.size + 1) - 0.5) / ordered.size
     ax.plot(uniform, ordered, label=label, **kwargs)
-    one_to_one(ax, 0.0, 1.0)
+    style.one_to_one(ax, 0.0, 1.0)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_xlabel("uniform quantile")
@@ -201,14 +257,28 @@ def plot_pit_qq(pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs):
 
 
 def plot_coverage(
-    pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs
-):
+    pit: npt.ArrayLike,
+    *,
+    ax: mpl_axes.Axes | None = None,
+    label: str | None = None,
+    **kwargs: Any,
+) -> mpl_axes.Axes:
     """Empirical against nominal coverage of central credible intervals.
 
     For each nominal level ``q``, the fraction of galaxies whose true redshift
     falls inside the central ``q`` credible interval of its own PDF. This is
     the plot to quote when someone asks "if I take your 68% interval, how often
     is it right?" -- the answer should be 68% of the time, i.e. the diagonal.
+
+    Args:
+        pit: Probability integral transform of each galaxy, in [0, 1],
+            shape (n_galaxies,).
+        ax: The axes to draw into; a new column-width square figure if None.
+        label: Legend label.
+        **kwargs: Passed to ``ax.plot``.
+
+    Returns:
+        The axes drawn into.
     """
     pit = np.asarray(pit, dtype=float)
     ax = _axes(ax, width="column", aspect="square")
@@ -217,7 +287,7 @@ def plot_coverage(
         [np.mean(np.abs(pit - 0.5) <= 0.5 * q) for q in nominal]
     )
     ax.plot(nominal, empirical, label=label, **kwargs)
-    one_to_one(ax, 0.0, 1.0)
+    style.one_to_one(ax, 0.0, 1.0)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_xlabel("nominal coverage")
@@ -226,33 +296,43 @@ def plot_coverage(
 
 
 def plot_nz(
-    z_grid: ArrayLike,
-    pdfs: ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
     *,
-    z_true: ArrayLike | None = None,
-    ax=None,
+    z_true: npt.ArrayLike | None = None,
+    ax: mpl_axes.Axes | None = None,
     label: str | None = "stacked PDFs",
     truth_label: str | None = "truth",
-    **kwargs,
-):
-    """The sample redshift distribution: stacked PDFs against the true histogram.
+    **kwargs: Any,
+) -> mpl_axes.Axes:
+    """Plots the sample redshift distribution: stacked PDFs against the truth.
 
     Stacking is only an estimator of N(z) under assumptions that photo-z PDFs
     rarely satisfy exactly, but it is what most analyses do, so how badly it
-    fails is worth knowing. ``z_true``, if given, is histogrammed on the same
-    grid for comparison.
+    fails is worth knowing.
+
+    Args:
+        z_grid: Redshift grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
+        z_true: True redshifts, shape (n_galaxies,). If given, histogrammed
+            on the same grid for comparison.
+        ax: The axes to draw into; a new column-width figure if None.
+        label: Legend label of the stacked PDFs.
+        truth_label: Legend label of the true histogram.
+        **kwargs: Passed to ``ax.plot`` for the stacked PDFs.
+
+    Returns:
+        The axes drawn into.
     """
     z_grid = np.asarray(z_grid, dtype=float)
     pdfs = np.asarray(pdfs, dtype=float)
     ax = _axes(ax, width="column", aspect="golden")
     ax.plot(z_grid, pdfs.mean(axis=0), label=label, **kwargs)
     if z_true is not None:
-        from lazy.grid import RedshiftGrid
-
-        edges = RedshiftGrid.from_centers(z_grid).edges
+        edges = grid.RedshiftGrid.from_centers(z_grid).edges
         ax.hist(
             np.asarray(z_true, dtype=float),
-            bins=edges,
+            bins=edges.tolist(),
             density=True,
             histtype="step",
             color="k",
@@ -267,22 +347,37 @@ def plot_nz(
 
 
 def plot_pdfs(
-    z_grid: ArrayLike,
-    pdfs: ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
     *,
-    z_true: ArrayLike | None = None,
-    indices: ArrayLike | None = None,
-    n: int = 6,
+    z_true: npt.ArrayLike | None = None,
+    indices: npt.ArrayLike | None = None,
+    n: int = 6,  # noqa: GS030 - public keyword; tests call plot_pdfs(n=...).
     random_state: int = 0,
-    axes=None,
-):
-    """A handful of individual PDFs, with their true redshifts marked.
+    axes: mpl_axes.Axes
+    | Sequence[mpl_axes.Axes]
+    | npt.NDArray[np.object_]
+    | None = None,
+) -> npt.NDArray[np.object_]:
+    """Plots a handful of individual PDFs, with their true redshifts marked.
 
-    Summary statistics hide multimodality; this is where you see it. By default
-    ``n`` galaxies are drawn at random (reproducibly), or pass ``indices`` to
-    pick them yourself.
+    Summary statistics hide multimodality; this is where you see it. By
+    default ``n`` galaxies are drawn at random (reproducibly), or pass
+    ``indices`` to pick them yourself.
 
-    Returns the array of axes.
+    Args:
+        z_grid: Redshift grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
+        z_true: True redshifts, shape (n_galaxies,), marked as dashed
+            vertical lines if given.
+        indices: Rows of ``pdfs`` to draw; ``n`` random rows if None.
+        n: Number of galaxies drawn at random when ``indices`` is None.
+        random_state: Seed of the random draw.
+        axes: Axes to draw into, one per galaxy; a new text-width grid of
+            up to three columns if None. Spare axes are hidden.
+
+    Returns:
+        The flattened array of axes.
     """
     z_grid = np.asarray(z_grid, dtype=float)
     pdfs = np.asarray(pdfs, dtype=float)
@@ -296,12 +391,12 @@ def plot_pdfs(
         _, axes = plt.subplots(
             nrows,
             ncols,
-            figsize=figsize(width="text", aspect=0.33 * nrows),
+            figsize=style.figsize(width="text", aspect=0.33 * nrows),
             squeeze=False,
             sharex=True,
         )
-    axes = np.atleast_1d(axes).ravel()
-    for ax, row in zip(axes, indices, strict=False):
+    axes_array = np.atleast_1d(np.asarray(axes, dtype=object)).ravel()
+    for ax, row in zip(axes_array, indices, strict=False):
         ax.plot(z_grid, pdfs[row], color="C0")
         if z_true is not None:
             ax.axvline(
@@ -313,33 +408,44 @@ def plot_pdfs(
         ax.set_xlim(z_grid[0], z_grid[-1])
         ax.set_ylim(bottom=0)
         ax.set_xlabel(r"$z$")
-    for ax in axes[len(indices) :]:
+    for ax in axes_array[len(indices) :]:
         ax.set_visible(False)
-    return axes
+    return axes_array
 
 
 def diagnostic_panel(
-    z_true: ArrayLike,
-    z_grid: ArrayLike,
-    pdfs: ArrayLike,
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
     *,
     point: str = "z_peak",
     label: str | None = None,
-):
-    """The four-panel summary of one estimator: accuracy, bias, calibration, N(z).
+) -> mpl_figure.Figure:
+    """Draws the four-panel summary of one estimator.
 
-    Panels are z_phot-z_true, the residual trend, the PIT Q-Q and the stacked
-    N(z). Returns the :class:`matplotlib.figure.Figure`.
+    The panels cover accuracy, bias, calibration and N(z): z_phot-z_true, the
+    residual trend, the PIT Q-Q and the stacked N(z). The figure is returned
+    open; closing it is up to the caller.
+
+    Args:
+        z_true: True redshifts, shape (n_galaxies,).
+        z_grid: Redshift grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
+        point: Point estimate to use, a key of
+            :func:`lazy.metrics.grid_point_estimates`.
+        label: Legend label and figure title.
+
+    Returns:
+        The new :class:`matplotlib.figure.Figure`.
     """
-    from lazy.metrics import evaluate_grid_pdfs
-    from lazy.metrics import grid_point_estimates
-
     z_true = np.asarray(z_true, dtype=float)
     z_grid = np.asarray(z_grid, dtype=float)
-    z_pred = grid_point_estimates(z_grid, pdfs)[point]
-    _, _, pit = evaluate_grid_pdfs(z_true, z_grid, pdfs, point=point)
+    z_pred = metrics.grid_point_estimates(z_grid, pdfs)[point]
+    _, _, pit = metrics.evaluate_grid_pdfs(z_true, z_grid, pdfs, point=point)
 
-    fig, axes = plt.subplots(2, 2, figsize=figsize(width="text", aspect=0.85))
+    fig, axes = plt.subplots(
+        2, 2, figsize=style.figsize(width="text", aspect=0.85)
+    )
     plot_zphot_ztrue(z_true, z_pred, ax=axes[0, 0])
     plot_residuals(z_true, z_pred, ax=axes[0, 1])
     plot_pit_qq(pit, ax=axes[1, 0], label=label)
