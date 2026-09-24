@@ -98,13 +98,17 @@ class Journal:
         try:
             return {"column": self.column_width, "text": self.text_width}[kind]
         except KeyError:
-            raise ValueError(f"width must be 'column' or 'text', got {kind!r}") from None
+            raise ValueError(
+                f"width must be 'column' or 'text', got {kind!r}"
+            ) from None
 
 
 # Only measured classes go in here. Add a journal with register_journal(),
 # never by guessing — a wrong width silently rescales every figure in the paper.
 JOURNALS: dict[str, Journal] = {
-    "aastex": Journal("aastex", column_pt=242.26653, text_pt=513.11743),  # AJ / ApJ
+    "aastex": Journal(
+        "aastex", column_pt=242.26653, text_pt=513.11743
+    ),  # AJ / ApJ
 }
 DEFAULT_JOURNAL = "aastex"
 _active_journal: Journal = JOURNALS[DEFAULT_JOURNAL]
@@ -279,7 +283,9 @@ def verify_style(strict: bool = True) -> dict:
         for key in RC_PARAMS
         if mpl.rcParams[key] != expected[key]
     ]
-    font_path = Path(fm.findfont(fm.FontProperties(family=mpl.rcParams["font.serif"])))
+    font_path = Path(
+        fm.findfont(fm.FontProperties(family=mpl.rcParams["font.serif"]))
+    )
     if "dejavu" in font_path.name.lower():
         problems.append(
             f"serif font resolved to {font_path.name}; install Nimbus Roman "
@@ -287,13 +293,16 @@ def verify_style(strict: bool = True) -> dict:
             "~/.cache/matplotlib"
         )
     if strict and problems:
-        raise RuntimeError("plot style not in effect:\n  - " + "\n  - ".join(problems))
+        raise RuntimeError(
+            "plot style not in effect:\n  - " + "\n  - ".join(problems)
+        )
     colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", [])
     return {
         "font": str(font_path),
         "palette": colors,
         "cmap": mpl.rcParams["image.cmap"],
-        "default_palette": colors == DEFAULT_PALETTE["axes.prop_cycle"].by_key()["color"]
+        "default_palette": colors
+        == DEFAULT_PALETTE["axes.prop_cycle"].by_key()["color"]
         and mpl.rcParams["image.cmap"] == DEFAULT_PALETTE["image.cmap"],
         "problems": problems,
     }
@@ -326,7 +335,9 @@ def _resolve_aspect(aspect) -> float:
         try:
             return ASPECTS[aspect]
         except KeyError:
-            raise ValueError(f"aspect must be a float or one of {sorted(ASPECTS)}") from None
+            raise ValueError(
+                f"aspect must be a float or one of {sorted(ASPECTS)}"
+            ) from None
     return float(aspect)
 
 
@@ -348,7 +359,9 @@ def figsize(width="column", aspect="golden", journal=None):
     return (w, _resolve_aspect(aspect) * w)
 
 
-def grid_figsize(nrows=1, ncols=1, width="text", panel_aspect="golden", journal=None):
+def grid_figsize(
+    nrows=1, ncols=1, width="text", panel_aspect="golden", journal=None
+):
     """``(w, h)`` for an ``nrows x ncols`` grid whose *panels* have ``panel_aspect``.
 
     The figure spans ``width``; each panel is nominally ``width / ncols``
@@ -379,19 +392,38 @@ def better_step(bin_edges, y, yerr=None, ax=None, **kwargs):
         ax (Optional): The axis where this should be plotted.
         **kwargs: Passed straight through to matplotlib's ``plot``.
     """
-    new_x = [a for row in zip(bin_edges[:-1], bin_edges[1:], strict=True) for a in row]
+    new_x = [
+        a
+        for row in zip(bin_edges[:-1], bin_edges[1:], strict=True)
+        for a in row
+    ]
     new_y = [a for row in zip(y, y, strict=True) for a in row]
     if ax is None:
         ax = plt.gca()
     p = ax.plot(new_x, new_y, **kwargs)
     if yerr is not None:
-        new_yerr_lo = np.array([a for row in zip(yerr[0], yerr[0], strict=True) for a in row])
-        new_yerr_up = np.array([a for row in zip(yerr[1], yerr[1], strict=True) for a in row])
-        ax.fill_between(new_x, new_yerr_up, new_yerr_lo, alpha=0.1, color=p[0].get_color())
+        new_yerr_lo = np.array(
+            [a for row in zip(yerr[0], yerr[0], strict=True) for a in row]
+        )
+        new_yerr_up = np.array(
+            [a for row in zip(yerr[1], yerr[1], strict=True) for a in row]
+        )
+        ax.fill_between(
+            new_x, new_yerr_up, new_yerr_lo, alpha=0.1, color=p[0].get_color()
+        )
     return ax
 
 
-def stacked_hist(ax, datasets, labels=None, bins=20, colors=None, alpha=0.5, rwidth=0.8, **kwargs):
+def stacked_hist(
+    ax,
+    datasets,
+    labels=None,
+    bins=20,
+    colors=None,
+    alpha=0.5,
+    rwidth=0.8,
+    **kwargs,
+):
     """Stacked histogram in house style: white step underlay + gapped fills.
 
     Two passes over the same bin edges — a ``histtype="step"`` pass in white
@@ -429,7 +461,9 @@ def stacked_hist(ax, datasets, labels=None, bins=20, colors=None, alpha=0.5, rwi
     )
 
 
-def binned_quantiles(x, y, nbins=10, equal_count=True, bins=None, q=(25, 50, 75)):
+def binned_quantiles(
+    x, y, nbins=10, equal_count=True, bins=None, q=(25, 50, 75)
+):
     """Quantiles of ``y`` in bins of ``x``.
 
     ``equal_count=True`` puts an equal number of points in each bin (the
@@ -461,7 +495,17 @@ def binned_quantiles(x, y, nbins=10, equal_count=True, bins=None, q=(25, 50, 75)
     return edges, values
 
 
-def running_median(ax, x, y, nbins=10, equal_count=True, bins=None, color="C1", global_median=True, **kwargs):
+def running_median(
+    ax,
+    x,
+    y,
+    nbins=10,
+    equal_count=True,
+    bins=None,
+    color="C1",
+    global_median=True,
+    **kwargs,
+):
     """Overlay a binned median with a 25–75 percentile band.
 
     Draws the median as a :func:`better_step` staircase with a shaded IQR,
@@ -488,7 +532,9 @@ def one_to_one(ax, lo, hi, color="k", ls="--", equal=True, **kwargs):
     return ax
 
 
-def side_colorbar(fig, mappable, label=None, rect=(0.95, 0.15, 0.02, 0.7), labelpad=15):
+def side_colorbar(
+    fig, mappable, label=None, rect=(0.95, 0.15, 0.02, 0.7), labelpad=15
+):
     """Slim colorbar on its own axes to the right of the whole figure.
 
     ``rect`` is ``[left, bottom, width, height]`` in figure coordinates; the

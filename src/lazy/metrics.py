@@ -90,7 +90,9 @@ class PDFMetrics:
 # --------------------------------------------------------------------------
 
 
-def scaled_residual(z_true: ArrayLike, z_pred: ArrayLike) -> NDArray[np.float64]:
+def scaled_residual(
+    z_true: ArrayLike, z_pred: ArrayLike
+) -> NDArray[np.float64]:
     """``ez = (z_phot - z_true) / (1 + z_true)``, the residual every point metric is built on.
 
     Dividing by ``1 + z`` is what makes a 0.05 error at z = 0.2 and at z = 1.5
@@ -154,7 +156,9 @@ def normalize_grid_pdfs(
     if grid.ndim != 1 or density.ndim != 2 or density.shape[1] != grid.size:
         raise ValueError("expected z_grid shape (g,) and pdfs shape (n, g)")
     if grid.size < 2 or not np.all(np.diff(grid) > 0):
-        raise ValueError("z_grid must be strictly increasing with at least two points")
+        raise ValueError(
+            "z_grid must be strictly increasing with at least two points"
+        )
     density = np.nan_to_num(density, nan=0.0, posinf=0.0, neginf=0.0)
     np.clip(density, 0.0, None, out=density)
     mass = np.trapezoid(density, grid, axis=1)
@@ -165,18 +169,26 @@ def normalize_grid_pdfs(
     return grid, density / mass[:, None]
 
 
-def normalization_error(z_grid: ArrayLike, pdfs: ArrayLike) -> NDArray[np.float64]:
+def normalization_error(
+    z_grid: ArrayLike, pdfs: ArrayLike
+) -> NDArray[np.float64]:
     """``|trapz(p, z) - 1|`` per row: the check callers assert on."""
 
     grid = np.asarray(z_grid, dtype=float)
-    return np.abs(np.trapezoid(np.asarray(pdfs, dtype=float), grid, axis=1) - 1.0)
+    return np.abs(
+        np.trapezoid(np.asarray(pdfs, dtype=float), grid, axis=1) - 1.0
+    )
 
 
-def grid_cdf(z_grid: NDArray[np.float64], density: NDArray[np.float64]) -> NDArray[np.float64]:
+def grid_cdf(
+    z_grid: NDArray[np.float64], density: NDArray[np.float64]
+) -> NDArray[np.float64]:
     """Cumulative mass at each grid point, by the same trapezoid rule as the norm."""
 
     increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(z_grid)
-    return np.column_stack((np.zeros(len(density)), np.cumsum(increments, axis=1)))
+    return np.column_stack(
+        (np.zeros(len(density)), np.cumsum(increments, axis=1))
+    )
 
 
 def z_peak(z_grid: ArrayLike, density: ArrayLike) -> NDArray[np.float64]:
@@ -186,7 +198,9 @@ def z_peak(z_grid: ArrayLike, density: ArrayLike) -> NDArray[np.float64]:
     return grid[np.argmax(np.asarray(density, dtype=float), axis=1)]
 
 
-def z_weight(z_grid: ArrayLike, density: ArrayLike, frac: float = 0.05) -> NDArray[np.float64]:
+def z_weight(
+    z_grid: ArrayLike, density: ArrayLike, frac: float = 0.05
+) -> NDArray[np.float64]:
     """DC1 ``z_WEIGHT``: the main-peak weighted mean of Dahlen et al. (2013).
 
     The main peak is the contiguous run of grid points containing the mode over
@@ -201,8 +215,15 @@ def z_weight(z_grid: ArrayLike, density: ArrayLike, frac: float = 0.05) -> NDArr
     rows = np.arange(n)
     peak = np.argmax(dens, axis=1)
     below = dens < (frac * dens[rows, peak])[:, None]
-    left = np.maximum.accumulate(np.where(below, idx, -1), axis=1)[rows, peak] + 1
-    right = np.minimum.accumulate(np.where(below, idx, g)[:, ::-1], axis=1)[:, ::-1][rows, peak] - 1
+    left = (
+        np.maximum.accumulate(np.where(below, idx, -1), axis=1)[rows, peak] + 1
+    )
+    right = (
+        np.minimum.accumulate(np.where(below, idx, g)[:, ::-1], axis=1)[
+            :, ::-1
+        ][rows, peak]
+        - 1
+    )
     inside = (idx[None, :] >= left[:, None]) & (idx[None, :] <= right[:, None])
     weights = dens * inside
     mass = np.trapezoid(weights, grid, axis=1)
@@ -213,7 +234,9 @@ def z_weight(z_grid: ArrayLike, density: ArrayLike, frac: float = 0.05) -> NDArr
     return out
 
 
-def grid_point_estimates(z_grid: ArrayLike, pdfs: ArrayLike) -> dict[str, NDArray[np.float64]]:
+def grid_point_estimates(
+    z_grid: ArrayLike, pdfs: ArrayLike
+) -> dict[str, NDArray[np.float64]]:
     """The DC1 point estimators (``peak``, ``weight``) plus mean and median."""
 
     grid, density = normalize_grid_pdfs(z_grid, pdfs)
@@ -222,7 +245,9 @@ def grid_point_estimates(z_grid: ArrayLike, pdfs: ArrayLike) -> dict[str, NDArra
     right = np.clip(np.argmax(cdf >= 0.5, axis=1), 1, grid.size - 1)
     left = right - 1
     span = cdf[rows, right] - cdf[rows, left]
-    frac = np.divide(0.5 - cdf[rows, left], span, out=np.zeros(len(density)), where=span > 0)
+    frac = np.divide(
+        0.5 - cdf[rows, left], span, out=np.zeros(len(density)), where=span > 0
+    )
     return {
         "z_peak": z_peak(grid, density),
         "z_weight": z_weight(grid, density),
@@ -233,7 +258,12 @@ def grid_point_estimates(z_grid: ArrayLike, pdfs: ArrayLike) -> dict[str, NDArra
 
 def evaluate_grid_at_truth(
     z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+]:
     """Return ``(grid, density, pdf_at_truth, pit)``.
 
     ``pdf_at_truth`` is the density at the grid point *nearest* the truth (the
@@ -248,7 +278,9 @@ def evaluate_grid_at_truth(
         raise ValueError("z_true must have one value per PDF")
     rows = np.arange(truth.size)
     cdf = grid_cdf(grid, density)
-    right = np.clip(np.searchsorted(grid, truth, side="right"), 1, grid.size - 1)
+    right = np.clip(
+        np.searchsorted(grid, truth, side="right"), 1, grid.size - 1
+    )
     left = right - 1
     frac = np.clip((truth - grid[left]) / (grid[right] - grid[left]), 0.0, 1.0)
     nearest = np.clip(
@@ -257,7 +289,8 @@ def evaluate_grid_at_truth(
         grid.size - 1,
     )
     pdf_at_truth = np.where(
-        (truth < grid[0] - 0.5 * (grid[1] - grid[0])) | (truth > grid[-1] + 0.5 * (grid[-1] - grid[-2])),
+        (truth < grid[0] - 0.5 * (grid[1] - grid[0]))
+        | (truth > grid[-1] + 0.5 * (grid[-1] - grid[-2])),
         0.0,
         density[rows, nearest],
     )
@@ -275,8 +308,12 @@ def cde_loss(z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike) -> float:
     density. It is the single number this project optimises.
     """
 
-    grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(z_true, z_grid, pdfs)
-    return float(np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth))
+    grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(
+        z_true, z_grid, pdfs
+    )
+    return float(
+        np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -284,7 +321,9 @@ def cde_loss(z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike) -> float:
 # --------------------------------------------------------------------------
 
 
-def anderson_darling_dc1(pit: ArrayLike, vmin: float = 0.05, vmax: float = 0.95) -> float:
+def anderson_darling_dc1(
+    pit: ArrayLike, vmin: float = 0.05, vmax: float = 0.95
+) -> float:
     """DC1's Anderson-Darling statistic of the PIT sample.
 
     The statistic diverges at 0 and 1, so DC1 discards PIT values outside
@@ -329,8 +368,14 @@ def pit_statistics(pit: ArrayLike, n_bins: int = 20) -> dict[str, float]:
         "pit_ad1": anderson_darling_dc1(values, *AD_CUTS[0]),
         "pit_ad2": anderson_darling_dc1(values, *AD_CUTS[1]),
         "pit_rmse": float(np.sqrt(np.mean((ordered - ideal) ** 2))),
-        "pit_kl": float(np.sum(probabilities[nonzero] * np.log(probabilities[nonzero] * n_bins))),
-        "pit_outlier_rate": float(np.mean((values < PIT_EXTREME) | (values > 1.0 - PIT_EXTREME))),
+        "pit_kl": float(
+            np.sum(
+                probabilities[nonzero] * np.log(probabilities[nonzero] * n_bins)
+            )
+        ),
+        "pit_outlier_rate": float(
+            np.mean((values < PIT_EXTREME) | (values > 1.0 - PIT_EXTREME))
+        ),
     }
 
 
@@ -339,9 +384,15 @@ def pdf_metrics(
 ) -> tuple[PDFMetrics, NDArray[np.float64]]:
     """Score grid PDFs; returns the metric bundle and the per-object PIT values."""
 
-    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(z_true, z_grid, pdfs)
-    loss = float(np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth))
-    return PDFMetrics(n=int(pit.size), cde_loss=loss, **pit_statistics(pit)), pit
+    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
+        z_true, z_grid, pdfs
+    )
+    loss = float(
+        np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth)
+    )
+    return PDFMetrics(
+        n=int(pit.size), cde_loss=loss, **pit_statistics(pit)
+    ), pit
 
 
 def evaluate_grid_pdfs(
@@ -375,7 +426,9 @@ def summarize(
     ['uniform']
     """
 
-    point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(z_true, z_grid, pdfs, point=point)
+    point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(
+        z_true, z_grid, pdfs, point=point
+    )
     row: dict[str, object] = {}
     if label is not None:
         row["model"] = label

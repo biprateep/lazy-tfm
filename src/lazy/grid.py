@@ -42,7 +42,9 @@ class RedshiftGrid:
     def __post_init__(self) -> None:
         edges = np.asarray(self.edges, dtype=float)
         if edges.ndim != 1 or edges.size < 3:
-            raise ValueError("edges must be a 1D array of at least three values")
+            raise ValueError(
+                "edges must be a 1D array of at least three values"
+            )
         if not np.all(np.diff(edges) > 0):
             raise ValueError("edges must be strictly increasing")
         if not np.isfinite(edges).all():
@@ -74,7 +76,9 @@ class RedshiftGrid:
         """
         centers = np.asarray(centers, dtype=float)
         if centers.ndim != 1 or centers.size < 2:
-            raise ValueError("centers must be a 1D array of at least two values")
+            raise ValueError(
+                "centers must be a 1D array of at least two values"
+            )
         inner = 0.5 * (centers[1:] + centers[:-1])
         return cls(
             np.concatenate(
@@ -176,12 +180,20 @@ class RedshiftGrid:
         if p.ndim != 2:
             raise ValueError("probs must be a 2D (n_rows, n_bins) array")
         if in_edges.ndim != 1 or in_edges.size != p.shape[1] + 1:
-            raise ValueError("edges must have one more entry than probs has columns")
+            raise ValueError(
+                "edges must have one more entry than probs has columns"
+            )
         p = p / np.maximum(p.sum(axis=1, keepdims=True), 1e-300)
         widths = np.diff(in_edges)
         out_edges = self.edges
-        cum = np.concatenate([np.zeros((len(p), 1)), np.cumsum(p, axis=1)], axis=1)
-        idx = np.clip(np.searchsorted(in_edges, out_edges, side="right") - 1, 0, len(widths) - 1)
+        cum = np.concatenate(
+            [np.zeros((len(p), 1)), np.cumsum(p, axis=1)], axis=1
+        )
+        idx = np.clip(
+            np.searchsorted(in_edges, out_edges, side="right") - 1,
+            0,
+            len(widths) - 1,
+        )
         frac = np.divide(
             out_edges - in_edges[idx],
             widths[idx],
@@ -192,7 +204,9 @@ class RedshiftGrid:
         mass = np.diff(cdf_at_edges, axis=1)
         return np.clip(mass, 0.0, None) / self.widths
 
-    def from_quantiles(self, values: ArrayLike, levels: ArrayLike) -> NDArray[np.float64]:
+    def from_quantiles(
+        self, values: ArrayLike, levels: ArrayLike
+    ) -> NDArray[np.float64]:
         """Density on this grid from per-row quantiles of the predictive CDF.
 
         ``values[i]`` are the redshifts at cumulative probabilities ``levels``.
@@ -217,7 +231,9 @@ class RedshiftGrid:
     def bin_index(self, z: ArrayLike) -> NDArray[np.intp]:
         """Index of the bin each redshift falls in, clipped to the grid."""
         z = np.asarray(z, dtype=float)
-        return np.clip(np.searchsorted(self.edges, z, side="right") - 1, 0, self.n_bins - 1)
+        return np.clip(
+            np.searchsorted(self.edges, z, side="right") - 1, 0, self.n_bins - 1
+        )
 
 
 #: The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over

@@ -47,7 +47,9 @@ def test_every_estimator_has_a_default_version():
 def test_every_checkpoint_is_pinned():
     """An unpinned checkpoint would silently change published numbers."""
     for key, spec in CHECKPOINTS.items():
-        assert key == spec.key, "a key that disagrees with its record points at the wrong weights"
+        assert key == spec.key, (
+            "a key that disagrees with its record points at the wrong weights"
+        )
         assert spec.backend in ESTIMATORS
         assert spec.repo_id and spec.package and spec.version
         assert spec.revision is not None or spec.filename is not None
@@ -71,7 +73,14 @@ def test_an_unknown_backend_is_reported_as_such():
 
 
 def test_list_versions_is_sorted_and_scoped_to_one_backend():
-    assert list_versions("tabpfn") == ["v2", "v2.5", "v2.6", "v3", "v3.5", "v3.5-fast"]
+    assert list_versions("tabpfn") == [
+        "v2",
+        "v2.5",
+        "v2.6",
+        "v3",
+        "v3.5",
+        "v3.5-fast",
+    ]
     assert list_versions("tabicl") == ["v2"]
     assert list_versions("tabdpt") == []
 
@@ -86,7 +95,9 @@ def test_provenance_identifies_the_weights_and_the_code():
     assert record["package"].startswith("tabpfn ")
     assert record["lazy"].startswith("lazy-photoz ")
     assert record["device"] == "cuda"
-    assert not any(isinstance(v, str) and "/home" in v for v in record.values()), (
+    assert not any(
+        isinstance(v, str) and "/home" in v for v in record.values()
+    ), (
         "a provenance record travels between machines, so it carries no local paths"
     )
 
@@ -96,7 +107,10 @@ def test_provenance_is_json_serialisable():
     import json
 
     for spec in CHECKPOINTS.values():
-        assert json.loads(json.dumps(spec.provenance(device="cpu")))["version"] == spec.version
+        assert (
+            json.loads(json.dumps(spec.provenance(device="cpu")))["version"]
+            == spec.version
+        )
 
 
 def test_constructing_an_estimator_downloads_nothing(monkeypatch):

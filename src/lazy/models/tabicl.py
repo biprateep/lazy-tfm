@@ -137,7 +137,9 @@ class TabICLQuantile(BasePhotoZEstimator):
             ) from error
 
         if self.chunk_size < 0:
-            raise ValueError("chunk_size must be non-negative (0 means one pass)")
+            raise ValueError(
+                "chunk_size must be non-negative (0 means one pass)"
+            )
         check_progress(self.progress)
         self.device_ = resolve_device(self.device)
 
@@ -151,7 +153,9 @@ class TabICLQuantile(BasePhotoZEstimator):
         spec = get_checkpoint("tabicl", self.version)
         self.checkpoint_ = spec.download()
         self.provenance_ = spec.provenance(device=self.device_)
-        self._log(f"fitting TabICL on {len(X)} context rows ({self.device_}), {self.checkpoint_.name}")
+        self._log(
+            f"fitting TabICL on {len(X)} context rows ({self.device_}), {self.checkpoint_.name}"
+        )
         regressor = TabICLRegressor(
             n_estimators=self.n_estimators,
             device=self.device_,
@@ -160,26 +164,42 @@ class TabICLQuantile(BasePhotoZEstimator):
             model_path=str(self.checkpoint_),
             verbose=False,
         )
-        regressor.fit(X.to_numpy(dtype=np.float32), np.asarray(y, dtype=np.float32))
+        regressor.fit(
+            X.to_numpy(dtype=np.float32), np.asarray(y, dtype=np.float32)
+        )
         self.regressor_ = regressor
         self.n_context_ = len(X)
 
     def _predict_pdf(self, X: pd.DataFrame, grid) -> NDArray[np.float64]:
         size = self.chunk_size if self.chunk_size > 0 else len(X)
         blocks = []
-        with bar(self.progress, total=len(X), desc=f"TabICL {self.version}", unit="gal") as progress:
+        with bar(
+            self.progress,
+            total=len(X),
+            desc=f"TabICL {self.version}",
+            unit="gal",
+        ) as progress:
             progress.set_postfix(context=self.n_context_)
             for start in range(0, len(X), size):
                 stop = min(start + size, len(X))
                 self._log(f"rows {start}:{stop} of {len(X)}")
                 quantiles = self.regressor_.predict(
-                    X.iloc[start:stop].to_numpy(dtype=np.float32), output_type="raw_quantiles"
+                    X.iloc[start:stop].to_numpy(dtype=np.float32),
+                    output_type="raw_quantiles",
                 )
                 quantiles = np.asarray(quantiles, dtype=np.float64)
                 self.n_quantiles_ = int(quantiles.shape[1])
-                blocks.append(grid.from_quantiles(quantiles, quantile_levels(self.n_quantiles_)))
+                blocks.append(
+                    grid.from_quantiles(
+                        quantiles, quantile_levels(self.n_quantiles_)
+                    )
+                )
                 del quantiles
-                progress.set_postfix(context=self.n_context_, quantiles=self.n_quantiles_, refresh=False)
+                progress.set_postfix(
+                    context=self.n_context_,
+                    quantiles=self.n_quantiles_,
+                    refresh=False,
+                )
                 progress.update(stop - start)
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 

@@ -76,7 +76,9 @@ from lazy.models import (
 
 try:
     __version__ = version("lazy-photoz")
-except PackageNotFoundError:  # pragma: no cover - only when running from a source tree
+except (
+    PackageNotFoundError
+):  # pragma: no cover - only when running from a source tree
     __version__ = "0.0.0.dev0"
 
 __all__ = [

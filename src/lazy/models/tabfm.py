@@ -66,7 +66,9 @@ MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
 
 
-def quantile_edges(z: ArrayLike, n_bins: int, lo: float, hi: float, shift: float = 0.0) -> NDArray:
+def quantile_edges(
+    z: ArrayLike, n_bins: int, lo: float, hi: float, shift: float = 0.0
+) -> NDArray:
     """Equal-mass bin edges over ``[lo, hi]``.
 
     ``shift`` (in bins) moves the interior edges in quantile space, which is
@@ -76,7 +78,9 @@ def quantile_edges(z: ArrayLike, n_bins: int, lo: float, hi: float, shift: float
     [0.0, 0.5, 1.0]
     """
     z = np.asarray(z, dtype=float)
-    levels = np.clip(np.linspace(0.0, 1.0, n_bins + 1) + shift / n_bins, 0.0, 1.0)
+    levels = np.clip(
+        np.linspace(0.0, 1.0, n_bins + 1) + shift / n_bins, 0.0, 1.0
+    )
     edges = np.quantile(z, levels)
     edges[0], edges[-1] = lo, hi
     return np.maximum.accumulate(edges)
@@ -286,7 +290,9 @@ class TabFMHistogram(BasePhotoZEstimator):
         if self.n_dither < 1:
             raise ValueError("n_dither must be at least 1")
         if self.chunk_size < 0:
-            raise ValueError("chunk_size must be non-negative (0 means one pass)")
+            raise ValueError(
+                "chunk_size must be non-negative (0 means one pass)"
+            )
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
         if len(X) < self.n_coarse_bins * self.n_fine_bins:
@@ -296,14 +302,18 @@ class TabFMHistogram(BasePhotoZEstimator):
             )
         check_progress(self.progress)
         self.device_ = resolve_device(self.device)
-        self.provenance_ = get_checkpoint("tabfm", self.version).provenance(device=self.device_)
+        self.provenance_ = get_checkpoint("tabfm", self.version).provenance(
+            device=self.device_
+        )
         self.X_context_ = X
         self.z_context_ = y
 
     def _resolve_inference(self) -> str:
         """Pick the inference path, failing at fit time rather than mid-prediction."""
         if self.inference not in ("auto", "stream", "predict_proba"):
-            raise ValueError("inference must be 'auto', 'stream' or 'predict_proba'")
+            raise ValueError(
+                "inference must be 'auto', 'stream' or 'predict_proba'"
+            )
         try:
             import tabfm  # noqa: F401
         except ImportError as error:
@@ -354,12 +364,22 @@ class TabFMHistogram(BasePhotoZEstimator):
         densities = []
         stages = self.n_dither * (1 + self.n_coarse_bins)
         with bar(
-            self.progress, total=stages, desc=f"TabFM {self.version} ({len(X):,} gal)", unit="stage"
+            self.progress,
+            total=stages,
+            desc=f"TabFM {self.version} ({len(X):,} gal)",
+            unit="stage",
         ) as progress:
             for i, shift in enumerate(shifts):
-                self._log(f"dither {i + 1}/{self.n_dither} (edge shift {shift:.2f} bins)")
+                self._log(
+                    f"dither {i + 1}/{self.n_dither} (edge shift {shift:.2f} bins)"
+                )
                 probs, edges, prior = self._hierarchy(
-                    model, X, shift, grid, progress=progress, dither=f"{i + 1}/{self.n_dither}"
+                    model,
+                    X,
+                    shift,
+                    grid,
+                    progress=progress,
+                    dither=f"{i + 1}/{self.n_dither}",
                 )
                 if self.prior_shift == "em":
                     probs, _ = prior_shift_em(probs, prior)
@@ -370,7 +390,14 @@ class TabFMHistogram(BasePhotoZEstimator):
     # -- the hierarchy ------------------------------------------------------
 
     def _hierarchy(
-        self, model, X_query: pd.DataFrame, shift: float, grid, *, progress=None, dither: str = "1/1"
+        self,
+        model,
+        X_query: pd.DataFrame,
+        shift: float,
+        grid,
+        *,
+        progress=None,
+        dither: str = "1/1",
     ) -> tuple[NDArray, NDArray, NDArray]:
         """``(probs, edges, context_bin_prior)`` for one set of dithered edges.
 
@@ -380,7 +407,9 @@ class TabFMHistogram(BasePhotoZEstimator):
 
         def stage(level: str, n_context: int) -> None:
             if progress is not None:
-                progress.set_postfix(dither=dither, level=level, context=n_context)
+                progress.set_postfix(
+                    dither=dither, level=level, context=n_context
+                )
 
         def done() -> None:
             if progress is not None:
@@ -388,10 +417,18 @@ class TabFMHistogram(BasePhotoZEstimator):
 
         z = self.z_context_
         span = grid.z_max - grid.z_min
-        coarse_edges = quantile_edges(z, self.n_coarse_bins, grid.z_min, grid.z_max + 1e-6 * span, shift)
-        coarse = np.clip(np.searchsorted(coarse_edges, z, side="right") - 1, 0, self.n_coarse_bins - 1)
+        coarse_edges = quantile_edges(
+            z, self.n_coarse_bins, grid.z_min, grid.z_max + 1e-6 * span, shift
+        )
+        coarse = np.clip(
+            np.searchsorted(coarse_edges, z, side="right") - 1,
+            0,
+            self.n_coarse_bins - 1,
+        )
         stage("coarse", z.size)
-        p_coarse = self._class_probabilities(model, self.X_context_, coarse, X_query, self.random_state)
+        p_coarse = self._class_probabilities(
+            model, self.X_context_, coarse, X_query, self.random_state
+        )
         done()
 
         edges: list[NDArray] = []
@@ -400,18 +437,34 @@ class TabFMHistogram(BasePhotoZEstimator):
         for j in range(self.n_coarse_bins):
             rows = coarse == j
             fine_edges = quantile_edges(
-                z[rows], self.n_fine_bins, coarse_edges[j], coarse_edges[j + 1], shift
+                z[rows],
+                self.n_fine_bins,
+                coarse_edges[j],
+                coarse_edges[j + 1],
+                shift,
             )
-            fine = np.clip(np.searchsorted(fine_edges, z[rows], side="right") - 1, 0, self.n_fine_bins - 1)
+            fine = np.clip(
+                np.searchsorted(fine_edges, z[rows], side="right") - 1,
+                0,
+                self.n_fine_bins - 1,
+            )
             stage(f"fine {j + 1}/{self.n_coarse_bins}", int(rows.sum()))
             p_fine = self._class_probabilities(
-                model, self.X_context_.iloc[rows], fine, X_query, self.random_state + 1 + j
+                model,
+                self.X_context_.iloc[rows],
+                fine,
+                X_query,
+                self.random_state + 1 + j,
             )
             done()
             edges.append(fine_edges[:-1])
-            prior.append(np.bincount(fine, minlength=self.n_fine_bins) / max(z.size, 1))
+            prior.append(
+                np.bincount(fine, minlength=self.n_fine_bins) / max(z.size, 1)
+            )
             blocks.append(p_fine * p_coarse[:, [j]])
-            self._log(f"  coarse bin {j + 1}/{self.n_coarse_bins} ({int(rows.sum())} context rows)")
+            self._log(
+                f"  coarse bin {j + 1}/{self.n_coarse_bins} ({int(rows.sum())} context rows)"
+            )
         return (
             np.concatenate(blocks, axis=1),
             np.r_[np.concatenate(edges), coarse_edges[-1]],
@@ -443,9 +496,14 @@ class TabFMHistogram(BasePhotoZEstimator):
                 decode_chunk_rows=self.decode_chunk_rows,
                 keep_cache_on_device=self.keep_cache_on_device,
             )
-            probs = softmax(logits["query"]["mean_logits"], self.softmax_temperature)
+            probs = softmax(
+                logits["query"]["mean_logits"], self.softmax_temperature
+            )
         else:
-            probs = np.asarray(classifier.predict_proba(X_query.reset_index(drop=True)), dtype=float)
+            probs = np.asarray(
+                classifier.predict_proba(X_query.reset_index(drop=True)),
+                dtype=float,
+            )
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
@@ -453,7 +511,9 @@ class TabFMHistogram(BasePhotoZEstimator):
         full[:, classes.astype(int)] = probs
         return full
 
-    def _predict_proba_chunked(self, classifier, X_query: pd.DataFrame) -> NDArray:
+    def _predict_proba_chunked(
+        self, classifier, X_query: pd.DataFrame
+    ) -> NDArray:
         """Upstream ``predict_proba``, a bounded number of query rows at a time.
 
         ``predict_proba`` materialises ``n_members x n_query x n_features`` in
@@ -467,7 +527,10 @@ class TabFMHistogram(BasePhotoZEstimator):
         size = self.chunk_size if self.chunk_size > 0 else len(X_query)
         frame = X_query.reset_index(drop=True)
         blocks = [
-            np.asarray(classifier.predict_proba(frame.iloc[start : start + size]), dtype=float)
+            np.asarray(
+                classifier.predict_proba(frame.iloc[start : start + size]),
+                dtype=float,
+            )
             for start in range(0, len(frame), size)
         ]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
@@ -517,15 +580,21 @@ class TabFMHistogram(BasePhotoZEstimator):
             from tabfm import tabfm_v1_0_0_pytorch as tabfm_v1
 
             self.checkpoint_ = get_checkpoint("tabfm", self.version).download()
-            self._log(f"loading TabFM classification checkpoint from {self.checkpoint_}")
+            self._log(
+                f"loading TabFM classification checkpoint from {self.checkpoint_}"
+            )
             model = tabfm_v1.load(
-                model_type="classification", device=self.device_, checkpoint_path=str(self.checkpoint_)
+                model_type="classification",
+                device=self.device_,
+                checkpoint_path=str(self.checkpoint_),
             )
             self._backbone_cache = (self.version, model)
         return model
 
     def __getstate__(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if k != "_backbone_cache"}
+        return {
+            k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
+        }
 
     def _log(self, message: str) -> None:
         if self.verbose:

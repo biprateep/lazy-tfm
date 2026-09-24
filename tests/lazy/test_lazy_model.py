@@ -61,7 +61,9 @@ def test_the_version_reaches_the_backend_and_the_label():
 
 def test_a_parameter_the_backend_does_not_take_is_rejected_at_fit():
     model = LazyModel("tabicl", n_dither=3)  # that is a TabFM parameter
-    with pytest.raises(TypeError, match="TabICLQuantile does not take 'n_dither'"):
+    with pytest.raises(
+        TypeError, match="TabICLQuantile does not take 'n_dither'"
+    ):
         model.fit(np.zeros((3, 2)), np.ones(3))
 
 
@@ -128,7 +130,9 @@ def test_an_unknown_backend_set_by_set_params_is_rejected_at_fit():
 
 def test_repr_names_the_backend_and_only_non_default_parameters():
     assert repr(LazyModel("tabfm")) == "LazyModel('tabfm')"
-    assert repr(LazyModel("tabfm", n_dither=3)) == "LazyModel('tabfm', n_dither=3)"
+    assert (
+        repr(LazyModel("tabfm", n_dither=3)) == "LazyModel('tabfm', n_dither=3)"
+    )
 
 
 def test_the_grid_default_is_carried_down_to_the_backend():
@@ -179,9 +183,14 @@ def test_fit_predict_round_trip_through_the_wrapper(registered):
 def test_a_call_time_grid_overrides_the_default(registered):
     X = np.random.default_rng(0).normal(size=(5, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 5)
-    model = LazyModel(registered, z_grid=RedshiftGrid.linear(0.0, 2.0, 50)).fit(X, z)
+    model = LazyModel(registered, z_grid=RedshiftGrid.linear(0.0, 2.0, 50)).fit(
+        X, z
+    )
     assert model.predict_proba(X).shape == (5, 50)
-    assert model.predict_proba(X, RedshiftGrid.linear(0.0, 3.0, 11)).shape == (5, 11)
+    assert model.predict_proba(X, RedshiftGrid.linear(0.0, 3.0, 11)).shape == (
+        5,
+        11,
+    )
 
 
 def test_evaluate_labels_the_row_with_the_backend_name(registered):

@@ -39,7 +39,12 @@ autoapi_root = "autoapi"
 autoapi_add_toctree_entry = False
 autoapi_member_order = "groupwise"
 # No private members or modules: the reference documents the public API only.
-autoapi_options = ["members", "undoc-members", "show-inheritance", "show-module-summary"]
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "show-inheritance",
+    "show-module-summary",
+]
 add_module_names = False
 
 intersphinx_mapping = {

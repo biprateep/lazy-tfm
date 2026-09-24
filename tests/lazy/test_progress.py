@@ -68,7 +68,12 @@ def test_every_backend_takes_the_parameter_and_clones_it(name):
 SETTINGS = {
     "tabpfn": {"n_estimators": 2, "chunk_size": 7},
     "tabicl": {"n_estimators": 2, "chunk_size": 7},
-    "tabfm": {"n_coarse_bins": 2, "n_fine_bins": 2, "n_estimators": 1, "n_dither": 2},
+    "tabfm": {
+        "n_coarse_bins": 2,
+        "n_fine_bins": 2,
+        "n_estimators": 1,
+        "n_dither": 2,
+    },
 }
 
 #: What the finished bar must say: the unit it counts in and the final tally.
@@ -85,18 +90,27 @@ EXPECTED = {
 def data():
     generator = np.random.default_rng(0)
     z = generator.uniform(0.2, 1.8, 240)
-    X = pd.DataFrame({"a": z + generator.normal(0, 0.1, 240), "b": generator.normal(size=240)})
+    X = pd.DataFrame(
+        {
+            "a": z + generator.normal(0, 0.1, 240),
+            "b": generator.normal(size=240),
+        }
+    )
     return X.iloc[:200], z[:200], X.iloc[200:].reset_index(drop=True)
 
 
 @needs_checkpoint
 @pytest.mark.parametrize("name", sorted(ESTIMATORS))
-def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(name, data, capsys):
+def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(
+    name, data, capsys
+):
     pytest.importorskip(name)
     X_ctx, z_ctx, X_q = data
 
     def run(progress):
-        model = LazyModel(name, device="cpu", progress=progress, **SETTINGS[name])
+        model = LazyModel(
+            name, device="cpu", progress=progress, **SETTINGS[name]
+        )
         return model.fit(X_ctx, z_ctx).predict_proba(X_q)
 
     quiet = run(False)

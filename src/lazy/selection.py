@@ -86,7 +86,9 @@ class HSCGrid:
     #: The HSC spectroscopic sample: ``mag``, ``color``, ``specz``.
     spec: pd.DataFrame
     #: Per-percentile ceiling tables, filled on demand. Not part of the value.
-    _ceilings: dict[float, np.ndarray] = field(default_factory=dict, repr=False, compare=False)
+    _ceilings: dict[float, np.ndarray] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def __repr__(self) -> str:
         n_y, n_x = self.ratios.shape
@@ -108,15 +110,21 @@ class HSCGrid:
         """
         try:
             import h5py
-        except ImportError as error:  # pragma: no cover - depends on the environment
+        except (
+            ImportError
+        ) as error:  # pragma: no cover - depends on the environment
             raise ImportError(
                 "reading the HSC selection grid needs h5py; install it with "
                 "`pip install h5py` (or `pip install lazy-photoz[all]`)"
             ) from error
         with h5py.File(path, "r") as saved:
             ratios = np.asarray(saved["ratios"][...], dtype=float)
-            columns = [name.decode() for name in saved["data/block0_items"][...]]
-            spec = pd.DataFrame(np.asarray(saved["data/block0_values"][...]), columns=columns)
+            columns = [
+                name.decode() for name in saved["data/block0_items"][...]
+            ]
+            spec = pd.DataFrame(
+                np.asarray(saved["data/block0_values"][...]), columns=columns
+            )
         return cls(
             ratios=ratios,
             x_edges=np.linspace(*magnitude_limits, ratios.shape[1] + 1),
@@ -124,9 +132,14 @@ class HSCGrid:
             spec=spec,
         )
 
-    def pixel(self, magnitude: np.ndarray, color: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def pixel(
+        self, magnitude: np.ndarray, color: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """``(magnitude bin, colour bin)``; ``-1`` or ``n`` for values off the grid."""
-        px = np.searchsorted(self.x_edges, np.asarray(magnitude, dtype=float)) - 1
+        px = (
+            np.searchsorted(self.x_edges, np.asarray(magnitude, dtype=float))
+            - 1
+        )
         py = np.searchsorted(self.y_edges, np.asarray(color, dtype=float)) - 1
         return px, py
 
@@ -154,11 +167,19 @@ class HSCGrid:
         """
         key = float(percentile)
         if key not in self._ceilings:
-            px, py = self.pixel(self.spec["mag"].to_numpy(), self.spec["color"].to_numpy())
+            px, py = self.pixel(
+                self.spec["mag"].to_numpy(), self.spec["color"].to_numpy()
+            )
             n_y, n_x = self.ratios.shape
             ok = self.inside(px, py)
             table = np.zeros((n_y, n_x))
-            populated = pd.DataFrame({"px": px[ok], "py": py[ok], "z": self.spec["specz"].to_numpy()[ok]})
+            populated = pd.DataFrame(
+                {
+                    "px": px[ok],
+                    "py": py[ok],
+                    "z": self.spec["specz"].to_numpy()[ok],
+                }
+            )
             for (x, y), galaxies in populated.groupby(["px", "py"]):
                 table[y, x] = np.percentile(galaxies.z.to_numpy(), key)
             self._ceilings[key] = table
@@ -241,12 +262,16 @@ def grid_selection(
 
         grid = fetch_hsc_grid()
     blue, red = color
-    missing = [name for name in (magnitude, blue, red) if name not in raw.columns]
+    missing = [
+        name for name in (magnitude, blue, red) if name not in raw.columns
+    ]
     if missing:
         raise KeyError(f"raw photometry is missing columns: {missing}")
     redshift = np.asarray(redshift, dtype=float)
     if len(redshift) != len(raw):
-        raise ValueError(f"raw has {len(raw)} rows but redshift has {len(redshift)}")
+        raise ValueError(
+            f"raw has {len(raw)} rows but redshift has {len(redshift)}"
+        )
 
     rng = np.random.default_rng(seed)
     n = len(redshift)
@@ -261,7 +286,9 @@ def grid_selection(
     ceiling = np.full(n, 99.0)
     if color_redshift_cut:
         ceiling[inside] = grid.max_specz(percentile_cut)[py[inside], px[inside]]
-    survives = (redshift <= ceiling) & (redshift <= redshift_cut) & (redshift > 0)
+    survives = (
+        (redshift <= ceiling) & (redshift <= redshift_cut) & (redshift > 0)
+    )
     factor = scaling_factor if color_redshift_cut else 1.0
 
     # Group the survivors by ratio once. A stable sort leaves each group's row
@@ -285,11 +312,15 @@ def grid_selection(
             number = float(len(candidates))
         extra = 0
         if int(number) != number and rng.uniform() <= value:
-            extra = 1  # RAIL keeps the fractional galaxy with probability `value`
+            extra = (
+                1  # RAIL keeps the fractional galaxy with probability `value`
+            )
         count = min(int(np.floor(number)) + extra, len(candidates))
         keep[rng.permutation(candidates)[:count]] = True
 
-    diagnostics = pd.DataFrame({"ratio": ratio, "z_ceiling": ceiling, "survives_z_cut": survives})
+    diagnostics = pd.DataFrame(
+        {"ratio": ratio, "z_ceiling": ceiling, "survives_z_cut": survives}
+    )
     return keep, diagnostics
 
 

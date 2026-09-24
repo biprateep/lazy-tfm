@@ -174,7 +174,9 @@ class Catalog:
         (1, True)
         """
         raw = frame.reset_index(drop=True)
-        dropped = [name for name in (redshift, object_id) if isinstance(name, str)]
+        dropped = [
+            name for name in (redshift, object_id) if isinstance(name, str)
+        ]
         if isinstance(redshift, str):
             z = np.asarray(raw[redshift], dtype=np.float64)
         else:
@@ -235,7 +237,9 @@ class Catalog:
         A thin wrapper over :meth:`build_features`; see it for what each mode
         contains.
         """
-        return self.build_features(self.raw, mode, bands=bands, reference_band=reference_band)
+        return self.build_features(
+            self.raw, mode, bands=bands, reference_band=reference_band
+        )
 
     @staticmethod
     def build_features(
@@ -299,13 +303,17 @@ class Catalog:
         ['I', 'U-G', 'G-R', 'R-I', 'I-Z', 'Z-Y', 'IERR', 'U-GERR', 'G-RERR', 'R-IERR', 'I-ZERR', 'Z-YERR']
         """
         if mode not in FEATURE_MODES:
-            raise ValueError(f"unknown feature mode {mode!r}; known: {sorted(FEATURE_MODES)}")
+            raise ValueError(
+                f"unknown feature mode {mode!r}; known: {sorted(FEATURE_MODES)}"
+            )
         err_columns = tuple(f"{band}ERR" for band in bands)
         missing = [c for c in (*bands, *err_columns) if c not in raw.columns]
         if missing:
             raise KeyError(f"raw photometry is missing columns: {missing}")
         if reference_band not in bands:
-            raise ValueError(f"reference_band {reference_band!r} is not one of {bands}")
+            raise ValueError(
+                f"reference_band {reference_band!r} is not one of {bands}"
+            )
 
         mags = raw[list(bands)].to_numpy(dtype=np.float32)
         errs = raw[list(err_columns)].to_numpy(dtype=np.float32)
@@ -320,13 +328,19 @@ class Catalog:
         else:
             keep, pairs = bands, tuple(itertools.combinations(bands, 2))
 
-        out: dict[str, np.ndarray] = {band: mags[:, index[band]] for band in keep}
+        out: dict[str, np.ndarray] = {
+            band: mags[:, index[band]] for band in keep
+        }
         for first, second in pairs:
-            out[f"{first}-{second}"] = mags[:, index[first]] - mags[:, index[second]]
+            out[f"{first}-{second}"] = (
+                mags[:, index[first]] - mags[:, index[second]]
+            )
         for band in keep:
             out[f"{band}ERR"] = errs[:, index[band]]
         for first, second in pairs:
-            out[f"{first}-{second}ERR"] = np.hypot(errs[:, index[first]], errs[:, index[second]])
+            out[f"{first}-{second}ERR"] = np.hypot(
+                errs[:, index[first]], errs[:, index[second]]
+            )
         return pd.DataFrame(out)
 
 
@@ -384,8 +398,12 @@ def fetch_dc1(
     Both files are read either way -- the flag chooses how they are handed
     back, not how much is downloaded.
     """
-    train = _load_split("train", root=data_home, download_if_missing=download_if_missing)
-    test = _load_split("test", root=data_home, download_if_missing=download_if_missing)
+    train = _load_split(
+        "train", root=data_home, download_if_missing=download_if_missing
+    )
+    test = _load_split(
+        "test", root=data_home, download_if_missing=download_if_missing
+    )
     if split:
         return train, test
     return Catalog(
@@ -393,7 +411,12 @@ def fetch_dc1(
         raw=pd.concat([train.raw, test.raw], ignore_index=True),
         redshift=np.concatenate([train.redshift, test.redshift]),
         object_id=np.concatenate([train.object_id, test.object_id]),
-        source=np.concatenate([np.zeros(len(train), dtype=np.int8), np.ones(len(test), dtype=np.int8)]),
+        source=np.concatenate(
+            [
+                np.zeros(len(train), dtype=np.int8),
+                np.ones(len(test), dtype=np.int8),
+            ]
+        ),
     )
 
 
@@ -414,19 +437,32 @@ def load_trainz(
     same order, so the rows line up with ``fetch_dc1()``; ``True`` returns
     ``(z_grid, train_pdfs, test_pdfs)``.
     """
-    z_grid, train = _load_trainz_split("train", root=data_home, download_if_missing=download_if_missing)
-    _, test = _load_trainz_split("test", root=data_home, download_if_missing=download_if_missing)
+    z_grid, train = _load_trainz_split(
+        "train", root=data_home, download_if_missing=download_if_missing
+    )
+    _, test = _load_trainz_split(
+        "test", root=data_home, download_if_missing=download_if_missing
+    )
     if split:
         return z_grid, train, test
     return z_grid, np.concatenate([train, test])
 
 
-def _load_split(name: str, *, root: str | Path | None, download_if_missing: bool) -> Catalog:
+def _load_split(
+    name: str, *, root: str | Path | None, download_if_missing: bool
+) -> Catalog:
     """One DC1 file as a :class:`Catalog`."""
-    path = _cached_path(name, root=root, download_if_missing=download_if_missing)
+    path = _cached_path(
+        name, root=root, download_if_missing=download_if_missing
+    )
     with np.load(path, allow_pickle=True) as saved:
         cat = saved[_CAT_KEYS[name]]
-        raw = pd.DataFrame({column: np.asarray(cat[column], dtype=np.float32) for column in RAW_COLUMNS})
+        raw = pd.DataFrame(
+            {
+                column: np.asarray(cat[column], dtype=np.float32)
+                for column in RAW_COLUMNS
+            }
+        )
         redshift = np.asarray(cat["SPECZ"], dtype=np.float64)
         object_id = np.asarray(cat["ID"], dtype=np.int64)
     return Catalog(split=name, raw=raw, redshift=redshift, object_id=object_id)
@@ -436,7 +472,9 @@ def _load_trainz_split(
     name: str, *, root: str | Path | None, download_if_missing: bool
 ) -> tuple[np.ndarray, np.ndarray]:
     """The ``z_grid`` and ``trainZ`` PDFs stored in one DC1 file."""
-    path = _cached_path(name, root=root, download_if_missing=download_if_missing)
+    path = _cached_path(
+        name, root=root, download_if_missing=download_if_missing
+    )
     with np.load(path, allow_pickle=True) as saved:
         return (
             np.asarray(saved["z_grid"], dtype=float),
@@ -444,7 +482,9 @@ def _load_trainz_split(
         )
 
 
-def _cached_path(name: str, *, root: str | Path | None, download_if_missing: bool) -> Path:
+def _cached_path(
+    name: str, *, root: str | Path | None, download_if_missing: bool
+) -> Path:
     return _cached_file(
         _FILES[name],
         f"{_ZENODO}/{_FILES[name]}",
@@ -483,11 +523,16 @@ def _download(url: str, dest: Path, sha256: str) -> None:
         urllib.request.urlretrieve(url, tmp)  # noqa: S310 - the URL is a fixed https literal
         digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
         if digest != sha256:
-            raise OSError(f"checksum mismatch for {url}\n  got  {digest}\n  want {sha256}")
+            raise OSError(
+                f"checksum mismatch for {url}\n  got  {digest}\n  want {sha256}"
+            )
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
-    print(f"lazy.datasets: cached {dest} ({dest.stat().st_size / 1e6:.0f} MB)", flush=True)
+    print(
+        f"lazy.datasets: cached {dest} ({dest.stat().st_size / 1e6:.0f} MB)",
+        flush=True,
+    )
 
 
 # -- the spectroscopically selected split ----------------------------------
@@ -530,7 +575,9 @@ class SelectionSplit:
     meta: dict
 
     def __repr__(self) -> str:
-        sizes = ", ".join(f"{name}={len(cat):,}" for name, cat in self.catalogs.items())
+        sizes = ", ".join(
+            f"{name}={len(cat):,}" for name, cat in self.catalogs.items()
+        )
         return f"SelectionSplit({sizes})"
 
     @property
@@ -544,7 +591,9 @@ class SelectionSplit:
         named["test"] = self.test
         return named
 
-    def summary(self, *, magnitude: str = "I", faint: float = 24.0) -> pd.DataFrame:
+    def summary(
+        self, *, magnitude: str = "I", faint: float = 24.0
+    ) -> pd.DataFrame:
         """One row per subset: how many, how bright, how deep in redshift.
 
         The row labelled ``catalog`` is the catalogue the split was cut from.
@@ -561,7 +610,9 @@ class SelectionSplit:
         return pd.DataFrame(rows).set_index("set")
 
 
-def _describe(catalog: Catalog, *, magnitude: str = "I", faint: float = 24.0) -> dict:
+def _describe(
+    catalog: Catalog, *, magnitude: str = "I", faint: float = 24.0
+) -> dict:
     """The handful of numbers that say whether two samples are drawn alike."""
     mag = catalog.raw[magnitude].to_numpy(dtype=float)
     return {
@@ -703,9 +754,15 @@ def make_selection_split(
     if grid is None:
         grid = fetch_hsc_grid()
     n = len(catalog)
-    holdout_rows = np.arange(n) if holdout_rows is None else np.asarray(holdout_rows, np.int64).ravel()
+    holdout_rows = (
+        np.arange(n)
+        if holdout_rows is None
+        else np.asarray(holdout_rows, np.int64).ravel()
+    )
     if n_calibration < 0 or n_train < 1:
-        raise ValueError("n_train must be positive and n_calibration non-negative")
+        raise ValueError(
+            "n_train must be positive and n_calibration non-negative"
+        )
     if len(holdout_rows) <= n_calibration:
         raise ValueError(
             f"only {len(holdout_rows):,} rows may be held out, which leaves nothing to "
@@ -718,7 +775,11 @@ def make_selection_split(
 
     rate, history = float(initial_rate), []
     for iteration in range(max_iterations):
-        n_holdout = int(np.clip(round(n - n_train / rate), n_calibration + 1, len(candidates)))
+        n_holdout = int(
+            np.clip(
+                round(n - n_train / rate), n_calibration + 1, len(candidates)
+            )
+        )
         holdout = candidates[:n_holdout]
         pool = np.setdiff1d(everything, holdout, assume_unique=True)
         keep, _ = grid_selection(
@@ -758,8 +819,15 @@ def make_selection_split(
 
     # The hold-out is already a random draw; its split into calibration and test
     # is another. The control comes last so that asking for it moves nothing else.
-    calibration_rows, test_rows = holdout[:n_calibration], holdout[n_calibration:]
-    unbiased_rows = rng.choice(pool, size=len(biased_rows), replace=False) if control else None
+    calibration_rows, test_rows = (
+        holdout[:n_calibration],
+        holdout[n_calibration:],
+    )
+    unbiased_rows = (
+        rng.choice(pool, size=len(biased_rows), replace=False)
+        if control
+        else None
+    )
 
     rows = {"biased": np.sort(biased_rows), "test": np.sort(test_rows)}
     if n_calibration:
@@ -771,7 +839,11 @@ def make_selection_split(
         "n_holdout": len(holdout),
         "n_pool": len(pool),
         "n_pool_unused": int(len(pool) - len(biased_rows)),
-        "n_biased_also_unbiased": (int(np.intersect1d(biased_rows, unbiased_rows).size) if control else None),
+        "n_biased_also_unbiased": (
+            int(np.intersect1d(biased_rows, unbiased_rows).size)
+            if control
+            else None
+        ),
         "seed": seed,
         "selection": {"seed": selection_seed} | dict(selection),
         "history": history,
@@ -780,8 +852,14 @@ def make_selection_split(
     return SelectionSplit(
         biased=catalog.take(rows["biased"], split="biased"),
         test=catalog.take(rows["test"], split="test"),
-        calibration=(catalog.take(rows["calibration"], split="calibration") if n_calibration else None),
-        unbiased=catalog.take(rows["unbiased"], split="unbiased") if control else None,
+        calibration=(
+            catalog.take(rows["calibration"], split="calibration")
+            if n_calibration
+            else None
+        ),
+        unbiased=catalog.take(rows["unbiased"], split="unbiased")
+        if control
+        else None,
         rows=rows,
         meta=meta,
     )
@@ -829,8 +907,12 @@ def fetch_dc1_biased(
     >>> X = split.biased.features("mag-color")              # doctest: +SKIP
     >>> model.fit(X, split.biased.redshift)                 # doctest: +SKIP
     """
-    catalog = fetch_dc1(data_home=data_home, download_if_missing=download_if_missing)
-    grid = fetch_hsc_grid(data_home=data_home, download_if_missing=download_if_missing)
+    catalog = fetch_dc1(
+        data_home=data_home, download_if_missing=download_if_missing
+    )
+    grid = fetch_hsc_grid(
+        data_home=data_home, download_if_missing=download_if_missing
+    )
     return make_selection_split(
         catalog,
         n_train=n_train,

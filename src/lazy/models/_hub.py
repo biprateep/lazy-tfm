@@ -91,7 +91,9 @@ class Checkpoint:
             snapshot_download(
                 repo_id=self.repo_id,
                 revision=self.revision,
-                allow_patterns=list(self.allow_patterns) if self.allow_patterns else None,
+                allow_patterns=list(self.allow_patterns)
+                if self.allow_patterns
+                else None,
                 local_files_only=local_files_only,
             )
         )
@@ -140,7 +142,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             repo_id="google/tabfm-1.0.0-pytorch",
             package="tabfm",
             revision="77cb9cc1b4fd3a9c77fbb9552c218200bb4dab83",
-            allow_patterns=("classification/**", "config.json", "LICENSE", "README.md"),
+            allow_patterns=(
+                "classification/**",
+                "config.json",
+                "LICENSE",
+                "README.md",
+            ),
             license_note=(
                 "TabFM weights are released by Google under a non-commercial licence; "
                 "read it at https://huggingface.co/google/tabfm-1.0.0-pytorch before use."
@@ -277,13 +284,17 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
         name, _, spelled = name.partition(":")
         version = version if version is not None else spelled
     if name not in DEFAULT_VERSIONS:
-        raise KeyError(f"unknown backend {name!r}; known: {sorted(DEFAULT_VERSIONS)}")
+        raise KeyError(
+            f"unknown backend {name!r}; known: {sorted(DEFAULT_VERSIONS)}"
+        )
     if version is None:
         version = DEFAULT_VERSIONS[name]
     try:
         return CHECKPOINTS[f"{name}:{version}"]
     except KeyError:
-        raise KeyError(f"unknown version {version!r} for {name!r}; known: {list_versions(name)}") from None
+        raise KeyError(
+            f"unknown version {version!r} for {name!r}; known: {list_versions(name)}"
+        ) from None
 
 
 def list_versions(name: str) -> list[str]:
@@ -294,7 +305,9 @@ def list_versions(name: str) -> list[str]:
     >>> list_versions("tabicl")
     ['v2']
     """
-    return sorted(spec.version for spec in CHECKPOINTS.values() if spec.backend == name)
+    return sorted(
+        spec.version for spec in CHECKPOINTS.values() if spec.backend == name
+    )
 
 
 def download_checkpoint(name: str, version: str | None = None) -> Path:

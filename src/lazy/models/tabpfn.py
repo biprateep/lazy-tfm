@@ -42,7 +42,12 @@ from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
 from lazy.models._progress import Progress, bar, check_progress
 
-__all__ = ["FIT_MODES", "TabPFNBarDistribution", "bucket_masses", "path_for_tabpfn"]
+__all__ = [
+    "FIT_MODES",
+    "TabPFNBarDistribution",
+    "bucket_masses",
+    "path_for_tabpfn",
+]
 
 #: ``fit_mode`` values this backend accepts. Upstream also has ``"batched"``,
 #: which belongs to ``predict_batched`` -- a different call than the one made
@@ -179,9 +184,13 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
             ) from error
 
         if self.chunk_size < 0:
-            raise ValueError("chunk_size must be non-negative (0 means one pass)")
+            raise ValueError(
+                "chunk_size must be non-negative (0 means one pass)"
+            )
         if self.fit_mode not in FIT_MODES:
-            raise ValueError(f"fit_mode must be one of {FIT_MODES}, got {self.fit_mode!r}")
+            raise ValueError(
+                f"fit_mode must be one of {FIT_MODES}, got {self.fit_mode!r}"
+            )
         check_progress(self.progress)
         self.device_ = resolve_device(self.device)
 
@@ -210,26 +219,38 @@ class TabPFNBarDistribution(BasePhotoZEstimator):
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
         )
-        regressor.fit(X.to_numpy(dtype=np.float64), np.asarray(y, dtype=np.float64))
+        regressor.fit(
+            X.to_numpy(dtype=np.float64), np.asarray(y, dtype=np.float64)
+        )
         self.regressor_ = regressor
         self.n_context_ = len(X)
 
     def _predict_pdf(self, X: pd.DataFrame, grid) -> NDArray[np.float64]:
         size = self.chunk_size if self.chunk_size > 0 else len(X)
         blocks = []
-        with bar(self.progress, total=len(X), desc=f"TabPFN {self.version}", unit="gal") as progress:
+        with bar(
+            self.progress,
+            total=len(X),
+            desc=f"TabPFN {self.version}",
+            unit="gal",
+        ) as progress:
             progress.set_postfix(context=self.n_context_)
             for start in range(0, len(X), size):
                 stop = min(start + size, len(X))
                 self._log(f"rows {start}:{stop} of {len(X)}")
                 output = self.regressor_.predict(
-                    X.iloc[start:stop].to_numpy(dtype=np.float64), output_type="full"
+                    X.iloc[start:stop].to_numpy(dtype=np.float64),
+                    output_type="full",
                 )
                 borders, masses = bucket_masses(output)
                 self.borders_, self.n_buckets_ = borders, int(borders.size - 1)
                 blocks.append(grid.rebin(masses, borders))
                 del output, masses
-                progress.set_postfix(context=self.n_context_, buckets=self.n_buckets_, refresh=False)
+                progress.set_postfix(
+                    context=self.n_context_,
+                    buckets=self.n_buckets_,
+                    refresh=False,
+                )
                 progress.update(stop - start)
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
@@ -289,7 +310,9 @@ def bucket_masses(output) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     import torch
 
     criterion, logits = output["criterion"], output["logits"]
-    borders = np.maximum.accumulate(np.asarray(criterion.borders.detach().cpu().numpy(), dtype=np.float64))
+    borders = np.maximum.accumulate(
+        np.asarray(criterion.borders.detach().cpu().numpy(), dtype=np.float64)
+    )
     masses = torch.softmax(logits.detach().double(), dim=-1).cpu().numpy()
     if masses.ndim != 2 or masses.shape[1] != borders.size - 1:
         raise RuntimeError(

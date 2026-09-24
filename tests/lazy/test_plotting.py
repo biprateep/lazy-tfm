@@ -26,7 +26,9 @@ def predictions():
     z_true = generator.uniform(0.1, 1.9, 300)
     centers = z_true + generator.normal(0.0, 0.05, 300)
     z = DC1_GRID.centers[None, :]
-    pdfs = DC1_GRID.normalize(np.exp(-0.5 * ((z - centers[:, None]) / 0.08) ** 2))
+    pdfs = DC1_GRID.normalize(
+        np.exp(-0.5 * ((z - centers[:, None]) / 0.08) ** 2)
+    )
     _, _, pit = evaluate_grid_pdfs(z_true, DC1_GRID.centers, pdfs)
     return z_true, pdfs, pit
 

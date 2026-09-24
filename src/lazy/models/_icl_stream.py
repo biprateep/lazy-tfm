@@ -78,7 +78,9 @@ class QueryViews:
         self._preprocessed: dict[str, np.ndarray] = {}
 
     def _base(self, norm_method: str, cat_perm) -> np.ndarray:
-        from tabfm.src.classifier_and_regressor import _apply_categorical_permutation
+        from tabfm.src.classifier_and_regressor import (
+            _apply_categorical_permutation,
+        )
 
         preprocessor = self.generator.preprocessors_[norm_method]
         if cat_perm:
@@ -92,10 +94,14 @@ class QueryViews:
     def members(self, start: int, stop: int) -> np.ndarray:
         """Stacked ``(members, rows, features)`` views for members ``[start, stop)``."""
         views = []
-        for norm_method, (shuffle_pattern, _, cat_perm, _) in self.flat[start:stop]:
+        for norm_method, (shuffle_pattern, _, cat_perm, _) in self.flat[
+            start:stop
+        ]:
             cols = self._base(norm_method, cat_perm)[:, shuffle_pattern]
             if cols.shape[1] < self.max_features:
-                cols = np.pad(cols, ((0, 0), (0, self.max_features - cols.shape[1])))
+                cols = np.pad(
+                    cols, ((0, 0), (0, self.max_features - cols.shape[1]))
+                )
             views.append(cols)
         return np.stack(views, axis=0).astype(np.float32, copy=False)
 
@@ -128,7 +134,8 @@ def stream_icl(
     is_cuda = device.type == "cuda"
 
     encoded = {
-        name: estimator.X_encoder_.transform(frame.reset_index(drop=True)) for name, frame in targets.items()
+        name: estimator.X_encoder_.transform(frame.reset_index(drop=True))
+        for name, frame in targets.items()
     }
     started = time.time()
 
@@ -169,7 +176,14 @@ def stream_icl(
                             cat_mask=cat_batch,
                             d=d_batch,
                         )
-                    consumer(name, m0, m1, b0 + r0, b0 + r1, out.float().cpu().numpy())
+                    consumer(
+                        name,
+                        m0,
+                        m1,
+                        b0 + r0,
+                        b0 + r1,
+                        out.float().cpu().numpy(),
+                    )
                 del views
         del cache, cat_batch, d_batch
         gc.collect()
@@ -178,7 +192,9 @@ def stream_icl(
         if log is not None:
             elapsed = time.time() - started
             eta = elapsed / m1 * (n_members - m1)
-            log(f"members {m1}/{n_members} | {elapsed / 60:.1f} min | eta {eta / 60:.1f} min")
+            log(
+                f"members {m1}/{n_members} | {elapsed / 60:.1f} min | eta {eta / 60:.1f} min"
+            )
 
 
 def class_shift_offsets(estimator) -> np.ndarray:
@@ -205,7 +221,9 @@ def classification_logits(
     out = {
         name: {
             "mean_logits": np.zeros((n, n_classes), dtype=np.float64),
-            "members": np.empty((n, estimator.n_estimators, n_classes), dtype=np.float16)
+            "members": np.empty(
+                (n, estimator.n_estimators, n_classes), dtype=np.float16
+            )
             if keep_members
             else None,
         }
@@ -214,11 +232,15 @@ def classification_logits(
 
     def consume(name, m0, m1, r0, r1, values):
         if values.shape[-1] < n_classes:
-            raise RuntimeError(f"classifier returned {values.shape[-1]} logits for {n_classes} classes")
+            raise RuntimeError(
+                f"classifier returned {values.shape[-1]} logits for {n_classes} classes"
+            )
         values = values[..., :n_classes]
         for local in range(m1 - m0):
             offset = offsets[m0 + local]
-            logits = np.concatenate([values[local, :, offset:], values[local, :, :offset]], axis=-1)
+            logits = np.concatenate(
+                [values[local, :, offset:], values[local, :, :offset]], axis=-1
+            )
             out[name]["mean_logits"][r0:r1] += logits / estimator.n_estimators
             if keep_members:
                 out[name]["members"][r0:r1, m0 + local] = logits

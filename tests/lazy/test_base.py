@@ -27,13 +27,18 @@ class GaussianDummy(BasePhotoZEstimator):
 
     def _predict_pdf(self, X, grid):
         centers = np.asarray(X.iloc[:, 0], dtype=float) + self.offset_
-        return np.exp(-0.5 * ((grid.centers[None, :] - centers[:, None]) / self.sigma) ** 2)
+        return np.exp(
+            -0.5
+            * ((grid.centers[None, :] - centers[:, None]) / self.sigma) ** 2
+        )
 
 
 @pytest.fixture
 def data():
     generator = np.random.default_rng(0)
-    X = pd.DataFrame({"a": generator.uniform(0.2, 1.8, 64), "b": generator.normal(size=64)})
+    X = pd.DataFrame(
+        {"a": generator.uniform(0.2, 1.8, 64), "b": generator.normal(size=64)}
+    )
     return X, X["a"].to_numpy()
 
 
@@ -62,7 +67,9 @@ def test_predict_pdf_is_an_alias_of_predict_proba(data):
 def test_predict_recovers_the_truth_for_a_well_specified_model(data):
     X, y = data
     z = GaussianDummy(sigma=0.05).fit(X, y).predict(X)
-    assert np.abs(z - y).max() < 0.02  # one grid bin plus the peak's discreteness
+    assert (
+        np.abs(z - y).max() < 0.02
+    )  # one grid bin plus the peak's discreteness
 
 
 @pytest.mark.parametrize("method", POINT_ESTIMATORS)
@@ -83,7 +90,9 @@ def test_unknown_method_names_the_alternatives(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
     with pytest.raises(ValueError, match="method must be one of"):
-        est.predict(X, method="peak")  # the un-prefixed spelling is not accepted
+        est.predict(
+            X, method="peak"
+        )  # the un-prefixed spelling is not accepted
 
 
 def test_score_is_negated_cde_loss_so_higher_is_better(data):
@@ -99,8 +108,14 @@ def test_score_is_negated_cde_loss_so_higher_is_better(data):
 def test_a_grid_passed_at_call_time_is_used(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 3.0, 37)).shape == (len(X), 37)
-    assert est.predict_proba(X, np.linspace(0.05, 2.95, 30)).shape == (len(X), 30)
+    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 3.0, 37)).shape == (
+        len(X),
+        37,
+    )
+    assert est.predict_proba(X, np.linspace(0.05, 2.95, 30)).shape == (
+        len(X),
+        30,
+    )
     assert est.predict(X, z_grid=np.linspace(0.05, 2.95, 30)).shape == (len(X),)
 
 
@@ -110,7 +125,9 @@ def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
     coarse = est.predict(X, z_grid=RedshiftGrid.linear(0.0, 2.0, 50))
     fine = est.predict(X, z_grid=RedshiftGrid.linear(0.0, 2.0, 400))
     assert est.offset_ is not None  # nothing was refitted
-    assert np.abs(coarse - fine).max() < 0.05  # same estimator, coarser resolution
+    assert (
+        np.abs(coarse - fine).max() < 0.05
+    )  # same estimator, coarser resolution
 
 
 def test_the_constructor_grid_is_the_default(data):
@@ -118,7 +135,10 @@ def test_the_constructor_grid_is_the_default(data):
     est = GaussianDummy(z_grid=RedshiftGrid.linear(0.0, 3.0, 37)).fit(X, y)
     assert est.predict_proba(X).shape == (len(X), 37)
     # ... and a call-time grid still wins
-    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 2.0, 11)).shape == (len(X), 11)
+    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 2.0, 11)).shape == (
+        len(X),
+        11,
+    )
 
 
 def test_predict_cdf_is_monotone_and_reaches_one(data):

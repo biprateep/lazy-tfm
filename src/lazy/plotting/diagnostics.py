@@ -95,7 +95,9 @@ def plot_zphot_ztrue(
     if outlier_lines:
         edge = np.array([0.0, hi])
         for sign in (+1, -1):
-            ax.plot(edge, edge + sign * _OUTLIER_FLOOR * (1 + edge), "k:", lw=0.8)
+            ax.plot(
+                edge, edge + sign * _OUTLIER_FLOOR * (1 + edge), "k:", lw=0.8
+            )
     ax.set_xlim(0, hi)
     ax.set_ylim(0, hi)
     ax.set_xlabel(r"$z_{\rm true}$")
@@ -124,21 +126,32 @@ def plot_residuals(
     edges = np.quantile(z_true, np.linspace(0, 1, n_bins + 1))
     edges = np.unique(edges)
     centers = 0.5 * (edges[1:] + edges[:-1])
-    index = np.clip(np.searchsorted(edges, z_true, side="right") - 1, 0, len(centers) - 1)
+    index = np.clip(
+        np.searchsorted(edges, z_true, side="right") - 1, 0, len(centers) - 1
+    )
     stats = np.full((len(centers), 3), np.nan)
     for i in range(len(centers)):
         rows = index == i
         if rows.any():
             stats[i] = np.percentile(ez[rows], quantiles)
     ax.axhline(0.0, color="k", ls="--", lw=0.8)
-    ax.fill_between(centers, stats[:, 0], stats[:, 2], alpha=0.3, lw=0, color="C0")
+    ax.fill_between(
+        centers, stats[:, 0], stats[:, 2], alpha=0.3, lw=0, color="C0"
+    )
     ax.plot(centers, stats[:, 1], color="C0")
     ax.set_xlabel(r"$z_{\rm true}$")
     ax.set_ylabel(r"$(z_{\rm phot} - z_{\rm true}) / (1 + z_{\rm true})$")
     return ax
 
 
-def plot_pit(pit: ArrayLike, *, ax=None, n_bins: int = 20, label: str | None = None, **kwargs):
+def plot_pit(
+    pit: ArrayLike,
+    *,
+    ax=None,
+    n_bins: int = 20,
+    label: str | None = None,
+    **kwargs,
+):
     """Histogram of the PIT values against the uniform distribution they should follow.
 
     The shape names the failure: a U means the PDFs are too narrow
@@ -147,7 +160,15 @@ def plot_pit(pit: ArrayLike, *, ax=None, n_bins: int = 20, label: str | None = N
     """
     pit = np.asarray(pit, dtype=float)
     ax = _axes(ax, width="column", aspect="golden")
-    ax.hist(pit, bins=n_bins, range=(0, 1), density=True, histtype="step", label=label, **kwargs)
+    ax.hist(
+        pit,
+        bins=n_bins,
+        range=(0, 1),
+        density=True,
+        histtype="step",
+        label=label,
+        **kwargs,
+    )
     ax.axhline(1.0, color="k", ls="--", lw=0.8)
     ax.set_xlim(0, 1)
     ax.set_ylim(bottom=0)
@@ -176,7 +197,9 @@ def plot_pit_qq(pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs):
     return ax
 
 
-def plot_coverage(pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs):
+def plot_coverage(
+    pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs
+):
     """Empirical against nominal coverage of central credible intervals.
 
     For each nominal level ``q``, the fraction of galaxies whose true redshift
@@ -187,7 +210,9 @@ def plot_coverage(pit: ArrayLike, *, ax=None, label: str | None = None, **kwargs
     pit = np.asarray(pit, dtype=float)
     ax = _axes(ax, width="column", aspect="square")
     nominal = np.linspace(0.0, 1.0, 101)
-    empirical = np.array([np.mean(np.abs(pit - 0.5) <= 0.5 * q) for q in nominal])
+    empirical = np.array(
+        [np.mean(np.abs(pit - 0.5) <= 0.5 * q) for q in nominal]
+    )
     ax.plot(nominal, empirical, label=label, **kwargs)
     one_to_one(ax, 0.0, 1.0)
     ax.set_xlim(0, 1)
@@ -276,7 +301,12 @@ def plot_pdfs(
     for ax, row in zip(axes, indices, strict=False):
         ax.plot(z_grid, pdfs[row], color="C0")
         if z_true is not None:
-            ax.axvline(float(np.asarray(z_true, dtype=float)[row]), color="k", ls="--", lw=0.8)
+            ax.axvline(
+                float(np.asarray(z_true, dtype=float)[row]),
+                color="k",
+                ls="--",
+                lw=0.8,
+            )
         ax.set_xlim(z_grid[0], z_grid[-1])
         ax.set_ylim(bottom=0)
         ax.set_xlabel(r"$z$")

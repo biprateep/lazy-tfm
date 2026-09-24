@@ -20,7 +20,10 @@ def photometry():
     n = 32
     return pd.DataFrame(
         {b: generator.normal(23.0, 1.0, n).astype(np.float32) for b in bands}
-        | {f"{b}ERR": generator.uniform(0.01, 0.2, n).astype(np.float32) for b in bands}
+        | {
+            f"{b}ERR": generator.uniform(0.01, 0.2, n).astype(np.float32)
+            for b in bands
+        }
     )
 
 

@@ -43,8 +43,13 @@ def check_progress(progress) -> None:
     ...
     ValueError: progress must be one of ('auto', True, False), got 1
     """
-    if not (isinstance(progress, bool) or (isinstance(progress, str) and progress == "auto")):
-        raise ValueError(f"progress must be one of {PROGRESS_MODES}, got {progress!r}")
+    if not (
+        isinstance(progress, bool)
+        or (isinstance(progress, str) and progress == "auto")
+    ):
+        raise ValueError(
+            f"progress must be one of {PROGRESS_MODES}, got {progress!r}"
+        )
 
 
 def bar(progress: Progress, *, total: int, desc: str, unit: str, **kwargs):

@@ -74,7 +74,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
         """Store or fit whatever the backend needs. Sets ``*_`` attributes."""
 
     @abstractmethod
-    def _predict_pdf(self, X: pd.DataFrame, grid: RedshiftGrid) -> NDArray[np.float64]:
+    def _predict_pdf(
+        self, X: pd.DataFrame, grid: RedshiftGrid
+    ) -> NDArray[np.float64]:
         """Un-normalised densities on ``grid``, one row per row of ``X``."""
 
     # -- the public API ----------------------------------------------------
@@ -140,7 +142,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
         grid = self._resolve_grid(z_grid)
         return grid.cdf(self.predict_proba(X, grid))
 
-    def predict(self, X, method: str = "z_peak", z_grid=None) -> NDArray[np.float64]:
+    def predict(
+        self, X, method: str = "z_peak", z_grid=None
+    ) -> NDArray[np.float64]:
         """One redshift per row, reducing each density by ``method``.
 
         Parameters
@@ -164,7 +168,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
         model per definition.
         """
         grid = self._resolve_grid(z_grid)
-        return self.point_estimates(self.predict_proba(X, grid), grid)[_check_method(method)]
+        return self.point_estimates(self.predict_proba(X, grid), grid)[
+            _check_method(method)
+        ]
 
     def score(self, X, y, z_grid=None) -> float:
         """Negative conditional-density-estimate loss -- higher is better.
@@ -178,7 +184,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
         y = np.asarray(y, dtype=float).ravel()
         return -cde_loss(y, grid.centers, self.predict_proba(X, grid))
 
-    def evaluate(self, X, y, method: str = "z_peak", z_grid=None) -> pd.DataFrame:
+    def evaluate(
+        self, X, y, method: str = "z_peak", z_grid=None
+    ) -> pd.DataFrame:
         """Score predictions for ``X`` with the full diagnostic metric set.
 
         A convenience wrapper over :func:`lazy.metrics.summarize`; that function
@@ -210,7 +218,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
         version = getattr(self, "version", None)
         return f"{self.backend}:{version}" if version else self.backend
 
-    def point_estimates(self, pdfs: ArrayLike, z_grid=None) -> dict[str, NDArray[np.float64]]:
+    def point_estimates(
+        self, pdfs: ArrayLike, z_grid=None
+    ) -> dict[str, NDArray[np.float64]]:
         """Every supported reduction of already-computed densities.
 
         Cheaper than calling :meth:`predict` once per definition, which would
@@ -241,7 +251,9 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
             array = np.asarray(X)
             if array.ndim != 2:
                 raise ValueError(f"X must be 2D, got shape {array.shape}")
-            frame = pd.DataFrame(array, columns=[f"x{i}" for i in range(array.shape[1])])
+            frame = pd.DataFrame(
+                array, columns=[f"x{i}" for i in range(array.shape[1])]
+            )
         if frame.shape[1] == 0:
             raise ValueError("X has no feature columns")
         if reset:
@@ -268,5 +280,7 @@ class BasePhotoZEstimator(BaseEstimator, ABC):
 def _check_method(method: str) -> str:
     """Validate a point-estimate name, naming the alternatives when it is wrong."""
     if method not in POINT_ESTIMATORS:
-        raise ValueError(f"method must be one of {POINT_ESTIMATORS}, got {method!r}")
+        raise ValueError(
+            f"method must be one of {POINT_ESTIMATORS}, got {method!r}"
+        )
     return method

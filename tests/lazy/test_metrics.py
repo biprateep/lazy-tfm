@@ -29,9 +29,13 @@ def test_point_metrics_match_challenge_definitions():
     assert result.bias == pytest.approx(0.01, abs=1e-3)
     assert result.sigma_mad == pytest.approx(0.02, abs=2e-3)
     assert result.sigma_iqr == pytest.approx(0.02, abs=2e-3)
-    assert result.outlier_threshold == pytest.approx(max(0.06, 3 * result.sigma_iqr))
+    assert result.outlier_threshold == pytest.approx(
+        max(0.06, 3 * result.sigma_iqr)
+    )
     # injected outliers plus the N(0.01, 0.02) tail beyond |ez| > 0.06
-    tail = stats.norm.sf((0.06 - 0.01) / 0.02) + stats.norm.cdf((-0.06 - 0.01) / 0.02)
+    tail = stats.norm.sf((0.06 - 0.01) / 0.02) + stats.norm.cdf(
+        (-0.06 - 0.01) / 0.02
+    )
     assert result.outlier_rate == pytest.approx(0.02 + 0.98 * tail, abs=3e-3)
     assert result.outlier_rate_015 == pytest.approx(0.02, abs=1e-3)
 
@@ -44,8 +48,12 @@ def test_outlier_threshold_has_006_floor():
 
 def test_normalization_and_point_estimates():
     centres = np.array([0.3, 0.9, 1.5])
-    _, density = normalize_grid_pdfs(GRID, 5.0 * _gaussian_grid_pdfs(centres, 0.05))
-    np.testing.assert_allclose(np.trapezoid(density, GRID, axis=1), 1.0, atol=1e-10)
+    _, density = normalize_grid_pdfs(
+        GRID, 5.0 * _gaussian_grid_pdfs(centres, 0.05)
+    )
+    np.testing.assert_allclose(
+        np.trapezoid(density, GRID, axis=1), 1.0, atol=1e-10
+    )
     estimates = grid_point_estimates(GRID, density)
     for key in ("z_peak", "z_weight", "z_mean", "z_median"):
         np.testing.assert_allclose(estimates[key], centres, atol=0.006)
@@ -65,7 +73,9 @@ def test_calibrated_gaussians_give_uniform_pit_and_correct_cde_loss():
     assert abs(metrics.pit_cvm) < 0.5
     assert metrics.pit_ad1 < 3.0 and metrics.pit_ad2 < 5.0
     # E[int p^2] - 2 E[p(z_true)] for the true Gaussian model:
-    expected = 1 / (2 * np.sqrt(np.pi) * sigma) - 2 / (2 * np.sqrt(np.pi) * sigma)
+    expected = 1 / (2 * np.sqrt(np.pi) * sigma) - 2 / (
+        2 * np.sqrt(np.pi) * sigma
+    )
     assert metrics.cde_loss == pytest.approx(expected, rel=0.02)
     assert np.all((pit >= 0) & (pit <= 1))
 
@@ -108,5 +118,7 @@ def test_cde_loss_uses_the_nearest_grid_point():
     pdfs = np.array([[0.0, 1.0, 0.0]])
     pdfs = normalize_grid_pdfs(grid, pdfs)[1]
     # 0.6 is nearest to grid point 1.0, so the likelihood is that bin's density
-    at_truth = (np.trapezoid(pdfs[0] ** 2, grid) - cde_loss(np.array([0.6]), grid, pdfs)) / 2
+    at_truth = (
+        np.trapezoid(pdfs[0] ** 2, grid) - cde_loss(np.array([0.6]), grid, pdfs)
+    ) / 2
     assert at_truth == pytest.approx(pdfs[0, 1])

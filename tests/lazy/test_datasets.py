@@ -96,7 +96,9 @@ def test_a_dataframe_of_your_own_becomes_a_catalog(photometry):
 
 def test_truth_and_ids_can_come_as_arrays_instead_of_columns(photometry):
     ids = np.arange(100, 100 + len(photometry))
-    catalog = Catalog.from_frame(photometry, redshift=np.zeros(len(photometry)), object_id=ids)
+    catalog = Catalog.from_frame(
+        photometry, redshift=np.zeros(len(photometry)), object_id=ids
+    )
     assert np.array_equal(catalog.object_id, ids)
     assert list(catalog.raw.columns) == list(RAW_COLUMNS)
 
@@ -115,7 +117,9 @@ def test_mismatched_lengths_are_reported(photometry):
 
 def test_a_catalog_of_your_own_builds_features_the_same_way(photometry):
     catalog = Catalog.from_frame(photometry, redshift=np.zeros(len(photometry)))
-    assert catalog.features("mag-color").equals(Catalog.build_features(photometry))
+    assert catalog.features("mag-color").equals(
+        Catalog.build_features(photometry)
+    )
 
 
 # -- feature modes ----------------------------------------------------------
@@ -135,7 +139,9 @@ def test_mag_is_the_photometry_untouched(photometry):
     assert np.allclose(X.to_numpy(), photometry[list(RAW_COLUMNS)].to_numpy())
 
 
-def test_mag_color_keeps_the_reference_magnitude_and_the_adjacent_colours(photometry):
+def test_mag_color_keeps_the_reference_magnitude_and_the_adjacent_colours(
+    photometry,
+):
     X = Catalog.build_features(photometry, "mag-color")
     assert list(X.columns) == ["I", "U-G", "G-R", "R-I", "I-Z", "Z-Y"] + [
         "IERR",
@@ -149,10 +155,14 @@ def test_mag_color_keeps_the_reference_magnitude_and_the_adjacent_colours(photom
     assert np.allclose(X["I"], photometry["I"])
 
 
-def test_colour_errors_are_the_quadrature_sum_of_the_two_magnitude_errors(photometry):
+def test_colour_errors_are_the_quadrature_sum_of_the_two_magnitude_errors(
+    photometry,
+):
     """This is the whole point of carrying colours rather than magnitudes."""
     X = Catalog.build_features(photometry, "mag-color")
-    assert np.allclose(X["G-RERR"], np.hypot(photometry["GERR"], photometry["RERR"]))
+    assert np.allclose(
+        X["G-RERR"], np.hypot(photometry["GERR"], photometry["RERR"])
+    )
 
 
 def test_all_carries_every_colour_and_every_error(photometry):
@@ -161,12 +171,16 @@ def test_all_carries_every_colour_and_every_error(photometry):
     assert len(colours) == 15
     assert list(X.columns[: len(BANDS)]) == list(BANDS)
     assert np.allclose(X["U-Y"], photometry["U"] - photometry["Y"])
-    assert np.allclose(X["U-YERR"], np.hypot(photometry["UERR"], photometry["YERR"]))
+    assert np.allclose(
+        X["U-YERR"], np.hypot(photometry["UERR"], photometry["YERR"])
+    )
     assert sum(c.endswith("ERR") for c in X.columns) == 21
 
 
 def test_the_default_mode_is_mag_color(photometry):
-    assert Catalog.build_features(photometry).equals(Catalog.build_features(photometry, "mag-color"))
+    assert Catalog.build_features(photometry).equals(
+        Catalog.build_features(photometry, "mag-color")
+    )
 
 
 def test_unknown_mode_names_the_alternatives(photometry):
@@ -186,14 +200,18 @@ def test_alternative_band_sets_are_supported(photometry):
 
 def test_a_reference_band_outside_the_band_set_is_reported(photometry):
     with pytest.raises(ValueError, match="reference_band"):
-        Catalog.build_features(photometry, "mag-color", bands=("G", "R"), reference_band="I")
+        Catalog.build_features(
+            photometry, "mag-color", bands=("G", "R"), reference_band="I"
+        )
 
 
 # -- subsetting a catalogue -------------------------------------------------
 
 
 def test_take_returns_the_named_rows_in_the_order_asked_for(photometry):
-    catalog = Catalog.from_frame(photometry, redshift=np.arange(len(photometry), dtype=float))
+    catalog = Catalog.from_frame(
+        photometry, redshift=np.arange(len(photometry), dtype=float)
+    )
     subset = catalog.take([5, 1, 1])
     assert len(subset) == 3
     assert list(subset.redshift) == [5.0, 1.0, 1.0]
@@ -201,7 +219,9 @@ def test_take_returns_the_named_rows_in_the_order_asked_for(photometry):
 
 
 def test_take_accepts_a_boolean_mask(photometry):
-    catalog = Catalog.from_frame(photometry, redshift=np.arange(len(photometry), dtype=float))
+    catalog = Catalog.from_frame(
+        photometry, redshift=np.arange(len(photometry), dtype=float)
+    )
     mask = np.zeros(len(photometry), dtype=bool)
     mask[[2, 7]] = True
     assert list(catalog.take(mask).redshift) == [2.0, 7.0]
@@ -221,7 +241,9 @@ def test_take_carries_the_source_column_when_there_is_one(photometry):
 
 
 def test_take_labels_the_result_after_its_parent(photometry):
-    catalog = Catalog.from_frame(photometry, redshift=np.zeros(len(photometry)), split="dc1")
+    catalog = Catalog.from_frame(
+        photometry, redshift=np.zeros(len(photometry)), split="dc1"
+    )
     assert catalog.take([0, 1]).split == "dc1[2]"
 
 
@@ -247,11 +269,18 @@ def test_the_training_set_is_the_size_that_was_asked_for(split):
 
 def test_the_two_parts_of_the_shuffle_account_for_every_galaxy(split):
     """The catalogue is cut in two: what the selection draws from, and what is held back."""
-    assert split.meta["n_pool"] + split.meta["n_holdout"] == split.meta["n_catalog"]
-    assert split.meta["n_pool_unused"] == split.meta["n_pool"] - len(split.biased)
+    assert (
+        split.meta["n_pool"] + split.meta["n_holdout"]
+        == split.meta["n_catalog"]
+    )
+    assert split.meta["n_pool_unused"] == split.meta["n_pool"] - len(
+        split.biased
+    )
 
 
-def test_the_calibration_sample_comes_out_of_the_hold_out_not_on_top_of_it(split):
+def test_the_calibration_sample_comes_out_of_the_hold_out_not_on_top_of_it(
+    split,
+):
     """Stolen, not added: otherwise galaxies a model was given are also scored."""
     assert len(split.calibration) == 50
     assert len(split.test) + len(split.calibration) == split.meta["n_holdout"]
@@ -261,16 +290,22 @@ def test_nothing_a_model_is_given_is_also_scored(split):
     scored = split.rows["test"]
     assert not np.intersect1d(split.rows["biased"], scored).size
     assert not np.intersect1d(split.rows["calibration"], scored).size
-    assert not np.intersect1d(split.rows["calibration"], split.rows["biased"]).size
+    assert not np.intersect1d(
+        split.rows["calibration"], split.rows["biased"]
+    ).size
 
 
-def test_the_hold_out_is_drawn_from_the_whole_catalogue_by_default(split, biasable_catalog):
+def test_the_hold_out_is_drawn_from_the_whole_catalogue_by_default(
+    split, biasable_catalog
+):
     """No source file is privileged: the merged catalogue is shuffled and cut."""
     held = np.concatenate([split.rows["test"], split.rows["calibration"]])
     assert set(np.unique(biasable_catalog.source[held])) == {0, 1}
 
 
-def test_the_hold_out_can_be_restricted_to_chosen_rows(biasable_catalog, hsc_grid):
+def test_the_hold_out_can_be_restricted_to_chosen_rows(
+    biasable_catalog, hsc_grid
+):
     """One source file only, for keeping a model trained on the other one scorable."""
     from_test_file = np.flatnonzero(biasable_catalog.source == 1)
     split = make_selection_split(
@@ -285,15 +320,25 @@ def test_the_hold_out_can_be_restricted_to_chosen_rows(biasable_catalog, hsc_gri
     assert (biasable_catalog.source[held] == 1).all()
 
 
-def test_every_row_index_points_back_at_the_parent_catalogue(split, biasable_catalog):
+def test_every_row_index_points_back_at_the_parent_catalogue(
+    split, biasable_catalog
+):
     rows = split.rows["biased"]
-    assert np.array_equal(split.biased.redshift, biasable_catalog.redshift[rows])
+    assert np.array_equal(
+        split.biased.redshift, biasable_catalog.redshift[rows]
+    )
     assert all(np.all(np.diff(index) > 0) for index in split.rows.values())
 
 
-def test_asking_for_no_calibration_sample_leaves_the_whole_hold_out_to_test_on(biasable_catalog, hsc_grid):
+def test_asking_for_no_calibration_sample_leaves_the_whole_hold_out_to_test_on(
+    biasable_catalog, hsc_grid
+):
     split = make_selection_split(
-        biasable_catalog, grid=hsc_grid, n_train=100, n_calibration=0, color_redshift_cut=False
+        biasable_catalog,
+        grid=hsc_grid,
+        n_train=100,
+        n_calibration=0,
+        color_redshift_cut=False,
     )
     assert split.calibration is None
     assert "calibration" not in split.rows
@@ -301,7 +346,9 @@ def test_asking_for_no_calibration_sample_leaves_the_whole_hold_out_to_test_on(b
 
 
 def test_the_split_is_reproducible_from_its_seed(biasable_catalog, hsc_grid):
-    kwargs = dict(grid=hsc_grid, n_train=100, n_calibration=50, color_redshift_cut=False)
+    kwargs = dict(
+        grid=hsc_grid, n_train=100, n_calibration=50, color_redshift_cut=False
+    )
     first = make_selection_split(biasable_catalog, **kwargs)
     again = make_selection_split(biasable_catalog, **kwargs)
     other = make_selection_split(biasable_catalog, seed=99, **kwargs)
@@ -313,10 +360,14 @@ def test_where_the_catalogue_is_cut_is_solved_for_rather_than_guessed(split):
     """The selection keeps a fixed fraction, so the cut is what sets the training-set size."""
     history = split.meta["history"]
     assert len(history) > 1
-    assert abs(history[-1]["n_biased"] - 100) <= abs(history[0]["n_biased"] - 100)
+    assert abs(history[-1]["n_biased"] - 100) <= abs(
+        history[0]["n_biased"] - 100
+    )
 
 
-def test_a_training_set_the_catalogue_cannot_supply_is_reported(biasable_catalog, hsc_grid):
+def test_a_training_set_the_catalogue_cannot_supply_is_reported(
+    biasable_catalog, hsc_grid
+):
     """The ceiling is what the selection returns on everything, and the message says so."""
     with pytest.raises(RuntimeError, match="cannot supply more than"):
         make_selection_split(
@@ -328,7 +379,9 @@ def test_a_training_set_the_catalogue_cannot_supply_is_reported(biasable_catalog
         )
 
 
-def test_a_hold_out_too_small_for_the_calibration_sample_is_reported(biasable_catalog, hsc_grid):
+def test_a_hold_out_too_small_for_the_calibration_sample_is_reported(
+    biasable_catalog, hsc_grid
+):
     with pytest.raises(ValueError, match="nothing to test on"):
         make_selection_split(
             biasable_catalog,
@@ -339,15 +392,21 @@ def test_a_hold_out_too_small_for_the_calibration_sample_is_reported(biasable_ca
         )
 
 
-def test_the_summary_puts_every_subset_next_to_the_catalogue_it_came_from(split):
+def test_the_summary_puts_every_subset_next_to_the_catalogue_it_came_from(
+    split,
+):
     summary = split.summary()
     assert list(summary.index) == ["biased", "calibration", "test", "catalog"]
     assert summary.loc["catalog", "n"] == 2_000
-    assert summary.loc["test", "median_z"] == pytest.approx(summary.loc["catalog", "median_z"], abs=0.05)
+    assert summary.loc["test", "median_z"] == pytest.approx(
+        summary.loc["catalog", "median_z"], abs=0.05
+    )
 
 
 def test_the_repr_says_how_big_each_piece_is(split):
-    assert repr(split) == "SelectionSplit(biased=100, calibration=50, test=1,750)"
+    assert (
+        repr(split) == "SelectionSplit(biased=100, calibration=50, test=1,750)"
+    )
 
 
 def test_a_missing_hsc_grid_is_reported_rather_than_downloaded(isolated_home):
@@ -364,7 +423,9 @@ def test_no_control_is_drawn_unless_it_is_asked_for(split):
     assert split.meta["n_biased_also_unbiased"] is None
 
 
-def test_the_control_matches_the_biased_set_in_size_and_nothing_else(biasable_catalog, hsc_grid):
+def test_the_control_matches_the_biased_set_in_size_and_nothing_else(
+    biasable_catalog, hsc_grid
+):
     """Without it "biased" and "smaller" cannot be told apart."""
     split = make_selection_split(
         biasable_catalog,
@@ -376,10 +437,14 @@ def test_the_control_matches_the_biased_set_in_size_and_nothing_else(biasable_ca
     )
     assert len(split.unbiased) == len(split.biased)
     assert not np.intersect1d(split.rows["unbiased"], split.rows["test"]).size
-    assert not np.intersect1d(split.rows["unbiased"], split.rows["calibration"]).size
+    assert not np.intersect1d(
+        split.rows["unbiased"], split.rows["calibration"]
+    ).size
 
 
-def test_asking_for_the_control_leaves_the_rest_of_the_split_alone(split, biasable_catalog, hsc_grid):
+def test_asking_for_the_control_leaves_the_rest_of_the_split_alone(
+    split, biasable_catalog, hsc_grid
+):
     """It is drawn last, so it cannot perturb what the other runs were scored on."""
     with_control = make_selection_split(
         biasable_catalog,

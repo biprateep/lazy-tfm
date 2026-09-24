@@ -28,7 +28,9 @@ needs_checkpoint = pytest.mark.skipif(
 def tiny():
     generator = np.random.default_rng(0)
     z = generator.uniform(0.2, 1.8, 40)
-    X = pd.DataFrame({"a": z + generator.normal(0, 0.1, 40), "b": generator.normal(size=40)})
+    X = pd.DataFrame(
+        {"a": z + generator.normal(0, 0.1, 40), "b": generator.normal(size=40)}
+    )
     return X, z
 
 
@@ -45,14 +47,20 @@ class TestTabFM:
     def test_unknown_inference_mode_is_rejected(self, tiny):
         X, z = tiny
         with pytest.raises(ValueError, match="inference must be"):
-            get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2, inference="fast").fit(X, z)
+            get_estimator(
+                "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="fast"
+            ).fit(X, z)
 
-    def test_forcing_stream_without_the_kv_cache_api_explains_itself(self, tiny):
+    def test_forcing_stream_without_the_kv_cache_api_explains_itself(
+        self, tiny
+    ):
         """The PyPI release of tabfm has no prefill/decode; say so, don't TypeError."""
         from lazy.models._icl_stream import streaming_available
 
         X, z = tiny
-        est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2, inference="stream")
+        est = get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="stream"
+        )
         if streaming_available():
             assert est.fit(X, z).inference_ == "stream"
         else:
@@ -69,13 +77,17 @@ class TestTabFM:
         from lazy.models import tabfm as tabfm_module
 
         X, z = tiny
-        monkeypatch.setattr(tabfm_module, "streaming_available", lambda: False, raising=False)
+        monkeypatch.setattr(
+            tabfm_module, "streaming_available", lambda: False, raising=False
+        )
         import lazy.models._icl_stream as icl_stream
 
         monkeypatch.setattr(icl_stream, "streaming_available", lambda: False)
 
         est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2)
-        with pytest.warns(tabfm_module.TabFMPerformanceWarning, match="KV-cache"):
+        with pytest.warns(
+            tabfm_module.TabFMPerformanceWarning, match="KV-cache"
+        ):
             est.fit(X, z)
         assert est.inference_ == "predict_proba"
 
@@ -86,7 +98,9 @@ class TestTabFM:
         from lazy.models.tabfm import TabFMPerformanceWarning
 
         X, z = tiny
-        est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba")
+        est = get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba"
+        )
         with warnings.catch_warnings():
             warnings.simplefilter("error", TabFMPerformanceWarning)
             est.fit(X, z)
@@ -104,7 +118,9 @@ class TestTabFM:
         """Not at the first prediction, an hour later."""
         X, z = tiny
         with pytest.raises(KeyError, match="unknown version"):
-            get_estimator("tabfm", version="v9", n_coarse_bins=2, n_fine_bins=2).fit(X, z)
+            get_estimator(
+                "tabfm", version="v9", n_coarse_bins=2, n_fine_bins=2
+            ).fit(X, z)
 
     def test_more_than_ten_classes_per_level_is_rejected(self, tiny):
         X, z = tiny
@@ -145,11 +161,19 @@ class TestTabICL:
         """Same claim as for TabFM, and the reason chunking is the default."""
         generator = np.random.default_rng(0)
         z = generator.uniform(0.2, 1.8, 260)
-        X = pd.DataFrame({"a": z + generator.normal(0, 0.1, 260), "b": generator.normal(size=260), "c": z**2})
+        X = pd.DataFrame(
+            {
+                "a": z + generator.normal(0, 0.1, 260),
+                "b": generator.normal(size=260),
+                "c": z**2,
+            }
+        )
         X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
 
         def run(chunk_size):
-            model = LazyModel("tabicl", n_estimators=2, device="cpu", chunk_size=chunk_size)
+            model = LazyModel(
+                "tabicl", n_estimators=2, device="cpu", chunk_size=chunk_size
+            )
             return model.fit(X_ctx, z[:200]).predict_proba(X_q)
 
         assert np.array_equal(run(0), run(7))
@@ -179,7 +203,9 @@ class TestTabPFN:
         with pytest.raises(ValueError, match="fit_mode must be one of"):
             get_estimator("tabpfn", fit_mode="batched").fit(X, z)
 
-    def test_an_unknown_version_is_rejected_before_anything_is_downloaded(self, tiny):
+    def test_an_unknown_version_is_rejected_before_anything_is_downloaded(
+        self, tiny
+    ):
         X, z = tiny
         with pytest.raises(KeyError, match=r"unknown version 'v9'"):
             get_estimator("tabpfn", version="v9").fit(X, z)
@@ -200,9 +226,13 @@ class TestTabPFN:
         readable = path_for_tabpfn(link)
         assert readable.resolve().suffix == ".safetensors"
         assert readable.read_bytes() == b"weights"
-        assert readable.stat().st_ino == blob.stat().st_ino, "hardlinked, not copied"
+        assert readable.stat().st_ino == blob.stat().st_ino, (
+            "hardlinked, not copied"
+        )
 
-    def test_a_path_that_already_survives_resolving_is_left_alone(self, tmp_path):
+    def test_a_path_that_already_survives_resolving_is_left_alone(
+        self, tmp_path
+    ):
         from lazy.models.tabpfn import path_for_tabpfn
 
         real = tmp_path / "model.safetensors"
@@ -215,12 +245,18 @@ class TestTabPFN:
 
         from lazy.models.tabpfn import bucket_masses
 
-        criterion = types.SimpleNamespace(borders=torch.tensor([0.0, 1.0, 2.0, 4.0]))
+        criterion = types.SimpleNamespace(
+            borders=torch.tensor([0.0, 1.0, 2.0, 4.0])
+        )
         logits = torch.log(torch.tensor([[0.5, 0.25, 0.25], [0.1, 0.1, 0.8]]))
-        borders, masses = bucket_masses({"criterion": criterion, "logits": logits})
+        borders, masses = bucket_masses(
+            {"criterion": criterion, "logits": logits}
+        )
 
         assert borders.tolist() == [0.0, 1.0, 2.0, 4.0]
-        assert masses == pytest.approx(np.array([[0.5, 0.25, 0.25], [0.1, 0.1, 0.8]]))
+        assert masses == pytest.approx(
+            np.array([[0.5, 0.25, 0.25], [0.1, 0.1, 0.8]])
+        )
 
     def test_a_logit_count_that_misses_the_buckets_is_reported(self):
         """A shape mismatch here would otherwise land in `rebin` as a bare ValueError."""
@@ -230,18 +266,28 @@ class TestTabPFN:
 
         criterion = types.SimpleNamespace(borders=torch.tensor([0.0, 1.0, 2.0]))
         with pytest.raises(RuntimeError, match="bar distribution"):
-            bucket_masses({"criterion": criterion, "logits": torch.zeros((2, 5))})
+            bucket_masses(
+                {"criterion": criterion, "logits": torch.zeros((2, 5))}
+            )
 
     @needs_checkpoint
     def test_chunking_the_query_rows_is_bit_identical(self):
         """Same claim as for the other two, and the reason chunking is the default."""
         generator = np.random.default_rng(0)
         z = generator.uniform(0.2, 1.8, 260)
-        X = pd.DataFrame({"a": z + generator.normal(0, 0.1, 260), "b": generator.normal(size=260), "c": z**2})
+        X = pd.DataFrame(
+            {
+                "a": z + generator.normal(0, 0.1, 260),
+                "b": generator.normal(size=260),
+                "c": z**2,
+            }
+        )
         X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
 
         def run(chunk_size):
-            model = LazyModel("tabpfn", n_estimators=2, device="cpu", chunk_size=chunk_size)
+            model = LazyModel(
+                "tabpfn", n_estimators=2, device="cpu", chunk_size=chunk_size
+            )
             return model.fit(X_ctx, z[:200]).predict_proba(X_q)
 
         assert np.array_equal(run(0), run(7))
@@ -256,11 +302,20 @@ class TestTabPFN:
         """
         generator = np.random.default_rng(0)
         z = generator.uniform(0.2, 1.8, 160)
-        X = pd.DataFrame({"a": z + generator.normal(0, 0.05, 160), "b": generator.normal(size=160)})
+        X = pd.DataFrame(
+            {
+                "a": z + generator.normal(0, 0.05, 160),
+                "b": generator.normal(size=160),
+            }
+        )
         grid = RedshiftGrid.linear(0.0, 2.0, 200)
 
-        model = LazyModel("tabpfn", version=version, n_estimators=2, device="cpu")
-        pdfs = model.fit(X.iloc[:120], z[:120]).predict_proba(X.iloc[120:], grid)
+        model = LazyModel(
+            "tabpfn", version=version, n_estimators=2, device="cpu"
+        )
+        pdfs = model.fit(X.iloc[:120], z[:120]).predict_proba(
+            X.iloc[120:], grid
+        )
 
         assert pdfs.shape == (40, grid.n_bins)
         assert np.allclose(np.trapezoid(pdfs, grid.centers, axis=1), 1.0)
@@ -279,13 +334,22 @@ class TestTabPFN:
         """
         generator = np.random.default_rng(0)
         z = generator.uniform(0.2, 1.8, 240)
-        X = pd.DataFrame({"a": z + generator.normal(0, 0.05, 240), "b": generator.normal(size=240)})
+        X = pd.DataFrame(
+            {
+                "a": z + generator.normal(0, 0.05, 240),
+                "b": generator.normal(size=240),
+            }
+        )
         X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
 
         grid = RedshiftGrid.linear(0.0, 2.0, 2000)
-        model = get_estimator("tabpfn", n_estimators=2, device="cpu").fit(X_ctx, z[:200])
+        model = get_estimator("tabpfn", n_estimators=2, device="cpu").fit(
+            X_ctx, z[:200]
+        )
         ours = model.predict(X_q, method="z_median", z_grid=grid)
-        theirs = model.regressor_.predict(X_q.to_numpy(dtype=np.float64), output_type="median")
+        theirs = model.regressor_.predict(
+            X_q.to_numpy(dtype=np.float64), output_type="median"
+        )
 
         assert ours == pytest.approx(theirs, abs=2 * grid.widths.max())
 
@@ -303,7 +367,12 @@ def test_chunking_the_query_rows_is_bit_identical():
 
     generator = np.random.default_rng(0)
     z = generator.uniform(0.2, 1.8, 240)
-    X = pd.DataFrame({"a": z + generator.normal(0, 0.1, 240), "b": generator.normal(size=240)})
+    X = pd.DataFrame(
+        {
+            "a": z + generator.normal(0, 0.1, 240),
+            "b": generator.normal(size=240),
+        }
+    )
     X_ctx, z_ctx = X.iloc[:200], z[:200]
     X_q = X.iloc[200:].reset_index(drop=True)
 
@@ -361,7 +430,9 @@ class TestMissingBackend:
         with pytest.raises(ImportError, match=r"lazy-photoz\[tabfm\]"):
             LazyModel("tabfm").fit(X, z)
 
-    def test_the_missing_backend_is_reported_before_parameter_problems(self, without, tiny):
+    def test_the_missing_backend_is_reported_before_parameter_problems(
+        self, without, tiny
+    ):
         """With 40 context rows the default 10x10 hierarchy is also too big.
 
         The install problem is the one to report: sending someone off to change

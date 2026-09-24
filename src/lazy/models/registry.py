@@ -48,5 +48,7 @@ def get_estimator(name: str, **params) -> BasePhotoZEstimator:
     try:
         cls = ESTIMATORS[name]
     except KeyError:
-        raise KeyError(f"unknown estimator {name!r}; known: {list_estimators()}") from None
+        raise KeyError(
+            f"unknown estimator {name!r}; known: {list_estimators()}"
+        ) from None
     return cls(**params)

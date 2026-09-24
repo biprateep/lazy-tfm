@@ -18,7 +18,9 @@ def resolve_device(device: str = "auto") -> str:
             import torch
 
             if not torch.cuda.is_available():
-                raise RuntimeError(f"device={device!r} requested but CUDA is unavailable")
+                raise RuntimeError(
+                    f"device={device!r} requested but CUDA is unavailable"
+                )
         return device
     try:
         import torch

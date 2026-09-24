@@ -116,7 +116,11 @@ class LazyModel(BasePhotoZEstimator):
 
     def __repr__(self) -> str:
         defaults = _backend_defaults(self.model) or {}
-        params = {k: v for k, v in self._params.items() if k not in defaults or v != defaults[k]}
+        params = {
+            k: v
+            for k, v in self._params.items()
+            if k not in defaults or v != defaults[k]
+        }
         inner = ", ".join(f"{k}={v!r}" for k, v in sorted(params.items()))
         return f"LazyModel({self.model!r}{', ' + inner if inner else ''})"
 
@@ -126,13 +130,17 @@ class LazyModel(BasePhotoZEstimator):
         self.estimator_ = self._build()
         self.estimator_.fit(X, y)
 
-    def _predict_pdf(self, X: pd.DataFrame, grid: RedshiftGrid) -> NDArray[np.float64]:
+    def _predict_pdf(
+        self, X: pd.DataFrame, grid: RedshiftGrid
+    ) -> NDArray[np.float64]:
         return self.estimator_._predict_pdf(X, grid)
 
     def _build(self) -> BasePhotoZEstimator:
         """The unfitted backend these parameters describe, validated."""
         if self.model not in ESTIMATORS:
-            raise ValueError(f"unknown model {self.model!r}; known: {list_estimators()}")
+            raise ValueError(
+                f"unknown model {self.model!r}; known: {list_estimators()}"
+            )
         cls = ESTIMATORS[self.model]
         unknown = sorted(set(self._params) - set(_backend_defaults(self.model)))
         if unknown:
@@ -150,7 +158,11 @@ class LazyModel(BasePhotoZEstimator):
         raises ``AttributeError`` rather than recursing.
         """
         state = self.__dict__
-        if name.startswith("_") or "model" not in state or "_params" not in state:
+        if (
+            name.startswith("_")
+            or "model" not in state
+            or "_params" not in state
+        ):
             raise AttributeError(name)
         if "estimator_" in state:
             try:
@@ -166,7 +178,9 @@ class LazyModel(BasePhotoZEstimator):
         backend = ESTIMATORS.get(state["model"])
         if backend is None:
             raise AttributeError(f"LazyModel has no attribute {name!r}")
-        raise AttributeError(f"neither LazyModel nor {backend.__name__} has attribute {name!r}")
+        raise AttributeError(
+            f"neither LazyModel nor {backend.__name__} has attribute {name!r}"
+        )
 
     # -- scikit-learn parameter protocol -----------------------------------
     #
@@ -217,7 +231,10 @@ def _backend_defaults(model) -> dict | None:
         return None
     return {
         name: parameter.default
-        for name, parameter in inspect.signature(cls.__init__).parameters.items()
+        for name, parameter in inspect.signature(
+            cls.__init__
+        ).parameters.items()
         if name not in ("self", "z_grid")
-        and parameter.kind not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
+        and parameter.kind
+        not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
     }
