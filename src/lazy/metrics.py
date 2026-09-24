@@ -2,10 +2,10 @@
 # Copyright (c) 2025 Biprateep Dey
 """Photo-z metrics, following the LSST DESC PZ Data Challenge (DC1) definitions.
 
-Every definition here is the one used to produce the published DC1 numbers, read
-off ``LSSTDESC/PZDC1paper/metric_scripts/individual_metrics.py`` rather than
-paraphrased from the text, so that our columns and Schmidt et al. (2020) Tables
-2, 3 and B1 are directly comparable.
+Every definition here is the one used to produce the published DC1 numbers,
+read off ``LSSTDESC/PZDC1paper/metric_scripts/individual_metrics.py`` rather
+than paraphrased from the text, so that our columns and Schmidt et al. (2020)
+Tables 2, 3 and B1 are directly comparable.
 
 Point estimates (Appendix B1)::
 
@@ -18,42 +18,63 @@ Point estimates (Appendix B1)::
 PDF metrics on a grid of bin centres (:class:`lazy.grid.RedshiftGrid`)::
 
     CDE loss  = mean_i [ trapz(p_i^2, z) - 2 p_i(z_nearest to z_true_i) ]
-    PIT_i     = integral of the gridded (linearly interpolated) p_i from 0 to z_true_i
-    KS, CvM   = one-sample goodness-of-fit statistics of the PIT sample against
-                U(0, 1) (DC1 used ``skgof``; ``scipy.stats`` gives the identical
-                statistics)
-    AD        = DC1 discards PIT values outside ``(vmin, vmax)`` -- the statistic
-                diverges at 0 and 1 -- and runs a one-sample Anderson-Darling
-                test of the survivors against ``U(vmin, vmax)``. DC1 reports two
-                cuts; :data:`AD_CUTS` holds them.
+    PIT_i     = integral of the gridded (linearly interpolated) p_i from 0
+                to z_true_i
+    KS, CvM   = one-sample goodness-of-fit statistics of the PIT sample
+                against U(0, 1) (DC1 used ``skgof``; ``scipy.stats`` gives
+                the identical statistics)
+    AD        = DC1 discards PIT values outside ``(vmin, vmax)`` -- the
+                statistic diverges at 0 and 1 -- and runs a one-sample
+                Anderson-Darling test of the survivors against
+                ``U(vmin, vmax)``. DC1 reports two cuts; :data:`AD_CUTS`
+                holds them.
 
 The nearest-grid-point likelihood (rather than linear interpolation) is also
 what the Cal-PIT reference implementation uses, and is exact for the
 piecewise-constant densities this project produces.
+
+Typical usage example:
+
+  table = metrics.summarize(z_true, grid.centers, pdfs, label="tabfm")
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from dataclasses import dataclass
+import dataclasses
 
 import numpy as np
-from numpy.typing import ArrayLike
-from numpy.typing import NDArray
+import numpy.typing as npt
 import pandas as pd
 from scipy import stats
+
+from lazy import _typing
 
 OUTLIER_FLOOR = 0.06
 DC1_OUTLIER_THRESHOLD = 0.15
 PIT_EXTREME = 1e-4
-# The two Anderson-Darling cut ranges DC1 tabulates (AD1, AD2); the script also
-# computed (0.1, 0.9), which the paper does not quote.
+# The two Anderson-Darling cut ranges DC1 tabulates (AD1, AD2); the script
+# also computed (0.1, 0.9), which the paper does not quote.
 AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PointMetrics:
-    """The DC1 Appendix B1 point-estimate statistics for one sample."""
+    """The DC1 Appendix B1 point-estimate statistics for one sample.
+
+    All statistics are of the scaled residual
+    ``ez = (z_phot - z_true) / (1 + z_true)``.
+
+    Attributes:
+        n: Number of objects.
+        bias: Median of ``ez``.
+        sigma_mad: ``1.4826 * median(|ez - median(ez)|)``.
+        sigma_iqr: Interquartile range of ``ez`` divided by 1.349.
+        outlier_rate: Fraction of objects with
+            ``|ez| > outlier_threshold``.
+        outlier_threshold: ``max(0.06, 3 * sigma_iqr)``.
+        outlier_rate_015: Fraction of objects with ``|ez| > 0.15``.
+        median_abs_ez: Median of ``|ez|``.
+    """
 
     n: int
     bias: float
@@ -65,13 +86,29 @@ class PointMetrics:
     median_abs_ez: float
 
     def as_dict(self) -> dict[str, float | int]:
-        """The metrics as a plain dict, for building a table row."""
-        return asdict(self)
+        """Returns the metrics as a plain dict, for building a table row."""
+        return dataclasses.asdict(self)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class PDFMetrics:
-    """The DC1 conditional-density and PIT statistics for one sample."""
+    """The DC1 conditional-density and PIT statistics for one sample.
+
+    Attributes:
+        n: Number of objects.
+        cde_loss: Conditional-density-estimate loss (see :func:`cde_loss`).
+        pit_ks: Kolmogorov-Smirnov statistic of the PIT against U(0, 1).
+        pit_ks_pvalue: Its p-value.
+        pit_cvm: Cramer-von Mises statistic of the PIT against U(0, 1).
+        pit_ad1: DC1 Anderson-Darling statistic for the first cut of
+            :data:`AD_CUTS`.
+        pit_ad2: The same for the second cut.
+        pit_rmse: RMS difference between the sorted PIT values and the
+            uniform quantiles.
+        pit_kl: KL divergence of the binned PIT histogram from uniform.
+        pit_outlier_rate: Fraction of PIT values within :data:`PIT_EXTREME`
+            of 0 or 1.
+    """
 
     n: int
     cde_loss: float
@@ -85,8 +122,8 @@ class PDFMetrics:
     pit_outlier_rate: float
 
     def as_dict(self) -> dict[str, float | int]:
-        """The metrics as a plain dict, for building a table row."""
-        return asdict(self)
+        """Returns the metrics as a plain dict, for building a table row."""
+        return dataclasses.asdict(self)
 
 
 # --------------------------------------------------------------------------
@@ -95,15 +132,22 @@ class PDFMetrics:
 
 
 def scaled_residual(
-    z_true: ArrayLike, z_pred: ArrayLike
-) -> NDArray[np.float64]:
-    """``ez = (z_phot - z_true) / (1 + z_true)``, the residual every point metric is built on.
+    z_true: npt.ArrayLike, z_pred: npt.ArrayLike
+) -> _typing.FloatArray:
+    """The residual ``(z_phot - z_true) / (1 + z_true)``.
 
-    Dividing by ``1 + z`` is what makes a 0.05 error at z = 0.2 and at z = 1.5
-    comparable: photometric redshift errors scale with the observed wavelength
-    shift, not with z itself.
+    This ``ez`` is the residual every point metric is built on. Dividing by
+    ``1 + z`` is what makes a 0.05 error at z = 0.2 and at z = 1.5
+    comparable: photometric redshift errors scale with the observed
+    wavelength shift, not with z itself.
+
+    Args:
+        z_true: True redshifts, finite, shape (n,).
+        z_pred: Point redshifts, finite, shape (n,).
+
+    Returns:
+        The scaled residuals ``ez``, shape (n,).
     """
-
     truth = np.asarray(z_true, dtype=float)
     pred = np.asarray(z_pred, dtype=float)
     if truth.shape != pred.shape or truth.ndim != 1:
@@ -113,16 +157,22 @@ def scaled_residual(
     return (pred - truth) / (1.0 + truth)
 
 
-def point_metrics(z_true: ArrayLike, z_pred: ArrayLike) -> PointMetrics:
+def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
     """Bias, scatter and outlier rate of a set of point redshifts.
 
     ``sigma_iqr`` and ``sigma_mad`` are both robust widths; they differ when
     the residual distribution has heavy tails, and reporting both is what DC1
     does. The outlier threshold is ``max(0.06, 3 * sigma_IQR)``, so a model
-    with tiny scatter is not credited for having few "outliers" merely because
-    its own threshold shrank.
-    """
+    with tiny scatter is not credited for having few "outliers" merely
+    because its own threshold shrank.
 
+    Args:
+        z_true: True redshifts, finite, shape (n,).
+        z_pred: Point redshifts, finite, shape (n,).
+
+    Returns:
+        The statistics.
+    """
     ez = scaled_residual(z_true, z_pred)
     median = float(np.median(ez))
     q25, q75 = np.percentile(ez, [25.0, 75.0])
@@ -146,15 +196,24 @@ def point_metrics(z_true: ArrayLike, z_pred: ArrayLike) -> PointMetrics:
 
 
 def normalize_grid_pdfs(
-    z_grid: ArrayLike, pdfs: ArrayLike
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Clip to non-negative, then renormalize each row to unit trapezoid mass.
 
-    Trapezoid is the DC1/``qp`` convention (``Ensemble.evaluate(..., norm=True)``)
-    and the one :func:`cde_loss` integrates with, so normalizing any other way
-    would leave ``trapz(p) != 1`` inside the loss.
-    """
+    Trapezoid is the DC1/``qp`` convention
+    (``Ensemble.evaluate(..., norm=True)``) and the one :func:`cde_loss`
+    integrates with, so normalizing any other way would leave
+    ``trapz(p) != 1`` inside the loss. Non-finite values are treated as zero,
+    and a row with no mass left becomes a uniform density.
 
+    Args:
+        z_grid: Strictly increasing bin centres, shape (g,) with g >= 2.
+        pdfs: Densities at those centres, shape (n, g).
+
+    Returns:
+        A tuple (grid, density): the centres as a float array, shape (g,),
+        and the normalised densities, shape (n, g).
+    """
     grid = np.asarray(z_grid, dtype=float)
     density = np.array(pdfs, dtype=float)
     if grid.ndim != 1 or density.ndim != 2 or density.shape[1] != grid.size:
@@ -174,10 +233,17 @@ def normalize_grid_pdfs(
 
 
 def normalization_error(
-    z_grid: ArrayLike, pdfs: ArrayLike
-) -> NDArray[np.float64]:
-    """``|trapz(p, z) - 1|`` per row: the check callers assert on."""
+    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+) -> _typing.FloatArray:
+    """``|trapz(p, z) - 1|`` per row: the check callers assert on.
 
+    Args:
+        z_grid: Bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g).
+
+    Returns:
+        The absolute normalisation error of each row, shape (n,).
+    """
     grid = np.asarray(z_grid, dtype=float)
     return np.abs(
         np.trapezoid(np.asarray(pdfs, dtype=float), grid, axis=1) - 1.0
@@ -185,33 +251,56 @@ def normalization_error(
 
 
 def grid_cdf(
-    z_grid: NDArray[np.float64], density: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Cumulative mass at each grid point, by the same trapezoid rule as the norm."""
+    z_grid: _typing.FloatArray, density: _typing.FloatArray
+) -> _typing.FloatArray:
+    """Cumulative mass at each grid point, by the trapezoid rule of the norm.
 
+    Args:
+        z_grid: Bin centres, shape (g,).
+        density: Densities at those centres, shape (n, g).
+
+    Returns:
+        The cumulative mass below each centre, shape (n, g); column 0 is
+        zero.
+    """
     increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(z_grid)
     return np.column_stack(
         (np.zeros(len(density)), np.cumsum(increments, axis=1))
     )
 
 
-def z_peak(z_grid: ArrayLike, density: ArrayLike) -> NDArray[np.float64]:
-    """DC1 ``z_PEAK``: the mode of the PDF."""
+def z_peak(z_grid: npt.ArrayLike, density: npt.ArrayLike) -> _typing.FloatArray:
+    """DC1 ``z_PEAK``: the mode of the PDF.
 
+    Args:
+        z_grid: Bin centres, shape (g,).
+        density: Densities at those centres, shape (n, g).
+
+    Returns:
+        The centre of each row's highest bin, shape (n,).
+    """
     grid = np.asarray(z_grid, dtype=float)
     return grid[np.argmax(np.asarray(density, dtype=float), axis=1)]
 
 
 def z_weight(
-    z_grid: ArrayLike, density: ArrayLike, frac: float = 0.05
-) -> NDArray[np.float64]:
+    z_grid: npt.ArrayLike, density: npt.ArrayLike, frac: float = 0.05
+) -> _typing.FloatArray:
     """DC1 ``z_WEIGHT``: the main-peak weighted mean of Dahlen et al. (2013).
 
-    The main peak is the contiguous run of grid points containing the mode over
-    which ``p(z) >= frac * p(z_PEAK)``; ``z_WEIGHT`` is the probability-weighted
-    mean of ``z`` over that run.
-    """
+    The main peak is the contiguous run of grid points containing the mode
+    over which ``p(z) >= frac * p(z_PEAK)``; ``z_WEIGHT`` is the
+    probability-weighted mean of ``z`` over that run.
 
+    Args:
+        z_grid: Bin centres, shape (g,).
+        density: Densities at those centres, shape (n, g).
+        frac: Fraction of the peak density that bounds the main peak.
+
+    Returns:
+        The main-peak weighted mean of each row, shape (n,). A peak one grid
+        point wide falls back to the mode.
+    """
     grid = np.asarray(z_grid, dtype=float)
     dens = np.asarray(density, dtype=float)
     n, g = dens.shape
@@ -239,10 +328,20 @@ def z_weight(
 
 
 def grid_point_estimates(
-    z_grid: ArrayLike, pdfs: ArrayLike
-) -> dict[str, NDArray[np.float64]]:
-    """The DC1 point estimators (``peak``, ``weight``) plus mean and median."""
+    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+) -> dict[str, _typing.FloatArray]:
+    """The DC1 point estimators (``peak``, ``weight``) plus mean and median.
 
+    The densities are normalised first (see :func:`normalize_grid_pdfs`).
+
+    Args:
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g).
+
+    Returns:
+        A dict with keys ``"z_peak"``, ``"z_weight"``, ``"z_mean"`` and
+        ``"z_median"``, each an array of shape (n,).
+    """
     grid, density = normalize_grid_pdfs(z_grid, pdfs)
     cdf = grid_cdf(grid, density)
     rows = np.arange(len(density))
@@ -252,30 +351,44 @@ def grid_point_estimates(
     frac = np.divide(
         0.5 - cdf[rows, left], span, out=np.zeros(len(density)), where=span > 0
     )
+    z_mean: _typing.FloatArray = np.asarray(
+        np.trapezoid(density * grid[None, :], grid, axis=1), dtype=np.float64
+    )
     return {
         "z_peak": z_peak(grid, density),
         "z_weight": z_weight(grid, density),
-        "z_mean": np.trapezoid(density * grid[None, :], grid, axis=1),
+        "z_mean": z_mean,
         "z_median": grid[left] + frac * (grid[right] - grid[left]),
     }
 
 
 def evaluate_grid_at_truth(
-    z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike
+    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
 ) -> tuple[
-    NDArray[np.float64],
-    NDArray[np.float64],
-    NDArray[np.float64],
-    NDArray[np.float64],
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
 ]:
-    """Return ``(grid, density, pdf_at_truth, pit)``.
+    """Returns ``(grid, density, pdf_at_truth, pit)``.
 
-    ``pdf_at_truth`` is the density at the grid point *nearest* the truth (the
-    DC1 and Cal-PIT convention, exact for a piecewise-constant density); ``pit``
-    is the integral of the linearly interpolated density from the grid's left
-    edge to the truth, which is what ``qp``'s gridded ``integrate`` computes.
+    ``pdf_at_truth`` is the density at the grid point *nearest* the truth
+    (the DC1 and Cal-PIT convention, exact for a piecewise-constant density);
+    ``pit`` is the integral of the linearly interpolated density from the
+    grid's left edge to the truth, which is what ``qp``'s gridded
+    ``integrate`` computes.
+
+    Args:
+        z_true: True redshifts, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g).
+
+    Returns:
+        A tuple (grid, density, pdf_at_truth, pit): the centres, shape (g,);
+        the normalised densities, shape (n, g); the density at the truth,
+        shape (n,), zero for a truth more than half a bin outside the grid;
+        and the PIT values, shape (n,), in [0, 1].
     """
-
     truth = np.asarray(z_true, dtype=float)
     grid, density = normalize_grid_pdfs(z_grid, pdfs)
     if truth.ndim != 1 or truth.size != len(density):
@@ -303,15 +416,24 @@ def evaluate_grid_at_truth(
     return grid, density, pdf_at_truth, pit
 
 
-def cde_loss(z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike) -> float:
+def cde_loss(
+    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+) -> float:
     """The conditional-density-estimate loss; lower is better.
 
     ``E[integral p^2] - 2 E[p(z_true)]`` is the L2 distance between the
     estimated and true conditional densities, up to a constant that does not
-    depend on the estimator -- so it ranks methods without knowing the truth's
-    density. It is the single number this project optimises.
-    """
+    depend on the estimator -- so it ranks methods without knowing the
+    truth's density. It is the single number this project optimises.
 
+    Args:
+        z_true: True redshifts, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+
+    Returns:
+        The loss, averaged over objects.
+    """
     grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(
         z_true, z_grid, pdfs
     )
@@ -326,15 +448,23 @@ def cde_loss(z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike) -> float:
 
 
 def anderson_darling_dc1(
-    pit: ArrayLike, vmin: float = 0.05, vmax: float = 0.95
+    pit: npt.ArrayLike, vmin: float = 0.05, vmax: float = 0.95
 ) -> float:
     """DC1's Anderson-Darling statistic of the PIT sample.
 
     The statistic diverges at 0 and 1, so DC1 discards PIT values outside
     ``(vmin, vmax)`` and tests the survivors against ``U(vmin, vmax)``
-    (``individual_metrics.EvaluateMetric.AD``, which calls ``skgof.ad_test``).
-    """
+    (``individual_metrics.EvaluateMetric.AD``, which calls
+    ``skgof.ad_test``).
 
+    Args:
+        pit: PIT values, shape (n,).
+        vmin: Lower cut; values at or below it are discarded.
+        vmax: Upper cut; values at or above it are discarded.
+
+    Returns:
+        The statistic, or NaN when no value survives the cuts.
+    """
     values = np.asarray(pit, dtype=float)
     kept = np.sort(values[(values > vmin) & (values < vmax)])
     n = kept.size
@@ -345,7 +475,7 @@ def anderson_darling_dc1(
     return float(-n - np.mean((2 * i - 1) * (np.log(u) + np.log1p(-u[::-1]))))
 
 
-def pit_statistics(pit: ArrayLike, n_bins: int = 20) -> dict[str, float]:
+def pit_statistics(pit: npt.ArrayLike, n_bins: int = 20) -> dict[str, float]:
     """Goodness-of-fit of the PIT sample against U(0, 1), several ways.
 
     A well-calibrated set of PDFs has uniform PIT values. Each statistic is
@@ -353,8 +483,16 @@ def pit_statistics(pit: ArrayLike, n_bins: int = 20) -> dict[str, float]:
     KS to the largest CDF gap, CvM and AD to the whole shape (AD weighted
     towards the tails), KL to the binned histogram, and ``pit_outlier_rate``
     to the spikes at 0 and 1 that mark catastrophic failures.
-    """
 
+    Args:
+        pit: PIT values, non-empty, shape (n,).
+        n_bins: Number of histogram bins on [0, 1] for the KL divergence.
+
+    Returns:
+        A dict with the :class:`PDFMetrics` PIT fields (``pit_ks``,
+        ``pit_ks_pvalue``, ``pit_cvm``, ``pit_ad1``, ``pit_ad2``,
+        ``pit_rmse``, ``pit_kl``, ``pit_outlier_rate``).
+    """
     values = np.asarray(pit, dtype=float)
     if values.ndim != 1 or values.size == 0:
         raise ValueError("pit must be a non-empty 1D array")
@@ -384,10 +522,19 @@ def pit_statistics(pit: ArrayLike, n_bins: int = 20) -> dict[str, float]:
 
 
 def pdf_metrics(
-    z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike
-) -> tuple[PDFMetrics, NDArray[np.float64]]:
-    """Score grid PDFs; returns the metric bundle and the per-object PIT values."""
+    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+) -> tuple[PDFMetrics, _typing.FloatArray]:
+    """Scores grid PDFs with the CDE loss and the PIT statistics.
 
+    Args:
+        z_true: True redshifts, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+
+    Returns:
+        A tuple (metrics, pit): the metric bundle and the per-object PIT
+        values, shape (n,).
+    """
     grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
         z_true, z_grid, pdfs
     )
@@ -400,10 +547,26 @@ def pdf_metrics(
 
 
 def evaluate_grid_pdfs(
-    z_true: ArrayLike, z_grid: ArrayLike, pdfs: ArrayLike, point: str = "z_peak"
-) -> tuple[PointMetrics, PDFMetrics, NDArray[np.float64]]:
-    """Convenience: point metrics from a PDF reduction plus the PDF metrics."""
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    point: str = "z_peak",
+) -> tuple[PointMetrics, PDFMetrics, _typing.FloatArray]:
+    """Convenience: point metrics from a PDF reduction plus the PDF metrics.
 
+    Args:
+        z_true: True redshifts, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        point: The reduction to score as the point estimate: a key of
+            :func:`grid_point_estimates` (``"z_peak"``, ``"z_weight"``,
+            ``"z_mean"`` or ``"z_median"``).
+
+    Returns:
+        A tuple (point_metrics, pdf_metrics, pit): the point statistics of
+        the chosen reduction, the PDF metric bundle and the per-object PIT
+        values, shape (n,).
+    """
     estimates = grid_point_estimates(z_grid, pdfs)
     if point not in estimates:
         raise ValueError(f"point must be one of {sorted(estimates)}")
@@ -412,9 +575,9 @@ def evaluate_grid_pdfs(
 
 
 def summarize(
-    z_true: ArrayLike,
-    z_grid: ArrayLike,
-    pdfs: ArrayLike,
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
     point: str = "z_peak",
     label: str | None = None,
 ) -> pd.DataFrame:
@@ -423,13 +586,27 @@ def summarize(
     Built for stacking: ``pd.concat([summarize(..., label=name) for ...])``
     gives the comparison table that the tutorials and the paper both report.
 
-    >>> z = np.array([0.5, 1.0])
-    >>> grid = np.linspace(0.005, 1.995, 200)
-    >>> pdfs = np.ones((2, 200))
-    >>> summarize(z, grid, pdfs, label="uniform")["model"].tolist()
-    ['uniform']
-    """
+    Args:
+        z_true: True redshifts, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        point: The point-estimate reduction, as in
+            :func:`evaluate_grid_pdfs`.
+        label: Model name for a leading ``model`` column; no such column
+            when ``None``.
 
+    Returns:
+        A one-row table: ``model`` (if labelled), ``point_estimate``, the
+        :class:`PointMetrics` fields and the :class:`PDFMetrics` fields other
+        than ``n``.
+
+    Examples:
+        >>> z = np.array([0.5, 1.0])
+        >>> grid = np.linspace(0.005, 1.995, 200)
+        >>> pdfs = np.ones((2, 200))
+        >>> summarize(z, grid, pdfs, label="uniform")["model"].tolist()
+        ['uniform']
+    """
     point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(
         z_true, z_grid, pdfs, point=point
     )
