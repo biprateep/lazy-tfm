@@ -1,10 +1,14 @@
+# Monthly update PRs for the GitHub Actions and for the locked Python
+# dependencies (uv.lock). The pre-commit hook revisions are not covered:
+# refresh them with `uv run pre-commit autoupdate`, keeping the ruff dev pin
+# in pyproject.toml in step with the ruff hook.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "monthly"
