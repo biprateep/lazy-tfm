@@ -86,9 +86,7 @@ class TestTabFM:
         from lazy.models.tabfm import TabFMPerformanceWarning
 
         X, z = tiny
-        est = get_estimator(
-            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba"
-        )
+        est = get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba")
         with warnings.catch_warnings():
             warnings.simplefilter("error", TabFMPerformanceWarning)
             est.fit(X, z)

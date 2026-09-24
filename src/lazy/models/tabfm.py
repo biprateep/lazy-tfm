@@ -61,6 +61,7 @@ class TabFMPerformanceWarning(UserWarning):
     raised.
     """
 
+
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
 
