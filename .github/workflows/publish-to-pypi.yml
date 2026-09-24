@@ -1,32 +1,34 @@
-# Publish to PyPI when a GitHub release is published, via trusted publishing
-# (no API token stored in the repository).
-#   https://docs.pypi.org/trusted-publishers/
+# Build, check and publish the package. See CONTRIBUTING.md, "Making a release".
 #
-# Before the first release, register this workflow as a trusted publisher for
-# the `lazy-photoz` project on PyPI.
+#   * A published GitHub release uploads to PyPI.
+#   * Running this workflow by hand (Actions -> Publish -> Run workflow) uploads
+#     to TestPyPI instead: a dry run of the whole path, safe to repeat.
+#
+# Uploads use trusted publishing, so no API token is stored in the repository,
+# and the publish action attaches PEP 740 attestations to each file. Both
+# indexes must list this workflow as a trusted publisher, each for its own
+# GitHub environment (`pypi`, `testpypi`):
+#   https://docs.pypi.org/trusted-publishers/adding-a-publisher/
 
-name: Upload Python Package
+name: Publish
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
     - uses: actions/checkout@v7
     - name: Install uv
       uses: astral-sh/setup-uv@v7
-    - name: Build sdist and wheel
-      run: uv build
     - name: Check the version matches the release tag
+      if: github.event_name == 'release'
       run: |
         version=$(uv version --short)
         tag="${GITHUB_REF_NAME#v}"
@@ -34,5 +36,54 @@ jobs:
           echo "pyproject version $version does not match release tag $tag" >&2
           exit 1
         fi
-    - name: Publish package
-      run: uv publish --trusted-publishing always
+    - name: Build the sdist and wheel
+      run: uv build
+    - name: Check the metadata renders on PyPI
+      run: uvx twine check --strict dist/*
+    - name: Install the wheel into a clean environment and import it
+      run: |
+        uv venv --python 3.12 /tmp/smoke
+        VIRTUAL_ENV=/tmp/smoke uv pip install dist/*.whl
+        /tmp/smoke/bin/python -c "import lazy; print('lazy', lazy.__version__)"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: dist
+        path: dist/
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/lazy-photoz
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: dist
+        path: dist/
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        # A version can be uploaded once; re-running a dry run should not fail.
+        skip-existing: true
+
+  pypi:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lazy-photoz
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: dist
+        path: dist/
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
