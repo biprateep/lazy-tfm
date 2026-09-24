@@ -34,7 +34,7 @@ own splits.
 
 It works on a plain {class}`pandas.DataFrame`, so your own catalogue goes
 through the same code via {meth}`~lazy.datasets.Catalog.from_frame` or
-{meth}`~lazy.datasets.Catalog.build_features`. Any tabular features work; the
+{func}`~lazy.datasets.build_features`. Any tabular features work; the
 DC1 helpers are a convenience, not a requirement.
 
 ## The model
