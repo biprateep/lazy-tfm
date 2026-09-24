@@ -35,6 +35,7 @@ dependencies = [
 "Source Code" = "https://github.com/biprateep/lazy-photoz"
 "Documentation" = "https://lazy-photoz.readthedocs.io"
 "Bug Tracker" = "https://github.com/biprateep/lazy-photoz/issues"
+"Changelog" = "https://github.com/biprateep/lazy-photoz/blob/main/CHANGELOG.md"
 
 # Each backend is optional: `pip install lazy-photoz` on its own gives you the
 # grid, metrics, plotting and dataset machinery with no deep-learning stack.
