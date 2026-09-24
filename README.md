@@ -270,8 +270,9 @@ uv run pre-commit install
 uv run pytest
 ```
 
-`uv sync --locked` is what CI runs; if it fails, `uv lock` and commit the
-result. The test suite needs neither a GPU nor a checkpoint.
+The test suite needs neither a GPU nor a checkpoint. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the checks CI runs, building the docs and
+making a release.
 
 ## Repository layout
 
