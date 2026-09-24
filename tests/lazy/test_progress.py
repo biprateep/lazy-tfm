@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The progress bars: the helper, the parameter, and what each backend reports.
 
 The helper tests need nothing. The per-backend ones load a checkpoint, so they

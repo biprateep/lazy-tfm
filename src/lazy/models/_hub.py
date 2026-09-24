@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Pretrained checkpoints: where they come from, and where they are cached.
 
 Every backend in :mod:`lazy.models` runs a pretrained tabular foundation model

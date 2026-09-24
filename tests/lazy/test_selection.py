@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The spectroscopic selection function: who gets a redshift, and who is quietly dropped.
 
 The library's own reproduction test -- that this port returns the same galaxies

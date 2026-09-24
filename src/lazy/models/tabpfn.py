@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Photo-z densities from TabPFN-3's bar distribution.
 
 TabPFN-3 (Prior Labs, 2026) is an in-context tabular foundation model, and its

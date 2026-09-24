@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """One entry point for every backend, chosen by name.
 
 :class:`LazyModel` is the class most code should use. It takes the backend name

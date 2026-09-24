@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The estimator protocol, exercised through a backend-free stand-in.
 
 Nothing here needs a GPU or a checkpoint: a Gaussian whose mean tracks the first

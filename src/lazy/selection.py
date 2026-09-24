@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The spectroscopic selection function: how a complete catalogue becomes a biased one.
 
 A photo-z model trained on a spectroscopic sample is trained on the galaxies

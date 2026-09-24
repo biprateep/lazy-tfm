@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
+
 # Sphinx configuration: https://www.sphinx-doc.org/en/master/usage/configuration.html
 #
 # Pages are MyST Markdown (via myst-nb, which also renders notebooks when the

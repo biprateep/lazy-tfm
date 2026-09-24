@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Publication figure style and the standard photo-z diagnostic plots.
 
 ``lazy.plotting.style`` is general-purpose: journal geometry, house rcParams and

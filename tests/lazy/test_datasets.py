@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Where cached catalogues land, how they are handed back, and the feature views of them.
 
 The same code has to run on a laptop, a shared login node and a compute node

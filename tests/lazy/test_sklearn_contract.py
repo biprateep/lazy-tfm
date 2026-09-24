@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """scikit-learn's own checks of the estimator contract, on every estimator.
 
 Only the checks that need no fitting: those would load a checkpoint. Between

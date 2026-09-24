@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
+
 import numpy as np
 import pytest
 from scipy import stats

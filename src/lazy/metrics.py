@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Photo-z metrics, following the LSST DESC PZ Data Challenge (DC1) definitions.
 
 Every definition here is the one used to produce the published DC1 numbers, read

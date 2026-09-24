@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """LAZY -- Lazy but Accurate photo-Z for Yinz.
 
 Photometric redshift PDFs from tabular foundation models. The models are

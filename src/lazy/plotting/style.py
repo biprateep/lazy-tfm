@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Publication plot style: journal geometry, rcParams and figure helpers.
 
 Every figure in :mod:`lazy.plotting.diagnostics` is drawn through this, and it

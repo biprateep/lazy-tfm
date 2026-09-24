@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The photo-z backends, and the name-based entry point to them.
 
 Two ways in, and they give you the same estimator::

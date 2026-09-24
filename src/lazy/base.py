@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The estimator protocol every :mod:`lazy` photo-z model implements.
 
 The API is scikit-learn's, with one difference: the natural output of a photo-z

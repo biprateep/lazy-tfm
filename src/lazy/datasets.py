@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Built-in photo-z catalogues: fetching them, caching them, turning them into features.
 
 The library is general purpose -- every estimator takes whatever tabular

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Backend wiring that can be checked without running a foundation model.
 
 Skipped wholesale when the optional backend is not installed, so the default

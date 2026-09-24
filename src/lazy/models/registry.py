@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The backend registry: which estimators exist and what they are called.
 
 Kept in its own module so that :class:`lazy.models.lazy_model.LazyModel` can

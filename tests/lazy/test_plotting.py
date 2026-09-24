@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Smoke tests: the diagnostics must draw without error and honour a given axes."""
 
 import matplotlib.pyplot as plt

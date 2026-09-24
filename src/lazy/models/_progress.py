@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Progress bars for the prediction loops.
 
 Every backend takes a ``progress`` parameter and hands it to :func:`bar`, but

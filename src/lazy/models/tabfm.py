@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Photo-z densities from TabFM's in-context classifier, as a bin hierarchy.
 
 TabFM (Google, 2026) is an in-context tabular foundation model: it is never

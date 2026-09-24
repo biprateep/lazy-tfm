@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """LazyModel: the name-addressed wrapper, its delegation and its sklearn contract.
 
 None of this constructs a backbone or touches the hub, so it runs anywhere.

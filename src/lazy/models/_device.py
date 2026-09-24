@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Resolving the ``device`` parameter shared by the foundation-model backends."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Redshift grids: the output format every :mod:`lazy` estimator writes onto.
 
 A conditional density estimate here is always a table: one row per galaxy, one

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Photo-z densities from TabICLv2's quantile regression head.
 
 TabICLv2 (Qu et al. 2026) is an in-context tabular foundation model whose

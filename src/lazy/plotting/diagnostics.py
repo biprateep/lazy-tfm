@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """The standard photo-z diagnostic figures, drawn from PDFs and truth.
 
 These are the plots that decide whether a photo-z estimator is any good, and

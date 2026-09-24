@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
 """Memory-bounded in-context inference for a fitted TabFM estimator.
 
 TabFM's public ``TabFMClassifier.predict_proba`` builds every ensemble member's
