@@ -85,7 +85,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         is_fitted_: ``True`` once :meth:`fit` has run.
         n_features_in_: Number of feature columns seen by :meth:`fit`.
         feature_names_in_: Their names, an object array of shape
-            (n_features_in_,).
+            (``n_features_in_``,).
     """
 
     #: The registered backend name (a key of :data:`lazy.ESTIMATORS`), set
