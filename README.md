@@ -283,8 +283,8 @@ result. The test suite needs neither a GPU nor a checkpoint.
 ## Repository layout
 
 This repository is the library alone: the public, installable package, its
-tests and its documentation. The production runs behind the paper are not
-tracked here.
+tests and its documentation. The production runs and figures behind the paper
+live in a separate repository that uses this package through its public API.
 
 ## Citing
 
