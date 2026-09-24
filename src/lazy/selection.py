@@ -38,7 +38,8 @@ in the file and RAIL reads it correctly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 import numpy as np

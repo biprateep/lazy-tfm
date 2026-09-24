@@ -25,11 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from cycler import cycler
 import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
-from cycler import cycler
 
 __all__ = [
     "PT_PER_INCH",

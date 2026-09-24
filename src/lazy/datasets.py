@@ -53,19 +53,20 @@ through the same code, either via :meth:`Catalog.from_frame` or by calling
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from functools import lru_cache
 import hashlib
 import itertools
 import os
-import urllib.request
-from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+import urllib.request
 
 import numpy as np
 import pandas as pd
 
-from lazy.selection import HSCGrid, grid_selection
+from lazy.selection import grid_selection
+from lazy.selection import HSCGrid
 
 __all__ = [
     "BANDS",
@@ -520,7 +521,7 @@ def _download(url: str, dest: Path, sha256: str) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
     print(f"lazy.datasets: downloading {url}", flush=True)
     try:
-        urllib.request.urlretrieve(url, tmp)  # noqa: S310 - the URL is a fixed https literal
+        urllib.request.urlretrieve(url, tmp)
         digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
         if digest != sha256:
             raise OSError(

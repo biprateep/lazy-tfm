@@ -32,7 +32,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lazy.plotting.style import figsize, one_to_one
+from lazy.plotting.style import figsize
+from lazy.plotting.style import one_to_one
 
 __all__ = [
     "diagnostic_panel",
@@ -328,7 +329,8 @@ def diagnostic_panel(
     Panels are z_phot-z_true, the residual trend, the PIT Q-Q and the stacked
     N(z). Returns the :class:`matplotlib.figure.Figure`.
     """
-    from lazy.metrics import evaluate_grid_pdfs, grid_point_estimates
+    from lazy.metrics import evaluate_grid_pdfs
+    from lazy.metrics import grid_point_estimates
 
     z_true = np.asarray(z_true, dtype=float)
     z_grid = np.asarray(z_grid, dtype=float)

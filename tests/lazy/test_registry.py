@@ -1,14 +1,12 @@
 import pytest
 
-from lazy import (
-    CHECKPOINTS,
-    DEFAULT_VERSIONS,
-    ESTIMATORS,
-    get_checkpoint,
-    get_estimator,
-    list_estimators,
-    list_versions,
-)
+from lazy import CHECKPOINTS
+from lazy import DEFAULT_VERSIONS
+from lazy import ESTIMATORS
+from lazy import get_checkpoint
+from lazy import get_estimator
+from lazy import list_estimators
+from lazy import list_versions
 from lazy.base import BasePhotoZEstimator
 
 

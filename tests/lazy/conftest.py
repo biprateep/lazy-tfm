@@ -59,7 +59,8 @@ def biasable_catalog():
     Every row has colour 0.5 and magnitude 21, so all of them sit in the pixel
     of ratio 0.5; the first hundred are marked as coming from the "train file".
     """
-    from lazy.datasets import BANDS, Catalog
+    from lazy.datasets import BANDS
+    from lazy.datasets import Catalog
 
     n = 2_000
     generator = np.random.default_rng(3)

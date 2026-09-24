@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
 
-from lazy.grid import DC1_GRID, RedshiftGrid, as_grid
+from lazy.grid import as_grid
+from lazy.grid import DC1_GRID
+from lazy.grid import RedshiftGrid
 
 
 def test_dc1_grid_matches_the_challenge_output_format():

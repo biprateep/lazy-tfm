@@ -76,7 +76,8 @@ class Checkpoint:
 
     def download(self, *, local_files_only: bool = False) -> Path:
         """Fetch (or locate) the weights and return the path they live at."""
-        from huggingface_hub import hf_hub_download, snapshot_download
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub import snapshot_download
 
         if self.filename is not None:
             return Path(
@@ -332,6 +333,6 @@ def is_cached(name: str, version: str | None = None) -> bool:
     """
     try:
         get_checkpoint(name, version).download(local_files_only=True)
-    except Exception:  # noqa: BLE001 - any hub failure means "not usable offline"
+    except Exception:
         return False
     return True

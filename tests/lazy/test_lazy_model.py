@@ -7,10 +7,15 @@ import numpy as np
 import pytest
 from sklearn.base import clone
 
-from lazy import DEFAULT_VERSIONS, LazyModel, list_estimators
+from lazy import DEFAULT_VERSIONS
+from lazy import LazyModel
+from lazy import list_estimators
 from lazy.base import BasePhotoZEstimator
-from lazy.grid import DC1_GRID, RedshiftGrid
-from lazy.models import TabFMHistogram, TabICLQuantile, TabPFNBarDistribution
+from lazy.grid import DC1_GRID
+from lazy.grid import RedshiftGrid
+from lazy.models import TabFMHistogram
+from lazy.models import TabICLQuantile
+from lazy.models import TabPFNBarDistribution
 
 
 @pytest.mark.parametrize("name", ["tabfm", "tabicl", "tabpfn"])

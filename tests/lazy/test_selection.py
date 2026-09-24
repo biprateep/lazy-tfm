@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lazy.selection import grid_selection, selection_summary
+from lazy.selection import grid_selection
+from lazy.selection import selection_summary
 
 
 @pytest.fixture

@@ -2,15 +2,13 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from lazy.metrics import (
-    AD_CUTS,
-    anderson_darling_dc1,
-    cde_loss,
-    grid_point_estimates,
-    normalize_grid_pdfs,
-    pdf_metrics,
-    point_metrics,
-)
+from lazy.metrics import AD_CUTS
+from lazy.metrics import anderson_darling_dc1
+from lazy.metrics import cde_loss
+from lazy.metrics import grid_point_estimates
+from lazy.metrics import normalize_grid_pdfs
+from lazy.metrics import pdf_metrics
+from lazy.metrics import point_metrics
 
 GRID = np.linspace(0.0, 2.0, 401)
 

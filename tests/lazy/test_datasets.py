@@ -9,16 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lazy.datasets import (
-    BANDS,
-    FEATURE_MODES,
-    RAW_COLUMNS,
-    Catalog,
-    data_home,
-    fetch_dc1,
-    fetch_hsc_grid,
-    make_selection_split,
-)
+from lazy.datasets import BANDS
+from lazy.datasets import Catalog
+from lazy.datasets import data_home
+from lazy.datasets import FEATURE_MODES
+from lazy.datasets import fetch_dc1
+from lazy.datasets import fetch_hsc_grid
+from lazy.datasets import make_selection_split
+from lazy.datasets import RAW_COLUMNS
 
 EXPECTED_COLUMNS = {
     "mag": 12,

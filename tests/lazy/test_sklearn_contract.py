@@ -6,15 +6,18 @@ them they hold ``__init__`` to storing its arguments and nothing else, and
 """
 
 import pytest
+from sklearn.utils.estimator_checks import check_get_params_invariance
+from sklearn.utils.estimator_checks import check_no_attributes_set_in_init
 from sklearn.utils.estimator_checks import (
-    check_get_params_invariance,
-    check_no_attributes_set_in_init,
     check_parameters_default_constructible,
-    check_set_params,
 )
+from sklearn.utils.estimator_checks import check_set_params
 
-from lazy import LazyModel, list_estimators
-from lazy.models import TabFMHistogram, TabICLQuantile, TabPFNBarDistribution
+from lazy import LazyModel
+from lazy import list_estimators
+from lazy.models import TabFMHistogram
+from lazy.models import TabICLQuantile
+from lazy.models import TabPFNBarDistribution
 
 ESTIMATORS = [
     *(LazyModel(name) for name in list_estimators()),

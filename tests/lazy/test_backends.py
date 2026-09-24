@@ -16,7 +16,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lazy import LazyModel, RedshiftGrid, get_estimator, list_versions
+from lazy import get_estimator
+from lazy import LazyModel
+from lazy import list_versions
+from lazy import RedshiftGrid
 
 needs_checkpoint = pytest.mark.skipif(
     os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",

@@ -36,13 +36,16 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 import pandas as pd
-from numpy.typing import ArrayLike, NDArray
 
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
-from lazy.models._progress import Progress, bar, check_progress
+from lazy.models._progress import bar
+from lazy.models._progress import check_progress
+from lazy.models._progress import Progress
 
 __all__ = [
     "TabFMHistogram",
@@ -315,7 +318,7 @@ class TabFMHistogram(BasePhotoZEstimator):
                 "inference must be 'auto', 'stream' or 'predict_proba'"
             )
         try:
-            import tabfm  # noqa: F401
+            import tabfm
         except ImportError as error:
             raise ImportError(
                 "TabFMHistogram needs the tabfm backend: pip install 'lazy-photoz[tabfm]'"
@@ -485,7 +488,8 @@ class TabFMHistogram(BasePhotoZEstimator):
         classes = np.asarray(classifier.classes_)
 
         if self.inference_ == "stream":
-            from lazy.models._icl_stream import classification_logits, softmax
+            from lazy.models._icl_stream import classification_logits
+            from lazy.models._icl_stream import softmax
 
             logits = classification_logits(
                 classifier,

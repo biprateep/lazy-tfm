@@ -38,15 +38,18 @@ estimator can implement the same protocol.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
+from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 import pandas as pd
-from numpy.typing import ArrayLike, NDArray
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted
 
-from lazy.grid import RedshiftGrid, as_grid
+from lazy.grid import as_grid
+from lazy.grid import RedshiftGrid
 
 __all__ = ["POINT_ESTIMATORS", "BasePhotoZEstimator"]
 

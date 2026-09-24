@@ -11,8 +11,10 @@ import pytest
 from sklearn.base import clone
 from sklearn.exceptions import NotFittedError
 
-from lazy.base import POINT_ESTIMATORS, BasePhotoZEstimator
-from lazy.grid import DC1_GRID, RedshiftGrid
+from lazy.base import BasePhotoZEstimator
+from lazy.base import POINT_ESTIMATORS
+from lazy.grid import DC1_GRID
+from lazy.grid import RedshiftGrid
 
 
 class GaussianDummy(BasePhotoZEstimator):

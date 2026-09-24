@@ -12,8 +12,10 @@ import pandas as pd
 import pytest
 from sklearn.base import clone
 
-from lazy import ESTIMATORS, LazyModel
-from lazy.models._progress import bar, check_progress
+from lazy import ESTIMATORS
+from lazy import LazyModel
+from lazy.models._progress import bar
+from lazy.models._progress import check_progress
 
 needs_checkpoint = pytest.mark.skipif(
     os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",

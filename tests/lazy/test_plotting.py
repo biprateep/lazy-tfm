@@ -6,18 +6,16 @@ import pytest
 
 from lazy.grid import DC1_GRID
 from lazy.metrics import evaluate_grid_pdfs
-from lazy.plotting import (
-    diagnostic_panel,
-    figsize,
-    plot_coverage,
-    plot_nz,
-    plot_pdfs,
-    plot_pit,
-    plot_pit_qq,
-    plot_residuals,
-    plot_zphot_ztrue,
-    use_style,
-)
+from lazy.plotting import diagnostic_panel
+from lazy.plotting import figsize
+from lazy.plotting import plot_coverage
+from lazy.plotting import plot_nz
+from lazy.plotting import plot_pdfs
+from lazy.plotting import plot_pit
+from lazy.plotting import plot_pit_qq
+from lazy.plotting import plot_residuals
+from lazy.plotting import plot_zphot_ztrue
+from lazy.plotting import use_style
 
 
 @pytest.fixture

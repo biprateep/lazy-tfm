@@ -54,25 +54,27 @@ Weights are fetched from the Hugging Face Hub on first use and cached
 thereafter; :func:`download_checkpoint` warms that cache ahead of time.
 """
 
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version
 
-from lazy.base import POINT_ESTIMATORS, BasePhotoZEstimator
-from lazy.grid import DC1_GRID, RedshiftGrid, as_grid
-from lazy.models import (
-    CHECKPOINTS,
-    DEFAULT_VERSIONS,
-    ESTIMATORS,
-    LazyModel,
-    TabFMHistogram,
-    TabICLQuantile,
-    TabPFNBarDistribution,
-    download_checkpoint,
-    get_checkpoint,
-    get_estimator,
-    is_cached,
-    list_estimators,
-    list_versions,
-)
+from lazy.base import BasePhotoZEstimator
+from lazy.base import POINT_ESTIMATORS
+from lazy.grid import as_grid
+from lazy.grid import DC1_GRID
+from lazy.grid import RedshiftGrid
+from lazy.models import CHECKPOINTS
+from lazy.models import DEFAULT_VERSIONS
+from lazy.models import download_checkpoint
+from lazy.models import ESTIMATORS
+from lazy.models import get_checkpoint
+from lazy.models import get_estimator
+from lazy.models import is_cached
+from lazy.models import LazyModel
+from lazy.models import list_estimators
+from lazy.models import list_versions
+from lazy.models import TabFMHistogram
+from lazy.models import TabICLQuantile
+from lazy.models import TabPFNBarDistribution
 
 try:
     __version__ = version("lazy-photoz")

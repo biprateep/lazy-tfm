@@ -23,9 +23,9 @@ This is a private module: nothing here is part of the public API.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import gc
 import time
-from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -56,10 +56,8 @@ class QueryViews:
     """Per-member feature views of one block of encoded query rows."""
 
     def __init__(self, generator, X_encoded: np.ndarray):
-        from tabfm.src.classifier_and_regressor import (
-            _append_cross_features,
-            _append_svd_features,
-        )
+        from tabfm.src.classifier_and_regressor import _append_cross_features
+        from tabfm.src.classifier_and_regressor import _append_svd_features
 
         X = generator.unique_filter_.transform(X_encoded)
         if getattr(generator, "cross_pairs_", None):
@@ -124,8 +122,8 @@ def stream_icl(
     the estimator was fitted on). Outputs go to ``consumer`` as produced.
     """
 
-    import torch
     from tabfm.src.pytorch.model import move_cache_to_device
+    import torch
 
     generator = estimator.ensemble_generator_
     Xs_ctx, ys_ctx, cat_ctx, d_ctx = context_tensors(generator)
@@ -272,7 +270,8 @@ def streaming_available() -> bool:
     """
 
     try:
-        from tabfm.src.pytorch.model import TabFM, move_cache_to_device  # noqa: F401
-    except Exception:  # noqa: BLE001 - any import failure means "not available"
+        from tabfm.src.pytorch.model import move_cache_to_device
+        from tabfm.src.pytorch.model import TabFM
+    except Exception:
         return False
     return hasattr(TabFM, "prefill") and hasattr(TabFM, "decode")

@@ -21,13 +21,15 @@ than by the data.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
+import pandas as pd
 
 from lazy.base import BasePhotoZEstimator
 from lazy.models._device import resolve_device
 from lazy.models._hub import get_checkpoint
-from lazy.models._progress import Progress, bar, check_progress
+from lazy.models._progress import bar
+from lazy.models._progress import check_progress
+from lazy.models._progress import Progress
 
 __all__ = ["TabICLQuantile", "quantile_levels"]
 

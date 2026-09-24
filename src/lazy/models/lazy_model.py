@@ -31,12 +31,13 @@ from __future__ import annotations
 import inspect
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
+import pandas as pd
 
 from lazy.base import BasePhotoZEstimator
 from lazy.grid import RedshiftGrid
-from lazy.models.registry import ESTIMATORS, list_estimators
+from lazy.models.registry import ESTIMATORS
+from lazy.models.registry import list_estimators
 
 __all__ = ["LazyModel"]
 
