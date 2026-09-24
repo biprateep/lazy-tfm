@@ -65,7 +65,7 @@ class LazyModel(BasePhotoZEstimator):
 
     Attributes
     ----------
-    estimator_ : BasePhotoZEstimator
+    estimator_ : lazy.base.BasePhotoZEstimator
         The fitted backend every prediction is delegated to.
 
     Notes
