@@ -1,18 +1,27 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
+"""Sphinx configuration for the lazy-photoz documentation.
 
-# Sphinx configuration: https://www.sphinx-doc.org/en/master/usage/configuration.html
-#
-# Pages are MyST Markdown (via myst-nb, which also renders notebooks when the
-# tutorials arrive). The API reference is generated from the docstrings by
-# sphinx-autoapi, public names only.
+Pages are MyST Markdown (via myst-nb, which also renders notebooks when the
+tutorials arrive). The API reference is generated from the docstrings by
+sphinx-autoapi, public names only. Options:
+https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-from importlib.metadata import version as _version
+Typical usage example:
+
+  uv run sphinx-build -W -b html docs docs/_build/html
+"""
+
+# Sphinx reads its configuration as this module's global names, so they are
+# public, lowercase and (for lists and dicts) mutable by design.
+# ruff: noqa: GS004
+
+from importlib import metadata
 
 project = "lazy-photoz"
 author = "Biprateep Dey"
-copyright = "2026, Biprateep Dey"
-release = _version("lazy-photoz")
+copyright = "2026, Biprateep Dey"  # noqa: A001 - a Sphinx setting.
+release = metadata.version("lazy-photoz")
 version = ".".join(release.split(".")[:2])
 
 extensions = [
@@ -49,6 +58,9 @@ autoapi_options = [
     "show-module-summary",
 ]
 add_module_names = False
+# Attributes: sections render as fields, not as a second copy of the
+# attributes autoapi already documents (dataclass fields would appear twice).
+napoleon_use_ivar = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -61,7 +73,7 @@ intersphinx_mapping = {
 copybutton_prompt_text = r"\$ |>>> |\.\.\. "
 copybutton_prompt_is_regexp = True
 
-# -- HTML ------------------------------------------------------------------------
+# -- HTML ---------------------------------------------------------------------
 html_theme = "pydata_sphinx_theme"
 html_title = "lazy-photoz"
 html_show_sourcelink = False
