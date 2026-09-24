@@ -77,6 +77,8 @@ dev = [
     "ipykernel>=6",
     "jupyter>=1",
     "jupytext>=1.16", # Notebooks are authored as py:percent scripts
+    "mypy>=2.3",
+    "pandas-stubs>=3.0.5.260914",
 ]
 docs = [
     "sphinx>=8",
@@ -109,54 +111,118 @@ markers = [
 # Tests that load a multi-gigabyte checkpoint are opt-in:
 #   LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 
+# Code style: the Google Python Style Guide, as adopted by the author's
+# code-style skill. Every selected rule names the guide section (§) it enforces
+# or the pylint check from Google's pylintrc it replaces. The skill's checker
+# (check_code_style.py, codes GS001-GS030) covers what ruff cannot express.
 [tool.ruff]
-line-length = 110
+required-version = ">=0.16.0"
+line-length = 80  # §3.2
+indent-width = 4  # §3.4
+
+[tool.ruff.format]
+quote-style = "double"  # §3.10
+indent-style = "space"  # §3.4
+skip-magic-trailing-comma = false  # §3.4.1
 
 [tool.ruff.lint]
 select = [
-    # pycodestyle
-    "E",
-    "W",
-    # Pyflakes
-    "F",
-    # pep8-naming
-    "N",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
-    # docstrings
-    "D101",
-    "D102",
-    "D103",
-    "D106",
-    "D206",
-    "D207",
-    "D208",
-    "D300",
-    "D417",
-    "D419",
-    # Numpy v2.0 compatibility
-    "NPY201",
+    "F",  # pyflakes
+    "E",  # pycodestyle: imports, line length, statements, None/bool, except
+    "W",  # trailing whitespace, tabs, invalid escapes
+    "PLC",  # PLC0415 imports at top (§3.13), PLC1802 len (§2.14)
+    "PLE",  # pylint errors
+    "PLW",  # pylint warnings
+    "PLR0402",  # §2.2: `import a.b as b` is `from a import b`
+    "B006", "B008",  # §2.12: mutable or call-evaluated defaults
+    "B012",  # return/break/continue in finally
+    "B015", "B018",  # pointless statements
+    "B019",  # functools.lru_cache on a method
+    "B023",  # §2.16: closure over a loop variable
+    "B904",  # raise ... from inside except
+    "BLE",  # §2.4: catch-all except Exception
+    "TRY002",  # §2.4: raising bare Exception
+    "TRY203",  # try/except that only re-raises
+    "ARG",  # unused arguments; fix with `del arg  # Unused.`
+    "A001", "A002", "A004", "A006",  # shadowed builtins
+    "SLF001",  # §3.16.2: another object's _protected member
+    "S102", "S307",  # §2.19: exec and eval
+    "G",  # §3.10.1: logging takes a pattern and arguments
+    "PGH004",  # §2.1: suppress named rules, never a blanket noqa
+    "RUF100",  # §2.1: suppressions that no longer suppress anything
+    "I",  # §3.13: import grouping and order, settings below
+    "TID252",  # §2.2: no relative imports
+    "ICN001",  # §2.2: the standard abbreviation (np, pd, plt)
+    "SIM118",  # §2.8: `key in adict`, not `adict.keys()`
+    "FURB129",  # §2.8: `for line in afile`, not `afile.readlines()`
+    "C417",  # §2.10: a generator expression, not map/filter with a lambda
+    "ANN0", "ANN2",  # §2.21: every signature is annotated
+    "UP",  # §3.19: X | None, list[int], no typing.Text
+    "RUF013",  # §3.19.5: no implicit Optional
+    "RUF036",  # §3.19.5: None last in a union
+    "RUF009",  # §2.12: call-evaluated dataclass defaults
+    "EXE",  # §3.7: shebang lines
+    "D",  # §3.8: docstrings, Google convention below
+    "TD001", "TD003", "TD004", "TD005", "TD006", "TD007",  # §3.12: TODOs
+    "N",  # §3.16: naming
+    "SIM115",  # §3.11: open() outside a with block
+    "NPY",  # NumPy 2 deprecations and the legacy global random state
 ]
 ignore = [
-    "UP006", # Allow non standard library generics in type hints
-    "UP007", # Allow Union in type hints
-    "SIM114", # Allow if with same arms
-    "B028", # Allow default warning level
-    "SIM117", # Allow nested with
-    "UP015", # Allow redundant open parameters
-    "UP028", # Allow yield in for loop
-    "N803", # Allow the scikit-learn `X` argument name
-    "N806", # Allow the scikit-learn `X` local-variable name
+    "D100",  # module docstrings: the checker's GS014
+    "D105",  # magic methods need no docstring
+    "UP031", "UP032",  # §3.10 allows % and str.format as well as f-strings
+    "UP040", "UP046", "UP047",  # §3.19.6, §3.19.10: TypeAlias and TypeVar
+    "PLW0603",  # `global`: disabled in Google's pylintrc
+    "PLW0120",  # else clause on a loop: disabled in Google's pylintrc
+    "PLW1641",  # __eq__ without __hash__: disabled in Google's pylintrc
+    "PLW2901",  # redefined loop name: not a check Google loads
+    # The one project-wide deviation from the guide: scikit-learn's API names
+    # the feature matrix `X` (fit(X, y)), in signatures and in locals such as
+    # X_train. Keeping its vocabulary is what lets these estimators drop into
+    # scikit-learn unchanged.
+    "N803",
+    "N806",
 ]
+external = ["GS"]  # the checker's codes, so `# noqa: GS001` is accepted
+dummy-variable-rgx = "^(_|unused_.*|dummy_.*)$"
+
+[tool.ruff.lint.per-file-ignores]
+# §3.8.2.1: tests need no docstrings on modules, classes or test functions,
+# may read protected members, need no annotations, and take pytest fixtures
+# that the body never names.
+"tests/**" = ["D101", "D102", "D103", "D107", "ANN", "SLF001", "ARG"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # §3.8: Args:, Returns:, Raises:
+
+[tool.ruff.lint.isort]
+# §3.13: one import per line except typing and collections.abc symbols; groups
+# future, standard library, third party, this repository; sorted by module path.
+force-single-line = true
+single-line-exclusions = ["collections.abc", "typing", "typing_extensions"]
+force-sort-within-sections = true
+order-by-type = false
+known-first-party = ["lazy"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"  # §2.2
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true  # §3.19.1: __init__ may omit `-> None`
+
+# §2.21: type checking, in place of the guide's discontinued pytype.
+[tool.mypy]
+files = ["src"]
+disallow_any_generics = true  # §3.19.15: generics carry their parameters
+disallow_incomplete_defs = true  # §2.21: annotate a signature fully or not at all
+check_untyped_defs = true
+no_implicit_optional = true  # §3.19.5
+warn_unused_ignores = true  # §2.1
+warn_redundant_casts = true
+# Several dependencies (h5py, tabfm, tabicl, tabpfn) ship no type information;
+# importing them is not an error, but a misspelled module still is.
+disable_error_code = ["import-untyped"]
 
 [tool.coverage.run]
 source = ["src/lazy"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["lazy"]

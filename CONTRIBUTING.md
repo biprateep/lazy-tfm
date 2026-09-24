@@ -19,11 +19,20 @@ uv run pre-commit install   # lint and format on every commit
 `uv sync` also removes packages that are not in the lockfile. If you keep extra
 packages in the environment, use `uv sync --inexact`.
 
+## Code style
+
+Code follows the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
+checked by ruff (formatting and lint, configured in `pyproject.toml`) and mypy.
+In short: 80-column lines; import modules, not their members; Google
+docstrings (`Args:`, `Returns:`, `Raises:`) that give shapes and units; every
+signature annotated. The one deliberate exception is scikit-learn's vocabulary:
+the feature matrix is `X` and the target `y`, as scikit-learn requires.
+
 ## Checks
 
 ```bash
 uv run pytest               # unit tests and doctests; no GPU or checkpoint needed
-uv run pre-commit run --all-files
+uv run pre-commit run --all-files   # ruff format, ruff check, mypy
 ```
 
 Tests that need a GPU and a downloaded checkpoint are marked `gpu` and skipped

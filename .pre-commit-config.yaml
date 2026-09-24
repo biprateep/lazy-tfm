@@ -37,3 +37,14 @@ repos:
       - id: ruff-format
         name: Format code using ruff
         types_or: [ python, pyi, jupyter ]
+  # §2.21: type-check the package with the locked environment's mypy, so the
+  # hook sees the same dependencies as the code.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: Type-check with mypy
+        entry: uv run --no-sync mypy
+        language: system
+        types: [python]
+        files: ^src/
+        pass_filenames: false
