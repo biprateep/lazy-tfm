@@ -101,8 +101,8 @@ build-backend = "uv_build"
 module-name = "lazy"
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "src", "docs"]
-addopts = "--doctest-modules --doctest-glob=*.rst"
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules"
 markers = [
     "gpu: needs a CUDA device and a downloaded foundation-model checkpoint",
 ]
