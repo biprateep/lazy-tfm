@@ -22,15 +22,15 @@ def test_every_registered_name_builds(name):
 
 
 def test_the_backend_is_the_concrete_class():
-    assert isinstance(LazyModel("tabfm").estimator, TabFMHistogram)
-    assert isinstance(LazyModel("tabicl").estimator, TabICLQuantile)
-    assert isinstance(LazyModel("tabpfn").estimator, TabPFNBarDistribution)
+    assert isinstance(LazyModel("tabfm")._build(), TabFMHistogram)
+    assert isinstance(LazyModel("tabicl")._build(), TabICLQuantile)
+    assert isinstance(LazyModel("tabpfn")._build(), TabPFNBarDistribution)
 
 
 def test_parameters_reach_the_backend():
-    model = LazyModel("tabfm", n_estimators=4, n_dither=3)
-    assert model.estimator.n_estimators == 4
-    assert model.estimator.n_dither == 3
+    backend = LazyModel("tabfm", n_estimators=4, n_dither=3)._build()
+    assert backend.n_estimators == 4
+    assert backend.n_dither == 3
 
 
 def test_backend_attributes_are_reachable_through_the_wrapper():
@@ -45,9 +45,10 @@ def test_a_missing_attribute_names_both_classes():
         getattr(model, missing)
 
 
-def test_unknown_model_name_names_the_alternatives():
+def test_unknown_model_name_names_the_alternatives_at_fit():
+    model = LazyModel("tabdpt")  # construction validates nothing
     with pytest.raises(ValueError, match="tabicl"):
-        LazyModel("tabdpt")
+        model.fit(np.zeros((3, 2)), np.ones(3))
 
 
 def test_the_version_reaches_the_backend_and_the_label():
@@ -58,9 +59,17 @@ def test_the_version_reaches_the_backend_and_the_label():
     assert model.get_params()["version"] == "v2.5"
 
 
-def test_a_parameter_the_backend_does_not_take_is_rejected_immediately():
-    with pytest.raises(TypeError):
-        LazyModel("tabicl", n_dither=3)  # that is a TabFM parameter
+def test_a_parameter_the_backend_does_not_take_is_rejected_at_fit():
+    model = LazyModel("tabicl", n_dither=3)  # that is a TabFM parameter
+    with pytest.raises(TypeError, match="TabICLQuantile does not take 'n_dither'"):
+        model.fit(np.zeros((3, 2)), np.ones(3))
+
+
+def test_init_stores_its_arguments_and_nothing_else():
+    model = LazyModel("tabfm", z_grid=None, n_dither=3)
+    public = {name for name in vars(model) if not name.startswith("_")}
+    assert public == {"model", "z_grid"}
+    assert not hasattr(model, "estimator_")
 
 
 def test_constructing_touches_neither_hub_nor_backend(monkeypatch):
@@ -86,7 +95,7 @@ def test_clone_reproduces_the_model():
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     copy = clone(model)
     assert copy.get_params() == model.get_params()
-    assert isinstance(copy.estimator, TabFMHistogram)
+    assert isinstance(copy._build(), TabFMHistogram)
     assert copy is not model
 
 
@@ -94,20 +103,27 @@ def test_set_params_updates_the_backend_in_place():
     model = LazyModel("tabfm", n_dither=1)
     returned = model.set_params(n_dither=4)
     assert returned is model
-    assert model.estimator.n_dither == 4
+    assert model.n_dither == 4
+    assert model._build().n_dither == 4
+
+
+def test_set_params_rejects_a_parameter_the_backend_does_not_take():
+    with pytest.raises(ValueError, match="n_dither"):
+        LazyModel("tabicl").set_params(n_dither=3)
 
 
 def test_set_params_can_switch_backend():
     model = LazyModel("tabfm", n_dither=3)
     model.set_params(model="tabicl", n_estimators=16)
     assert model.name_ == "tabicl:v2"
-    assert isinstance(model.estimator, TabICLQuantile)
-    assert model.estimator.n_estimators == 16
+    assert isinstance(model._build(), TabICLQuantile)
+    assert model.n_estimators == 16
 
 
-def test_set_params_rejects_an_unknown_backend():
+def test_an_unknown_backend_set_by_set_params_is_rejected_at_fit():
+    model = LazyModel("tabfm").set_params(model="nope")
     with pytest.raises(ValueError, match="tabfm"):
-        LazyModel("tabfm").set_params(model="nope")
+        model.fit(np.zeros((3, 2)), np.ones(3))
 
 
 def test_repr_names_the_backend_and_only_non_default_parameters():
@@ -119,7 +135,7 @@ def test_the_grid_default_is_carried_down_to_the_backend():
     grid = RedshiftGrid.linear(0.0, 3.0, 37)
     model = LazyModel("tabicl", z_grid=grid)
     assert model.z_grid is grid
-    assert model.estimator.z_grid is grid
+    assert model._build().z_grid is grid
     assert model.get_params()["z_grid"] is grid
 
 
@@ -173,3 +189,14 @@ def test_evaluate_labels_the_row_with_the_backend_name(registered):
     z = np.random.default_rng(1).uniform(0.2, 1.8, 30)
     table = LazyModel(registered).fit(X, z).evaluate(X, z)
     assert table["model"].iloc[0] == "uniform"
+
+
+def test_a_fitted_model_survives_pickling(registered):
+    import pickle
+
+    X = np.random.default_rng(0).normal(size=(10, 2))
+    z = np.random.default_rng(1).uniform(0.2, 1.8, 10)
+    model = LazyModel(registered, width=2.0).fit(X, z)
+    copy = pickle.loads(pickle.dumps(model))
+    assert copy.width == 2.0 and copy.n_context_ == 10
+    assert np.array_equal(copy.predict_proba(X), model.predict_proba(X))
