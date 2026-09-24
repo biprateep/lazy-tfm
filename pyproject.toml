@@ -38,20 +38,16 @@ dependencies = [
 # Each backend is optional: `pip install lazy-photoz` on its own gives you the
 # grid, metrics, plotting and dataset machinery with no deep-learning stack.
 [project.optional-dependencies]
-# Pinned to the repository build, by URL, because nothing weaker works. The
-# KV-cache API (`TabFM.prefill` / `TabFM.decode`) that `lazy.models._icl_stream`
-# needs exists only there, and without it TabFMHistogram re-encodes the training
-# context for every chunk of query rows -- ~13.7 ms per member-row against
-# ~0.53 ms, about 26x the compute, for identical answers. A version specifier
-# cannot express this: the repository build also calls itself 1.0.1, so
-# `tabfm>=1.0.1` is satisfied by the release that lacks the API. Hence the URL.
-#
-# Consequence worth knowing before publishing: PyPI refuses metadata containing
-# direct URLs, so uploading `lazy-photoz` to an index requires relaxing this back
-# to `tabfm[pytorch]>=1.0.1`. The runtime TabFMPerformanceWarning stays in place
-# for exactly that case, and for anyone who force-installs the release build.
+# PyPI refuses packages whose metadata holds direct URLs, so the published
+# requirement is the release. The release lacks the KV-cache API
+# (`TabFM.prefill` / `TabFM.decode`) that `lazy.models._icl_stream` needs, and
+# without it TabFMHistogram re-encodes the training context for every chunk of
+# query rows -- ~13.7 ms per member-row against ~0.53 ms, about 26x the compute,
+# for identical answers. TabFMHistogram raises TabFMPerformanceWarning when it
+# falls back, and the README says how to install the repository build. A uv
+# checkout gets that build automatically, from [tool.uv.sources] below.
 tabfm = [
-    "tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff",
+    "tabfm[pytorch]>=1.0.1",
     # huggingface_hub loads the checkpoint through `_load_as_safetensor`, which
     # touches `safetensors.__version__` but only imports the module when it is
     # installed -- and neither hub nor tabfm declares it. Without this the load
@@ -89,6 +85,12 @@ docs = [
     "nbconvert>=7",
     "ipython>=8",
 ]
+
+# Development-only source overrides: honoured by `uv sync` in a checkout, never
+# written into the published metadata. The repository build also calls itself
+# 1.0.1, so only the commit distinguishes it from the release.
+[tool.uv.sources]
+tabfm = { git = "https://github.com/google-research/tabfm", rev = "fbb665569425fd2f490c6576b3af967876fe11ff" }
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]

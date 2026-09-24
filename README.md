@@ -79,30 +79,23 @@ values from the context rows alone, so a query row's answer never depends on
 which other query rows share its chunk (asserted bit-identical in the test
 suite).
 
-### TabFM's KV cache is pinned for you
+### For TabFM, install its repository build
 
-`lazy-photoz[tabfm]` installs TabFM from its repository at a pinned commit, not
-from PyPI, and that is deliberate rather than fussiness. The PyPI release has no
-KV-cache API, so every chunk of query rows re-encodes the entire training
-context: about **13.7 ms per member-row against 0.53 ms** on the cached path,
-roughly **26× the compute**.
-
-Both paths give the same answers, which is exactly what makes it dangerous — the
-only symptom is a prediction that takes a day instead of an hour, and there is
-nothing wrong with the result to tip you off. This project lost 17 GPU-hours to
-it on a run we had every reason to believe was simply large.
-
-A version specifier cannot express the requirement, because the repository build
-also calls itself `1.0.1`; only the URL distinguishes them. Nothing is needed
-from you:
+`pip install 'lazy-photoz[tabfm]'` installs TabFM's PyPI release, which works
+but has no KV-cache API: every chunk of query rows re-encodes the whole training
+context, about **13.7 ms per member-row against 0.53 ms** on the cached path,
+roughly **26× the compute** for identical answers. For anything beyond a few
+thousand galaxies, install the repository build as well:
 
 ```bash
-uv sync --extra all                  # or: pip install 'lazy-photoz[tabfm]'
+pip install 'lazy-photoz[tabfm]'
+pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
 ```
 
-If you end up on the release build anyway — a stale lock, a deliberate override,
-or an index that strips direct URLs — the backend says so at `fit` time with a
-`TabFMPerformanceWarning` rather than silently taking 26× longer. To check:
+A checkout of this repository gets the repository build automatically (`uv sync
+--extra all`), pinned through `[tool.uv.sources]`. On the release build the
+backend warns at `fit` with a `TabFMPerformanceWarning` rather than silently
+taking 26× longer. To check which you have:
 
 ```python
 from lazy.models._icl_stream import streaming_available
