@@ -352,7 +352,7 @@ def plot_pdfs(
     *,
     z_true: npt.ArrayLike | None = None,
     indices: npt.ArrayLike | None = None,
-    n: int = 6,  # noqa: GS030 - public keyword; tests call plot_pdfs(n=...).
+    n_galaxies: int = 6,
     random_state: int = 0,
     axes: mpl_axes.Axes
     | Sequence[mpl_axes.Axes]
@@ -362,7 +362,7 @@ def plot_pdfs(
     """Plots a handful of individual PDFs, with their true redshifts marked.
 
     Summary statistics hide multimodality; this is where you see it. By
-    default ``n`` galaxies are drawn at random (reproducibly), or pass
+    default ``n_galaxies`` galaxies are drawn at random (reproducibly), or pass
     ``indices`` to pick them yourself.
 
     Args:
@@ -370,8 +370,8 @@ def plot_pdfs(
         pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
         z_true: True redshifts, shape (n_galaxies,), marked as dashed
             vertical lines if given.
-        indices: Rows of ``pdfs`` to draw; ``n`` random rows if None.
-        n: Number of galaxies drawn at random when ``indices`` is None.
+        indices: Rows of ``pdfs`` to draw; ``n_galaxies`` random rows if None.
+        n_galaxies: Number of galaxies drawn at random when ``indices`` is None.
         random_state: Seed of the random draw.
         axes: Axes to draw into, one per galaxy; a new text-width grid of
             up to three columns if None. Spare axes are hidden.
@@ -383,7 +383,9 @@ def plot_pdfs(
     pdfs = np.asarray(pdfs, dtype=float)
     if indices is None:
         rng = np.random.default_rng(random_state)
-        indices = rng.choice(len(pdfs), size=min(n, len(pdfs)), replace=False)
+        indices = rng.choice(
+            len(pdfs), size=min(n_galaxies, len(pdfs)), replace=False
+        )
     indices = np.atleast_1d(np.asarray(indices, dtype=int))
     if axes is None:
         ncols = min(3, len(indices))
