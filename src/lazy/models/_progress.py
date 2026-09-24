@@ -15,35 +15,45 @@ their time in different shapes:
   says which dither and level is running and how many context rows it has.
 
 ``progress`` is ``"auto"`` by default: shown on a terminal or in a notebook,
-silent when output goes to a file, which is what keeps a batch job's log free of
-carriage-return spam without anyone having to remember to switch it off.
+silent when output goes to a file, which is what keeps a batch job's log free
+of carriage-return spam without anyone having to remember to switch it off.
 ``True`` forces it on, ``False`` off. The bar writes to stderr, so it never
 mixes with what ``verbose`` prints to stdout.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal, TypeAlias
+
+from tqdm import auto as tqdm_auto
 
 __all__ = ["PROGRESS_MODES", "Progress", "bar", "check_progress"]
 
 #: What ``progress`` accepts on every estimator.
 PROGRESS_MODES = ("auto", True, False)
 
-Progress = bool | Literal["auto"]
+#: The type of every estimator's ``progress`` parameter.
+Progress: TypeAlias = bool | Literal["auto"]
 
 
-def check_progress(progress) -> None:
-    """Raise unless ``progress`` is ``"auto"``, ``True`` or ``False``.
+def check_progress(progress: object) -> None:
+    """Raises unless ``progress`` is ``"auto"``, ``True`` or ``False``.
 
-    Checked by type as well as value, because ``1 in (True, False)`` is true in
-    Python and a bar switched on by ``progress=1`` would be an accident.
+    Checked by type as well as value, because ``1 in (True, False)`` is true
+    in Python and a bar switched on by ``progress=1`` would be an accident.
 
-    >>> check_progress("auto")
-    >>> check_progress(1)
-    Traceback (most recent call last):
-    ...
-    ValueError: progress must be one of ('auto', True, False), got 1
+    Args:
+        progress: The value to check.
+
+    Raises:
+        ValueError: If ``progress`` is anything else.
+
+    Examples:
+        >>> check_progress("auto")
+        >>> check_progress(1)
+        Traceback (most recent call last):
+        ...
+        ValueError: progress must be one of ('auto', True, False), got 1
     """
     if not (
         isinstance(progress, bool)
@@ -54,31 +64,36 @@ def check_progress(progress) -> None:
         )
 
 
-def bar(progress: Progress, *, total: int, desc: str, unit: str, **kwargs):
-    """A ``tqdm`` bar honouring ``progress``, usable as a context manager.
+def bar(
+    progress: Progress,
+    *,
+    total: int,
+    desc: str,
+    unit: str,
+    **kwargs: Any,
+) -> Any:
+    """Returns a ``tqdm`` bar honouring ``progress``, for use in a ``with``.
 
-    Parameters
-    ----------
-    progress
-        ``"auto"``, ``True`` or ``False``; see the module docstring.
-    total, desc, unit
-        Passed to ``tqdm``.
-    **kwargs
-        Anything else ``tqdm`` takes.
+    Args:
+        progress: ``"auto"``, ``True`` or ``False``; see the module docstring.
+        total: Passed to ``tqdm``.
+        desc: Passed to ``tqdm``.
+        unit: Passed to ``tqdm``.
+        **kwargs: Anything else ``tqdm`` takes.
 
-    Examples
-    --------
-    >>> with bar(False, total=3, desc="demo", unit="row") as b:
-    ...     b.update(3)
-    >>> b.disable
-    True
+    Returns:
+        A ``tqdm.auto.tqdm`` bar, disabled when ``progress`` says so.
+
+    Examples:
+        >>> with bar(False, total=3, desc="demo", unit="row") as b:
+        ...     b.update(3)
+        >>> b.disable
+        True
     """
     check_progress(progress)
-    from tqdm.auto import tqdm
-
     # tqdm's own vocabulary: disable=None is its "only on a TTY" mode.
     disable = None if progress == "auto" else not progress
-    return tqdm(
+    return tqdm_auto.tqdm(
         total=total,
         desc=desc,
         unit=unit,

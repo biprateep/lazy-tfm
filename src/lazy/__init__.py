@@ -29,8 +29,8 @@ regression head, ``tabpfn`` from the bucket masses TabPFN-3 predicts natively
 -- and all of them write onto whatever :class:`~lazy.grid.RedshiftGrid` you
 pass, at prediction time, without refitting.
 
-Layout
-------
+The package is laid out as follows.
+
 :mod:`lazy.models`
     :class:`~lazy.models.lazy_model.LazyModel`, the concrete backends, and the
     registry they are looked up in.
@@ -56,8 +56,10 @@ Weights are fetched from the Hugging Face Hub on first use and cached
 thereafter; :func:`download_checkpoint` warms that cache ahead of time.
 """
 
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version
+# This file's imports re-export the public API by name; that is its purpose.
+# ruff: noqa: GS001
+
+from importlib import metadata
 
 from lazy.base import BasePhotoZEstimator
 from lazy.base import POINT_ESTIMATORS
@@ -79,10 +81,8 @@ from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
 
 try:
-    __version__ = version("lazy-photoz")
-except (
-    PackageNotFoundError
-):  # pragma: no cover - only when running from a source tree
+    __version__ = metadata.version("lazy-photoz")
+except metadata.PackageNotFoundError:  # pragma: no cover - a source tree only.
     __version__ = "0.0.0.dev0"
 
 __all__ = [

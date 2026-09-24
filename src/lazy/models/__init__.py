@@ -11,12 +11,15 @@ Two ways in, and they give you the same estimator::
     model = TabFMHistogram(n_estimators=4, n_dither=3)       # by class
 
 Use :class:`~lazy.models.lazy_model.LazyModel` when the backend is a
-configuration value -- a CLI flag, a config file, a loop over methods -- and the
-concrete class when you want its parameters documented at your fingertips.
+configuration value -- a CLI flag, a config file, a loop over methods -- and
+the concrete class when you want its parameters documented at your fingertips.
 
-Constructing either downloads nothing: the pretrained weights are fetched on the
-first prediction and cached from then on (:func:`download_checkpoint`).
+Constructing either downloads nothing: the pretrained weights are fetched on
+the first prediction and cached from then on (:func:`download_checkpoint`).
 """
+
+# This file's imports re-export the public API by name; that is its purpose.
+# ruff: noqa: GS001
 
 from lazy.models._hub import CHECKPOINTS
 from lazy.models._hub import DEFAULT_VERSIONS

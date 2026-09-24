@@ -2,9 +2,9 @@
 # Copyright (c) 2025 Biprateep Dey
 """One entry point for every backend, chosen by name.
 
-:class:`LazyModel` is the class most code should use. It takes the backend name
-as its first argument and forwards everything else to that backend, so switching
-between them is a string change rather than an import change::
+:class:`LazyModel` is the class most code should use. It takes the backend
+name as its first argument and forwards everything else to that backend, so
+switching between them is a string change rather than an import change::
 
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     model = LazyModel("tabicl", n_estimators=8)
@@ -31,48 +31,21 @@ backend name or a parameter it does not take is reported, at :meth:`fit`.
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
-import numpy as np
-from numpy.typing import NDArray
 import pandas as pd
 
-from lazy.base import BasePhotoZEstimator
-from lazy.grid import RedshiftGrid
-from lazy.models.registry import ESTIMATORS
-from lazy.models.registry import list_estimators
+from lazy import _typing
+from lazy import base
+from lazy import grid as grid_lib
+from lazy.models import registry
 
 __all__ = ["LazyModel"]
 
 
-class LazyModel(BasePhotoZEstimator):
+class LazyModel(base.BasePhotoZEstimator):
     """A photo-z model addressed by backend name.
 
-    Parameters
-    ----------
-    model
-        Which backend to use; one of :func:`lazy.list_estimators`.
-        ``"tabfm"`` builds the density from a hierarchy of in-context
-        classifiers, ``"tabicl"`` from a quantile regression head, ``"tabpfn"``
-        from the bucket masses TabPFN-3 predicts natively.
-    z_grid
-        Default output grid for this model: a :class:`lazy.grid.RedshiftGrid`,
-        an array of bin centres, or ``None`` for :data:`lazy.grid.DC1_GRID`.
-        Every prediction method takes a ``z_grid`` that overrides it per call.
-    **params
-        Passed straight to the backend's constructor. See
-        :class:`lazy.models.tabfm.TabFMHistogram`,
-        :class:`lazy.models.tabicl.TabICLQuantile` and
-        :class:`lazy.models.tabpfn.TabPFNBarDistribution` for what each
-        accepts; a name the backend does not take raises ``TypeError`` at
-        :meth:`fit`, naming the class.
-
-    Attributes
-    ----------
-    estimator_ : lazy.base.BasePhotoZEstimator
-        The fitted backend every prediction is delegated to.
-
-    Notes
-    -----
     The backend's parameters are reachable by ordinary attribute access, and
     after ``fit`` so are its fitted attributes (``inference_``,
     ``regressor_``, ...), so ``model.n_estimators`` and ``model.inference_``
@@ -82,20 +55,45 @@ class LazyModel(BasePhotoZEstimator):
     chosen backend, flattened, so :func:`sklearn.base.clone` and the search
     objects work with no prefix: ``GridSearchCV(model, {"n_dither": [1, 3]})``.
 
-    Examples
-    --------
-    >>> model = LazyModel("tabfm", n_estimators=4, n_dither=3)
-    >>> model.name_
-    'tabfm:v1.0'
-    >>> model.n_dither
-    3
-    >>> LazyModel("tabicl", n_estimators=16).get_params()["n_estimators"]
-    16
-    >>> LazyModel("tabpfn", version="v2.5").name_
-    'tabpfn:v2.5'
+    Args:
+        model: Which backend to use; one of :func:`lazy.list_estimators`.
+            ``"tabfm"`` builds the density from a hierarchy of in-context
+            classifiers, ``"tabicl"`` from a quantile regression head,
+            ``"tabpfn"`` from the bucket masses TabPFN-3 predicts natively.
+        z_grid: Default output grid for this model: a
+            :class:`lazy.grid.RedshiftGrid`, an array of bin centres, or
+            ``None`` for :data:`lazy.grid.DC1_GRID`. Every prediction method
+            takes a ``z_grid`` that overrides it per call.
+        **params: Passed straight to the backend's constructor. See
+            :class:`lazy.models.tabfm.TabFMHistogram`,
+            :class:`lazy.models.tabicl.TabICLQuantile` and
+            :class:`lazy.models.tabpfn.TabPFNBarDistribution` for what each
+            accepts; a name the backend does not take raises ``TypeError`` at
+            :meth:`fit`, naming the class.
+
+    Attributes:
+        estimator_: The fitted backend every prediction is delegated to, a
+            :class:`lazy.base.BasePhotoZEstimator`.
+
+    Examples:
+        >>> model = LazyModel("tabfm", n_estimators=4, n_dither=3)
+        >>> model.name_
+        'tabfm:v1.0'
+        >>> model.n_dither
+        3
+        >>> LazyModel("tabicl", n_estimators=16).get_params()["n_estimators"]
+        16
+        >>> LazyModel("tabpfn", version="v2.5").name_
+        'tabpfn:v2.5'
     """
 
-    def __init__(self, model: str = "tabfm", *, z_grid=None, **params):
+    def __init__(  # noqa: D107 - arguments documented on the class.
+        self,
+        model: str = "tabfm",
+        *,
+        z_grid: grid_lib.GridLike = None,
+        **params: Any,
+    ):
         self.model = model
         self.z_grid = z_grid
         # The backend's own parameters, exactly as given. They cannot be
@@ -107,12 +105,12 @@ class LazyModel(BasePhotoZEstimator):
 
     @property
     def name_(self) -> str:
-        """``"<backend>:<version>"``: the name asked for, and the version it loads.
+        """The ``"<backend>:<version>"`` label: the name asked for, and version.
 
         Built from ``self.model`` rather than delegated, so the label is the
-        name the caller used; the version is appended because a row saying only
-        ``tabpfn`` would not say which model produced it. A backend with no
-        ``version`` parameter is labelled by name alone.
+        name the caller used; the version is appended because a row saying
+        only ``tabpfn`` would not say which model produced it. A backend with
+        no ``version`` parameter is labelled by name alone.
         """
         version = self.get_params().get("version")
         return f"{self.model}:{version}" if version else str(self.model)
@@ -129,36 +127,56 @@ class LazyModel(BasePhotoZEstimator):
 
     # -- delegation --------------------------------------------------------
 
-    def _fit(self, X: pd.DataFrame, y: NDArray[np.float64]) -> None:
+    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         self.estimator_ = self._build()
         self.estimator_.fit(X, y)
 
     def _predict_pdf(
-        self, X: pd.DataFrame, grid: RedshiftGrid
-    ) -> NDArray[np.float64]:
-        return self.estimator_._predict_pdf(X, grid)
+        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
+    ) -> _typing.FloatArray:
+        # Validation already ran in this wrapper, so the backend's hook is
+        # called directly rather than through its public method.
+        return self.estimator_._predict_pdf(X, grid)  # noqa: SLF001 - delegate.
 
-    def _build(self) -> BasePhotoZEstimator:
-        """The unfitted backend these parameters describe, validated."""
-        if self.model not in ESTIMATORS:
+    def _build(self) -> base.BasePhotoZEstimator:
+        """Returns the unfitted backend these parameters describe, validated.
+
+        Raises:
+            ValueError: If ``model`` is not a registered backend.
+            TypeError: If the backend does not take one of the parameters.
+        """
+        if self.model not in registry.ESTIMATORS:
             raise ValueError(
-                f"unknown model {self.model!r}; known: {list_estimators()}"
+                f"unknown model {self.model!r}; "
+                f"known: {registry.list_estimators()}"
             )
-        cls = ESTIMATORS[self.model]
-        unknown = sorted(set(self._params) - set(_backend_defaults(self.model)))
+        cls = registry.ESTIMATORS[self.model]
+        defaults = _constructor_defaults(cls)
+        unknown = sorted(set(self._params) - set(defaults))
         if unknown:
             raise TypeError(
-                f"{cls.__name__} does not take {', '.join(map(repr, unknown))}; "
-                f"its parameters are {sorted(_backend_defaults(self.model))}"
+                f"{cls.__name__} does not take "
+                f"{', '.join(map(repr, unknown))}; "
+                f"its parameters are {sorted(defaults)}"
             )
         return cls(z_grid=self.z_grid, **self._params)
 
-    def __getattr__(self, name: str):
-        """Expose the backend's parameters and fitted attributes.
+    def __getattr__(self, name: str) -> Any:
+        """Exposes the backend's parameters and fitted attributes.
 
-        Only reached for names this object does not define. Reads ``__dict__``
-        directly, so that a half-built object -- during unpickling, say --
-        raises ``AttributeError`` rather than recursing.
+        Only reached for names this object does not define. Reads
+        ``__dict__`` directly, so that a half-built object -- during
+        unpickling, say -- raises ``AttributeError`` rather than recursing.
+
+        Args:
+            name: The attribute looked up.
+
+        Returns:
+            The fitted backend's attribute after ``fit``; before it, the
+            backend parameter as given, or its default.
+
+        Raises:
+            AttributeError: If neither this object nor its backend has it.
         """
         state = self.__dict__
         if (
@@ -178,7 +196,7 @@ class LazyModel(BasePhotoZEstimator):
             defaults = _backend_defaults(state["model"]) or {}
             if name in defaults:
                 return defaults[name]
-        backend = ESTIMATORS.get(state["model"])
+        backend = registry.ESTIMATORS.get(state["model"])
         if backend is None:
             raise AttributeError(f"LazyModel has no attribute {name!r}")
         raise AttributeError(
@@ -190,24 +208,43 @@ class LazyModel(BasePhotoZEstimator):
     # `BaseEstimator` reads parameter names off `__init__`, which here ends in
     # `**params` and so would hide every backend parameter from `get_params`,
     # breaking `clone` and every search object. Both methods are therefore
-    # implemented directly, flattening the backend's parameters into this one's.
+    # implemented directly, flattening the backend's parameters into this
+    # one's.
 
-    def get_params(self, deep: bool = True) -> dict:
-        """This model's parameters: ``model`` plus everything the backend takes."""
-        params = {"model": self.model}
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Returns ``model`` and ``z_grid`` plus everything the backend takes.
+
+        Args:
+            deep: Accepted for scikit-learn compatibility and ignored: the
+                backend's parameters are always flattened into this model's.
+
+        Returns:
+            Parameter name to value, the backend's defaults filled in.
+        """
+        del deep  # Unused; there are no nested estimators to descend into.
+        params: dict[str, Any] = {"model": self.model}
         params.update(_backend_defaults(self.model) or {})
         params.update(self._params)
         params["z_grid"] = self.z_grid
         return params
 
-    def set_params(self, **params) -> LazyModel:
-        """Set parameters, starting the backend's afresh if ``model`` changes."""
+    def set_params(self, **params: Any) -> LazyModel:
+        """Sets parameters, starting the backend's afresh if ``model`` changes.
+
+        Args:
+            **params: New values for ``model``, ``z_grid`` or any parameter
+                of the backend.
+
+        Returns:
+            This model.
+        """
         if "z_grid" in params:
             self.z_grid = params.pop("z_grid")
         model = params.pop("model", self.model)
         if model != self.model:
             # A different backend takes different parameters, so the old ones
-            # cannot be carried over; only what is passed in this call survives.
+            # cannot be carried over; only what is passed in this call
+            # survives.
             self.model = model
             self._params = dict(params)
             return self
@@ -215,23 +252,20 @@ class LazyModel(BasePhotoZEstimator):
         if defaults is not None:
             for name in params:
                 if name not in defaults:
+                    valid = sorted(["model", "z_grid", *defaults])
                     raise ValueError(
-                        f"invalid parameter {name!r} for LazyModel({self.model!r}); "
-                        f"valid parameters are {sorted(['model', 'z_grid', *defaults])}"
+                        f"invalid parameter {name!r} for "
+                        f"LazyModel({self.model!r}); "
+                        f"valid parameters are {valid}"
                     )
         self._params = {**self._params, **params}
         return self
 
 
-def _backend_defaults(model) -> dict | None:
-    """``{name: default}`` for a backend's parameters other than ``z_grid``.
-
-    ``None`` for a name that is not a registered backend, which is not an error
-    until :meth:`LazyModel.fit`.
-    """
-    cls = ESTIMATORS.get(model) if isinstance(model, str) else None
-    if cls is None:
-        return None
+def _constructor_defaults(
+    cls: type[base.BasePhotoZEstimator],
+) -> dict[str, Any]:
+    """Returns ``{name: default}`` for ``cls``'s parameters but ``z_grid``."""
     return {
         name: parameter.default
         for name, parameter in inspect.signature(
@@ -241,3 +275,19 @@ def _backend_defaults(model) -> dict | None:
         and parameter.kind
         not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
     }
+
+
+def _backend_defaults(model: object) -> dict[str, Any] | None:
+    """Returns ``{name: default}`` for a backend's parameters but ``z_grid``.
+
+    Args:
+        model: The backend name, which may not be registered.
+
+    Returns:
+        The defaults, or ``None`` for a name that is not a registered backend,
+        which is not an error until :meth:`LazyModel.fit`.
+    """
+    cls = registry.ESTIMATORS.get(model) if isinstance(model, str) else None
+    if cls is None:
+        return None
+    return _constructor_defaults(cls)

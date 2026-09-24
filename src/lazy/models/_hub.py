@@ -27,10 +27,9 @@ top-level :mod:`lazy`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _installed_version
-from pathlib import Path
+import dataclasses
+from importlib import metadata
+import pathlib
 
 __all__ = [
     "CHECKPOINTS",
@@ -43,55 +42,75 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Checkpoint:
-    """A pinned set of pretrained weights on the Hugging Face Hub."""
+    """A pinned set of pretrained weights on the Hugging Face Hub.
 
-    #: Which backend loads these weights; a name in :data:`lazy.ESTIMATORS`.
+    Attributes:
+        backend: Which backend loads these weights; a name in
+            :data:`lazy.ESTIMATORS`.
+        version: The model version, in the backbone's own vocabulary --
+            ``"v2.5"``, ``"v3"``, ``"v3.5-fast"`` are the strings TabPFN itself
+            uses.
+        repo_id: The Hugging Face Hub repository holding the weights.
+        package: The distribution providing the backend. Its *installed*
+            version is half of "which model was this": the weights are the
+            other half.
+        allow_patterns: ``snapshot_download`` patterns, for repositories
+            holding several models.
+        filename: A single file to fetch instead of a filtered snapshot.
+        revision: Pinned git revision; ``None`` means the repository has no
+            history worth pinning because ``filename`` already names an
+            immutable artifact.
+        license_note: Anything a user must know before downloading. Surfaced
+            in the docs.
+        size_note: The download size, and any limit the model declares.
+    """
+
     backend: str
-    #: The model version, in the backbone's own vocabulary -- ``"v2.5"``,
-    #: ``"v3"``, ``"v3.5-fast"`` are the strings TabPFN itself uses.
     version: str
     repo_id: str
-    #: The distribution providing the backend. Its *installed* version is half
-    #: of "which model was this": the weights are the other half.
     package: str
-    #: ``snapshot_download`` patterns, for repositories holding several models.
     allow_patterns: tuple[str, ...] | None = None
-    #: A single file to fetch instead of a filtered snapshot.
     filename: str | None = None
-    #: Pinned git revision; ``None`` means the repository has no history worth
-    #: pinning because ``filename`` already names an immutable artifact.
     revision: str | None = None
-    #: Anything a user must know before downloading. Surfaced in the docs.
     license_note: str = ""
     size_note: str = ""
 
     @property
     def key(self) -> str:
-        """``"<backend>:<version>"``: the key this checkpoint is registered under.
+        """The ``"<backend>:<version>"`` key this checkpoint is filed under.
 
-        >>> get_checkpoint("tabpfn").key
-        'tabpfn:v3'
+        Examples:
+            >>> get_checkpoint("tabpfn").key
+            'tabpfn:v3'
         """
         return f"{self.backend}:{self.version}"
 
-    def download(self, *, local_files_only: bool = False) -> Path:
-        """Fetch (or locate) the weights and return the path they live at."""
-        from huggingface_hub import hf_hub_download
-        from huggingface_hub import snapshot_download
+    def download(self, *, local_files_only: bool = False) -> pathlib.Path:
+        """Fetches (or locates) the weights and returns the path they live at.
+
+        Args:
+            local_files_only: Only look in the local Hugging Face cache, never
+                on the network.
+
+        Returns:
+            The checkpoint file, or the snapshot directory when the
+            checkpoint is a filtered snapshot rather than one file.
+        """
+        import huggingface_hub  # noqa: PLC0415 - kept out of `import lazy`.
 
         if self.filename is not None:
-            return Path(
-                hf_hub_download(
+            return pathlib.Path(
+                huggingface_hub.hf_hub_download(
                     repo_id=self.repo_id,
                     filename=self.filename,
                     revision=self.revision,
                     local_files_only=local_files_only,
                 )
             )
-        return Path(
-            snapshot_download(
+        return pathlib.Path(
+            huggingface_hub.snapshot_download(
                 repo_id=self.repo_id,
                 revision=self.revision,
                 allow_patterns=list(self.allow_patterns)
@@ -102,7 +121,7 @@ class Checkpoint:
         )
 
     def provenance(self, *, device: str | None = None) -> dict[str, str | None]:
-        """Which weights, and which code, produced a set of numbers.
+        """Returns which weights, and which code, produced a set of numbers.
 
         Everything needed to identify the model, and nothing that is merely a
         setting -- ``n_estimators``, ``chunk_size`` and the rest are in
@@ -110,9 +129,21 @@ class Checkpoint:
         model on two machines gives the same record, and it survives being
         written to JSON next to a results table.
 
-        >>> record = get_checkpoint("tabpfn", "v2.5").provenance(device="cpu")
-        >>> record["backend"], record["version"], record["revision"][:7]
-        ('tabpfn', 'v2.5', '6c45f3a')
+        Args:
+            device: The torch device the model ran on, if known.
+
+        Returns:
+            A JSON-serialisable record with the keys ``backend``, ``version``,
+            ``repo_id``, ``filename``, ``revision``, ``package`` (the
+            backend's distribution and installed version), ``lazy`` (this
+            package's) and ``device``.
+
+        Examples:
+            >>> record = get_checkpoint("tabpfn", "v2.5").provenance(
+            ...     device="cpu"
+            ... )
+            >>> record["backend"], record["version"], record["revision"][:7]
+            ('tabpfn', 'v2.5', '6c45f3a')
         """
         return {
             "backend": self.backend,
@@ -127,10 +158,12 @@ class Checkpoint:
 
 
 def _package_version(distribution: str) -> str:
-    """``"tabpfn 9.0.0"``, or a stand-in when the distribution is not installed."""
+    """Returns ``"tabpfn 9.0.0"``, or a stand-in when it is not installed."""
     try:
-        return f"{distribution} {_installed_version(distribution)}"
-    except PackageNotFoundError:  # pragma: no cover - only outside an install
+        return f"{distribution} {metadata.version(distribution)}"
+    except (
+        metadata.PackageNotFoundError
+    ):  # pragma: no cover - only outside an install
         return f"{distribution} (not installed)"
 
 
@@ -152,8 +185,9 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "README.md",
             ),
             license_note=(
-                "TabFM weights are released by Google under a non-commercial licence; "
-                "read it at https://huggingface.co/google/tabfm-1.0.0-pytorch before use."
+                "TabFM weights are released by Google under a non-commercial "
+                "licence; read it at "
+                "https://huggingface.co/google/tabfm-1.0.0-pytorch before use."
             ),
             size_note="~6.6 GB for the classification checkpoint.",
         ),
@@ -164,7 +198,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             package="tabicl",
             filename="tabicl-regressor-v2-20260212.ckpt",
             license_note=(
-                "TabICL is released under BSD-3-Clause; see https://huggingface.co/jingang/TabICL."
+                "TabICL is released under BSD-3-Clause; see "
+                "https://huggingface.co/jingang/TabICL."
             ),
             size_note="~100 MB.",
         ),
@@ -180,9 +215,10 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v2-regressor.ckpt",
             revision="4972a65a1b30806315c6f92499959ffbfc69a673",
             license_note=(
-                "TabPFN v2 weights are released by Prior Labs under the Prior Labs License "
-                "v1.1, which is Apache-2.0 with an added attribution clause -- the only "
-                "TabPFN version here that is not non-commercial. See "
+                "TabPFN v2 weights are released by Prior Labs under the Prior "
+                "Labs License v1.1, which is Apache-2.0 with an added "
+                "attribution clause -- the only TabPFN version here that is "
+                "not non-commercial. See "
                 "https://huggingface.co/Prior-Labs/TabPFN-v2-reg."
             ),
             size_note="~45 MB. Pretrained for at most 10,000 context rows.",
@@ -195,8 +231,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v2.5-regressor-v2.5_default.ckpt",
             revision="6c45f3a6d0d07c6c5f62572e04a0c2929de91b8b",
             license_note=(
-                "TabPFN-2.5 weights are released by Prior Labs under the TABPFN-2.5 "
-                "Non-Commercial License; read it at "
+                "TabPFN-2.5 weights are released by Prior Labs under the "
+                "TABPFN-2.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_2_5 before use."
             ),
             size_note="~41 MB. Pretrained for at most 50,000 context rows.",
@@ -209,8 +245,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v2.6-regressor-v2.6_default.ckpt",
             revision="24148873a9a5992b429833d07363690dcffd02a8",
             license_note=(
-                "TabPFN-2.6 weights are released by Prior Labs under the TABPFN-2.6 "
-                "Non-Commercial License; read it at "
+                "TabPFN-2.6 weights are released by Prior Labs under the "
+                "TABPFN-2.6 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_2_6 before use."
             ),
             size_note="~52 MB.",
@@ -223,8 +259,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v3-regressor-v3_default.ckpt",
             revision="24a16a89d245878b846555110985634aa2e656d7",
             license_note=(
-                "TabPFN-3 weights are released by Prior Labs under the TABPFN-3 "
-                "Non-Commercial License; read it at "
+                "TabPFN-3 weights are released by Prior Labs under the "
+                "TABPFN-3 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3 before use."
             ),
             size_note="~230 MB.",
@@ -239,8 +275,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v3.5-20260909.safetensors",
             revision="06bf2ba35c80a92a3b9abb436b99cf49e7a0365e",
             license_note=(
-                "TabPFN-3.5 weights are released by Prior Labs under the TABPFN-3.5 "
-                "Non-Commercial License; read it at "
+                "TabPFN-3.5 weights are released by Prior Labs under the "
+                "TABPFN-3.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3_5 before use."
             ),
             size_note="~880 MB.",
@@ -253,11 +289,13 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="tabpfn-v3.5-fast-20260909.safetensors",
             revision="06bf2ba35c80a92a3b9abb436b99cf49e7a0365e",
             license_note=(
-                "TabPFN-3.5 weights are released by Prior Labs under the TABPFN-3.5 "
-                "Non-Commercial License; read it at "
+                "TabPFN-3.5 weights are released by Prior Labs under the "
+                "TABPFN-3.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3_5 before use."
             ),
-            size_note="~335 MB. A separate, faster model, not a smaller copy of v3.5.",
+            size_note=(
+                "~335 MB. A separate, faster model, not a smaller copy of v3.5."
+            ),
         ),
     )
 }
@@ -272,16 +310,27 @@ DEFAULT_VERSIONS: dict[str, str] = {
 
 
 def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
-    """The pinned checkpoint for a backend, at a version.
+    """Returns the pinned checkpoint for a backend, at a version.
 
-    ``name`` is a backend name, which takes that backend's default version, or
-    a full ``"backend:version"`` key. An explicit ``version`` wins over one
-    spelled into ``name``.
+    Args:
+        name: A backend name, which takes that backend's default version, or
+            a full ``"backend:version"`` key.
+        version: The model version; an explicit one wins over one spelled
+            into ``name``. ``None`` for the default in
+            :data:`DEFAULT_VERSIONS`.
 
-    >>> get_checkpoint("tabpfn").version
-    'v3'
-    >>> get_checkpoint("tabpfn:v2.5").repo_id
-    'Prior-Labs/tabpfn_2_5'
+    Returns:
+        The registered checkpoint.
+
+    Raises:
+        KeyError: If the backend is unknown, or has no pinned checkpoint at
+            that version.
+
+    Examples:
+        >>> get_checkpoint("tabpfn").version
+        'v3'
+        >>> get_checkpoint("tabpfn:v2.5").repo_id
+        'Prior-Labs/tabpfn_2_5'
     """
     if ":" in name:
         name, _, spelled = name.partition(":")
@@ -296,45 +345,74 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
         return CHECKPOINTS[f"{name}:{version}"]
     except KeyError:
         raise KeyError(
-            f"unknown version {version!r} for {name!r}; known: {list_versions(name)}"
+            f"unknown version {version!r} for {name!r}; "
+            f"known: {list_versions(name)}"
         ) from None
 
 
 def list_versions(name: str) -> list[str]:
-    """The model versions ``name`` has pinned weights for, sorted.
+    """Returns the model versions ``name`` has pinned weights for, sorted.
 
-    >>> list_versions("tabpfn")
-    ['v2', 'v2.5', 'v2.6', 'v3', 'v3.5', 'v3.5-fast']
-    >>> list_versions("tabicl")
-    ['v2']
+    Args:
+        name: A backend name; one that is not registered has no versions.
+
+    Returns:
+        The version strings, sorted.
+
+    Examples:
+        >>> list_versions("tabpfn")
+        ['v2', 'v2.5', 'v2.6', 'v3', 'v3.5', 'v3.5-fast']
+        >>> list_versions("tabicl")
+        ['v2']
     """
     return sorted(
         spec.version for spec in CHECKPOINTS.values() if spec.backend == name
     )
 
 
-def download_checkpoint(name: str, version: str | None = None) -> Path:
-    """Fetch the pretrained weights for ``name``, or return the cached path.
+def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
+    """Fetches the pretrained weights for ``name``, or returns the cached path.
 
     Safe to call repeatedly: the Hugging Face cache makes every call after the
-    first a no-op. Use it to warm the cache on a login node before submitting a
-    job to a compute node with no outbound network.
+    first a no-op. Use it to warm the cache on a login node before submitting
+    a job to a compute node with no outbound network.
 
-    >>> sorted(CHECKPOINTS)  # doctest: +NORMALIZE_WHITESPACE
-    ['tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5', 'tabpfn:v2.6',
-     'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
+    Args:
+        name: A backend name or a ``"backend:version"`` key, as for
+            :func:`get_checkpoint`.
+        version: The model version, or ``None`` for the default.
+
+    Returns:
+        The local path of the checkpoint file or snapshot directory.
+
+    Raises:
+        KeyError: If there is no pinned checkpoint for ``name`` at
+            ``version``.
+
+    Examples:
+        >>> sorted(CHECKPOINTS)  # doctest: +NORMALIZE_WHITESPACE
+        ['tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5', 'tabpfn:v2.6',
+         'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
     """
     return get_checkpoint(name, version).download()
 
 
 def is_cached(name: str, version: str | None = None) -> bool:
-    """Whether ``name``'s weights are already in the local cache.
+    """Returns whether ``name``'s weights are already in the local cache.
 
     Never triggers a download, so this is the cheap way to decide whether to
     warn a user that they are about to pull several gigabytes.
+
+    Args:
+        name: A backend name or a ``"backend:version"`` key, as for
+            :func:`get_checkpoint`.
+        version: The model version, or ``None`` for the default.
+
+    Returns:
+        ``True`` if the weights can be loaded without a network connection.
     """
     try:
         get_checkpoint(name, version).download(local_files_only=True)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure to load offline is a miss.
         return False
     return True
