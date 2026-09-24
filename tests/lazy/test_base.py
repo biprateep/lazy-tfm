@@ -10,16 +10,13 @@ whole scikit-learn conformance suite.
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import clone
-from sklearn.exceptions import NotFittedError
+from sklearn import base as sklearn_base
+from sklearn import exceptions
 
-from lazy.base import BasePhotoZEstimator
-from lazy.base import POINT_ESTIMATORS
-from lazy.grid import DC1_GRID
-from lazy.grid import RedshiftGrid
+import lazy
 
 
-class GaussianDummy(BasePhotoZEstimator):
+class GaussianDummy(lazy.BasePhotoZEstimator):
     """p(z | x) = N(x's first column + offset, sigma). Not a photo-z method."""
 
     def __init__(self, *, sigma=0.1, z_grid=None):
@@ -52,14 +49,14 @@ def test_fit_returns_self_and_sets_fitted_attributes(data):
     assert est.fit(X, y) is est
     assert est.n_features_in_ == 2
     assert list(est.feature_names_in_) == ["a", "b"]
-    assert est.grid_ is DC1_GRID
+    assert est.grid_ is lazy.DC1_GRID
 
 
 def test_predict_proba_is_normalized_on_the_grid(data):
     X, y = data
     pdfs = GaussianDummy().fit(X, y).predict_proba(X)
-    assert pdfs.shape == (len(X), DC1_GRID.n_bins)
-    assert np.allclose(np.trapezoid(pdfs, DC1_GRID.centers, axis=1), 1.0)
+    assert pdfs.shape == (len(X), lazy.DC1_GRID.n_bins)
+    assert np.allclose(np.trapezoid(pdfs, lazy.DC1_GRID.centers, axis=1), 1.0)
 
 
 def test_predict_pdf_is_an_alias_of_predict_proba(data):
@@ -71,12 +68,11 @@ def test_predict_pdf_is_an_alias_of_predict_proba(data):
 def test_predict_recovers_the_truth_for_a_well_specified_model(data):
     X, y = data
     z = GaussianDummy(sigma=0.05).fit(X, y).predict(X)
-    assert (
-        np.abs(z - y).max() < 0.02
-    )  # one grid bin plus the peak's discreteness
+    # One grid bin plus the peak's discreteness.
+    assert np.abs(z - y).max() < 0.02
 
 
-@pytest.mark.parametrize("method", POINT_ESTIMATORS)
+@pytest.mark.parametrize("method", lazy.POINT_ESTIMATORS)
 def test_every_point_estimate_method_is_usable(data, method):
     X, y = data
     z = GaussianDummy().fit(X, y).predict(X, method=method)
@@ -94,9 +90,8 @@ def test_unknown_method_names_the_alternatives(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
     with pytest.raises(ValueError, match="method must be one of"):
-        est.predict(
-            X, method="peak"
-        )  # the un-prefixed spelling is not accepted
+        # The un-prefixed spelling is not accepted.
+        est.predict(X, method="peak")
 
 
 def test_score_is_negated_cde_loss_so_higher_is_better(data):
@@ -112,7 +107,9 @@ def test_score_is_negated_cde_loss_so_higher_is_better(data):
 def test_a_grid_passed_at_call_time_is_used(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 3.0, 37)).shape == (
+    assert est.predict_proba(
+        X, lazy.RedshiftGrid.linear(0.0, 3.0, 37)
+    ).shape == (
         len(X),
         37,
     )
@@ -126,20 +123,21 @@ def test_a_grid_passed_at_call_time_is_used(data):
 def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
     X, y = data
     est = GaussianDummy(sigma=0.05).fit(X, y)
-    coarse = est.predict(X, z_grid=RedshiftGrid.linear(0.0, 2.0, 50))
-    fine = est.predict(X, z_grid=RedshiftGrid.linear(0.0, 2.0, 400))
+    coarse = est.predict(X, z_grid=lazy.RedshiftGrid.linear(0.0, 2.0, 50))
+    fine = est.predict(X, z_grid=lazy.RedshiftGrid.linear(0.0, 2.0, 400))
     assert est.offset_ is not None  # nothing was refitted
-    assert (
-        np.abs(coarse - fine).max() < 0.05
-    )  # same estimator, coarser resolution
+    # Same estimator, coarser resolution.
+    assert np.abs(coarse - fine).max() < 0.05
 
 
 def test_the_constructor_grid_is_the_default(data):
     X, y = data
-    est = GaussianDummy(z_grid=RedshiftGrid.linear(0.0, 3.0, 37)).fit(X, y)
+    est = GaussianDummy(z_grid=lazy.RedshiftGrid.linear(0.0, 3.0, 37)).fit(X, y)
     assert est.predict_proba(X).shape == (len(X), 37)
     # ... and a call-time grid still wins
-    assert est.predict_proba(X, RedshiftGrid.linear(0.0, 2.0, 11)).shape == (
+    assert est.predict_proba(
+        X, lazy.RedshiftGrid.linear(0.0, 2.0, 11)
+    ).shape == (
         len(X),
         11,
     )
@@ -174,7 +172,10 @@ def test_numpy_input_is_accepted(data):
     X, y = data
     est = GaussianDummy().fit(X.to_numpy(), y)
     assert list(est.feature_names_in_) == ["x0", "x1"]
-    assert est.predict_proba(X.to_numpy()).shape == (len(X), DC1_GRID.n_bins)
+    assert est.predict_proba(X.to_numpy()).shape == (
+        len(X),
+        lazy.DC1_GRID.n_bins,
+    )
 
 
 def test_mismatched_lengths_are_rejected(data):
@@ -193,7 +194,7 @@ def test_non_finite_targets_are_rejected(data):
 
 def test_predict_before_fit_raises(data):
     X, _ = data
-    with pytest.raises(NotFittedError):
+    with pytest.raises(exceptions.NotFittedError):
         GaussianDummy().predict_proba(X)
 
 
@@ -203,7 +204,7 @@ def test_predict_before_fit_raises(data):
 def test_sklearn_get_set_params_and_clone_round_trip():
     est = GaussianDummy(sigma=0.3)
     assert est.get_params()["sigma"] == 0.3
-    copy = clone(est)
+    copy = sklearn_base.clone(est)
     assert copy.get_params() == est.get_params()
     assert not hasattr(copy, "offset_")
     est.set_params(sigma=0.7)
@@ -214,7 +215,7 @@ def test_point_estimates_returns_every_definition_at_once(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
     estimates = est.point_estimates(est.predict_proba(X))
-    assert set(estimates) == set(POINT_ESTIMATORS)
+    assert set(estimates) == set(lazy.POINT_ESTIMATORS)
 
 
 def test_evaluate_returns_a_one_row_metric_table(data):

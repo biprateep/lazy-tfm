@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
 
-import matplotlib
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pytest
 
-# Every plotting test runs headless; set this before pyplot is first imported.
-matplotlib.use("Agg")
+from lazy import datasets
+from lazy import selection
+
+# Every plotting test runs headless. Nothing above draws, and switching to Agg
+# is allowed even after pyplot has been imported.
+mpl.use("Agg")
 
 
 @pytest.fixture
@@ -39,9 +43,7 @@ def hsc_grid():
     redshift, out to z = 1), the faint one is hard (a tenth, out to z = 0.5),
     and the colour-1 row is off limits -- no HSC spectra, so nothing survives.
     """
-    from lazy.selection import HSCGrid
-
-    return HSCGrid(
+    return selection.HSCGrid(
         ratios=np.array([[0.5, 0.1], [0.0, 0.0]]),
         x_edges=np.array([20.0, 22.0, 24.0]),
         y_edges=np.array([0.0, 1.0, 2.0]),
@@ -57,22 +59,20 @@ def hsc_grid():
 
 @pytest.fixture
 def biasable_catalog():
-    """2,000 galaxies in the toy grid's bright pixel, with a DC1-like `source` column.
+    """2,000 galaxies in the toy grid's bright pixel, with a `source` column.
 
-    Every row has colour 0.5 and magnitude 21, so all of them sit in the pixel
-    of ratio 0.5; the first hundred are marked as coming from the "train file".
+    The `source` column is DC1-like. Every row has colour 0.5 and magnitude
+    21, so all of them sit in the pixel of ratio 0.5; the first hundred are
+    marked as coming from the "train file".
     """
-    from lazy.datasets import BANDS
-    from lazy.datasets import Catalog
-
     n = 2_000
     generator = np.random.default_rng(3)
     frame = pd.DataFrame(
-        {b: np.full(n, 21.0, dtype=np.float32) for b in BANDS}
-        | {f"{b}ERR": np.full(n, 0.1, dtype=np.float32) for b in BANDS}
+        {b: np.full(n, 21.0, dtype=np.float32) for b in datasets.BANDS}
+        | {f"{b}ERR": np.full(n, 0.1, dtype=np.float32) for b in datasets.BANDS}
     )
     frame["G"] = np.float32(21.5)  # G - Z = 0.5, the grid's colour-0 row
-    return Catalog(
+    return datasets.Catalog(
         split="combined",
         raw=frame,
         redshift=generator.uniform(0.05, 0.95, n),

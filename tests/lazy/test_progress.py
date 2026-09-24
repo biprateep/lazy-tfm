@@ -12,58 +12,58 @@ import os
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import clone
+from sklearn import base as sklearn_base
 
-from lazy import ESTIMATORS
-from lazy import LazyModel
-from lazy.models._progress import bar
-from lazy.models._progress import check_progress
+import lazy
+from lazy.models import _progress
 
 needs_checkpoint = pytest.mark.skipif(
     os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason="set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint",
+    reason=(
+        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
+    ),
 )
 
 
 @pytest.mark.parametrize("value", ["auto", True, False])
 def test_the_three_modes_are_accepted(value):
-    check_progress(value)
+    _progress.check_progress(value)
 
 
 @pytest.mark.parametrize("value", [1, 0, "yes", None, "AUTO"])
 def test_anything_else_is_rejected(value):
     """``1`` in particular: it equals ``True`` and must still be refused."""
     with pytest.raises(ValueError, match="progress must be one of"):
-        check_progress(value)
+        _progress.check_progress(value)
 
 
 def test_forced_on_writes_to_stderr_not_stdout(capsys):
-    with bar(True, total=4, desc="demo", unit="gal") as progress:
+    with _progress.bar(True, total=4, desc="demo", unit="gal") as progress:
         progress.update(4)
     captured = capsys.readouterr()
-    assert captured.out == ""
+    assert not captured.out
     assert "demo" in captured.err and "4/4" in captured.err
 
 
 def test_auto_stays_quiet_when_output_is_not_a_terminal(capsys):
-    """pytest captures stderr, which is exactly the batch-job log case."""
-    with bar("auto", total=4, desc="demo", unit="gal") as progress:
+    """Pytest captures stderr, which is exactly the batch-job log case."""
+    with _progress.bar("auto", total=4, desc="demo", unit="gal") as progress:
         progress.update(4)
-    assert capsys.readouterr().err == ""
+    assert not capsys.readouterr().err
 
 
 def test_off_is_off(capsys):
-    with bar(False, total=4, desc="demo", unit="gal") as progress:
+    with _progress.bar(False, total=4, desc="demo", unit="gal") as progress:
         progress.update(4)
-    assert capsys.readouterr().err == ""
+    assert not capsys.readouterr().err
 
 
-@pytest.mark.parametrize("name", sorted(ESTIMATORS))
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_every_backend_takes_the_parameter_and_clones_it(name):
-    estimator = ESTIMATORS[name](progress=False)
+    estimator = lazy.ESTIMATORS[name](progress=False)
     assert estimator.get_params()["progress"] is False
-    assert clone(estimator).progress is False
-    assert ESTIMATORS[name]().progress == "auto"
+    assert sklearn_base.clone(estimator).progress is False
+    assert lazy.ESTIMATORS[name]().progress == "auto"
 
 
 # -- what each backend actually reports ---------------------------------------
@@ -104,7 +104,7 @@ def data():
 
 
 @needs_checkpoint
-@pytest.mark.parametrize("name", sorted(ESTIMATORS))
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(
     name, data, capsys
 ):
@@ -112,7 +112,7 @@ def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(
     X_ctx, z_ctx, X_q = data
 
     def run(progress):
-        model = LazyModel(
+        model = lazy.LazyModel(
             name, device="cpu", progress=progress, **SETTINGS[name]
         )
         return model.fit(X_ctx, z_ctx).predict_proba(X_q)

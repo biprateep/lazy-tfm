@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""The spectroscopic selection function: who gets a redshift, and who is quietly dropped.
+"""The spectroscopic selection function: who gets a redshift, who is dropped.
 
 The library's own reproduction test -- that this port returns the same galaxies
 as the runs the paper reports -- needs the real 14 MB HSC grid and the 1 GB DC1
@@ -13,8 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lazy.selection import grid_selection
-from lazy.selection import selection_summary
+from lazy import selection
 
 
 @pytest.fixture
@@ -39,7 +38,7 @@ def test_pixels_off_the_grid_are_reported_as_such(hsc_grid):
 
 
 def test_the_ceiling_is_the_percentile_of_the_spectra_in_that_pixel(hsc_grid):
-    """Column 0 is the bright pixel, column 1 the faint one; row 1 has no spectra."""
+    """Column 0 is the bright pixel, 1 the faint one; row 1 has no spectra."""
     ceiling = hsc_grid.max_specz(100.0)
     assert ceiling[0, 0] == pytest.approx(1.0)
     assert ceiling[0, 1] == pytest.approx(0.5)
@@ -47,11 +46,13 @@ def test_the_ceiling_is_the_percentile_of_the_spectra_in_that_pixel(hsc_grid):
 
 
 def test_a_pixel_with_no_spectra_keeps_nothing(hsc_grid):
-    """Zero is not "no cut" -- it is a ceiling every galaxy fails, which is the point."""
-    raw = pd.DataFrame(
-        {"I": [21.0], "G": [23.0], "Z": [21.0]}
-    )  # colour 2.0: the empty row
-    keep, _ = grid_selection(raw, np.array([0.1]), grid=hsc_grid)
+    """Zero is not "no cut" -- it is a ceiling every galaxy fails.
+
+    Which is the point.
+    """
+    # Colour 2.0: the empty row.
+    raw = pd.DataFrame({"I": [21.0], "G": [23.0], "Z": [21.0]})
+    keep, _ = selection.grid_selection(raw, np.array([0.1]), grid=hsc_grid)
     assert not keep.any()
 
 
@@ -66,8 +67,8 @@ def test_ceiling_tables_are_cached_per_percentile(hsc_grid):
 
 
 def test_the_kept_fraction_follows_the_pixel_ratio(hsc_grid, raw):
-    """Half the bright pixel, a tenth of the faint one -- that is the whole bias."""
-    keep, _ = grid_selection(
+    """Half the bright pixel, a tenth of the faint one: the whole bias."""
+    keep, _ = selection.grid_selection(
         raw, np.full(40, 0.1), grid=hsc_grid, color_redshift_cut=False
     )
     assert keep[:20].sum() == 10
@@ -77,9 +78,12 @@ def test_the_kept_fraction_follows_the_pixel_ratio(hsc_grid, raw):
 def test_the_redshift_ceiling_removes_galaxies_the_photometry_would_have_kept(
     hsc_grid, raw
 ):
-    """The faint pixel's spectra stop at z = 0.5, so nothing beyond it can be targeted."""
+    """The faint pixel's spectra stop at z = 0.5.
+
+    So nothing beyond it can be targeted.
+    """
     redshift = np.where(np.arange(40) < 20, 0.1, 0.9)
-    keep, diagnostics = grid_selection(
+    keep, diagnostics = selection.grid_selection(
         raw, redshift, grid=hsc_grid, percentile_cut=100.0
     )
     assert keep[:20].any()
@@ -91,19 +95,21 @@ def test_the_redshift_ceiling_removes_galaxies_the_photometry_would_have_kept(
 def test_the_scaling_factor_cannot_keep_more_galaxies_than_there_are(
     hsc_grid, raw
 ):
-    keep, _ = grid_selection(
+    keep, _ = selection.grid_selection(
         raw, np.full(40, 0.1), grid=hsc_grid, scaling_factor=1000.0
     )
     assert keep[:20].all()
 
 
 def test_galaxies_at_zero_redshift_are_never_selected(hsc_grid, raw):
-    keep, _ = grid_selection(raw, np.zeros(40), grid=hsc_grid)
+    keep, _ = selection.grid_selection(raw, np.zeros(40), grid=hsc_grid)
     assert not keep.any()
 
 
 def test_diagnostics_say_why_each_galaxy_was_reachable(hsc_grid, raw):
-    _, diagnostics = grid_selection(raw, np.full(40, 0.1), grid=hsc_grid)
+    _, diagnostics = selection.grid_selection(
+        raw, np.full(40, 0.1), grid=hsc_grid
+    )
     assert list(diagnostics.columns) == ["ratio", "z_ceiling", "survives_z_cut"]
     assert diagnostics["ratio"][:20].eq(0.5).all()
     assert diagnostics["ratio"][20:].eq(0.1).all()
@@ -111,13 +117,13 @@ def test_diagnostics_say_why_each_galaxy_was_reachable(hsc_grid, raw):
 
 def test_the_same_seed_gives_the_same_galaxies(hsc_grid, raw):
     redshift = np.full(40, 0.1)
-    first, _ = grid_selection(
+    first, _ = selection.grid_selection(
         raw, redshift, grid=hsc_grid, color_redshift_cut=False
     )
-    again, _ = grid_selection(
+    again, _ = selection.grid_selection(
         raw, redshift, grid=hsc_grid, color_redshift_cut=False
     )
-    other, _ = grid_selection(
+    other, _ = selection.grid_selection(
         raw, redshift, grid=hsc_grid, color_redshift_cut=False, seed=7
     )
     assert np.array_equal(first, again)
@@ -126,7 +132,7 @@ def test_the_same_seed_gives_the_same_galaxies(hsc_grid, raw):
 
 def test_other_bands_can_define_the_grid_axes(hsc_grid, raw):
     renamed = raw.rename(columns={"I": "i_mag", "G": "g_mag", "Z": "z_mag"})
-    keep, _ = grid_selection(
+    keep, _ = selection.grid_selection(
         renamed,
         np.full(40, 0.1),
         grid=hsc_grid,
@@ -139,22 +145,26 @@ def test_other_bands_can_define_the_grid_axes(hsc_grid, raw):
 
 def test_missing_columns_are_reported(hsc_grid, raw):
     with pytest.raises(KeyError, match="'Z'"):
-        grid_selection(raw.drop(columns=["Z"]), np.full(40, 0.1), grid=hsc_grid)
+        selection.grid_selection(
+            raw.drop(columns=["Z"]), np.full(40, 0.1), grid=hsc_grid
+        )
 
 
 def test_a_redshift_array_of_the_wrong_length_is_reported(hsc_grid, raw):
     with pytest.raises(ValueError, match="40 rows"):
-        grid_selection(raw, np.full(3, 0.1), grid=hsc_grid)
+        selection.grid_selection(raw, np.full(3, 0.1), grid=hsc_grid)
 
 
 # -- reporting --------------------------------------------------------------
 
 
 def test_the_summary_reports_the_selected_fraction_per_bin(hsc_grid, raw):
-    keep, _ = grid_selection(
+    keep, _ = selection.grid_selection(
         raw, np.full(40, 0.1), grid=hsc_grid, color_redshift_cut=False
     )
-    summary = selection_summary(keep, raw["I"].to_numpy(), np.full(40, 0.1))
+    summary = selection.selection_summary(
+        keep, raw["I"].to_numpy(), np.full(40, 0.1)
+    )
     bright = summary.loc[summary.bin == "i in [21.0, 22.0)"].iloc[0]
     faint = summary.loc[summary.bin == "i in [23.0, 24.0)"].iloc[0]
     assert bright.fraction == pytest.approx(0.5)
@@ -162,7 +172,7 @@ def test_the_summary_reports_the_selected_fraction_per_bin(hsc_grid, raw):
 
 
 def test_empty_bins_do_not_divide_by_zero(hsc_grid):
-    summary = selection_summary(
+    summary = selection.selection_summary(
         np.array([True]), np.array([21.0]), np.array([0.1])
     )
     assert np.isfinite(summary.fraction).all()
