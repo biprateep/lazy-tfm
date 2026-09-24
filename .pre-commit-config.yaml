@@ -6,7 +6,7 @@ repos:
   # on `main` until the first public release, after which it should be restored
   # alongside branch protection.
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
         name: Check for large files
@@ -16,19 +16,19 @@ repos:
         args: ['--maxkb=1024']
   # Verify that pyproject.toml is well formed
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.24.1
+    rev: '0.26'
     hooks:
       - id: validate-pyproject
         name: Validate pyproject.toml
         description: Verify that pyproject.toml adheres to the established schema.
   # Verify that GitHub workflows are well formed
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.28.0
+    rev: 0.38.2
     hooks:
       - id: check-github-workflows
         args: ["--verbose"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.2.1
+    rev: v0.16.8
     hooks:
       - id: ruff
         name: Lint code using ruff; sort and organize imports

@@ -86,9 +86,9 @@ def test_provenance_identifies_the_weights_and_the_code():
     assert record["package"].startswith("tabpfn ")
     assert record["lazy"].startswith("lazy-photoz ")
     assert record["device"] == "cuda"
-    assert not any(
-        isinstance(v, str) and "/home" in v for v in record.values()
-    ), "a provenance record travels between machines, so it carries no local paths"
+    assert not any(isinstance(v, str) and "/home" in v for v in record.values()), (
+        "a provenance record travels between machines, so it carries no local paths"
+    )
 
 
 def test_provenance_is_json_serialisable():
