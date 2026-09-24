@@ -357,8 +357,11 @@ def verify_style(strict: bool = True) -> dict[str, Any]:
         strict: Raise if anything is wrong, rather than only reporting it.
 
     Returns:
-        ``{"font": <path matplotlib will use>, "palette": [...],
-        "cmap": <name>, "default_palette": bool, "problems": [...]}``.
+        A dict with the keys ``font`` (the path of the font file matplotlib
+        will use), ``palette`` (the colours of the active property cycle),
+        ``cmap`` (the default colormap's name), ``default_palette`` (whether
+        the palette is matplotlib's default) and ``problems`` (a list of
+        messages, empty when the style is intact).
 
     Raises:
         RuntimeError: With ``strict=True`` (default), if any rcParam differs
