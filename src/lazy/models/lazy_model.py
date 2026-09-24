@@ -164,8 +164,9 @@ class LazyModel(BasePhotoZEstimator):
             if name in defaults:
                 return defaults[name]
         backend = ESTIMATORS.get(state["model"])
-        owner = f"LazyModel nor {backend.__name__}" if backend else "LazyModel"
-        raise AttributeError(f"neither {owner} has attribute {name!r}")
+        if backend is None:
+            raise AttributeError(f"LazyModel has no attribute {name!r}")
+        raise AttributeError(f"neither LazyModel nor {backend.__name__} has attribute {name!r}")
 
     # -- scikit-learn parameter protocol -----------------------------------
     #
