@@ -41,5 +41,15 @@ The first release. Everything below is new.
 - `LazyModel` builds its backend at `fit`, as the fitted attribute
   `estimator_`, rather than in `__init__`. An unknown backend name or parameter
   is reported at `fit`, and `set_params` rejects unknown parameter names.
+- The code follows the Google Python Style Guide, with Google-style
+  docstrings throughout; scikit-learn's `X` and `y` keep their names.
+- `Catalog.build_features` is now the module-level function
+  `lazy.datasets.build_features`, with the same arguments.
+- One-letter public parameters have descriptive names:
+  `RedshiftGrid.bin_index(redshifts)`, `tabfm.quantile_edges(redshifts, ...)`,
+  `plotting.plot_pdfs(..., n_galaxies=...)`, `style.set_palette(n_colors=...)`,
+  `style.better_step(bin_edges, heights, ...)`,
+  `style.binned_quantiles(x_values, y_values, ..., percentiles=...)` and
+  `style.running_median(ax, x_values, y_values, ...)`.
 
 [Unreleased]: https://github.com/biprateep/lazy-photoz/commits/main
