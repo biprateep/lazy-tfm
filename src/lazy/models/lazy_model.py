@@ -44,7 +44,7 @@ from lazy.models import registry
 __all__ = ["LazyModel"]
 
 
-class LazyModel(base.BasePhotoZEstimator):
+class LazyModel(base.BaseDensityRegressor):
     """A photo-z model addressed by backend name.
 
     The backend's parameters are reachable by ordinary attribute access, and
@@ -74,7 +74,7 @@ class LazyModel(base.BasePhotoZEstimator):
 
     Attributes:
         estimator_: The fitted backend every prediction is delegated to, a
-            :class:`lazy.base.BasePhotoZEstimator`.
+            :class:`lazy.base.BaseDensityRegressor`.
 
     Examples:
         >>> model = LazyModel("tabfm", n_estimators=4, n_dither=3)
@@ -151,7 +151,7 @@ class LazyModel(base.BasePhotoZEstimator):
         # The backend has already resolved its default (native or not).
         return self.estimator_.grid_
 
-    def _build(self) -> base.BasePhotoZEstimator:
+    def _build(self) -> base.BaseDensityRegressor:
         """Returns the unfitted backend these parameters describe, validated.
 
         Raises:
@@ -276,7 +276,7 @@ class LazyModel(base.BasePhotoZEstimator):
 
 
 def _constructor_defaults(
-    cls: type[base.BasePhotoZEstimator],
+    cls: type[base.BaseDensityRegressor],
 ) -> dict[str, Any]:
     """Returns ``{name: default}`` for ``cls``'s parameters but ``z_grid``."""
     return {

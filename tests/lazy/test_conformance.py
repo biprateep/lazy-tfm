@@ -343,7 +343,7 @@ def test_a_backend_without_the_uniform_features_cannot_register():
 
 
 def test_only_uniform_layer_backends_can_register():
-    class Plain(lazy.BasePhotoZEstimator):
+    class Plain(lazy.BaseDensityRegressor):
         def _fit(self, X, y):
             pass
 

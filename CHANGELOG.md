@@ -85,7 +85,8 @@ The first release. Everything below is new.
 ### Changed
 
 - The package is for any continuous target, not only redshift, and its
-  generic API says so: `RedshiftGrid` is now `Grid`.
+  generic API says so: `RedshiftGrid` is now `Grid` and `BasePhotoZEstimator`
+  is `BaseDensityRegressor`.
 - The distribution is named `lazy-tfm` (`pip install lazy-tfm`); the import
   name stays `lazy`. The benchmark-catalogue cache moved from
   `~/.cache/lazy-photoz` to `~/.cache/lazy-tfm` (move an existing cache there,

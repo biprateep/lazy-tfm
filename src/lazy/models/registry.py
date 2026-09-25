@@ -29,10 +29,10 @@ __all__ = ["ESTIMATORS", "get_estimator", "list_estimators", "register"]
 #: Short name -> estimator class. These names are what :class:`LazyModel` and
 #: :func:`get_estimator` accept, and what the benchmark tables record. Filled
 #: only through :func:`register`.
-ESTIMATORS: dict[str, type[base.BasePhotoZEstimator]] = {}
+ESTIMATORS: dict[str, type[base.BaseDensityRegressor]] = {}
 
 
-def register(name: str, cls: type[base.BasePhotoZEstimator]) -> None:
+def register(name: str, cls: type[base.BaseDensityRegressor]) -> None:
     """Adds a backend to the registry, once it meets the backend contract.
 
     Args:
@@ -63,7 +63,7 @@ def list_estimators() -> list[str]:
     return sorted(ESTIMATORS)
 
 
-def get_estimator(name: str, **params: Any) -> base.BasePhotoZEstimator:
+def get_estimator(name: str, **params: Any) -> base.BaseDensityRegressor:
     """Constructs the *concrete* backend class registered under ``name``.
 
     Prefer :class:`lazy.models.lazy_model.LazyModel`, which is the same lookup

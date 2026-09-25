@@ -100,7 +100,7 @@ class PerformanceWarning(UserWarning):
     """The prediction will be correct but slower than it needs to be."""
 
 
-class ContextEnsembleEstimator(base.BasePhotoZEstimator, abc.ABC):
+class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     """A pretrained in-context model behind the uniform feature layer.
 
     Subclasses declare their model's capabilities as class attributes and

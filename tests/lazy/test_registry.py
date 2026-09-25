@@ -19,7 +19,7 @@ def test_registered_names():
 @pytest.mark.parametrize("name", ["limix", "tabfm", "tabicl", "tabpfn"])
 def test_get_estimator_builds_a_photoz_estimator(name):
     est = lazy.get_estimator(name)
-    assert isinstance(est, lazy.BasePhotoZEstimator)
+    assert isinstance(est, lazy.BaseDensityRegressor)
     assert isinstance(est, lazy.ESTIMATORS[name])
 
 

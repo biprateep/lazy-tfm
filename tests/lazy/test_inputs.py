@@ -11,7 +11,7 @@ from lazy import _inputs
 from lazy import base
 
 
-class _Echo(base.BasePhotoZEstimator):
+class _Echo(base.BaseDensityRegressor):
     """Densities that depend on the features, so column mix-ups show."""
 
     def __init__(self, *, z_grid=None):

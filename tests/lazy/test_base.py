@@ -16,7 +16,7 @@ from sklearn import exceptions
 import lazy
 
 
-class GaussianDummy(lazy.BasePhotoZEstimator):
+class GaussianDummy(lazy.BaseDensityRegressor):
     """p(z | x) = N(x's first column + offset, sigma). Not a photo-z method."""
 
     def __init__(self, *, sigma=0.1, z_grid=None):

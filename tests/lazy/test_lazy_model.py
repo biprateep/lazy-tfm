@@ -22,7 +22,7 @@ def _explode(*args, **kwargs):
 @pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_every_registered_name_builds(name):
     model = lazy.LazyModel(name)
-    assert isinstance(model, lazy.BasePhotoZEstimator)
+    assert isinstance(model, lazy.BaseDensityRegressor)
     assert model.model == name
     assert model.name_ == f"{name}:{lazy.DEFAULT_VERSIONS[name]}"
 
@@ -153,7 +153,7 @@ def test_the_grid_default_is_carried_down_to_the_backend():
 # -- the full protocol, through a stand-in backend --------------------------
 
 
-class _Uniform(lazy.BasePhotoZEstimator):
+class _Uniform(lazy.BaseDensityRegressor):
     """A backend that answers with a flat density, for wiring tests only."""
 
     def __init__(self, *, width=1.0, z_grid=None):

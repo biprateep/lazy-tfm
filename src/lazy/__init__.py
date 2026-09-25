@@ -62,7 +62,7 @@ thereafter; :func:`download_checkpoint` warms that cache ahead of time.
 from importlib import metadata
 
 from lazy import _namespace
-from lazy.base import BasePhotoZEstimator
+from lazy.base import BaseDensityRegressor
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
 from lazy.grid import DC1_GRID
@@ -97,7 +97,7 @@ __all__ = [
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
     "POINT_ESTIMATORS",
-    "BasePhotoZEstimator",
+    "BaseDensityRegressor",
     "ContextSizeWarning",
     "LazyModel",
     "LimiXBarDistribution",

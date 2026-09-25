@@ -59,10 +59,10 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
 
-__all__ = ["POINT_ESTIMATORS", "BasePhotoZEstimator"]
+__all__ = ["POINT_ESTIMATORS", "BaseDensityRegressor"]
 
 #: Reductions of a density to a single redshift, accepted by the ``method``
-#: argument of :meth:`BasePhotoZEstimator.predict`. ``z_peak`` and
+#: argument of :meth:`BaseDensityRegressor.predict`. ``z_peak`` and
 #: ``z_weight`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see
 #: :mod:`lazy.metrics`).
 POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
@@ -73,7 +73,7 @@ POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
 _Features: TypeAlias = Any
 
 
-class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
+class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     """A conditional-density photo-z estimator with a scikit-learn API.
 
     Subclasses must accept a ``z_grid`` parameter and pass it through
@@ -173,7 +173,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
 
     # -- the public API ----------------------------------------------------
 
-    def fit(self, X: _Features, y: npt.ArrayLike) -> BasePhotoZEstimator:  # noqa: GS030 - scikit-learn's X, y.
+    def fit(self, X: _Features, y: npt.ArrayLike) -> BaseDensityRegressor:  # noqa: GS030 - scikit-learn's X, y.
         """Fits on labelled photometry.
 
         Args:

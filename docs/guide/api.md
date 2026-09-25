@@ -2,7 +2,7 @@
 
 It is scikit-learn's, with one difference. A photo-z model's natural output is a
 distribution rather than a number, so
-{meth}`~lazy.base.BasePhotoZEstimator.predict_proba` returns a density on a
+{meth}`~lazy.base.BaseDensityRegressor.predict_proba` returns a density on a
 redshift grid rather than class probabilities, and `predict` is a documented
 reduction of it:
 
@@ -102,7 +102,7 @@ loses nothing:
 Native bucket grids reach far into both tails, below zero included, because
 that is where the buckets are. Pass a grid to restrict the range; `"native"`
 asks for the native grid explicitly. A plain
-{class}`~lazy.base.BasePhotoZEstimator` subclass defaults to
+{class}`~lazy.base.BaseDensityRegressor` subclass defaults to
 {data}`~lazy.grid.DC1_GRID`, 200 bins over 0 < z < 2.
 
 ## Two normalisations
@@ -133,7 +133,7 @@ galaxies reach beyond a grid, pass one that covers them.
 The four definitions disagree exactly when a density is multimodal: `z_mean`
 lands between two peaks, where there is no probability, while `z_peak` and
 `z_weight` pick one. To get several, call `predict_proba` once and reduce it
-with {meth}`~lazy.base.BasePhotoZEstimator.point_estimates` or
+with {meth}`~lazy.base.BaseDensityRegressor.point_estimates` or
 {func}`lazy.metrics.grid_point_estimates`, rather than re-running the model for
 each definition. `z_median` is also `predict_quantiles(X, [0.5])`, computed
 without a grid.
