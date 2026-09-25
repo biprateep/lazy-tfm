@@ -231,7 +231,7 @@ disable_error_code = ["import-untyped"]
 # The optional backends: CI type-checks without the extras installed, so these
 # may be absent. Where they are installed, mypy still reads their types.
 [[tool.mypy.overrides]]
-module = ["tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*"]
+module = ["qp", "qp.*", "tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
