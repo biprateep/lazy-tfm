@@ -62,6 +62,9 @@ tabicl = [
 tabpfn = [
     "tabpfn>=9.0.0", # TabPFN-3; its checkpoint is fetched from Hugging Face on first use
 ]
+qp = [
+    "qp-prob>=1.1", # LSST DESC's PDF package: to_qp()/from_qp() and its file formats, for RAIL
+]
 all = [
     "lazy-photoz[tabfm,tabicl,tabpfn]",
 ]

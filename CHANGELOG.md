@@ -35,6 +35,12 @@ The first release. Everything below is new.
   query rows to bound memory (`chunk_size`).
 - A `TabFMPerformanceWarning` when TabFM falls back to its uncached path.
 - Support for Python 3.12, 3.13 and 3.14.
+- `lazy.distributions`: per-galaxy redshift distributions in each model's
+  native form (`HistogramDistribution`, `QuantileDistribution`,
+  `MixtureDistribution`) with exact `pdf`, `cdf`, `ppf`, `sf`, `rvs`, `mean`,
+  `median`, `mode`, `std`, `var`, `interval` and `histogramize`, following
+  scipy.stats and LSST DESC's qp; `to_qp()` / `from_qp()` with the new `qp`
+  extra.
 - Features may be given as NumPy arrays, structured or record arrays, pandas
   DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
   are `NaN` and pass through to each model's own handling; infinities and
