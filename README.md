@@ -25,8 +25,9 @@ hyper-parameter search, no per-survey retraining. Hence lazy.
 pip install lazy-photoz              # grid, metrics, plots, datasets
 pip install 'lazy-photoz[tabfm]'     # + the TabFM backend
 pip install 'lazy-photoz[tabicl]'    # + the TabICLv2 backend
-pip install 'lazy-photoz[tabpfn]'    # + the TabPFN-3 backend
-pip install 'lazy-photoz[all]'       # + all three
+pip install 'lazy-photoz[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
+pip install 'lazy-photoz[limix]'     # + the LimiX-2 backend (its code installs separately)
+pip install 'lazy-photoz[all]'       # + all four
 ```
 
 Pretrained weights are not bundled: they are fetched from the Hugging Face Hub
@@ -34,7 +35,8 @@ on first prediction and cached thereafter. TabFM's classification checkpoint is
 ~6.6 GB and carries a **non-commercial** licence from Google; TabICLv2's is
 ~100 MB (BSD-3-Clause); the TabPFN checkpoints run from ~41 MB to ~880 MB and
 are **non-commercial** from Prior Labs, except `v2`, which is Apache-2.0 with an
-attribution clause. Every licence is quoted in `lazy.CHECKPOINTS`. Warm the
+attribution clause; LimiX-2's is ~1.6 GB under Stable AI's Apache-2.0-based
+licence, which requires the attribution "Built with StableAI LimiX". Every licence is quoted in `lazy.CHECKPOINTS`. Warm the
 cache ahead of time with `lazy.download_checkpoint("tabfm")`.
 
 ## Use
@@ -46,17 +48,18 @@ from lazy.datasets import fetch_dc1
 train, test = fetch_dc1(split=True)        # or fetch_dc1() for both, concatenated
 X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
-model = LazyModel("tabfm", n_estimators=4, n_dither=3)
+model = LazyModel("tabpfn", version="v3.5")
 model.fit(X_train, train.redshift)
 
 pdfs = model.predict_proba(X_test, RedshiftGrid.linear(0, 2, 200))
 z = model.predict(X_test, method="z_peak")  # or z_mean, z_weight, z_median
+lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
 print(model.evaluate(X_test, test.redshift))
 ```
 
 `LazyModel(name, ...)` picks the backend by name, so switching is a string
-change; the concrete classes (`TabFMHistogram`, `TabICLQuantile`,
-`TabPFNBarDistribution`) are importable and identical. The API is scikit-learn's, except `predict_proba` returns a
+change; the concrete classes (`TabPFNBarDistribution`, `LimiXBarDistribution`,
+`TabICLQuantile`, `TabFMHistogram`) are importable and identical. The API is scikit-learn's, except `predict_proba` returns a
 density on a redshift grid rather than class probabilities — that is the natural
 output of a photo-z model. `get_params`/`set_params`/`clone` work, so models drop
 into scikit-learn pipelines and search objects unmodified.
@@ -68,21 +71,37 @@ rebinning step — so one fitted model answers on as many grids as you like
 without refitting:
 
 ```python
+model.predict_proba(X_test)                                  # the native grid
 model.predict_proba(X_test, RedshiftGrid.linear(0, 3, 300))
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))  # or bin centres
 ```
 
+With no grid a model answers on its *native* grid, the one it thinks in (for
+TabPFN and LimiX-2, their 5,000 buckets), so nothing is lost to rebinning.
+`predict_distribution(X)` returns that native answer itself, with exact
+`pdf`/`cdf`/`ppf`/`mean`/`interval`/`rvs` in the vocabulary of scipy.stats and
+LSST DESC's qp, and `.to_qp()` for RAIL.
+
 | Backend  | Method                                                           | Versions | Weights  |
 | -------- | ---------------------------------------------------------------- | -------- | -------- |
+| `tabpfn` | Bucket masses of the bar distribution | `v2` … `v3.5` | 41 MB – 880 MB |
+| `limix`  | Bucket masses of LimiX-2's 5,000-bucket head | `v2` | ~1.6 GB |
+| `tabicl` | Quantiles of an in-context regression head | `v2` | ~100 MB |
 | `tabfm`  | Hierarchy of in-context classifiers over equal-mass redshift bins | `v1.0` | ~6.6 GB  |
-| `tabicl` | Quantiles of an in-context regression head, differenced onto the grid | `v2` | ~100 MB |
-| `tabpfn` | Bucket masses of the bar distribution, rebinned onto the grid | `v2` … `v3.5` | 41 MB – 880 MB |
 
-Every backend runs correctly on its released dependency. Memory is bounded by
-`chunk_size` on all of them, which is exact — the in-context stage builds its keys and
-values from the context rows alone, so a query row's answer never depends on
-which other query rows share its chunk (asserted bit-identical in the test
-suite).
+**One set of parameters, on every model.** `kv_cache` (process the context
+once, at fit; exact; on by default), `n_estimators`, `feature_shuffle`,
+`transforms` (a shared vocabulary — `power`, `quantile`, `robust`, … — plus
+recipes such as `"limix"`; `"auto"` keeps each model's own), `bag_size`
+(per-member subsets of the context) and `z_grid` mean the same thing on every
+backend. Each is translated to the model's own machinery where it has it and
+built around the model where it does not, and registering a new backend
+without them fails. LimiX-2 degrades above ~20,000 context rows and warns when
+a larger context arrives without `bag_size`.
+
+Memory is bounded by `chunk_size` on every backend, and chunking is exact: a
+query row's answer never depends on which other query rows share its chunk
+(bit for bit on TabPFN and TabICL, to float rounding on LimiX-2).
 
 ### For TabFM, install its repository build
 
@@ -107,13 +126,24 @@ from lazy.models._icl_stream import streaming_available
 streaming_available()   # True means the fast path is in use
 ```
 
-Pass `inference="predict_proba"` to choose the slow path deliberately and
-silence the warning.
+Pass `kv_cache=False` to choose the slow path deliberately and silence the
+warning.
 
-The same concern has a different name on `tabpfn`: `fit_mode="fit_with_cache"`
-keeps the context's key/value tensors so each chunk of queries skips the
-context forward pass. It costs memory and is worth it whenever the query set is
-much larger than the context.
+### For LimiX-2, install its code
+
+LimiX is not on PyPI. The `limix` extra brings its dependencies; the code
+comes from the repository, at the commit this package was validated on (or
+from a checkout named by `LAZY_LIMIX_SRC`):
+
+```bash
+pip install 'lazy-photoz[limix]'
+pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
+```
+
+Upstream LimiX-2 has no key/value cache and its answers depend on how the
+queries are chunked; the backend runs its network with a ported cache,
+context-only preprocessing and a dedicated random generator, which removes
+both. Built with StableAI LimiX.
 
 They all write onto any `RedshiftGrid` you ask for — any number of bins, any
 spacing, any range. (TabFM's ten-class ceiling constrains its internal
@@ -250,9 +280,8 @@ grid caches beside the catalogues and `fetch_hsc_grid` takes the same flag. The
 checkpoint a model loads is the one `download_checkpoint` fetches — the pinned revision is handed
 to the backend rather than left to its default.
 
-Memory is bounded by default on every backend via `chunk_size` (16384 query
-rows), and chunking is numerically exact, so the default costs nothing but a
-little repeated context work.
+Memory is bounded by default on every backend via `chunk_size` (8,192 or
+16,384 query rows), and chunking is exact, so the default costs nothing.
 
 ## What's in the box
 
@@ -298,7 +327,8 @@ Built from the
 ## License
 
 MIT, for this code. The pretrained checkpoints carry their own licences; TabFM's
-is non-commercial. The HSC selection grid is redistributed by DESC's
+is non-commercial, and LimiX-2's requires the attribution "Built with StableAI
+LimiX". The HSC selection grid is redistributed by DESC's
 [rail_astro_tools](https://github.com/LSSTDESC/rail_astro_tools) (MIT) and
 derives from HSC PDR2 (Aihara et al. 2019); `lazy.selection` downloads it from
 there, at a pinned commit, rather than bundling it.

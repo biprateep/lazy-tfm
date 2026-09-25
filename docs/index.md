@@ -20,7 +20,7 @@ train, test = fetch_dc1(split=True)
 X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
 model = LazyModel("tabpfn", version="v3.5").fit(X_train, train.redshift)
-pdfs = model.predict_proba(X_test)            # densities on a redshift grid
+pdfs = model.predict_proba(X_test)            # densities on its native grid
 print(model.evaluate(X_test, test.redshift))  # the full metric table
 ```
 

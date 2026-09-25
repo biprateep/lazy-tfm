@@ -46,7 +46,11 @@ the backend's checkpoint.
 
 ## The outputs
 
-`predict_proba` returns densities, one row per galaxy, on the grid you pass;
-`predict` reduces each density to a point estimate; `evaluate` scores both
-against the true redshifts with the Data Challenge metrics. The next steps are
-in {doc}`guide/api`.
+`predict_proba` returns densities, one row per galaxy, on the grid you pass,
+or on the model's native grid if you pass none; `predict_quantiles` gives
+exact credible bounds, and `predict_distribution` the model's whole answer
+before any grid; `predict` reduces each density to a point estimate;
+`evaluate` scores both against the true redshifts with the Data Challenge
+metrics. The next steps are in {doc}`guide/api`, and the parameters every
+backend shares -- the key/value cache, ensembling, transforms, bagging -- in
+{doc}`guide/backends`.

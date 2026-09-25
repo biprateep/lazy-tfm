@@ -8,7 +8,8 @@ pip install lazy-photoz              # the grid, metrics, plots and datasets
 pip install 'lazy-photoz[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
 pip install 'lazy-photoz[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-photoz[tabfm]'     # + the TabFM backend
-pip install 'lazy-photoz[all]'       # + all three
+pip install 'lazy-photoz[limix]'     # + the LimiX-2 backend's dependencies
+pip install 'lazy-photoz[all]'       # + all four
 ```
 
 With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-photoz[tabpfn]'` in a
@@ -44,6 +45,23 @@ On the release build, `TabFMHistogram` warns at `fit` with a
 `TabFMPerformanceWarning`. `lazy.models._icl_stream.streaming_available()`
 returns `True` when the fast path is in use.
 
+## LimiX-2: install its code separately
+
+LimiX's code is not on PyPI, and PyPI does not let a package depend on a
+repository, so the `limix` extra installs only its dependencies. Install the
+code itself at the commit `lazy` was validated on:
+
+```console
+pip install 'lazy-photoz[limix]'
+pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
+```
+
+or clone the repository and set `LAZY_LIMIX_SRC` to the checkout. `lazy` loads
+two parts of it under private module names, so LimiX's generic top-level
+package names (`model`, `utils`, ...) never shadow anything. Another commit
+works with a `LimiXSourceWarning`. LimiX's network imports `triton`, which
+arrives with PyTorch's Linux wheels.
+
 ## Pretrained checkpoints
 
 Weights are not bundled. They are downloaded from the Hugging Face Hub the
@@ -52,6 +70,7 @@ repositories is gated, so no Hugging Face account or token is needed.
 
 | Backend  | Versions        | Size           | Licence of the weights                          |
 | -------- | --------------- | -------------- | ----------------------------------------------- |
+| `limix`  | `v2`            | ~1.6 GB        | Stable AI License 1.0 (Apache-2.0 with attribution: "Built with StableAI LimiX") |
 | `tabfm`  | `v1.0`          | ~6.6 GB        | Google, **non-commercial**                      |
 | `tabicl` | `v2`            | ~100 MB        | BSD-3-Clause                                    |
 | `tabpfn` | `v2` to `v3.5`  | 41 MB – 880 MB | Prior Labs, **non-commercial**, except `v2` (Apache-2.0 with attribution) |
@@ -78,5 +97,6 @@ uv sync --extra all
 ```
 
 This installs the package in editable mode with every dependency pinned by
-`uv.lock`, including TabFM's repository build. See {doc}`contributing` for the
+`uv.lock`, including TabFM's repository build (LimiX's code still comes from
+`LAZY_LIMIX_SRC` or a separate install). See {doc}`contributing` for the
 development workflow.
