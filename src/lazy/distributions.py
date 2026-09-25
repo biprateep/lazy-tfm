@@ -10,7 +10,7 @@ serves them all without approximation:
 
 * :class:`HistogramDistribution` -- masses in buckets shared by every row,
   uniform within each bucket (qp's ``hist`` parameterisation);
-* :class:`QuantileDistribution` -- redshifts at fixed cumulative levels,
+* :class:`QuantileDistribution` -- values at fixed cumulative levels,
   linear in between, the tails beyond the outermost levels sitting on the
   outermost values (qp's ``quant``);
 * :class:`MixtureDistribution` -- a weighted mixture of histograms whose
@@ -104,17 +104,17 @@ class _Base:
         """The number of rows (galaxies), as qp calls it."""
         raise NotImplementedError
 
-    def cdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The CDF at ``redshifts``, shape (n_rows, len(redshifts))."""
+    def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The CDF at ``values``, shape (n_rows, len(values))."""
         raise NotImplementedError
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         """Per-row inverse CDF at per-row levels, shape (n_rows, k)."""
         raise NotImplementedError
 
-    def sf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The survival function 1 - CDF, shape (n_rows, len(redshifts))."""
-        return 1.0 - self.cdf(redshifts)
+    def sf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The survival function 1 - CDF, shape (n_rows, len(values))."""
+        return 1.0 - self.cdf(values)
 
     def ppf(self, levels: npt.ArrayLike) -> _typing.FloatArray:
         """The inverse CDF (quantile function), exact.
@@ -123,7 +123,7 @@ class _Base:
             levels: Cumulative probabilities within [0, 1], shape (k,).
 
         Returns:
-            The redshifts at those levels, shape (n_rows, k).
+            The values at those levels, shape (n_rows, k).
         """
         levels = _as_levels(levels)
         return self._ppf_rows(np.broadcast_to(levels, (self.npdf, levels.size)))
@@ -143,7 +143,7 @@ class _Base:
             confidence: A probability in (0, 1), e.g. 0.68.
 
         Returns:
-            The lower and upper redshifts, shape (n_rows, 2).
+            The lower and upper values, shape (n_rows, 2).
         """
         if not 0.0 < confidence < 1.0:
             raise ValueError(f"confidence must lie in (0, 1): {confidence=}")
@@ -161,7 +161,7 @@ class _Base:
     def rvs(
         self, size: int, random_state: int | np.random.Generator | None = None
     ) -> _typing.FloatArray:
-        """Draws redshifts from each row by inverse-transform sampling.
+        """Draws values from each row by inverse-transform sampling.
 
         Args:
             size: Draws per row.
@@ -252,13 +252,13 @@ class HistogramDistribution(_Base):
         """
         return grid.rebin(self.masses, self.bins)
 
-    def pdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The density at ``redshifts``, shape (n_rows, len(redshifts)).
+    def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The density at ``values``, shape (n_rows, len(values)).
 
         The density inside a bucket is its mass over its width; zero outside
         the buckets and in zero-width buckets.
         """
-        z = np.atleast_1d(np.asarray(redshifts, dtype=np.float64))
+        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
         widths = self.widths
         index = np.searchsorted(self.bins, z, side="right") - 1
         inside = (index >= 0) & (index < widths.size)
@@ -271,9 +271,9 @@ class HistogramDistribution(_Base):
             )
         return np.where(inside, density, 0.0)
 
-    def cdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The CDF at ``redshifts``, shape (n_rows, len(redshifts)); exact."""
-        z = np.atleast_1d(np.asarray(redshifts, dtype=np.float64))
+    def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The CDF at ``values``, shape (n_rows, len(values)); exact."""
+        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
         widths = self.widths
         probabilities = self.probabilities
         cumulative = np.concatenate(
@@ -358,7 +358,7 @@ class HistogramDistribution(_Base):
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class QuantileDistribution(_Base):
-    """Redshifts at fixed cumulative levels, linear in between.
+    """Values at fixed cumulative levels, linear in between.
 
     The CDF passes through each (``locs[i, j]``, ``quants[j]``) and is linear
     between consecutive knots, so the density is constant there. Beyond the
@@ -439,9 +439,9 @@ class QuantileDistribution(_Base):
         """
         return grid.from_quantiles(self.locs, self.quants)
 
-    def cdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The CDF at ``redshifts``, shape (n_rows, len(redshifts)); exact."""
-        z = np.atleast_1d(np.asarray(redshifts, dtype=np.float64))
+    def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The CDF at ``values``, shape (n_rows, len(values)); exact."""
+        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
         out = np.empty((self.npdf, z.size))
         for row in range(self.npdf):
             out[row] = np.interp(
@@ -449,13 +449,13 @@ class QuantileDistribution(_Base):
             )
         return out
 
-    def pdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The density at ``redshifts``, shape (n_rows, len(redshifts)).
+    def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The density at ``values``, shape (n_rows, len(values)).
 
         Constant between knots; zero outside the outermost values (where the
         tails sit as point masses) and on zero-width segments.
         """
-        z = np.atleast_1d(np.asarray(redshifts, dtype=np.float64))
+        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
         step = np.diff(self.quants)
         out = np.zeros((self.npdf, z.size))
         for row in range(self.npdf):
@@ -623,13 +623,13 @@ class MixtureDistribution(_Base):
             total += weight * component.on_grid(grid)
         return total
 
-    def pdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The density at ``redshifts``, shape (n_rows, len(redshifts))."""
-        return self._weighted([c.pdf(redshifts) for c in self.components])
+    def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The density at ``values``, shape (n_rows, len(values))."""
+        return self._weighted([c.pdf(values) for c in self.components])
 
-    def cdf(self, redshifts: npt.ArrayLike) -> _typing.FloatArray:
-        """The CDF at ``redshifts``, shape (n_rows, len(redshifts)); exact."""
-        return self._weighted([c.cdf(redshifts) for c in self.components])
+    def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The CDF at ``values``, shape (n_rows, len(values)); exact."""
+        return self._weighted([c.cdf(values) for c in self.components])
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         # The union histogram is the same distribution, so its inverse is

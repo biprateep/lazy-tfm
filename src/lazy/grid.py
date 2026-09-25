@@ -331,7 +331,7 @@ class Grid:
     ) -> _typing.FloatArray:
         """Density on this grid from per-row quantiles of the predictive CDF.
 
-        ``values[i]`` are the redshifts at cumulative probabilities
+        ``values[i]`` are the values at cumulative probabilities
         ``levels``. Those pairs define a CDF; evaluating it at this grid's
         edges and differencing gives each bin exactly the mass the quantiles
         place inside it. Differencing at the bin *centres* instead
@@ -358,16 +358,16 @@ class Grid:
         density = np.diff(cdf, axis=1) / self.widths
         return self.normalize(np.clip(density, 0.0, None))
 
-    def bin_index(self, redshifts: npt.ArrayLike) -> _typing.IntArray:
+    def bin_index(self, values: npt.ArrayLike) -> _typing.IntArray:
         """Index of the bin each redshift falls in, clipped to the grid.
 
         Args:
-            redshifts: Redshifts, any shape.
+            values: Target values, any shape.
 
         Returns:
-            Bin indices in ``[0, n_bins)``, the same shape as ``redshifts``.
+            Bin indices in ``[0, n_bins)``, the same shape as ``values``.
         """
-        values = np.asarray(redshifts, dtype=float)
+        values = np.asarray(values, dtype=float)
         return np.clip(
             np.searchsorted(self.edges, values, side="right") - 1,
             0,

@@ -8,7 +8,7 @@ against them. Its classifier handles at most ten classes, which is far short of
 the resolution a photo-z PDF needs, so :class:`TabFMHistogram` builds the
 density as a two-level hierarchy of *equal-mass* redshift bins:
 
-* one classifier over ``n_coarse_bins`` quantile bins of the context redshifts;
+* one classifier over ``n_coarse_bins`` quantile bins of the context values;
 * one classifier per coarse bin over ``n_fine_bins`` quantile bins inside it,
   with only that bin's context galaxies as context.
 
@@ -18,7 +18,7 @@ With ``n_dither > 1`` the whole hierarchy is repeated with the bin edges
 shifted in quantile space and the results mixed with equal weights (a
 :class:`~lazy.distributions.MixtureDistribution`) -- an averaged shifted
 histogram, which removes the edge artifacts a single binning leaves behind.
-The bins span the constructor grid's range, or the training redshifts'; they
+The bins span the constructor grid's range, or the training values'; they
 never depend on the grid a prediction is asked on. The native grid is the
 union of every dither's edges.
 
@@ -100,7 +100,7 @@ _SLOW_PATH_WARNING = (
 
 
 def quantile_edges(
-    redshifts: npt.ArrayLike,
+    values: npt.ArrayLike,
     n_bins: int,
     lo: float,
     hi: float,
@@ -109,7 +109,7 @@ def quantile_edges(
     """Equal-mass bin edges over ``[lo, hi]``.
 
     Args:
-        redshifts: The redshifts whose quantiles set the edges, shape
+        values: The values whose quantiles set the edges, shape
             ``(n,)``.
         n_bins: Number of bins.
         lo: The first edge, replacing the lowest quantile.
@@ -124,7 +124,7 @@ def quantile_edges(
         >>> quantile_edges(np.linspace(0, 1, 101), 2, 0.0, 1.0).tolist()
         [0.0, 0.5, 1.0]
     """
-    values = np.asarray(redshifts, dtype=float)
+    values = np.asarray(values, dtype=float)
     levels = np.clip(
         np.linspace(0.0, 1.0, n_bins + 1) + shift / n_bins, 0.0, 1.0
     )
@@ -214,7 +214,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
             sets the range the equal-mass bins span; without one they span the
-            training redshifts.
+            training values.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
             the training prior, which is worth having when the context is a

@@ -122,7 +122,7 @@ The first release. Everything below is new.
 - `Catalog.build_features` is now the module-level function
   `lazy.datasets.build_features`, with the same arguments.
 - One-letter public parameters have descriptive names:
-  `Grid.bin_index(redshifts)`, `tabfm.quantile_edges(redshifts, ...)`,
+  `Grid.bin_index(values)`, `tabfm.quantile_edges(values, ...)`,
   `plotting.plot_pdfs(..., n_galaxies=...)`, `style.set_palette(n_colors=...)`,
   `style.better_step(bin_edges, heights, ...)`,
   `style.binned_quantiles(x_values, y_values, ..., percentiles=...)` and
