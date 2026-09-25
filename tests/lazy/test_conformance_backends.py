@@ -42,6 +42,14 @@ def data():
     return X[:200], z[:200], X[200:]
 
 
+def _skip_without(name):
+    """Skips unless the backend's model code can be imported."""
+    try:
+        lazy.ESTIMATORS[name]()._import_backend()
+    except ImportError as error:
+        pytest.skip(f"{name} is not installed: {error}")
+
+
 def _model(name, **params):
     settings = {
         **backend_settings.BACKEND_SETTINGS[name],
@@ -66,7 +74,7 @@ def test_every_backend_has_checkpoint_test_settings(name):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_cache_changes_nothing(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     cached = _fit(name, data, kv_cache=True).predict_proba(
         X_test, lazy.DC1_GRID
@@ -83,22 +91,24 @@ def test_the_cache_changes_nothing(name, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_chunking_changes_nothing(name, data):
-    pytest.importorskip(name)
-    if not lazy.ESTIMATORS[name].exact_chunking:
-        pytest.skip("this model's preprocessing sees the rows of a chunk")
+    _skip_without(name)
     _, _, X_test = data
     whole = _fit(name, data, chunk_size=0, kv_cache=False)
     chunked = _fit(name, data, chunk_size=7, kv_cache=False)
-    np.testing.assert_array_equal(
-        whole.predict_proba(X_test, lazy.DC1_GRID),
-        chunked.predict_proba(X_test, lazy.DC1_GRID),
-    )
+    whole_pdfs = whole.predict_proba(X_test, lazy.DC1_GRID)
+    chunked_pdfs = chunked.predict_proba(X_test, lazy.DC1_GRID)
+    if lazy.ESTIMATORS[name].exact_chunking:
+        np.testing.assert_array_equal(whole_pdfs, chunked_pdfs)
+    else:  # independent of the chunk, but batched differently: rounding
+        np.testing.assert_allclose(
+            whole_pdfs, chunked_pdfs, rtol=1e-4, atol=1e-4 * whole_pdfs.max()
+        )
 
 
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_native_grid_is_the_default_and_integrates_to_one(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     model = _fit(name, data)
     assert model.grid_ == model.native_grid_
@@ -110,7 +120,7 @@ def test_the_native_grid_is_the_default_and_integrates_to_one(name, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_quantiles_invert_the_native_distribution(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     model = _fit(name, data)
     levels = np.array([0.16, 0.5, 0.84])
@@ -126,7 +136,7 @@ def test_quantiles_invert_the_native_distribution(name, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     np.testing.assert_array_equal(
         _fit(name, data).predict_proba(X_test, lazy.DC1_GRID),
@@ -137,7 +147,7 @@ def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_bagging_runs_and_the_seed_controls_it(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     first = _fit(name, data, bag_size=0.5).predict_proba(X_test, lazy.DC1_GRID)
     again = _fit(name, data, bag_size=0.5).predict_proba(X_test, lazy.DC1_GRID)
@@ -152,7 +162,7 @@ def test_bagging_runs_and_the_seed_controls_it(name, data):
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("transforms", [*_transforms.BASE_TRANSFORMS, "limix"])
 def test_every_transform_runs(name, transforms, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     pdfs = _fit(name, data, transforms=transforms).predict_proba(
         X_test, lazy.DC1_GRID
@@ -163,7 +173,7 @@ def test_every_transform_runs(name, transforms, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_auto_recipe_is_the_default(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     _, _, X_test = data
     np.testing.assert_array_equal(
         _fit(name, data).predict_proba(X_test, lazy.DC1_GRID),
@@ -176,7 +186,7 @@ def test_the_auto_recipe_is_the_default(name, data):
 @needs_checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_unshuffled_columns_and_missing_values_run(name, data):
-    pytest.importorskip(name)
+    _skip_without(name)
     X, z, X_test = data
     X = X.copy()
     X[::5, 1] = np.nan

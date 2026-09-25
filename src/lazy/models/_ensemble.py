@@ -125,8 +125,9 @@ class ContextEnsembleEstimator(base.BasePhotoZEstimator, abc.ABC):
         kv_cache_rtol: How closely cached and uncached outputs agree.
         recommended_max_context: The context size above which the model
             degrades without bagging, or None.
-        exact_chunking: Whether a query's answer is independent of the other
-            queries in its chunk.
+        exact_chunking: Whether chunking the queries is exact bit for bit;
+            if not, a query's answer still does not depend on the others in
+            its chunk, but differs from an unchunked one by float rounding.
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
         accepts_auto_estimators: Whether ``n_estimators="auto"`` is allowed.
