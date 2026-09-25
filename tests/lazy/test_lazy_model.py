@@ -211,3 +211,14 @@ def test_a_fitted_model_survives_pickling(registered):
     copy = pickle.loads(pickle.dumps(model))
     assert copy.width == 2.0 and copy.n_context_ == 10
     assert np.array_equal(copy.predict_proba(X), model.predict_proba(X))
+
+
+def test_the_wrapper_forwards_distributions_and_quantiles(registered):
+    X = np.random.default_rng(0).normal(size=(12, 2))
+    z = np.random.default_rng(1).uniform(0.2, 1.8, 12)
+    model = lazy.LazyModel(registered).fit(X, z)
+    dist = model.predict_distribution(X)
+    assert len(dist) == 12
+    np.testing.assert_allclose(
+        model.predict_quantiles(X, [0.5])[:, 0], 1.0, atol=0.02
+    )

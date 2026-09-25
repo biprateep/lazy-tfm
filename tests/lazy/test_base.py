@@ -226,3 +226,65 @@ def test_evaluate_returns_a_one_row_metric_table(data):
     assert table["model"].iloc[0] == "GaussianDummy"
     assert table["point_estimate"].iloc[0] == "z_peak"
     assert {"bias", "sigma_iqr", "cde_loss", "pit_ks"} <= set(table.columns)
+
+
+# -- native distributions, quantiles and native grids ------------------------
+
+
+class _WithNativeGrid(GaussianDummy):
+    """The stand-in, plus a native grid fixed at fit."""
+
+    def _fit(self, X, y):
+        super()._fit(X, y)
+        self.native_grid_ = lazy.RedshiftGrid.linear(
+            0.0, 3.0, 30, normalization="histogram"
+        )
+
+
+def test_the_default_distribution_is_the_density_on_the_default_grid(data):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    dist = est.predict_distribution(X)
+    assert isinstance(dist, lazy.distributions.HistogramDistribution)
+    np.testing.assert_array_equal(dist.bins, lazy.DC1_GRID.edges)
+    masses = est.predict_proba(X) * lazy.DC1_GRID.widths
+    np.testing.assert_allclose(
+        dist.probabilities,
+        masses / masses.sum(axis=1, keepdims=True),
+        atol=1e-12,
+    )
+
+
+def test_quantiles_agree_with_the_grid_median(data):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    median = est.predict_quantiles(X, [0.5])[:, 0]
+    np.testing.assert_allclose(
+        median,
+        est.predict(X, method="z_median"),
+        atol=lazy.DC1_GRID.widths[0],
+    )
+    low, mid, high = est.predict_quantiles(X).T
+    assert (low <= mid).all() and (mid <= high).all()
+
+
+def test_the_native_grid_is_requested_by_name(data):
+    X, y = data
+    est = _WithNativeGrid().fit(X, y)
+    assert est.predict_proba(X, "native").shape == (len(X), 30)
+    assert est.grid_ == lazy.DC1_GRID  # still the default
+    native = _WithNativeGrid(z_grid="native").fit(X, y)
+    assert native.grid_ == native.native_grid
+    assert native.predict_proba(X).shape == (len(X), 30)
+
+
+def test_an_estimator_without_a_native_grid_says_so(data):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    with pytest.raises(AttributeError, match="no native grid"):
+        est.predict_proba(X, "native")
+
+
+def test_as_grid_refuses_the_native_sentinel():
+    with pytest.raises(ValueError, match="native grid"):
+        lazy.as_grid("native")

@@ -40,6 +40,9 @@ The first release. Everything below is new.
   `summarize`, `grid_point_estimates`, ...) take `bin_edges=` to score such
   grids exactly, and estimators use it automatically. Existing grids keep the
   trapezoid (DC1) convention, byte for byte.
+- `predict_distribution(X)` (the model's native distributions) and
+  `predict_quantiles(X, quantiles)` (exact, from the native distribution) on
+  every estimator; `z_grid="native"` asks a model for its own grid.
 - `lazy.distributions`: per-galaxy redshift distributions in each model's
   native form (`HistogramDistribution`, `QuantileDistribution`,
   `MixtureDistribution`) with exact `pdf`, `cdf`, `ppf`, `sf`, `rvs`, `mean`,

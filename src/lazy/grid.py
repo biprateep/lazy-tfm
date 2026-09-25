@@ -38,6 +38,7 @@ from lazy import metrics
 
 __all__ = [
     "DC1_GRID",
+    "NATIVE",
     "NORMALIZATIONS",
     "GridLike",
     "RedshiftGrid",
@@ -380,9 +381,12 @@ class RedshiftGrid:
 DC1_GRID = RedshiftGrid.linear(0.0, 2.0, 200)
 
 
-#: What every ``z_grid`` argument accepts: a grid, an array of bin centres, or
-#: ``None`` for the default.
-GridLike: TypeAlias = RedshiftGrid | npt.ArrayLike | None
+#: What every ``z_grid`` argument accepts: a grid, an array of bin centres,
+#: ``"native"`` for the model's own grid, or ``None`` for the default.
+GridLike: TypeAlias = RedshiftGrid | npt.ArrayLike | Literal["native"] | None
+
+#: The ``z_grid`` value that asks an estimator for its native grid.
+NATIVE = "native"
 
 
 def as_grid(grid: GridLike) -> RedshiftGrid:
@@ -408,4 +412,9 @@ def as_grid(grid: GridLike) -> RedshiftGrid:
         return DC1_GRID
     if isinstance(grid, RedshiftGrid):
         return grid
+    if isinstance(grid, str):
+        raise ValueError(
+            f"z_grid={grid!r} is not a grid; only a fitted estimator knows its "
+            "native grid, so pass it to the estimator, not to as_grid"
+        )
     return RedshiftGrid.from_centers(grid)

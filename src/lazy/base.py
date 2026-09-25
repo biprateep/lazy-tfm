@@ -55,6 +55,7 @@ from sklearn.utils import validation
 
 from lazy import _inputs
 from lazy import _typing
+from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
 
@@ -127,6 +128,49 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             (n_samples, grid.n_bins).
         """
 
+    def _predict_distribution(
+        self, X: pd.DataFrame
+    ) -> distributions.Distribution:
+        """Returns the native distributions of validated features.
+
+        This default serves estimators that only produce densities on a
+        grid: it tabulates them on the default grid as a histogram. Models
+        with a native output override it.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+        """
+        grid = self.grid_
+        density = grid.normalize(self._predict_pdf(X, grid))
+        return distributions.HistogramDistribution(
+            grid.edges, density * grid.widths
+        )
+
+    def _default_grid(self) -> grid_lib.RedshiftGrid:
+        """The grid to answer on when none is given; called after ``_fit``.
+
+        The constructor's ``z_grid`` (``"native"`` meaning the model's own),
+        else :data:`lazy.grid.DC1_GRID`. Models with a native grid override
+        this to make it their default.
+        """
+        if isinstance(self.z_grid, str) and self.z_grid == grid_lib.NATIVE:
+            return self.native_grid
+        return grid_lib.as_grid(self.z_grid)
+
+    @property
+    def native_grid(self) -> grid_lib.RedshiftGrid:
+        """The model's own output grid, available after ``fit``.
+
+        Raises:
+            AttributeError: If this estimator has no native grid.
+        """
+        native = getattr(self, "native_grid_", None)
+        if native is None:
+            raise AttributeError(
+                f"{type(self).__name__} has no native grid; pass a grid"
+            )
+        return native
+
     # -- the public API ----------------------------------------------------
 
     def fit(self, X: _Features, y: npt.ArrayLike) -> BasePhotoZEstimator:  # noqa: GS030 - scikit-learn's X, y.
@@ -149,8 +193,10 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             raise ValueError(f"X has {len(X)} rows but y has {y.size} values")
         if not np.isfinite(y).all():
             raise ValueError("y contains non-finite redshifts")
-        self.grid_ = grid_lib.as_grid(self.z_grid)
         self._fit(X, y)
+        # After _fit: a model's native grid is known only once it has seen
+        # its context.
+        self.grid_ = self._default_grid()
         self.is_fitted_ = True
         return self
 
@@ -163,13 +209,15 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
             z_grid: A :class:`~lazy.grid.RedshiftGrid`, an array of bin
-                centres, or ``None`` for this model's default.
+                centres, ``"native"`` for the model's own grid, or ``None``
+                for this model's default.
 
         Returns:
             Densities, shape (n_samples, n_bins). These are **densities**,
-            normalised to unit trapezoid mass over the bin centres -- the
-            convention every metric in :mod:`lazy.metrics` uses. Multiply by
-            ``grid.widths`` for per-bin probability masses.
+            normalised by the grid's convention (the trapezoid rule over the
+            bin centres, or ``sum(p * widths) == 1`` on a histogram grid),
+            which is how every metric in :mod:`lazy.metrics` integrates
+            them. Multiply by ``grid.widths`` for per-bin probability masses.
 
         Raises:
             RuntimeError: If the backend returns densities of the wrong
@@ -185,6 +233,47 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
                 f" {(len(X), grid.n_bins)}"
             )
         return grid.normalize(pdfs)
+
+    def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
+        """The model's native per-galaxy distributions, on no grid at all.
+
+        A bar-distribution model answers with a
+        :class:`~lazy.distributions.HistogramDistribution` over its own
+        buckets, a quantile model with a
+        :class:`~lazy.distributions.QuantileDistribution`, bagged or dithered
+        members with a :class:`~lazy.distributions.MixtureDistribution`. Each
+        gives exact ``pdf``, ``cdf``, ``ppf``, ``rvs``, moments and
+        ``to_qp()``.
+
+        Args:
+            X: Features with the columns ``fit`` saw, shape
+                (n_samples, n_features).
+
+        Returns:
+            One distribution per row of ``X``.
+        """
+        validation.check_is_fitted(self)
+        return self._predict_distribution(self._check_features(X, reset=False))
+
+    def predict_quantiles(  # noqa: GS030 - scikit-learn's X, y.
+        self,
+        X: _Features,
+        quantiles: npt.ArrayLike = (0.16, 0.5, 0.84),
+    ) -> _typing.FloatArray:
+        """Redshift quantiles of each galaxy's distribution, exactly.
+
+        Computed on the native distribution (:meth:`predict_distribution`),
+        never on a grid, so they carry the model's full resolution.
+
+        Args:
+            X: Features with the columns ``fit`` saw, shape
+                (n_samples, n_features).
+            quantiles: Cumulative probabilities within [0, 1], shape (k,).
+
+        Returns:
+            The redshift at each level, shape (n_samples, k).
+        """
+        return self.predict_distribution(X).ppf(quantiles)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, z_grid: grid_lib.GridLike = None
@@ -357,10 +446,12 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
 
     def _resolve_grid(self, z_grid: grid_lib.GridLike) -> grid_lib.RedshiftGrid:
         """A call-time grid, this model's default, or the DC1 grid, in order."""
+        if isinstance(z_grid, str) and z_grid == grid_lib.NATIVE:
+            return self.native_grid
         if z_grid is not None:
             return grid_lib.as_grid(z_grid)
         default = getattr(self, "grid_", None)
-        return default if default is not None else grid_lib.as_grid(self.z_grid)
+        return default if default is not None else self._default_grid()
 
     def _check_features(self, X: _Features, *, reset: bool) -> pd.DataFrame:
         """Coerces features to a DataFrame, consistent with those of ``fit``.

@@ -37,6 +37,7 @@ import pandas as pd
 
 from lazy import _typing
 from lazy import base
+from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import registry
 
@@ -140,6 +141,15 @@ class LazyModel(base.BasePhotoZEstimator):
         # Validation already ran in this wrapper, so the backend's hook is
         # called directly rather than through its public method.
         return self.estimator_._predict_pdf(X, grid)  # noqa: SLF001 - delegate.
+
+    def _predict_distribution(
+        self, X: pd.DataFrame
+    ) -> distributions.Distribution:
+        return self.estimator_._predict_distribution(X)  # noqa: SLF001 - delegate.
+
+    def _default_grid(self) -> grid_lib.RedshiftGrid:
+        # The backend has already resolved its default (native or not).
+        return self.estimator_.grid_
 
     def _build(self) -> base.BasePhotoZEstimator:
         """Returns the unfitted backend these parameters describe, validated.
