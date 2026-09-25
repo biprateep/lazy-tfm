@@ -171,7 +171,8 @@ def test_feature_count_mismatch_is_caught(data):
 def test_numpy_input_is_accepted(data):
     X, y = data
     est = GaussianDummy().fit(X.to_numpy(), y)
-    assert list(est.feature_names_in_) == ["x0", "x1"]
+    assert est.n_features_in_ == 2
+    assert not hasattr(est, "feature_names_in_")  # as in scikit-learn
     assert est.predict_proba(X.to_numpy()).shape == (
         len(X),
         lazy.DC1_GRID.n_bins,

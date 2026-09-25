@@ -27,6 +27,22 @@ models drop into scikit-learn pipelines and search objects unmodified.
 scikit-learn, constructing a model only stores its parameters: they are
 validated, and the checkpoint is loaded, at `fit`.
 
+## Input data
+
+Features can come in any of the forms scikit-learn users expect: a NumPy
+array, a structured or record array, a pandas DataFrame, an astropy `Table` or
+`QTable` (quantities give their values), or anything with a `to_pandas()`
+method. Column names, when the input has them, are recorded as
+`feature_names_in_` and checked at prediction time (the same columns in another
+order are reordered; an unnamed table meeting a named fit, or the reverse, is
+used by position with a warning).
+
+Mark missing values with `NaN`; masked entries of an astropy table or masked
+array become `NaN` too. Each model handles them its own way: TabPFN and LimiX
+add missing-value indicators, TabICL and TabFM impute inside their
+preprocessing. Infinities and non-numeric columns are rejected. Redshifts must
+be finite.
+
 ## The grid belongs to the prediction
 
 Nothing about fitting depends on the output binning: the models place their

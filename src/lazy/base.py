@@ -44,7 +44,8 @@ estimator can implement the same protocol.
 from __future__ import annotations
 
 import abc
-from typing import TypeAlias
+from typing import Any, TypeAlias
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -52,6 +53,7 @@ import pandas as pd
 from sklearn import base as sklearn_base
 from sklearn.utils import validation
 
+from lazy import _inputs
 from lazy import _typing
 from lazy import grid as grid_lib
 from lazy import metrics
@@ -64,9 +66,10 @@ __all__ = ["POINT_ESTIMATORS", "BasePhotoZEstimator"]
 #: :mod:`lazy.metrics`).
 POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
 
-# What the public methods accept as features: a DataFrame, or anything that
-# converts to a 2D array.
-_Features: TypeAlias = pd.DataFrame | npt.ArrayLike
+# What the public methods accept as features: any table lazy._inputs reads
+# (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
+# objects). Tables from optional packages have no common type, hence Any.
+_Features: TypeAlias = Any
 
 
 class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
@@ -130,16 +133,18 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         """Fits on labelled photometry.
 
         Args:
-            X: DataFrame or array of features, shape (n_samples, n_features).
-                A DataFrame's column names are remembered and enforced at
-                predict time.
+            X: Features, shape (n_samples, n_features): a NumPy array, a
+                structured or record array, a pandas DataFrame, an astropy
+                Table, or anything with ``to_pandas()``. Missing values are
+                NaN. Column names, when the input has them, are remembered
+                and enforced at predict time.
             y: Finite redshifts, shape (n_samples,).
 
         Returns:
             The fitted estimator itself.
         """
         X = self._check_features(X, reset=True)
-        y = np.asarray(y, dtype=float).ravel()
+        y = _inputs.as_target(y)
         if y.size != len(X):
             raise ValueError(f"X has {len(X)} rows but y has {y.size} values")
         if not np.isfinite(y).all():
@@ -353,45 +358,74 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
     def _check_features(self, X: _Features, *, reset: bool) -> pd.DataFrame:
         """Coerces features to a DataFrame, consistent with those of ``fit``.
 
+        Feature names follow scikit-learn: they are recorded as
+        ``feature_names_in_`` only when the input carries string column
+        names, a predict-time table with the same names in another order is
+        reordered, and a named table meeting an unnamed fit (or the reverse)
+        is used by position, with a warning.
+
         Args:
-            X: Features, shape (n_samples, n_features).
+            X: Features, shape (n_samples, n_features), in any form
+                :func:`lazy._inputs.as_feature_frame` accepts.
             reset: Whether to record the columns (at fit time) rather than
                 enforce them (at predict time).
 
         Returns:
-            The features as a DataFrame with a fresh index, columns in the
-            order ``fit`` saw.
+            The features as a float64 DataFrame with a fresh index, columns
+            labelled and ordered as at fit time.
         """
-        if isinstance(X, pd.DataFrame):
-            frame = X.reset_index(drop=True)
-        else:
-            array = np.asarray(X)
-            if array.ndim != 2:
-                raise ValueError(f"X must be 2D, got shape {array.shape}")
-            frame = pd.DataFrame(
-                array, columns=[f"x{i}" for i in range(array.shape[1])]
-            )
-        if frame.shape[1] == 0:
-            raise ValueError("X has no feature columns")
+        frame, named = _inputs.as_feature_frame(X)
         if reset:
             self.n_features_in_ = int(frame.shape[1])
-            self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
+            if named:
+                self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
+            else:
+                self.__dict__.pop("feature_names_in_", None)
             return frame
         if frame.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {frame.shape[1]} features, but this "
                 f"{type(self).__name__} was fitted with {self.n_features_in_}"
             )
-        names = np.asarray(frame.columns, dtype=object)
-        if not np.array_equal(names, self.feature_names_in_):
-            if set(names) == set(self.feature_names_in_):
-                return frame[list(self.feature_names_in_)]
-            raise ValueError(
-                "feature names differ from those seen during fit:\n"
-                f"  fitted:    {list(self.feature_names_in_)}\n"
-                f"  predicted: {list(names)}"
+        return self._align_to_fit(frame, named)
+
+    def _align_to_fit(self, frame: pd.DataFrame, named: bool) -> pd.DataFrame:
+        """Labels and orders predict-time columns as ``fit`` saw them.
+
+        Reads ``feature_names_in_`` from this object only, never through a
+        wrapper's attribute delegation.
+        """
+        fitted = vars(self).get("feature_names_in_")
+        if fitted is None:
+            if named:
+                warnings.warn(
+                    f"X has feature names, but {type(self).__name__} was "
+                    "fitted without feature names; using columns by position",
+                    UserWarning,
+                    stacklevel=4,
+                )
+            frame.columns = [f"x{i}" for i in range(frame.shape[1])]
+            return frame
+        if not named:
+            warnings.warn(
+                "X does not have valid feature names, but "
+                f"{type(self).__name__} was fitted with feature names; using "
+                "columns by position",
+                UserWarning,
+                stacklevel=4,
             )
-        return frame
+            frame.columns = list(fitted)
+            return frame
+        names = np.asarray(frame.columns, dtype=object)
+        if np.array_equal(names, fitted):
+            return frame
+        if set(names) == set(fitted):
+            return frame[list(fitted)]
+        raise ValueError(
+            "feature names differ from those seen during fit:\n"
+            f"  fitted:    {list(fitted)}\n"
+            f"  predicted: {list(names)}"
+        )
 
 
 def _check_method(method: str) -> str:

@@ -35,6 +35,10 @@ The first release. Everything below is new.
   query rows to bound memory (`chunk_size`).
 - A `TabFMPerformanceWarning` when TabFM falls back to its uncached path.
 - Support for Python 3.12, 3.13 and 3.14.
+- Features may be given as NumPy arrays, structured or record arrays, pandas
+  DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
+  are `NaN` and pass through to each model's own handling; infinities and
+  non-numeric columns are rejected with the offending columns named.
 
 ### Changed
 
@@ -43,6 +47,9 @@ The first release. Everything below is new.
   is reported at `fit`, and `set_params` rejects unknown parameter names.
 - The code follows the Google Python Style Guide, with Google-style
   docstrings throughout; scikit-learn's `X` and `y` keep their names.
+- `feature_names_in_` follows scikit-learn: it is set only when the features
+  have string column names, and a named/unnamed mismatch at prediction time is
+  a warning (columns used by position) rather than an error.
 - `Catalog.build_features` is now the module-level function
   `lazy.datasets.build_features`, with the same arguments.
 - One-letter public parameters have descriptive names:

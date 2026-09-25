@@ -79,6 +79,7 @@ dev = [
     "jupytext>=1.16", # Notebooks are authored as py:percent scripts
     "mypy>=2.3",
     "pandas-stubs>=3.0.5.260914",
+    "astropy>=6",
 ]
 docs = [
     "sphinx>=8",

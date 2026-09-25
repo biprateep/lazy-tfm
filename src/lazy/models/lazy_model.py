@@ -129,7 +129,10 @@ class LazyModel(base.BasePhotoZEstimator):
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         self.estimator_ = self._build()
-        self.estimator_.fit(X, y)
+        # Unnamed features reach the backend unnamed, so that its fitted
+        # attributes (and hence this wrapper's) keep scikit-learn's meaning.
+        named = "feature_names_in_" in vars(self)
+        self.estimator_.fit(X if named else X.to_numpy(), y)
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
