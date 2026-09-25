@@ -62,11 +62,21 @@ tabicl = [
 tabpfn = [
     "tabpfn>=9.0.0", # TabPFN-3; its checkpoint is fetched from Hugging Face on first use
 ]
+limix = [
+    # LimiX itself is not on PyPI, and PyPI refuses metadata with direct URLs,
+    # so it is installed separately (see lazy.models._limix_source). These are
+    # the dependencies of the two subtrees of it the backend loads. triton
+    # arrives with Linux torch wheels; LimiX's network imports it.
+    "torch>=2.9.1",
+    "einops>=0.8",
+    "kditransform>=1.0",
+    "nvtx>=0.2",
+]
 qp = [
     "qp-prob>=1.1", # LSST DESC's PDF package: to_qp()/from_qp() and its file formats, for RAIL
 ]
 all = [
-    "lazy-photoz[tabfm,tabicl,tabpfn]",
+    "lazy-photoz[limix,tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.
