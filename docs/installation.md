@@ -1,18 +1,18 @@
 # Installation
 
-`lazy-photoz` needs Python 3.12 or newer. The core package has no
+`lazy-tfm` needs Python 3.12 or newer. The core package has no
 deep-learning dependencies; each foundation-model backend is an optional extra:
 
 ```console
-pip install lazy-photoz              # the grid, metrics, plots and datasets
-pip install 'lazy-photoz[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
-pip install 'lazy-photoz[tabicl]'    # + the TabICLv2 backend
-pip install 'lazy-photoz[tabfm]'     # + the TabFM backend
-pip install 'lazy-photoz[limix]'     # + the LimiX-2 backend's dependencies
-pip install 'lazy-photoz[all]'       # + all four
+pip install lazy-tfm              # the grid, metrics, plots and datasets
+pip install 'lazy-tfm[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
+pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
+pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
+pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend's dependencies
+pip install 'lazy-tfm[all]'       # + all four
 ```
 
-With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-photoz[tabpfn]'` in a
+With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[tabpfn]'` in a
 project or `uv pip install` in an environment. The wheel is pure Python, so it
 installs the same way on Linux, macOS and Windows.
 
@@ -22,7 +22,7 @@ The backends run on PyTorch, which the extras pull in. The default PyTorch
 wheel from PyPI suits most Linux machines with an NVIDIA GPU. For a specific
 CUDA version, or ROCm, install PyTorch first by following
 [pytorch.org](https://pytorch.org/get-started/locally/), then install
-`lazy-photoz`.
+`lazy-tfm`.
 
 Every model chooses its device when it is fitted (`device="auto"`: CUDA if
 available, otherwise CPU). The models run on CPU, but a foundation model on a
@@ -37,7 +37,7 @@ cached path, for identical answers. For more than a few thousand galaxies,
 install the repository build as well:
 
 ```console
-pip install 'lazy-photoz[tabfm]'
+pip install 'lazy-tfm[tabfm]'
 pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
 ```
 
@@ -52,7 +52,7 @@ repository, so the `limix` extra installs only its dependencies. Install the
 code itself at the commit `lazy` was validated on:
 
 ```console
-pip install 'lazy-photoz[limix]'
+pip install 'lazy-tfm[limix]'
 pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
 ```
 

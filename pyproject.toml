@@ -1,5 +1,5 @@
 [project]
-name = "lazy-photoz"
+name = "lazy-tfm"
 version = "0.1.0.dev0"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -33,11 +33,11 @@ dependencies = [
 
 [project.urls]
 "Source Code" = "https://github.com/biprateep/lazy-photoz"
-"Documentation" = "https://lazy-photoz.readthedocs.io"
+"Documentation" = "https://lazy-tfm.readthedocs.io"
 "Bug Tracker" = "https://github.com/biprateep/lazy-photoz/issues"
 "Changelog" = "https://github.com/biprateep/lazy-photoz/blob/main/CHANGELOG.md"
 
-# Each backend is optional: `pip install lazy-photoz` on its own gives you the
+# Each backend is optional: `pip install lazy-tfm` on its own gives you the
 # grid, metrics, plotting and dataset machinery with no deep-learning stack.
 [project.optional-dependencies]
 # PyPI refuses packages whose metadata holds direct URLs, so the published
@@ -76,7 +76,7 @@ qp = [
     "qp-prob>=1.1", # LSST DESC's PDF package: to_qp()/from_qp() and its file formats, for RAIL
 ]
 all = [
-    "lazy-photoz[limix,tabfm,tabicl,tabpfn]",
+    "lazy-tfm[limix,tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.

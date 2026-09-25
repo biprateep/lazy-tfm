@@ -172,7 +172,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         except ImportError as error:
             raise ImportError(
                 "TabICLQuantile needs the tabicl backend: "
-                "pip install 'lazy-photoz[tabicl]'"
+                "pip install 'lazy-tfm[tabicl]'"
             ) from error
         return tabicl
 

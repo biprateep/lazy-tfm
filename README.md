@@ -3,10 +3,10 @@
 **L**azy but **A**ccurate photo-**Z** for **Y**inz — photometric redshift PDFs
 from pretrained tabular foundation models.
 
-[![PyPI](https://img.shields.io/pypi/v/lazy-photoz)](https://pypi.org/project/lazy-photoz/)
-[![Python](https://img.shields.io/pypi/pyversions/lazy-photoz)](https://pypi.org/project/lazy-photoz/)
+[![PyPI](https://img.shields.io/pypi/v/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
+[![Python](https://img.shields.io/pypi/pyversions/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
 [![Unit test and code coverage](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml)
-[![Documentation](https://readthedocs.org/projects/lazy-photoz/badge/?version=latest)](https://lazy-photoz.readthedocs.io)
+[![Documentation](https://readthedocs.org/projects/lazy-tfm/badge/?version=latest)](https://lazy-tfm.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 The models are pretrained and never fine-tuned. You hand them labelled galaxies
@@ -16,18 +16,18 @@ hyper-parameter search, no per-survey retraining. Hence lazy.
 > **Pre-release.** The API is still moving and the paper numbers are not final.
 > Pin a version if you depend on this.
 
-**Documentation:** [lazy-photoz.readthedocs.io](https://lazy-photoz.readthedocs.io) ·
+**Documentation:** [lazy-tfm.readthedocs.io](https://lazy-tfm.readthedocs.io) ·
 **Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Install
 
 ```console
-pip install lazy-photoz              # grid, metrics, plots, datasets
-pip install 'lazy-photoz[tabfm]'     # + the TabFM backend
-pip install 'lazy-photoz[tabicl]'    # + the TabICLv2 backend
-pip install 'lazy-photoz[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
-pip install 'lazy-photoz[limix]'     # + the LimiX-2 backend (its code installs separately)
-pip install 'lazy-photoz[all]'       # + all four
+pip install lazy-tfm              # grid, metrics, plots, datasets
+pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
+pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
+pip install 'lazy-tfm[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
+pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend (its code installs separately)
+pip install 'lazy-tfm[all]'       # + all four
 ```
 
 Pretrained weights are not bundled: they are fetched from the Hugging Face Hub
@@ -105,14 +105,14 @@ query row's answer never depends on which other query rows share its chunk
 
 ### For TabFM, install its repository build
 
-`pip install 'lazy-photoz[tabfm]'` installs TabFM's PyPI release, which works
+`pip install 'lazy-tfm[tabfm]'` installs TabFM's PyPI release, which works
 but has no KV-cache API: every chunk of query rows re-encodes the whole training
 context, about **13.7 ms per member-row against 0.53 ms** on the cached path,
 roughly **26× the compute** for identical answers. For anything beyond a few
 thousand galaxies, install the repository build as well:
 
 ```bash
-pip install 'lazy-photoz[tabfm]'
+pip install 'lazy-tfm[tabfm]'
 pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
 ```
 
@@ -136,7 +136,7 @@ comes from the repository, at the commit this package was validated on (or
 from a checkout named by `LAZY_LIMIX_SRC`):
 
 ```bash
-pip install 'lazy-photoz[limix]'
+pip install 'lazy-tfm[limix]'
 pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
 ```
 
@@ -248,7 +248,7 @@ model.fit(X_train, z_train).provenance_
 #  'repo_id': 'Prior-Labs/tabpfn_3',
 #  'filename': 'tabpfn-v3-regressor-v3_default.ckpt',
 #  'revision': '24a16a89d245878b846555110985634aa2e656d7',
-#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-photoz 0.1.0.dev0', 'device': 'cuda'}
+#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-tfm 0.1.0.dev0', 'device': 'cuda'}
 ```
 
 It holds the weights *and* the code that read them, and no local paths, so it
@@ -271,7 +271,7 @@ Nothing platform-specific is baked in: the wheel is pure Python
 | Cache | Default | Override |
 | ----- | ------- | -------- |
 | Pretrained weights | `~/.cache/huggingface/hub` | `HF_HOME` |
-| Benchmark catalogues | `~/.cache/lazy-photoz` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
+| Benchmark catalogues | `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
 
 For a compute node with no network, warm both on a login node first, then run
 with `download_checkpoint`/`is_cached` and `fetch_dc1(..., download_if_missing=False)`

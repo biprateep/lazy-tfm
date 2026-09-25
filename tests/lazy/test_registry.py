@@ -97,7 +97,7 @@ def test_provenance_identifies_the_weights_and_the_code():
     assert record["repo_id"] == "Prior-Labs/tabpfn_3"
     assert record["revision"] == "24a16a89d245878b846555110985634aa2e656d7"
     assert record["package"].startswith("tabpfn ")
-    assert record["lazy"].startswith("lazy-photoz ")
+    assert record["lazy"].startswith("lazy-tfm ")
     assert record["device"] == "cuda"
     assert not any(
         isinstance(v, str) and "/home" in v for v in record.values()

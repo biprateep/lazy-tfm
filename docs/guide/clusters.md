@@ -6,7 +6,7 @@ is chosen at run time, so a laptop and a cluster node run the same code.
 | What                 | Default location                                        | Override                             |
 | -------------------- | ------------------------------------------------------- | ------------------------------------ |
 | Pretrained weights   | `~/.cache/huggingface/hub`                              | `HF_HOME`                            |
-| Benchmark catalogues | `$XDG_CACHE_HOME/lazy-photoz`, else `~/.cache/lazy-photoz` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
+| Benchmark catalogues | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
 
 Compute nodes often have no outbound network. Warm both caches on a login node
 first, then run with downloads disabled, so that a missing file is an immediate

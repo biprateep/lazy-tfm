@@ -469,19 +469,19 @@ class TestMissingBackend:
     def test_tabicl_names_its_extra(self, without, tiny):
         without("tabicl")
         X, z = tiny
-        with pytest.raises(ImportError, match=r"lazy-photoz\[tabicl\]"):
+        with pytest.raises(ImportError, match=r"lazy-tfm\[tabicl\]"):
             lazy.LazyModel("tabicl").fit(X, z)
 
     def test_tabpfn_names_its_extra(self, without, tiny):
         without("tabpfn")
         X, z = tiny
-        with pytest.raises(ImportError, match=r"lazy-photoz\[tabpfn\]"):
+        with pytest.raises(ImportError, match=r"lazy-tfm\[tabpfn\]"):
             lazy.LazyModel("tabpfn").fit(X, z)
 
     def test_tabfm_names_its_extra(self, without, tiny):
         without("tabfm")
         X, z = tiny
-        with pytest.raises(ImportError, match=r"lazy-photoz\[tabfm\]"):
+        with pytest.raises(ImportError, match=r"lazy-tfm\[tabfm\]"):
             lazy.LazyModel("tabfm").fit(X, z)
 
     def test_the_missing_backend_is_reported_before_parameter_problems(
@@ -495,5 +495,5 @@ class TestMissingBackend:
         """
         without("tabfm")
         X, z = tiny
-        with pytest.raises(ImportError, match=r"lazy-photoz\[tabfm\]"):
+        with pytest.raises(ImportError, match=r"lazy-tfm\[tabfm\]"):
             lazy.LazyModel("tabfm").fit(X, z)

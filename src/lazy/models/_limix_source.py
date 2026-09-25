@@ -64,7 +64,7 @@ _loaded: dict[pathlib.Path, types.SimpleNamespace] = {}
 _INSTALL_HINT = (
     "LimiXBarDistribution needs LimiX's source, which is not on PyPI. "
     f'Install it with pip install "LimiX @ git+{REPOSITORY}@{LIMIX_COMMIT}" '
-    "and its dependencies with pip install 'lazy-photoz[limix]', or point "
+    "and its dependencies with pip install 'lazy-tfm[limix]', or point "
     "$LAZY_LIMIX_SRC at a checkout."
 )
 

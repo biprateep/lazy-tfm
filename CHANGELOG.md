@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `lazy-photoz` are recorded here. The format follows
+All notable changes to `lazy-tfm` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/). Until 1.0, a minor release may
 change the API.
@@ -82,6 +82,10 @@ The first release. Everything below is new.
 
 ### Changed
 
+- The distribution is named `lazy-tfm` (`pip install lazy-tfm`); the import
+  name stays `lazy`. The benchmark-catalogue cache moved from
+  `~/.cache/lazy-photoz` to `~/.cache/lazy-tfm` (move an existing cache there,
+  or point `LAZY_DATA_HOME` at it).
 - `LazyModel` builds its backend at `fit`, as the fitted attribute
   `estimator_`, rather than in `__init__`. An unknown backend name or parameter
   is reported at `fit`, and `set_params` rejects unknown parameter names.

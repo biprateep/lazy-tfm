@@ -119,7 +119,7 @@ LimiX is not on PyPI. Install its code from the repository, at the commit
 
 ```bash
 pip install "LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24"
-pip install "lazy-photoz[limix]"
+pip install "lazy-tfm[limix]"
 ```
 
 or point `$LAZY_LIMIX_SRC` at a checkout. `lazy` loads two parts of it under
@@ -161,7 +161,7 @@ model.fit(X_train, z_train).provenance_
 #  'repo_id': 'Prior-Labs/tabpfn_2_5',
 #  'filename': 'tabpfn-v2.5-regressor-v2.5_default.ckpt',
 #  'revision': '6c45f3a6d0d07c6c5f62572e04a0c2929de91b8b',
-#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-photoz 0.1.0', 'device': 'cuda',
+#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-tfm 0.1.0', 'device': 'cuda',
 #  'n_estimators': 8, 'transforms': ['auto', ...], 'kv_cache': True, ...}
 ```
 

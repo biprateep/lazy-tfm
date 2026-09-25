@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Sphinx configuration for the lazy-photoz documentation.
+"""Sphinx configuration for the lazy-tfm documentation.
 
 Pages are MyST Markdown (via myst-nb, which also renders notebooks when the
 tutorials arrive). The API reference is generated from the docstrings by
@@ -18,10 +18,10 @@ Typical usage example:
 
 from importlib import metadata
 
-project = "lazy-photoz"
+project = "lazy-tfm"
 author = "Biprateep Dey"
 copyright = "2026, Biprateep Dey"  # noqa: A001 - a Sphinx setting.
-release = metadata.version("lazy-photoz")
+release = metadata.version("lazy-tfm")
 version = ".".join(release.split(".")[:2])
 
 extensions = [
@@ -75,7 +75,7 @@ copybutton_prompt_is_regexp = True
 
 # -- HTML ---------------------------------------------------------------------
 html_theme = "pydata_sphinx_theme"
-html_title = "lazy-photoz"
+html_title = "lazy-tfm"
 html_show_sourcelink = False
 html_theme_options = {
     "github_url": "https://github.com/biprateep/lazy-photoz",

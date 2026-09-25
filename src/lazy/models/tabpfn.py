@@ -203,7 +203,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         except ImportError as error:
             raise ImportError(
                 "TabPFNBarDistribution needs the tabpfn backend: "
-                "pip install 'lazy-photoz[tabpfn]'"
+                "pip install 'lazy-tfm[tabpfn]'"
             ) from error
         return tabpfn
 

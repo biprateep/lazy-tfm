@@ -57,14 +57,14 @@ def test_constructing_needs_nothing_installed():
 
 
 def _missing_source():
-    raise ImportError("LimiX not found: pip install 'lazy-photoz[limix]'")
+    raise ImportError("LimiX not found: pip install 'lazy-tfm[limix]'")
 
 
 def test_fitting_without_the_source_says_how_to_install_it(monkeypatch, data):
     monkeypatch.setattr(_limix_source, "locate", _missing_source)
     monkeypatch.setattr(_limix_source, "_loaded", {})
     X, z, _ = data
-    with pytest.raises(ImportError, match=r"lazy-photoz\[limix\]"):
+    with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]"):
         _model().fit(X, z)
 
 

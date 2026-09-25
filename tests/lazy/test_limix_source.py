@@ -67,7 +67,7 @@ def _not_installed(name):
 
 def test_no_source_says_how_to_install_it(clean_env):
     clean_env.setattr(_limix_source.metadata, "distribution", _not_installed)
-    with pytest.raises(ImportError, match=r"lazy-photoz\[limix\]"):
+    with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]"):
         _limix_source.locate()
 
 

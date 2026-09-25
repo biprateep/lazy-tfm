@@ -337,7 +337,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         except ImportError as error:
             raise ImportError(
                 "TabFMHistogram needs the tabfm backend: "
-                "pip install 'lazy-photoz[tabfm]'"
+                "pip install 'lazy-tfm[tabfm]'"
             ) from error
         return tabfm
 

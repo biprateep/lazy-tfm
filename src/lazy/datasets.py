@@ -35,7 +35,7 @@ photometry, so a catalogue of your own can be biased the same way.
 
 The two files total about 1 GB. They are downloaded once from Zenodo record
 10975874, checksummed, and cached under :func:`data_home` -- by default
-``$XDG_CACHE_HOME/lazy-photoz`` or ``~/.cache/lazy-photoz``, overridable with
+``$XDG_CACHE_HOME/lazy-tfm`` or ``~/.cache/lazy-tfm``, overridable with
 the ``LAZY_DATA_HOME`` environment variable or the ``data_home`` argument.
 Nothing is re-downloaded if the cached file is already there and intact.
 
@@ -399,7 +399,7 @@ def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
     """Returns the directory cached catalogues live in, creating it if needed.
 
     Resolution order: the ``data_home`` argument, then ``$LAZY_DATA_HOME``,
-    then ``$XDG_CACHE_HOME/lazy-photoz``, then ``~/.cache/lazy-photoz``.
+    then ``$XDG_CACHE_HOME/lazy-tfm``, then ``~/.cache/lazy-tfm``.
 
     Nothing about the location is baked in, so a shared scratch filesystem or
     a node-local disk is one environment variable away and the same code runs
@@ -418,7 +418,7 @@ def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
         cache = (
             os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
         )
-        root = pathlib.Path(cache) / "lazy-photoz"
+        root = pathlib.Path(cache) / "lazy-tfm"
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     return root

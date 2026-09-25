@@ -84,7 +84,7 @@ from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
 
 try:
-    __version__ = metadata.version("lazy-photoz")
+    __version__ = metadata.version("lazy-tfm")
 except metadata.PackageNotFoundError:  # pragma: no cover - a source tree only.
     __version__ = "0.0.0.dev0"
 

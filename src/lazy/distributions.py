@@ -21,7 +21,7 @@ The method names are those of :mod:`scipy.stats` and LSST DESC's ``qp``:
 ``std``, ``var``, ``interval``. :meth:`on_grid` gives the bin-averaged
 densities on a :class:`~lazy.grid.RedshiftGrid`, which is what
 ``predict_proba`` returns, and ``to_qp`` / :func:`from_qp` convert to and from
-qp ensembles (install ``lazy-photoz[qp]``) for RAIL.
+qp ensembles (install ``lazy-tfm[qp]``) for RAIL.
 
 Typical usage example:
 
@@ -760,6 +760,6 @@ def _import_qp() -> Any:
         import qp  # noqa: PLC0415 - optional extra, imported on use.
     except ImportError as error:
         raise ImportError(
-            "qp interoperability needs qp: pip install 'lazy-photoz[qp]'"
+            "qp interoperability needs qp: pip install 'lazy-tfm[qp]'"
         ) from error
     return qp

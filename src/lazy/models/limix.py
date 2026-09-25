@@ -176,7 +176,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         except ImportError as error:
             raise ImportError(
                 "LimiXBarDistribution needs the limix extra: "
-                "pip install 'lazy-photoz[limix]'"
+                "pip install 'lazy-tfm[limix]'"
             ) from error
         return _limix_source.load().loading
 

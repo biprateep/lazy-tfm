@@ -152,7 +152,7 @@ class Checkpoint:
             "filename": self.filename,
             "revision": self.revision,
             "package": _package_version(self.package),
-            "lazy": _package_version("lazy-photoz"),
+            "lazy": _package_version("lazy-tfm"),
             "device": device,
         }
 

@@ -1,4 +1,4 @@
-# Contributing to lazy-photoz
+# Contributing to lazy-tfm
 
 Bug reports, questions and pull requests are welcome on
 [GitHub](https://github.com/biprateep/lazy-photoz/issues).
@@ -92,7 +92,7 @@ Each release:
    fresh empty `[Unreleased]` section. Commit both changes.
 4. Optional dry run: in the Actions tab, run the **Publish** workflow by hand.
    It uploads to TestPyPI. Check that the result installs with
-   `pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ lazy-photoz`.
+   `pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ lazy-tfm`.
 5. Create a GitHub release with the tag `v<version>`, for example `v0.1.0`.
    Publishing it runs the workflow, which checks that the tag matches the
    version, builds and checks the package, and uploads it to PyPI.
