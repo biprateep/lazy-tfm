@@ -56,6 +56,18 @@ CURRENT_PARAMS: dict[str, dict[str, Any]] = {
         },
         "kv_cache": False,
     },
+    # The recorded run pinned its bins to the DC1 grid it predicted on; the
+    # bins now follow the constructor's grid, and inference='stream' is the
+    # cache.
+    "tabfm": {
+        **{
+            k: v
+            for k, v in RECORDED_PARAMS["tabfm"].items()
+            if k != "inference"
+        },
+        "kv_cache": True,
+        "z_grid": GRID,
+    },
 }
 
 

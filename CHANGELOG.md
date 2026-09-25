@@ -81,6 +81,15 @@ The first release. Everything below is new.
   `kv_cache="int8"`. `transforms` map onto its `PREPROCESS_TRANSFORMS`,
   `bag_size` onto its per-member `SUBSAMPLE_SAMPLES`. Its default grid is its
   native one: the bar distribution's buckets, in full.
+- `TabFMHistogram` runs on the uniform feature layer. `kv_cache` (default on:
+  the streaming prefill/decode path, falling back with a warning) replaces
+  `inference`; `transforms` map onto its `norm_methods` (others scaffolded as
+  hierarchies of their own, so `transforms="limix"` reproduces the paper's
+  TabFM-with-LimiX-transforms runs), `bag_size` onto its `max_num_rows`.
+  Its equal-mass bins now span the constructor grid's range or the training
+  redshifts', not the grid a prediction happens to be asked on; pass
+  `z_grid=DC1_GRID` to reproduce earlier runs. Dithers form a mixture, and the
+  default grid is the union of their edges.
 - The code follows the Google Python Style Guide, with Google-style
   docstrings throughout; scikit-learn's `X` and `y` keep their names.
 - `feature_names_in_` follows scikit-learn: it is set only when the features

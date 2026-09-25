@@ -56,26 +56,19 @@ class TestTabFM:
         )
         assert est.inference_ in ("stream", "predict_proba")
 
-    def test_unknown_inference_mode_is_rejected(self, tiny):
+    def test_an_unknown_cache_mode_is_rejected(self, tiny):
         X, z = tiny
-        with pytest.raises(ValueError, match="inference must be"):
+        with pytest.raises(ValueError, match="kv_cache must be one of"):
             lazy.get_estimator(
-                "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="fast"
+                "tabfm", n_coarse_bins=2, n_fine_bins=2, kv_cache="fast"
             ).fit(X, z)
 
-    def test_forcing_stream_without_the_kv_cache_api_explains_itself(
-        self, tiny
-    ):
-        """The PyPI tabfm has no prefill/decode; say so, don't TypeError."""
+    def test_the_cache_uses_the_streaming_decoder_when_it_exists(self, tiny):
         X, z = tiny
-        est = lazy.get_estimator(
-            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="stream"
-        )
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2)
         if _icl_stream.streaming_available():
             assert est.fit(X, z).inference_ == "stream"
-        else:
-            with pytest.raises(RuntimeError, match="KV-cache API"):
-                est.fit(X, z)
+            assert est.kv_cache_ is True
 
     def test_falling_back_to_the_slow_path_warns(self, tiny, monkeypatch):
         """A silent 26x slowdown is the worst kind: both paths agree.
@@ -96,10 +89,10 @@ class TestTabFM:
         assert est.inference_ == "predict_proba"
 
     def test_choosing_the_slow_path_deliberately_does_not_warn(self, tiny):
-        """`inference='predict_proba'` is a decision, not an accident."""
+        """`kv_cache=False` is a decision, not an accident."""
         X, z = tiny
         est = lazy.get_estimator(
-            "tabfm", n_coarse_bins=2, n_fine_bins=2, inference="predict_proba"
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, kv_cache=False
         )
         with warnings.catch_warnings():
             warnings.simplefilter("error", tabfm.TabFMPerformanceWarning)
@@ -150,13 +143,21 @@ class TestTabFM:
 
         est = tabfm.TabFMHistogram(chunk_size=7)
         est.inference_ = "predict_proba"
-        monkeypatch.setattr(est, "_classifier", lambda model, seed: Recording())
+        monkeypatch.setattr(
+            est, "_classifier", lambda model, group, seed, rows: Recording()
+        )
         X_query = pd.DataFrame(
             {"a": np.linspace(0.0, 1.0, 40)}, index=np.arange(100, 140)
         )
 
+        handle = {"bag_fraction": None, "group": None}
         probs = est._class_probabilities(
-            None, X_query.iloc[:4], np.array([0, 1, 0, 1]), X_query, seed=0
+            None,
+            handle,
+            X_query.iloc[:4],
+            np.array([0, 1, 0, 1]),
+            X_query,
+            seed=0,
         )
 
         assert sizes == [7, 7, 7, 7, 7, 5]
@@ -174,7 +175,9 @@ class TestTabFM:
         )
         # _classifier needs a model object only to hand on; None is never
         # touched.
-        classifier = est._classifier(model=None, seed=0)
+        classifier = est._classifier(
+            model=None, group=est.member_groups_[0], seed=0, max_rows=None
+        )
         assert set(classifier.get_params()) <= accepted
 
 
@@ -426,7 +429,7 @@ def test_chunking_the_query_rows_is_bit_identical(monkeypatch):
             n_fine_bins=2,
             n_estimators=1,
             device="cpu",
-            inference="predict_proba",
+            kv_cache=False,
             chunk_size=chunk_size,
         )
         sizes.clear()

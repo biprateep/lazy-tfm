@@ -12,11 +12,20 @@ density as a two-level hierarchy of *equal-mass* redshift bins:
 * one classifier per coarse bin over ``n_fine_bins`` quantile bins inside it,
   with only that bin's context galaxies as context.
 
-Then ``P(bin | x) = P(coarse | x) * P(fine | coarse, x)``, and the density is
-``P(bin) / width``. With ``n_dither > 1`` the whole hierarchy is repeated with
-the bin edges shifted in quantile space and the densities averaged -- an
-averaged shifted histogram, which removes the edge artifacts a single binning
-leaves behind.
+Then ``P(bin | x) = P(coarse | x) * P(fine | coarse, x)``: a
+:class:`~lazy.distributions.HistogramDistribution` over the equal-mass bins.
+With ``n_dither > 1`` the whole hierarchy is repeated with the bin edges
+shifted in quantile space and the results mixed with equal weights (a
+:class:`~lazy.distributions.MixtureDistribution`) -- an averaged shifted
+histogram, which removes the edge artifacts a single binning leaves behind.
+The bins span the constructor grid's range, or the training redshifts'; they
+never depend on the grid a prediction is asked on. The native grid is the
+union of every dither's edges.
+
+The uniform features map onto TabFM's own machinery: ``kv_cache`` onto the
+streaming prefill/decode path (:mod:`lazy.models._icl_stream`),
+``feature_shuffle`` and the transforms it has onto its classifier's own
+shuffles and ``norm_methods``, and ``bag_size`` onto its per-member row cap.
 
 Because the bins are equal-mass they are narrow where galaxies are crowded, so
 in the busy part of N(z) they are routinely *narrower* than the output bin.
@@ -36,6 +45,8 @@ than the output bin cannot change a density tabulated on it.
 from __future__ import annotations
 
 import inspect
+import math
+import types
 from typing import Any
 import warnings
 
@@ -44,11 +55,12 @@ import numpy.typing as npt
 import pandas as pd
 
 from lazy import _typing
-from lazy import base
+from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
+from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _icl_stream
+from lazy.models import _members
 from lazy.models import _progress
 
 __all__ = [
@@ -59,7 +71,7 @@ __all__ = [
 ]
 
 
-class TabFMPerformanceWarning(UserWarning):
+class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
     """The prediction will be correct but far slower than it needs to be.
 
     Its own category so that it can be silenced on purpose --
@@ -83,8 +95,7 @@ _SLOW_PATH_WARNING = (
     "ships in the repository build but not on PyPI:\n"
     "    pip install 'tabfm[pytorch] @ "
     "git+https://github.com/google-research/tabfm'\n"
-    "Pass inference='predict_proba' to accept the slow path and "
-    "silence this."
+    "Pass kv_cache=False to accept the slow path and silence this."
 )
 
 
@@ -165,122 +176,111 @@ def prior_shift_em(
     return post, pi
 
 
-class TabFMHistogram(base.BasePhotoZEstimator):
-    """Conditional density from TabFM's classifier over a hierarchy of bins.
+class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
+    """Redshift distributions from TabFM's classifier over a bin hierarchy.
 
     Args:
         version: Which pinned TabFM checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_coarse_bins: Classes at the coarse hierarchy level. The product
-            ``n_coarse_bins * n_fine_bins`` is the number of equal-mass bins
-            the density is built on. Each is capped at ten by the backbone.
-            The default 10 x 10 gives 100 bins.
-        n_fine_bins: Classes at the fine level, inside each coarse bin; see
-            ``n_coarse_bins``.
-        n_estimators: TabFM ensemble members per classifier. More members
-            cost linearly more time and reduce member noise; 4 is enough for
-            a smooth density.
+        n_coarse_bins: Classes at the first hierarchy level (at most ten).
+        n_fine_bins: Classes within each coarse bin (at most ten). The
+            density is built on ``n_coarse_bins * n_fine_bins`` equal-mass
+            bins; the default 10 x 10 gives 100.
+        n_estimators: Ensemble members per classifier. More members cost
+            linearly more time and reduce member noise; 4 is enough for a
+            smooth density.
         n_dither: Repeats of the whole hierarchy with bin edges shifted by
-            ``d/n_dither`` of a bin, averaged. 1 disables dithering; 3 is a
-            good default when you can afford three times the compute.
-        z_grid: Output grid: a :class:`lazy.grid.RedshiftGrid`, an array of
-            bin centres, or ``None`` for :data:`lazy.grid.DC1_GRID`.
+            ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
+            dithering; 3 is a good default when you can afford three times the
+            compute.
+        transforms: Per-member feature transforms: ``"auto"`` (TabFM's own
+            ``none``/``power`` recipe), a recipe name, a transform name or a
+            sequence of them; see :mod:`lazy.models._transforms`. TabFM's
+            ``norm_methods`` implement ``none``, ``power``, ``quantile``,
+            ``quantile_rtdl`` and ``robust``; the rest are scaffolded, each as
+            a hierarchy of its own.
+        feature_shuffle: Whether members see the columns in different orders
+            (TabFM's own feature shuffles).
+        bag_size: Context rows per member: an int count, a float fraction in
+            (0, 1], or None for all of them. Native: each classifier's members
+            subsample the same fraction of the rows it sees (TabFM's
+            ``max_num_rows``).
+        kv_cache: Prefill each member's context once and decode the queries
+            against the cache (``True``, exact; needs TabFM's repository
+            build, and falls back with a :class:`TabFMPerformanceWarning`
+            without it), or re-encode the context for every chunk of queries
+            (``False``).
+        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+            array of bin centres, ``"native"``, or None for the native grid
+            (the union of every dither's bin edges). A constructor grid also
+            sets the range the equal-mass bins span; without one they span the
+            training redshifts.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
             the training prior, which is worth having when the context is a
             biased spectroscopic sample. ``None`` (default) leaves the
             posteriors alone.
-        inference: How query rows are pushed through the backbone.
-
-            ``"auto"`` (default)
-                Use the memory-bounded streaming decoder when the installed
-                ``tabfm`` provides the KV-cache API, and the upstream
-                ``predict_proba`` otherwise.
-            ``"stream"``
-                Force the streaming decoder; raise if it is unavailable.
-                This prefills each ensemble member's context once and
-                decodes queries in chunks, so peak memory does not grow with
-                the size of the query set -- which is what makes a
-                survey-sized run possible at all.
-            ``"predict_proba"``
-                Force the upstream API. Same estimator and same numbers (its
-                defaults ``average_logits=True`` and
-                ``softmax_temperature=0.9`` are exactly what the streaming
-                path computes), but it materialises every member's view of
-                every query row at once.
-
-            The KV-cache API is not in the PyPI release of ``tabfm``; it
-            only exists in later builds from the repository. Install one
-            with
-            ``pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'``
-            if you need the streaming path.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
         random_state: Seed for TabFM's ensemble construction.
-        softmax_temperature: Temperature applied to the classifier logits.
-            The upstream default of 0.9 is deliberately not 1.0 and should
-            rarely be changed.
+        softmax_temperature: Temperature applied to the classifier logits. The
+            upstream default of 0.9 is deliberately not 1.0 and should rarely
+            be changed.
         chunk_size: Query rows handed to the upstream ``predict_proba`` at a
-            time, on the ``"predict_proba"`` path. ``0`` does them in one
-            pass. This is what bounds peak memory there: the released
-            ``tabfm`` builds every ensemble member's view of every query row
-            up front, so a survey-sized query set in one pass is tens of
-            gigabytes. Chunking is numerically exact -- the in-context stage
-            builds its keys and values from the context rows only, so a
-            query row's prediction never depends on which other query rows
-            share its chunk -- and is verified bit-identical in the test
-            suite. The streaming path ignores it; ``query_block_rows`` and
-            ``decode_chunk_rows`` bound its memory instead.
-        member_batch_size: Ensemble members processed together on the
-            streaming path (and TabFM's own ``batch_size``). This and the
-            next three are memory/throughput knobs: they trade host and
-            device memory against the number of passes; none of them changes
-            the result.
-        decode_chunk_rows: Query rows decoded per forward pass on the
-            streaming path.
-        query_block_rows: Query rows whose member views are built at once on
-            the streaming path.
-        keep_cache_on_device: Keep each member batch's K/V cache on the
-            device rather than round-tripping it through host memory.
-        progress: A progress bar over the in-context stages: ``"auto"`` (the
-            default) shows it on a terminal or in a notebook and not when
-            output goes to a file, ``True`` always, ``False`` never. It
-            counts stages rather than galaxies because every stage -- per
-            dither, one coarse classification and then one fine one per
-            coarse bin, ``n_dither * (1 + n_coarse_bins)`` in all -- runs
-            over *every* query row, and shows which dither and level is
-            running and how many context rows that stage has.
+            time when ``kv_cache=False``; ``0`` does them in one pass. Exact:
+            the in-context stage builds its keys and values from the context
+            rows only. The cached path is bounded by ``query_block_rows`` and
+            ``decode_chunk_rows`` instead.
+        member_batch_size: Ensemble members processed together on the cached
+            path (and TabFM's own ``batch_size``). This and the next three are
+            memory/throughput knobs that never change the result.
+        decode_chunk_rows: Query rows decoded against the cache at a time.
+        query_block_rows: Query rows whose member views are built at a time
+            on the cached path, bounding host memory.
+        keep_cache_on_device: Whether the prefilled cache stays on the device
+            rather than round-tripping through host memory.
+        progress: A progress bar over the in-context stages: ``"auto"`` shows
+            it on a terminal or in a notebook, ``True`` always, ``False``
+            never. It counts stages, ``n_dither * (1 + n_coarse_bins)`` of
+            them, because each runs over every query row.
         verbose: Print per-level log messages to stdout.
 
     Attributes:
-        grid_: The resolved output grid, a :class:`lazy.grid.RedshiftGrid`.
-        inference_: The inference path actually chosen: ``"stream"`` or
+        grid_: The resolved default output grid.
+        native_grid_: The union of every dither's equal-mass bin edges, a
+            histogram-normalised grid set at fit.
+        inference_: The path actually used: ``"stream"`` or
             ``"predict_proba"``.
-        provenance_: Which weights and which code answered: backend,
-            version, repository, revision, package versions and device. See
-            :meth:`lazy.models._hub.Checkpoint.provenance`.
-        checkpoint_: The pinned checkpoint the weights were loaded from, a
-            :class:`pathlib.Path`. Unlike the other two backends TabFM loads
-            its backbone on the first prediction rather than at ``fit``, so
-            this appears then.
-        X_context_: The context rows, a :class:`pandas.DataFrame` kept as
-            given -- "fitting" an in-context model stores the context rather
-            than learning weights.
-        z_context_: The context redshifts, shape ``(n_context,)``.
-        bin_prior_: Context bin fractions from the last prediction, available
-            after :meth:`predict_pdf`, shape
-            ``(n_coarse_bins * n_fine_bins,)``. This is the prior the raw
-            posteriors carry.
+        support_: The range the equal-mass bins span, (low, high).
+        provenance_: Which weights, code and ensemble answered, as a dict.
+        checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
+            loads its backbone on the first prediction, so this appears then.
+        bin_prior_: The context's bin fractions from the last prediction,
+            shape (n_coarse_bins * n_fine_bins,).
+        n_context_: Context rows ``fit`` was given.
 
     Examples:
-        >>> est = TabFMHistogram(n_estimators=4, n_dither=3)
-        >>> est.n_coarse_bins * est.n_fine_bins
-        100
+        >>> est = TabFMHistogram(n_estimators=2, n_dither=3)
+        >>> est.n_dither
+        3
     """
 
     backend = "tabfm"
+    display_name = "TabFM"
+    extra = "tabfm"
+    native_output = "histogram"
+    native_transforms = {
+        "none": "none",
+        "power": "power",
+        "quantile": "quantile",
+        "quantile_rtdl": "quantile_rtdl",
+        "robust": "robust",
+    }
+    auto_tokens = ("none", "power")
+    supports_native_bagging = True
+    chunks_queries = False
 
-    def __init__(
+    def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
         version: str = "v1.0",
@@ -288,9 +288,12 @@ class TabFMHistogram(base.BasePhotoZEstimator):
         n_fine_bins: int = 10,
         n_estimators: int = 4,
         n_dither: int = 1,
+        transforms: str | tuple[str, ...] = "auto",
+        feature_shuffle: bool = True,
+        bag_size: int | float | None = None,
+        kv_cache: bool = True,
         z_grid: grid_lib.GridLike = None,
         prior_shift: str | None = None,
-        inference: str = "auto",
         device: str = "auto",
         random_state: int = 1,
         softmax_temperature: float = 0.9,
@@ -302,15 +305,17 @@ class TabFMHistogram(base.BasePhotoZEstimator):
         progress: _progress.Progress = "auto",
         verbose: bool = False,
     ):
-        """Stores the settings; see the class docstring for each one."""
         self.version = version
         self.n_coarse_bins = n_coarse_bins
         self.n_fine_bins = n_fine_bins
         self.n_estimators = n_estimators
         self.n_dither = n_dither
+        self.transforms = transforms
+        self.feature_shuffle = feature_shuffle
+        self.bag_size = bag_size
+        self.kv_cache = kv_cache
         self.z_grid = z_grid
         self.prior_shift = prior_shift
-        self.inference = inference
         self.device = device
         self.random_state = random_state
         self.softmax_temperature = softmax_temperature
@@ -322,14 +327,21 @@ class TabFMHistogram(base.BasePhotoZEstimator):
         self.progress = progress
         self.verbose = verbose
 
-    # -- estimator protocol -------------------------------------------------
+    # -- the per-backend interface -------------------------------------------
 
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        # Resolve the backend first. A missing `tabfm` is the likeliest reason
-        # a first fit fails, and telling someone their context is too small
-        # for their bin count -- when the real problem is that the extra is
-        # not installed -- sends them off fixing the wrong thing.
-        self.inference_ = self._resolve_inference()
+    def _import_backend(self) -> types.ModuleType:
+        # A missing `tabfm` is the likeliest reason a first fit fails, and it
+        # is reported before any parameter complaint.
+        try:
+            import tabfm  # noqa: PLC0415 - an optional, heavy extra.
+        except ImportError as error:
+            raise ImportError(
+                "TabFMHistogram needs the tabfm backend: "
+                "pip install 'lazy-photoz[tabfm]'"
+            ) from error
+        return tabfm
+
+    def _check_backend_params(self) -> None:
         if max(self.n_coarse_bins, self.n_fine_bins) > MAX_CLASSES:
             raise ValueError(
                 f"TabFM classification supports at most {MAX_CLASSES} classes"
@@ -340,75 +352,77 @@ class TabFMHistogram(base.BasePhotoZEstimator):
             raise ValueError("each hierarchy level needs at least two bins")
         if self.n_dither < 1:
             raise ValueError("n_dither must be at least 1")
-        if self.chunk_size < 0:
-            raise ValueError(
-                "chunk_size must be non-negative (0 means one pass)"
-            )
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
+        self.inference_ = self._resolve_inference()
+
+    def _resolve_inference(self) -> str:
+        """Picks the inference path, failing at fit time, not mid-prediction."""
+        if self.kv_cache is False:
+            return "predict_proba"  # asked for explicitly; say nothing
+        if _icl_stream.streaming_available():
+            return "stream"
+        # Warn, and do not be shy about it. The fallback is correct but it
+        # re-runs the context forward pass for every chunk of query rows,
+        # which measures ~13.7 ms per member-row against ~0.53 ms on the
+        # cached path -- around twenty-six times the work. On a large query
+        # set that is the difference between one hour and a day, and because
+        # both paths produce the same answer the only symptom is a run that
+        # never seems to end. Nothing else reports it, so this does.
+        warnings.warn(_SLOW_PATH_WARNING, TabFMPerformanceWarning, stacklevel=5)
+        return "predict_proba"
+
+    def _load_checkpoint(self) -> None:
+        # The backbone is several gigabytes and loads lazily on the first
+        # prediction (see _backbone); fit only records what it will load.
+        self.provenance_ = _hub.get_checkpoint(
+            "tabfm", self.version
+        ).provenance(device=self.device_)
+
+    def _fit_group(
+        self,
+        X: _typing.FloatArray,
+        y: _typing.FloatArray,
+        group: _members.MemberGroup,
+    ) -> Any:
         if len(X) < self.n_coarse_bins * self.n_fine_bins:
             raise ValueError(
                 f"context has {len(X)} rows, fewer than the "
                 f"{self.n_coarse_bins * self.n_fine_bins} bins asked for"
             )
-        _progress.check_progress(self.progress)
-        self.device_ = _device.resolve_device(self.device)
-        self.provenance_ = _hub.get_checkpoint(
-            "tabfm", self.version
-        ).provenance(device=self.device_)
-        self.X_context_ = X
+        if self.inference_ == "predict_proba":
+            self.kv_cache_ = False
+        self.support_ = self._support(y)
+        self.X_context_ = _frame(X)
         self.z_context_ = y
+        return {
+            "X": _frame(X),
+            "z": y,
+            "group": group,
+            "bag_fraction": (
+                None
+                if group.member_rows is None
+                else len(group.member_rows[0]) / len(X)
+            ),
+        }
 
-    def _resolve_inference(self) -> str:
-        """Pick the inference path, failing at fit time, not mid-prediction."""
-        if self.inference not in ("auto", "stream", "predict_proba"):
-            raise ValueError(
-                "inference must be 'auto', 'stream' or 'predict_proba'"
-            )
-        try:
-            import tabfm  # noqa: F401, PLC0415 - probes the optional backend.
-        except ImportError as error:
-            raise ImportError(
-                "TabFMHistogram needs the tabfm backend: "
-                "pip install 'lazy-photoz[tabfm]'"
-            ) from error
+    def _support(self, z: _typing.FloatArray) -> tuple[float, float]:
+        """The range the equal-mass bins span: the constructor grid's or z's."""
+        if self.z_grid is not None and not isinstance(self.z_grid, str):
+            fixed = grid_lib.as_grid(self.z_grid)
+            return fixed.z_min, fixed.z_max
+        return float(z.min()), float(z.max())
 
-        available = _icl_stream.streaming_available()
-        if self.inference == "stream" and not available:
-            raise RuntimeError(
-                "inference='stream' needs the KV-cache API, which the PyPI "
-                "release of tabfm does not provide. Install a build from the "
-                "repository (pip install 'tabfm[pytorch] @ "
-                "git+https://github.com/google-research/tabfm') "
-                "or use inference='auto'."
-            )
-        if self.inference == "predict_proba":
-            return "predict_proba"  # asked for explicitly; say nothing
-        if not available:
-            # Warn, and do not be shy about it. The fallback is correct but it
-            # re-runs the context forward pass for every chunk of query rows,
-            # which measures ~13.7 ms per member-row against ~0.53 ms on the
-            # cached path -- around twenty-six times the work. On a large
-            # query set that is the difference between one hour and a day,
-            # and because both paths produce the same answer the only symptom
-            # is a run that never seems to end. Nothing else reports it, so
-            # this does.
-            warnings.warn(
-                _SLOW_PATH_WARNING, TabFMPerformanceWarning, stacklevel=3
-            )
-            return "predict_proba"
-        return "stream"
-
-    def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
-    ) -> _typing.FloatArray:
+    def _predict_group(
+        self, handle: Any, X: _typing.FloatArray
+    ) -> distributions.Distribution:
         model = self._backbone()
+        query = _frame(X)
         shifts = [d / self.n_dither for d in range(self.n_dither)]
-        densities = []
-        stages = self.n_dither * (1 + self.n_coarse_bins)
+        parts = []
         with _progress.bar(
             self.progress,
-            total=stages,
+            total=self.n_dither * (1 + self.n_coarse_bins),
             desc=f"TabFM {self.version} ({len(X):,} gal)",
             unit="stage",
         ) as progress:
@@ -419,26 +433,72 @@ class TabFMHistogram(base.BasePhotoZEstimator):
                 )
                 probs, edges, prior = self._hierarchy(
                     model,
-                    X,
+                    handle,
+                    query,
                     shift,
-                    grid,
                     progress=progress,
                     dither=f"{i + 1}/{self.n_dither}",
                 )
                 if self.prior_shift == "em":
                     probs, _ = prior_shift_em(probs, prior)
-                densities.append(grid.rebin(probs, edges))
+                parts.append(distributions.HistogramDistribution(edges, probs))
         self.bin_prior_ = prior
-        return np.mean(densities, axis=0)
+        if len(parts) == 1:
+            return parts[0]
+        return distributions.MixtureDistribution.equal(parts)
+
+    def _native_grid(self) -> grid_lib.RedshiftGrid:
+        shifts = [d / self.n_dither for d in range(self.n_dither)]
+        edges = np.unique(
+            np.concatenate(
+                [self._edges(self.z_context_, shift)[0] for shift in shifts]
+            )
+        )
+        return grid_lib.RedshiftGrid.from_edges(
+            edges, normalization="histogram"
+        )
 
     # -- the hierarchy ------------------------------------------------------
+
+    def _edges(
+        self, z: _typing.FloatArray, shift: float
+    ) -> tuple[
+        _typing.FloatArray, _typing.FloatArray, list[_typing.FloatArray]
+    ]:
+        """Returns a tuple (all edges, coarse edges, fine edges per coarse bin).
+
+        The equal-mass edges for one dither, spanning ``support_``; the top
+        edge is nudged up so the largest redshift falls inside.
+        """
+        low, high = self.support_
+        span = high - low if high > low else 1.0
+        coarse = quantile_edges(
+            z, self.n_coarse_bins, low, high + 1e-6 * span, shift
+        )
+        labels = np.clip(
+            np.searchsorted(coarse, z, side="right") - 1,
+            0,
+            self.n_coarse_bins - 1,
+        )
+        fine = [
+            quantile_edges(
+                z[labels == j],
+                self.n_fine_bins,
+                coarse[j],
+                coarse[j + 1],
+                shift,
+            )
+            for j in range(self.n_coarse_bins)
+        ]
+        edges = np.r_[np.concatenate([f[:-1] for f in fine]), coarse[-1]]
+        return edges, coarse, fine
 
     def _hierarchy(
         self,
         model: Any,
+        handle: Any,
         X_query: pd.DataFrame,
         shift: float,
-        grid: grid_lib.RedshiftGrid,
         *,
         progress: Any = None,
         dither: str = "1/1",
@@ -447,11 +507,11 @@ class TabFMHistogram(base.BasePhotoZEstimator):
 
         Args:
             model: The loaded TabFM backbone.
+            handle: The fitted group: its context and members.
             X_query: The query rows.
             shift: Edge shift in quantile space, in bins.
-            grid: The output grid, whose range the edges span.
-            progress: The ``tqdm`` bar :meth:`_predict_pdf` opened, advanced
-                once per in-context stage; ``None`` draws nothing.
+            progress: The bar :meth:`_predict_group` opened, advanced once per
+                in-context stage; ``None`` draws nothing.
             dither: Which dither this is, for the bar's label.
 
         Returns:
@@ -459,60 +519,42 @@ class TabFMHistogram(base.BasePhotoZEstimator):
             ``(n_query, n_bins)``; bin edges, shape ``(n_bins + 1,)``; and
             the context's bin fractions, shape ``(n_bins,)``.
         """
-
-        def stage(level: str, n_context: int) -> None:
-            if progress is not None:
-                progress.set_postfix(
-                    dither=dither, level=level, context=n_context
-                )
-
-        def done() -> None:
-            if progress is not None:
-                progress.update(1)
-
-        z = self.z_context_
-        span = grid.z_max - grid.z_min
-        coarse_edges = quantile_edges(
-            z, self.n_coarse_bins, grid.z_min, grid.z_max + 1e-6 * span, shift
-        )
+        z, X_context = handle["z"], handle["X"]
+        edges, coarse_edges, fine_edges = self._edges(z, shift)
         coarse = np.clip(
             np.searchsorted(coarse_edges, z, side="right") - 1,
             0,
             self.n_coarse_bins - 1,
         )
-        stage("coarse", z.size)
+        _stage(progress, dither, "coarse", z.size)
         p_coarse = self._class_probabilities(
-            model, self.X_context_, coarse, X_query, self.random_state
+            model, handle, X_context, coarse, X_query, handle["group"].seed
         )
-        done()
-
-        edges: list[_typing.FloatArray] = []
+        _done(progress)
         prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
         for j in range(self.n_coarse_bins):
             rows = coarse == j
-            fine_edges = quantile_edges(
-                z[rows],
-                self.n_fine_bins,
-                coarse_edges[j],
-                coarse_edges[j + 1],
-                shift,
-            )
             fine = np.clip(
-                np.searchsorted(fine_edges, z[rows], side="right") - 1,
+                np.searchsorted(fine_edges[j], z[rows], side="right") - 1,
                 0,
                 self.n_fine_bins - 1,
             )
-            stage(f"fine {j + 1}/{self.n_coarse_bins}", int(rows.sum()))
+            _stage(
+                progress,
+                dither,
+                f"fine {j + 1}/{self.n_coarse_bins}",
+                int(rows.sum()),
+            )
             p_fine = self._class_probabilities(
                 model,
-                self.X_context_.iloc[rows],
+                handle,
+                X_context.iloc[rows],
                 fine,
                 X_query,
-                self.random_state + 1 + j,
+                handle["group"].seed + 1 + j,
             )
-            done()
-            edges.append(fine_edges[:-1])
+            _done(progress)
             prior.append(
                 np.bincount(fine, minlength=self.n_fine_bins) / max(z.size, 1)
             )
@@ -521,22 +563,24 @@ class TabFMHistogram(base.BasePhotoZEstimator):
                 f"  coarse bin {j + 1}/{self.n_coarse_bins}"
                 f" ({int(rows.sum())} context rows)"
             )
-        return (
-            np.concatenate(blocks, axis=1),
-            np.r_[np.concatenate(edges), coarse_edges[-1]],
-            np.concatenate(prior),
-        )
+        return np.concatenate(blocks, axis=1), edges, np.concatenate(prior)
 
     def _class_probabilities(
         self,
         model: Any,
+        handle: Any,
         X_context: pd.DataFrame,
         labels: _typing.IntArray,
         X_query: pd.DataFrame,
         seed: int,
     ) -> _typing.FloatArray:
         """Member-averaged class posteriors, ``(n_query, n_labels)``."""
-        classifier = self._classifier(model, seed)
+        max_rows = (
+            None
+            if handle["bag_fraction"] is None
+            else max(1, math.ceil(handle["bag_fraction"] * len(X_context)))
+        )
+        classifier = self._classifier(model, handle["group"], seed, max_rows)
         classifier.fit(X_context.reset_index(drop=True), labels)
         classes = np.asarray(classifier.classes_)
 
@@ -586,23 +630,38 @@ class TabFMHistogram(base.BasePhotoZEstimator):
         ]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
-    def _classifier(self, model: Any, seed: int) -> Any:
+    def _classifier(
+        self,
+        model: Any,
+        group: _members.MemberGroup,
+        seed: int,
+        max_rows: int | None,
+    ) -> Any:
         """A ``TabFMClassifier``, passing only the knobs this build understands.
 
         The cache arguments exist on builds with the KV-cache API and not on
-        the PyPI release; sending them unconditionally is a ``TypeError``.
+        the PyPI release; sending them unconditionally is a ``TypeError``. The
+        uniform features are passed only when asked for, so the default
+        recipe is upstream's own.
         """
-        import tabfm  # noqa: PLC0415 - optional backend, imported at use.
-
-        kwargs = {
+        tabfm = self._import_backend()
+        kwargs: dict[str, Any] = {
             "model": model,
-            "n_estimators": self.n_estimators,
+            "n_estimators": group.n_members,
             "batch_size": self.member_batch_size,
             "random_state": seed,
             "softmax_temperature": self.softmax_temperature,
             "binary_calibration_method": None,
             "verbose": False,
         }
+        if group.native_transforms is not None:
+            kwargs["norm_methods"] = list(
+                dict.fromkeys(group.native_transforms)
+            )
+        if not group.feature_shuffle:
+            kwargs["feat_shuffle_method"] = "none"
+        if max_rows is not None:
+            kwargs["max_num_rows"] = max_rows
         accepted = inspect.signature(tabfm.TabFMClassifier.__init__).parameters
         for name, value in (
             ("cache_context", False),
@@ -650,6 +709,21 @@ class TabFMHistogram(base.BasePhotoZEstimator):
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
 
-    def _log(self, message: str) -> None:
-        if self.verbose:
-            print(f"[TabFMHistogram] {message}", flush=True)
+
+def _frame(features: _typing.FloatArray) -> pd.DataFrame:
+    """Features as the DataFrame TabFM's preprocessing has always been given."""
+    return pd.DataFrame(
+        features, columns=[f"x{i}" for i in range(features.shape[1])]
+    )
+
+
+def _stage(progress: Any, dither: str, level: str, n_context: int) -> None:
+    """Labels the progress bar with the stage about to run."""
+    if progress is not None:
+        progress.set_postfix(dither=dither, level=level, context=n_context)
+
+
+def _done(progress: Any) -> None:
+    """Advances the progress bar by one stage."""
+    if progress is not None:
+        progress.update(1)
