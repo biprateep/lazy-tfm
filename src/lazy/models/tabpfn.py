@@ -141,7 +141,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         regressor_: The fitted ``tabpfn.TabPFNRegressor``, when one serves
             the whole ensemble.
         handles_: Every fitted regressor, one per member group.
-        borders_: The bucket borders in redshift, shape (n_buckets_ + 1,);
+        borders_: The bucket borders in redshift, shape (``n_buckets_`` + 1,);
             fixed at fit by the context redshifts' mean and spread.
         n_buckets_: How many buckets the bar distribution has.
         n_context_: Context rows ``fit`` was given.
