@@ -28,7 +28,7 @@ Typical usage example:
 from __future__ import annotations
 
 import dataclasses
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -36,7 +36,18 @@ import numpy.typing as npt
 from lazy import _typing
 from lazy import metrics
 
-__all__ = ["DC1_GRID", "GridLike", "RedshiftGrid", "as_grid"]
+__all__ = [
+    "DC1_GRID",
+    "NORMALIZATIONS",
+    "GridLike",
+    "RedshiftGrid",
+    "as_grid",
+]
+
+#: How a density on a grid integrates to one; see RedshiftGrid.
+Normalization: TypeAlias = Literal["trapezoid", "histogram"]
+#: The accepted values of RedshiftGrid.normalization.
+NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,6 +57,12 @@ class RedshiftGrid:
     Attributes:
         edges: The bin edges, strictly increasing and finite, shape
             (n_bins + 1,). Stored read-only.
+        normalization: How a density on the grid integrates to one.
+            ``"trapezoid"`` (the default, the DC1 and qp convention): the
+            trapezoid rule over the bin centres. ``"histogram"``: each bin's
+            density is constant across the bin, so ``sum(p * widths) == 1``
+            -- exact for the strongly non-uniform native grids of the
+            bar-distribution models, where the trapezoid rule is not.
 
     Examples:
         >>> grid = RedshiftGrid.linear(0.0, 2.0, 200)
@@ -54,6 +71,7 @@ class RedshiftGrid:
     """
 
     edges: _typing.FloatArray
+    normalization: Normalization = "trapezoid"
 
     def __post_init__(self) -> None:
         edges = np.asarray(self.edges, dtype=float)
@@ -65,37 +83,57 @@ class RedshiftGrid:
             raise ValueError("edges must be strictly increasing")
         if not np.isfinite(edges).all():
             raise ValueError("edges must all be finite")
+        if self.normalization not in NORMALIZATIONS:
+            raise ValueError(
+                f"normalization must be one of {NORMALIZATIONS}: "
+                f"{self.normalization=}"
+            )
         edges.setflags(write=False)
         object.__setattr__(self, "edges", edges)
 
     # -- constructors ------------------------------------------------------
 
     @classmethod
-    def linear(cls, z_min: float, z_max: float, n_bins: int) -> RedshiftGrid:
+    def linear(
+        cls,
+        z_min: float,
+        z_max: float,
+        n_bins: int,
+        *,
+        normalization: Normalization = "trapezoid",
+    ) -> RedshiftGrid:
         """``n_bins`` equal-width bins spanning ``[z_min, z_max]``.
 
         Args:
             z_min: Left edge of the first bin.
             z_max: Right edge of the last bin.
             n_bins: Number of bins.
+            normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
 
         Returns:
             The grid.
         """
-        return cls(np.linspace(float(z_min), float(z_max), int(n_bins) + 1))
+        edges = np.linspace(float(z_min), float(z_max), int(n_bins) + 1)
+        return cls(edges, normalization)
 
     @classmethod
-    def from_edges(cls, edges: npt.ArrayLike) -> RedshiftGrid:
+    def from_edges(
+        cls,
+        edges: npt.ArrayLike,
+        *,
+        normalization: Normalization = "trapezoid",
+    ) -> RedshiftGrid:
         """A grid from explicit bin edges (any spacing).
 
         Args:
             edges: Strictly increasing, finite bin edges, shape (n_bins + 1,)
                 with n_bins >= 2.
+            normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
 
         Returns:
             The grid.
         """
-        return cls(np.asarray(edges, dtype=float))
+        return cls(np.asarray(edges, dtype=float), normalization)
 
     @classmethod
     def from_centers(cls, centers: npt.ArrayLike) -> RedshiftGrid:
@@ -166,23 +204,42 @@ class RedshiftGrid:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RedshiftGrid):
             return NotImplemented
-        return self.edges.shape == other.edges.shape and bool(
-            np.allclose(self.edges, other.edges, rtol=0, atol=1e-12)
+        return (
+            self.normalization == other.normalization
+            and self.edges.shape == other.edges.shape
+            and bool(np.allclose(self.edges, other.edges, rtol=0, atol=1e-12))
         )
 
     def __hash__(self) -> int:
         return hash((self.n_bins, self.z_min, self.z_max))
 
     def __repr__(self) -> str:
+        extra = (
+            ""
+            if self.normalization == "trapezoid"
+            else f", normalization={self.normalization!r}"
+        )
         return (
             f"RedshiftGrid(n_bins={self.n_bins}, z_min={self.z_min:g},"
-            f" z_max={self.z_max:g})"
+            f" z_max={self.z_max:g}{extra})"
         )
+
+    @property
+    def histogram_edges(self) -> _typing.FloatArray | None:
+        """The edges when the grid is ``"histogram"``-normalised, else None.
+
+        This is the ``bin_edges`` argument the :mod:`lazy.metrics` functions
+        take to score densities on this grid by its own convention.
+        """
+        return self.edges if self.normalization == "histogram" else None
 
     # -- densities ---------------------------------------------------------
 
     def normalize(self, pdfs: npt.ArrayLike) -> _typing.FloatArray:
-        """Clip to non-negative and rescale each row to unit trapezoid mass.
+        """Clip to non-negative and rescale each row to unit mass.
+
+        Unit mass by this grid's :attr:`normalization`: the trapezoid rule
+        over the centres, or ``sum(p * widths)`` for a histogram grid.
 
         Rows that carry no mass at all (all-zero, or all non-finite) become a
         uniform density rather than NaN, so a single degenerate galaxy cannot
@@ -194,10 +251,15 @@ class RedshiftGrid:
         Returns:
             The normalised densities, shape (n_rows, n_bins).
         """
-        return metrics.normalize_grid_pdfs(self.centers, pdfs)[1]
+        return metrics.normalize_grid_pdfs(
+            self.centers, pdfs, bin_edges=self.histogram_edges
+        )[1]
 
     def cdf(self, density: npt.ArrayLike) -> _typing.FloatArray:
-        """Cumulative distribution at the bin centres, by trapezoid.
+        """Cumulative distribution at the bin centres.
+
+        By the trapezoid rule, or for a histogram grid exactly: the mass
+        below a bin's left edge plus half the bin's own.
 
         Args:
             density: Densities at the bin centres, shape (n_rows, n_bins).
@@ -206,7 +268,11 @@ class RedshiftGrid:
             An array of the same shape as ``density``; column ``j`` is the
             mass below ``centers[j]``, so column 0 is exactly zero.
         """
-        return metrics.grid_cdf(self.centers, np.asarray(density, dtype=float))
+        return metrics.grid_cdf(
+            self.centers,
+            np.asarray(density, dtype=float),
+            bin_edges=self.histogram_edges,
+        )
 
     def rebin(
         self, probs: npt.ArrayLike, edges: npt.ArrayLike

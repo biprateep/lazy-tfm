@@ -269,7 +269,12 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         """
         grid = self._resolve_grid(z_grid)
         y = np.asarray(y, dtype=float).ravel()
-        return -metrics.cde_loss(y, grid.centers, self.predict_proba(X, grid))
+        return -metrics.cde_loss(
+            y,
+            grid.centers,
+            self.predict_proba(X, grid),
+            bin_edges=grid.histogram_edges,
+        )
 
     def evaluate(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -302,6 +307,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             self.predict_proba(X, grid),
             point=_check_method(method),
             label=self.name_,
+            bin_edges=grid.histogram_edges,
         )
 
     # -- helpers -----------------------------------------------------------
@@ -338,8 +344,9 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
             redshifts, shape (n_samples,).
         """
+        grid = self._resolve_grid(z_grid)
         return metrics.grid_point_estimates(
-            self._resolve_grid(z_grid).centers, pdfs
+            grid.centers, pdfs, bin_edges=grid.histogram_edges
         )
 
     @property

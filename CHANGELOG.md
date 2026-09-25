@@ -35,6 +35,11 @@ The first release. Everything below is new.
   query rows to bound memory (`chunk_size`).
 - A `TabFMPerformanceWarning` when TabFM falls back to its uncached path.
 - Support for Python 3.12, 3.13 and 3.14.
+- `RedshiftGrid(normalization="histogram")`: densities constant across each
+  bin, normalised as `sum(p * widths) == 1`; the metrics (`cde_loss`,
+  `summarize`, `grid_point_estimates`, ...) take `bin_edges=` to score such
+  grids exactly, and estimators use it automatically. Existing grids keep the
+  trapezoid (DC1) convention, byte for byte.
 - `lazy.distributions`: per-galaxy redshift distributions in each model's
   native form (`HistogramDistribution`, `QuantileDistribution`,
   `MixtureDistribution`) with exact `pdf`, `cdf`, `ppf`, `sf`, `rvs`, `mean`,

@@ -196,7 +196,10 @@ def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
 
 
 def normalize_grid_pdfs(
-    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Clip to non-negative, then renormalize each row to unit trapezoid mass.
 
@@ -209,6 +212,9 @@ def normalize_grid_pdfs(
     Args:
         z_grid: Strictly increasing bin centres, shape (g,) with g >= 2.
         pdfs: Densities at those centres, shape (n, g).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         A tuple (grid, density): the centres as a float array, shape (g,),
@@ -224,6 +230,14 @@ def normalize_grid_pdfs(
         )
     density = np.nan_to_num(density, nan=0.0, posinf=0.0, neginf=0.0)
     np.clip(density, 0.0, None, out=density)
+    if bin_edges is not None:
+        widths = _bin_widths(bin_edges, grid.size)
+        mass = density @ widths
+        bad = ~(mass > 0)
+        if bad.any():
+            density[bad] = 1.0
+            mass = density @ widths
+        return grid, density / mass[:, None]
     mass = np.trapezoid(density, grid, axis=1)
     bad = ~(mass > 0)
     if bad.any():
@@ -233,36 +247,55 @@ def normalize_grid_pdfs(
 
 
 def normalization_error(
-    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> _typing.FloatArray:
     """``|trapz(p, z) - 1|`` per row: the check callers assert on.
 
     Args:
         z_grid: Bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         The absolute normalisation error of each row, shape (n,).
     """
     grid = np.asarray(z_grid, dtype=float)
+    if bin_edges is not None:
+        widths = _bin_widths(bin_edges, grid.size)
+        return np.abs(np.asarray(pdfs, dtype=float) @ widths - 1.0)
     return np.abs(
         np.trapezoid(np.asarray(pdfs, dtype=float), grid, axis=1) - 1.0
     )
 
 
 def grid_cdf(
-    z_grid: _typing.FloatArray, density: _typing.FloatArray
+    z_grid: _typing.FloatArray,
+    density: _typing.FloatArray,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> _typing.FloatArray:
     """Cumulative mass at each grid point, by the trapezoid rule of the norm.
 
     Args:
         z_grid: Bin centres, shape (g,).
         density: Densities at those centres, shape (n, g).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
-        The cumulative mass below each centre, shape (n, g); column 0 is
-        zero.
+        The cumulative mass below each centre, shape (n, g). By trapezoid
+        column 0 is zero; for a histogram grid each entry is the mass below
+        the bin's left edge plus half its own.
     """
+    if bin_edges is not None:
+        mass = density * _bin_widths(bin_edges, len(z_grid))
+        return np.cumsum(mass, axis=1) - 0.5 * mass
     increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(z_grid)
     return np.column_stack(
         (np.zeros(len(density)), np.cumsum(increments, axis=1))
@@ -284,7 +317,11 @@ def z_peak(z_grid: npt.ArrayLike, density: npt.ArrayLike) -> _typing.FloatArray:
 
 
 def z_weight(
-    z_grid: npt.ArrayLike, density: npt.ArrayLike, frac: float = 0.05
+    z_grid: npt.ArrayLike,
+    density: npt.ArrayLike,
+    frac: float = 0.05,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> _typing.FloatArray:
     """DC1 ``z_WEIGHT``: the main-peak weighted mean of Dahlen et al. (2013).
 
@@ -296,6 +333,9 @@ def z_weight(
         z_grid: Bin centres, shape (g,).
         density: Densities at those centres, shape (n, g).
         frac: Fraction of the peak density that bounds the main peak.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         The main-peak weighted mean of each row, shape (n,). A peak one grid
@@ -319,8 +359,13 @@ def z_weight(
     )
     inside = (idx[None, :] >= left[:, None]) & (idx[None, :] <= right[:, None])
     weights = dens * inside
-    mass = np.trapezoid(weights, grid, axis=1)
-    weighted = np.trapezoid(weights * grid[None, :], grid, axis=1)
+    if bin_edges is not None:
+        weights = weights * _bin_widths(bin_edges, g)
+        mass = weights.sum(axis=1)
+        weighted = weights @ grid
+    else:
+        mass = np.trapezoid(weights, grid, axis=1)
+        weighted = np.trapezoid(weights * grid[None, :], grid, axis=1)
     # A peak one grid point wide integrates to zero mass; fall back to the mode.
     out = grid[peak].astype(float)
     np.divide(weighted, mass, out=out, where=mass > 0)
@@ -328,7 +373,10 @@ def z_weight(
 
 
 def grid_point_estimates(
-    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> dict[str, _typing.FloatArray]:
     """The DC1 point estimators (``peak``, ``weight``) plus mean and median.
 
@@ -337,11 +385,16 @@ def grid_point_estimates(
     Args:
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         A dict with keys ``"z_peak"``, ``"z_weight"``, ``"z_mean"`` and
         ``"z_median"``, each an array of shape (n,).
     """
+    if bin_edges is not None:
+        return _histogram_point_estimates(z_grid, pdfs, bin_edges)
     grid, density = normalize_grid_pdfs(z_grid, pdfs)
     cdf = grid_cdf(grid, density)
     rows = np.arange(len(density))
@@ -363,7 +416,11 @@ def grid_point_estimates(
 
 
 def evaluate_grid_at_truth(
-    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> tuple[
     _typing.FloatArray,
     _typing.FloatArray,
@@ -382,6 +439,11 @@ def evaluate_grid_at_truth(
         z_true: True redshifts, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            Then the density at the truth is its bin's, zero outside the
+            edges, and the PIT is the exact piecewise-linear CDF.
 
     Returns:
         A tuple (grid, density, pdf_at_truth, pit): the centres, shape (g,);
@@ -390,9 +452,12 @@ def evaluate_grid_at_truth(
         and the PIT values, shape (n,), in [0, 1].
     """
     truth = np.asarray(z_true, dtype=float)
-    grid, density = normalize_grid_pdfs(z_grid, pdfs)
+    grid, density = normalize_grid_pdfs(z_grid, pdfs, bin_edges=bin_edges)
     if truth.ndim != 1 or truth.size != len(density):
         raise ValueError("z_true must have one value per PDF")
+    if bin_edges is not None:
+        pdf_at_truth, pit = _histogram_at_truth(truth, bin_edges, density)
+        return grid, density, pdf_at_truth, pit
     rows = np.arange(truth.size)
     cdf = grid_cdf(grid, density)
     right = np.clip(
@@ -417,7 +482,11 @@ def evaluate_grid_at_truth(
 
 
 def cde_loss(
-    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> float:
     """The conditional-density-estimate loss; lower is better.
 
@@ -430,16 +499,18 @@ def cde_loss(
         z_true: True redshifts, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         The loss, averaged over objects.
     """
     grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(
-        z_true, z_grid, pdfs
+        z_true, z_grid, pdfs, bin_edges=bin_edges
     )
-    return float(
-        np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth)
-    )
+    squared = _integral_of_square(grid, density, bin_edges)
+    return float(np.mean(squared - 2.0 * pdf_at_truth))
 
 
 # --------------------------------------------------------------------------
@@ -522,7 +593,11 @@ def pit_statistics(pit: npt.ArrayLike, n_bins: int = 20) -> dict[str, float]:
 
 
 def pdf_metrics(
-    z_true: npt.ArrayLike, z_grid: npt.ArrayLike, pdfs: npt.ArrayLike
+    z_true: npt.ArrayLike,
+    z_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> tuple[PDFMetrics, _typing.FloatArray]:
     """Scores grid PDFs with the CDE loss and the PIT statistics.
 
@@ -530,17 +605,19 @@ def pdf_metrics(
         z_true: True redshifts, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         A tuple (metrics, pit): the metric bundle and the per-object PIT
         values, shape (n,).
     """
     grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
-        z_true, z_grid, pdfs
+        z_true, z_grid, pdfs, bin_edges=bin_edges
     )
-    loss = float(
-        np.mean(np.trapezoid(density**2, grid, axis=1) - 2.0 * pdf_at_truth)
-    )
+    squared = _integral_of_square(grid, density, bin_edges)
+    loss = float(np.mean(squared - 2.0 * pdf_at_truth))
     return PDFMetrics(
         n=int(pit.size), cde_loss=loss, **pit_statistics(pit)
     ), pit
@@ -551,6 +628,8 @@ def evaluate_grid_pdfs(
     z_grid: npt.ArrayLike,
     pdfs: npt.ArrayLike,
     point: str = "z_peak",
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> tuple[PointMetrics, PDFMetrics, _typing.FloatArray]:
     """Convenience: point metrics from a PDF reduction plus the PDF metrics.
 
@@ -561,16 +640,19 @@ def evaluate_grid_pdfs(
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"z_peak"``, ``"z_weight"``,
             ``"z_mean"`` or ``"z_median"``).
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         A tuple (point_metrics, pdf_metrics, pit): the point statistics of
         the chosen reduction, the PDF metric bundle and the per-object PIT
         values, shape (n,).
     """
-    estimates = grid_point_estimates(z_grid, pdfs)
+    estimates = grid_point_estimates(z_grid, pdfs, bin_edges=bin_edges)
     if point not in estimates:
         raise ValueError(f"point must be one of {sorted(estimates)}")
-    distribution, pit = pdf_metrics(z_true, z_grid, pdfs)
+    distribution, pit = pdf_metrics(z_true, z_grid, pdfs, bin_edges=bin_edges)
     return point_metrics(z_true, estimates[point]), distribution, pit
 
 
@@ -580,6 +662,8 @@ def summarize(
     pdfs: npt.ArrayLike,
     point: str = "z_peak",
     label: str | None = None,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> pd.DataFrame:
     """Every point and PDF metric as a one-row table.
 
@@ -594,6 +678,9 @@ def summarize(
             :func:`evaluate_grid_pdfs`.
         label: Model name for a leading ``model`` column; no such column
             when ``None``.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
 
     Returns:
         A one-row table: ``model`` (if labelled), ``point_estimate``, the
@@ -608,7 +695,7 @@ def summarize(
         ['uniform']
     """
     point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(
-        z_true, z_grid, pdfs, point=point
+        z_true, z_grid, pdfs, point=point, bin_edges=bin_edges
     )
     row: dict[str, object] = {}
     if label is not None:
@@ -617,3 +704,94 @@ def summarize(
     row.update(point_metrics_.as_dict())
     row.update({k: v for k, v in pdf_metrics_.as_dict().items() if k != "n"})
     return pd.DataFrame([row])
+
+
+# --------------------------------------------------------------------------
+# Histogram grids: densities constant across each bin
+# --------------------------------------------------------------------------
+
+
+def _bin_widths(bin_edges: npt.ArrayLike, n_bins: int) -> _typing.FloatArray:
+    """The widths of ``n_bins`` bins from their strictly increasing edges."""
+    edges = np.asarray(bin_edges, dtype=float)
+    if edges.ndim != 1 or edges.size != n_bins + 1:
+        raise ValueError(
+            f"bin_edges must have one more entry than the grid: "
+            f"{edges.shape=}, {n_bins=}"
+        )
+    widths = np.diff(edges)
+    if not np.all(widths > 0):
+        raise ValueError("bin_edges must be strictly increasing")
+    return widths
+
+
+def _integral_of_square(
+    grid: _typing.FloatArray,
+    density: _typing.FloatArray,
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray:
+    """The integral of p(z)^2 per row, by each grid convention."""
+    if bin_edges is None:
+        return np.asarray(np.trapezoid(density**2, grid, axis=1))
+    return (density**2) @ _bin_widths(bin_edges, grid.size)
+
+
+def _histogram_at_truth(
+    truth: _typing.FloatArray,
+    bin_edges: npt.ArrayLike,
+    density: _typing.FloatArray,
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+    """Returns a tuple (density at the truth, PIT) for a histogram grid.
+
+    The density is that of the bin holding the truth, zero outside the
+    edges; the PIT is the mass below the truth, linear within its bin. This
+    is the exact scoring of a bar distribution.
+    """
+    edges = np.asarray(bin_edges, dtype=float)
+    widths = _bin_widths(edges, density.shape[1])
+    mass = density * widths
+    below = np.cumsum(mass, axis=1) - mass
+    rows = np.arange(truth.size)
+    index = np.clip(
+        np.searchsorted(edges, truth, side="right") - 1, 0, widths.size - 1
+    )
+    inside = (truth >= edges[0]) & (truth < edges[-1])
+    pdf_at_truth = np.where(inside, density[rows, index], 0.0)
+    fraction = np.clip((truth - edges[index]) / widths[index], 0.0, 1.0)
+    pit = below[rows, index] + mass[rows, index] * fraction
+    pit = np.where(
+        truth < edges[0], 0.0, np.where(truth >= edges[-1], 1.0, pit)
+    )
+    return pdf_at_truth, pit
+
+
+def _histogram_point_estimates(
+    z_grid: npt.ArrayLike, pdfs: npt.ArrayLike, bin_edges: npt.ArrayLike
+) -> dict[str, _typing.FloatArray]:
+    """The point estimates of :func:`grid_point_estimates` on a histogram grid.
+
+    ``z_peak`` is the centre of the densest bin, ``z_mean`` the exact mean of
+    the piecewise-constant density, ``z_median`` the exact inverse of its
+    CDF at one half, and ``z_weight`` the main-peak mean with bin masses as
+    weights.
+    """
+    grid, density = normalize_grid_pdfs(z_grid, pdfs, bin_edges=bin_edges)
+    edges = np.asarray(bin_edges, dtype=float)
+    widths = _bin_widths(edges, grid.size)
+    mass = density * widths
+    cumulative = np.cumsum(mass, axis=1)
+    rows = np.arange(len(density))
+    index = np.clip(np.argmax(cumulative >= 0.5, axis=1), 0, grid.size - 1)
+    below = cumulative[rows, index] - mass[rows, index]
+    fraction = np.divide(
+        0.5 - below,
+        mass[rows, index],
+        out=np.zeros(len(density)),
+        where=mass[rows, index] > 0,
+    )
+    return {
+        "z_peak": z_peak(grid, density),
+        "z_weight": z_weight(grid, density, bin_edges=edges),
+        "z_mean": mass @ grid,
+        "z_median": edges[index] + np.clip(fraction, 0.0, 1.0) * widths[index],
+    }
