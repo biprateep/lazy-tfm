@@ -192,6 +192,22 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             size_note="~6.6 GB for the classification checkpoint.",
         ),
         Checkpoint(
+            backend="limix",
+            version="v2",
+            repo_id="stable-ai/LimiX-2",
+            package="LimiX",
+            filename="LimiX-2.ckpt",
+            revision="de07b679e74a41b50b9de18251a8fa245e537440",
+            license_note=(
+                "LimiX-2 code and weights are released by Stable AI under the "
+                "Stable AI Technology Co., Ltd. License 1.0 (Apache-2.0 with "
+                "attribution terms): anything built with it and made "
+                'available must display "Built with StableAI LimiX". See '
+                "https://huggingface.co/stable-ai/LimiX-2."
+            ),
+            size_note="~1.6 GB. Pretrained for at most about 20,000 rows.",
+        ),
+        Checkpoint(
             backend="tabicl",
             version="v2",
             repo_id="jingang/TabICL",
@@ -303,6 +319,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
 #: The version each backend loads when none is asked for. Changing one of these
 #: changes what every unversioned call returns, so they move only deliberately.
 DEFAULT_VERSIONS: dict[str, str] = {
+    "limix": "v2",
     "tabfm": "v1.0",
     "tabicl": "v2",
     "tabpfn": "v3",
@@ -391,8 +408,8 @@ def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
 
     Examples:
         >>> sorted(CHECKPOINTS)  # doctest: +NORMALIZE_WHITESPACE
-        ['tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5', 'tabpfn:v2.6',
-         'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
+        ['limix:v2', 'tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5',
+         'tabpfn:v2.6', 'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
     """
     return get_checkpoint(name, version).download()
 

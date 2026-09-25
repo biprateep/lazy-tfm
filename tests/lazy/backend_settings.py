@@ -8,6 +8,7 @@ backend arrives with its settings.
 
 #: Per backend: parameters small enough for CPU, as its own tests use.
 BACKEND_SETTINGS = {
+    "limix": {"n_estimators": 2, "chunk_size": 7},
     "tabpfn": {"n_estimators": 2, "chunk_size": 7},
     "tabicl": {"n_estimators": 2, "chunk_size": 7},
     "tabfm": {

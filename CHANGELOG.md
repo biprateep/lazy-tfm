@@ -64,6 +64,17 @@ The first release. Everything below is new.
   `median`, `mode`, `std`, `var`, `interval` and `histogramize`, following
   scipy.stats and LSST DESC's qp; `to_qp()` / `from_qp()` with the new `qp`
   extra.
+- A fourth backend, `limix` (`LimiXBarDistribution`): LimiX-2's 5,000-bucket
+  densities, on the uniform feature layer. LimiX is not on PyPI; the
+  `limix` extra installs its dependencies and the backend loads its code from
+  a checkout (`$LAZY_LIMIX_SRC`) or a `pip install` of the repository, under
+  private module names. Its feature preprocessing is fitted on the context
+  alone and its positional embedding has its own generator, so a query's
+  answer no longer depends on the other queries in its chunk (upstream's does:
+  its global generator is advanced by an amount set by the chunk's size). A
+  ported key/value cache (`kv_cache`, default on) runs the context through the
+  network once, at fit. `ContextSizeWarning` above 20,000 unbagged context
+  rows. Built with StableAI LimiX.
 - Features may be given as NumPy arrays, structured or record arrays, pandas
   DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
   are `NaN` and pass through to each model's own handling; infinities and

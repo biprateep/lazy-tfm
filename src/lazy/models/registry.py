@@ -19,6 +19,7 @@ from typing import Any
 
 from lazy import base
 from lazy.models import _conformance
+from lazy.models import limix
 from lazy.models import tabfm
 from lazy.models import tabicl
 from lazy.models import tabpfn
@@ -46,6 +47,7 @@ def register(name: str, cls: type[base.BasePhotoZEstimator]) -> None:
     ESTIMATORS[name] = cls
 
 
+register("limix", limix.LimiXBarDistribution)
 register("tabfm", tabfm.TabFMHistogram)
 register("tabicl", tabicl.TabICLQuantile)
 register("tabpfn", tabpfn.TabPFNBarDistribution)
@@ -56,7 +58,7 @@ def list_estimators() -> list[str]:
 
     Examples:
         >>> list_estimators()
-        ['tabfm', 'tabicl', 'tabpfn']
+        ['limix', 'tabfm', 'tabicl', 'tabpfn']
     """
     return sorted(ESTIMATORS)
 

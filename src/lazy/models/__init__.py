@@ -31,6 +31,7 @@ from lazy.models._hub import get_checkpoint
 from lazy.models._hub import is_cached
 from lazy.models._hub import list_versions
 from lazy.models.lazy_model import LazyModel
+from lazy.models.limix import LimiXBarDistribution
 from lazy.models.registry import ESTIMATORS
 from lazy.models.registry import get_estimator
 from lazy.models.registry import list_estimators
@@ -45,6 +46,7 @@ __all__ = [
     "ContextEnsembleEstimator",
     "ContextSizeWarning",
     "LazyModel",
+    "LimiXBarDistribution",
     "PerformanceWarning",
     "TabFMHistogram",
     "TabICLQuantile",

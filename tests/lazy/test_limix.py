@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
+"""LimiXBarDistribution: what the uniform conformance suite does not cover."""
+
+import os
+import pickle
+import warnings
+
+import numpy as np
+import pytest
+
+import lazy
+from lazy.models import _limix_source
+from lazy.models import _limix_stream
+from lazy.models import limix
+
+
+def _has_limix() -> bool:
+    try:
+        _limix_source.locate()
+    except ImportError:
+        return False
+    return True
+
+
+needs_checkpoint = pytest.mark.skipif(
+    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1" or not _has_limix(),
+    reason="needs LimiX's source and LAZY_RUN_CHECKPOINT_TESTS=1",
+)
+
+
+@pytest.fixture(scope="module")
+def data():
+    rng = np.random.default_rng(7)
+    z = rng.uniform(0.1, 1.5, 230)
+    X = np.column_stack(
+        [np.sin(z * k) + rng.normal(0, 0.05, z.size) for k in (1, 2, 3)]
+    )
+    X[::9, 1] = np.nan
+    return X[:200], z[:200], X[200:]
+
+
+def _model(**params):
+    settings = {
+        "n_estimators": 2,
+        "device": "cpu",
+        "progress": False,
+        "chunk_size": 11,
+    }
+    return limix.LimiXBarDistribution(**{**settings, **params})
+
+
+def test_constructing_needs_nothing_installed():
+    est = limix.LimiXBarDistribution()
+    assert est.get_params()["random_state"] == 0
+    assert est.recommended_max_context == 20_000
+
+
+def _missing_source():
+    raise ImportError("LimiX not found: pip install 'lazy-photoz[limix]'")
+
+
+def test_fitting_without_the_source_says_how_to_install_it(monkeypatch, data):
+    monkeypatch.setattr(_limix_source, "locate", _missing_source)
+    monkeypatch.setattr(_limix_source, "_loaded", {})
+    X, z, _ = data
+    with pytest.raises(ImportError, match=r"lazy-photoz\[limix\]"):
+        _model().fit(X, z)
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"softmax_temperature": 0}, "softmax_temperature"),
+        ({"softmax_temperature": "hot"}, "softmax_temperature"),
+        ({"mixed_precision": "yes"}, "mixed_precision"),
+    ],
+)
+def test_backend_parameters_are_checked(params, message):
+    with pytest.raises(ValueError, match=message):
+        _model(**params)._check_backend_params()
+
+
+def test_standardisation_is_upstreams():
+    y = np.array([1.0, 2.0, 4.0])
+    assert limix._standardisation(y) == (y.mean(), y.std(ddof=1))
+    assert limix._standardisation(np.ones(4)) == (1.0, 1.0)
+
+
+@needs_checkpoint
+def test_the_cache_matches_upstreams_forward_pass(data):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    network = model._network()
+    entry = model.handles_[0]["members"][0]
+    queries = entry["pipeline"].transform(X_test)
+    cached = _limix_stream.decode(
+        network, entry["member"], entry["cache"], queries, mixed_precision=True
+    )
+    uncached = _limix_stream.forward(
+        network, entry["member"], queries, mixed_precision=True
+    )
+    np.testing.assert_allclose(cached, uncached, atol=1e-4)
+
+
+@needs_checkpoint
+def test_upstreams_recipe_is_the_default(data):
+    X, z, _ = data
+    model = _model(n_estimators=8).fit(X, z)
+    tokens = [entry["pipeline"].token for entry in model.handles_[0]["members"]]
+    assert tokens == list(limix._limix_preprocess.AUTO_TOKENS)
+    assert model.provenance_["attribution"] == "Built with StableAI LimiX"
+    assert model.provenance_["source_commit"] is not None
+
+
+@needs_checkpoint
+def test_the_native_grid_uses_the_whole_context(data):
+    X, z, _ = data
+    model = _model(bag_size=0.5).fit(X, z)
+    mean, std = z.mean(), z.std(ddof=1)
+    edges = model.native_grid_.edges
+    np.testing.assert_allclose(
+        edges, np.unique(model.borders_ * std + mean), rtol=1e-12
+    )
+    assert model.n_buckets_ == 5000
+
+
+@needs_checkpoint
+def test_a_cache_that_does_not_fit_falls_back(monkeypatch, data):
+    X, z, X_test = data
+    monkeypatch.setattr(limix, "_free_device_memory", lambda network: 1)
+    with pytest.warns(lazy.PerformanceWarning, match="without its key/value"):
+        fallback = _model().fit(X, z)
+    assert fallback.kv_cache_ is False
+    for handle in fallback.handles_:
+        assert all(entry["cache"] is None for entry in handle["members"])
+    np.testing.assert_array_equal(
+        fallback.predict_proba(X_test),
+        _model(kv_cache=False).fit(X, z).predict_proba(X_test),
+    )
+
+
+@needs_checkpoint
+def test_a_pickled_model_predicts_the_same(data):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    before = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    assert "_network_cache" not in vars(restored)
+    np.testing.assert_array_equal(restored.predict_proba(X_test), before)
+
+
+@needs_checkpoint
+def test_a_large_unbagged_context_warns(monkeypatch, data):
+    X, z, _ = data
+    monkeypatch.setattr(
+        limix.LimiXBarDistribution, "recommended_max_context", 150
+    )
+    with pytest.warns(lazy.ContextSizeWarning, match="bag_size=150"):
+        _model().fit(X, z)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.ContextSizeWarning)
+        _model(bag_size=150).fit(X, z)

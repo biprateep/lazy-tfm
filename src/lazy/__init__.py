@@ -75,6 +75,7 @@ from lazy.models import get_checkpoint
 from lazy.models import get_estimator
 from lazy.models import is_cached
 from lazy.models import LazyModel
+from lazy.models import LimiXBarDistribution
 from lazy.models import list_estimators
 from lazy.models import list_versions
 from lazy.models import PerformanceWarning
@@ -96,6 +97,7 @@ __all__ = [
     "BasePhotoZEstimator",
     "ContextSizeWarning",
     "LazyModel",
+    "LimiXBarDistribution",
     "PerformanceWarning",
     "RedshiftGrid",
     "TabFMHistogram",

@@ -19,7 +19,7 @@ def _explode(*args, **kwargs):
     raise AssertionError("constructing a model must not touch the hub")
 
 
-@pytest.mark.parametrize("name", ["tabfm", "tabicl", "tabpfn"])
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_every_registered_name_builds(name):
     model = lazy.LazyModel(name)
     assert isinstance(model, lazy.BasePhotoZEstimator)
@@ -28,6 +28,9 @@ def test_every_registered_name_builds(name):
 
 
 def test_the_backend_is_the_concrete_class():
+    assert isinstance(
+        lazy.LazyModel("limix")._build(), lazy.LimiXBarDistribution
+    )
     assert isinstance(lazy.LazyModel("tabfm")._build(), lazy.TabFMHistogram)
     assert isinstance(lazy.LazyModel("tabicl")._build(), lazy.TabICLQuantile)
     assert isinstance(
