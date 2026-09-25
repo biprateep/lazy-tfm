@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z densities from TabICLv2's quantile regression head.
+"""Photo-z distributions from TabICLv2's quantile regression head.
 
 TabICLv2 (Qu et al. 2026) is an in-context tabular foundation model whose
 regressor answers with a *distribution*: 999 quantiles of the predictive CDF
-per query row, not a single number. That is already a conditional density
-estimate in disguise, so :class:`TabICLQuantile` needs no hierarchy and no
-post-processing -- it evaluates the quantile CDF at the output grid's bin
-edges and differences it, which hands every bin exactly the mass the quantiles
-place inside it.
+per query row, not a single number. :class:`TabICLQuantile` returns them as a
+:class:`~lazy.distributions.QuantileDistribution`, whose densities on any
+grid come from evaluating the quantile CDF at the bin edges and differencing
+(:meth:`lazy.grid.RedshiftGrid.from_quantiles`): every bin gets exactly the
+mass the quantiles place inside it.
 
-Differentiating at the bin centres instead (``np.gradient``) would smear any
-feature narrower than a bin into its neighbours and would not conserve mass,
-so :meth:`lazy.grid.RedshiftGrid.from_quantiles` does the edge evaluation.
+The uniform features map onto TabICL's own machinery: ``kv_cache`` onto its
+key/value cache, ``feature_shuffle`` onto its Latin-square column shuffles,
+and the ``transforms`` it has (``none``, ``power``, ``quantile``,
+``quantile_rtdl``, ``robust``) onto its ``norm_methods``. TabICL cannot
+subsample rows, so ``bag_size`` is scaffolded: one single-member regressor
+per bag, their quantile functions averaged, as TabICL averages its own
+members.
 
 Compared with :class:`lazy.models.tabfm.TabFMHistogram`, this backbone is far
 smaller (a ~100 MB checkpoint rather than ~6.6 GB) and much faster, at the cost
@@ -22,17 +26,22 @@ than by the data.
 
 from __future__ import annotations
 
+import types
+from typing import Any
+
 import numpy as np
-import pandas as pd
 
 from lazy import _typing
-from lazy import base
+from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
-from lazy.models import _hub
+from lazy.models import _ensemble
+from lazy.models import _members
 from lazy.models import _progress
 
-__all__ = ["TabICLQuantile", "quantile_levels"]
+__all__ = ["NATIVE_QUANTILE_BINS", "TabICLQuantile", "quantile_levels"]
+
+#: Bins of the native grid: as fine as the 999 quantiles resolve.
+NATIVE_QUANTILE_BINS = 1000
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -54,44 +63,52 @@ def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
     return np.linspace(0.0, 1.0, int(n_quantiles) + 2)[1:-1]
 
 
-class TabICLQuantile(base.BasePhotoZEstimator):
-    """Conditional density from the quantiles TabICLv2's regressor predicts.
+class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
+    """Redshift distributions from the quantiles TabICLv2's regressor predicts.
 
     Args:
         version: Which pinned TabICL checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: TabICL ensemble members. Costs scale linearly; 8 is the
-            value the benchmarks use.
-        z_grid: Output grid: a :class:`lazy.grid.RedshiftGrid`, an array of
-            bin centres, or ``None`` for :data:`lazy.grid.DC1_GRID`.
+        n_estimators: Ensemble members. Costs scale linearly; 8 is the value
+            the benchmarks use.
+        transforms: Per-member feature transforms: ``"auto"`` (TabICL's own
+            ``none``/``power`` recipe), a recipe name, a transform name or a
+            sequence of them; see :mod:`lazy.models._transforms`.
+        feature_shuffle: Whether members see the columns in different orders
+            (TabICL's Latin-square shuffles).
+        bag_size: Context rows per member: an int count, a float fraction in
+            (0, 1], or None for all of them. Scaffolded: one regressor per
+            bag.
+        kv_cache: Cache the context's keys and values at fit, so each chunk
+            of queries skips the context forward pass: ``True`` (TabICL's
+            ``"kv"`` cache), ``"repr"`` (cached row representations, far
+            smaller, re-running the in-context layers) or ``False``. Exact
+            either way, up to floating-point rounding.
+        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+            array of bin centres, ``"native"``, or None for the native grid
+            (1,000 bins spanning the training redshifts).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
-        random_state: Seed for TabICL's ensemble construction.
-        chunk_size: Query rows predicted at a time, to bound peak memory: 999
-            float quantiles per row is roughly 8 kB, so a survey-sized query
-            set in one pass is gigabytes of intermediate before any of it
-            becomes a density. ``0`` does it in one pass. Chunking is
-            numerically exact -- TabICL's in-context stage builds its keys and
-            values from the context rows only, so a query row's prediction
-            never depends on which other query rows share its chunk -- and is
-            verified bit-identical in the test suite, so the default is
-            bounded rather than fast-and-hopeful.
-        progress: A progress bar over the query galaxies: ``"auto"`` (the
-            default) shows it on a terminal or in a notebook and not when
-            output goes to a file, ``True`` always, ``False`` never. It
-            advances one chunk at a time and shows the context size and how
-            many quantiles each galaxy is given.
+        random_state: Seed for the ensemble.
+        chunk_size: Query rows predicted at a time, to bound peak memory
+            (999 quantiles per row is about 8 kB); ``0`` does them in one
+            pass. Exact: TabICL builds its keys and values from the context
+            rows alone, so a row's answer never depends on the other rows in
+            its chunk.
+        progress: A progress bar over the query galaxies: ``"auto"`` shows it
+            on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
 
     Attributes:
-        grid_: The resolved output grid, a :class:`lazy.grid.RedshiftGrid`.
-        checkpoint_: The pinned checkpoint file the weights were loaded from,
-            a :class:`pathlib.Path`.
-        provenance_: Which weights and which code answered, as a dict:
-            backend, version, repository, revision, package versions and
-            device. See :meth:`lazy.models._hub.Checkpoint.provenance`.
-        regressor_: The fitted ``tabicl.TabICLRegressor``.
-        n_quantiles_: How many quantiles the backbone actually returned.
+        grid_: The resolved default output grid.
+        native_grid_: The native grid, 1,000 histogram-normalised bins over
+            the training redshifts padded by 2% (not below zero).
+        checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
+        provenance_: Which weights, code and ensemble answered, as a dict.
+        regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
+            the whole ensemble.
+        handles_: Every fitted regressor, one per member group.
+        n_quantiles_: How many quantiles the backbone returned.
         n_context_: Context rows ``fit`` was given.
 
     Examples:
@@ -101,12 +118,34 @@ class TabICLQuantile(base.BasePhotoZEstimator):
     """
 
     backend = "tabicl"
+    display_name = "TabICL"
+    extra = "tabicl"
+    native_output = "quantiles"
+    native_transforms = {
+        "none": "none",
+        "power": "power",
+        "quantile": "quantile",
+        "quantile_rtdl": "quantile_rtdl",
+        "robust": "robust",
+    }
+    auto_tokens = ("none", "power")
+    supports_native_bagging = False
+    member_combination = "quantile_average"
+    kv_cache_modes = (True, False, "repr")
+    kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
+
+    # The training redshifts' range, recorded by _fit_group for the grid.
+    _support: tuple[float, float]
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
         version: str = "v2",
         n_estimators: int = 8,
+        transforms: str | tuple[str, ...] = "auto",
+        feature_shuffle: bool = True,
+        bag_size: int | float | None = None,
+        kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int = 42,
@@ -116,6 +155,10 @@ class TabICLQuantile(base.BasePhotoZEstimator):
     ):
         self.version = version
         self.n_estimators = n_estimators
+        self.transforms = transforms
+        self.feature_shuffle = feature_shuffle
+        self.bag_size = bag_size
+        self.kv_cache = kv_cache
         self.z_grid = z_grid
         self.device = device
         self.random_state = random_state
@@ -123,9 +166,7 @@ class TabICLQuantile(base.BasePhotoZEstimator):
         self.progress = progress
         self.verbose = verbose
 
-    # -- estimator protocol -------------------------------------------------
-
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+    def _import_backend(self) -> types.ModuleType:
         try:
             import tabicl  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
@@ -133,78 +174,65 @@ class TabICLQuantile(base.BasePhotoZEstimator):
                 "TabICLQuantile needs the tabicl backend: "
                 "pip install 'lazy-photoz[tabicl]'"
             ) from error
+        return tabicl
 
-        if self.chunk_size < 0:
-            raise ValueError(
-                "chunk_size must be non-negative (0 means one pass)"
+    def _fit_group(
+        self,
+        X: _typing.FloatArray,
+        y: _typing.FloatArray,
+        group: _members.MemberGroup,
+    ) -> Any:
+        # The pinned checkpoint is handed over by path, never left to
+        # TabICL's own default, which upstream is free to bump: this way
+        # `CHECKPOINTS` is the authority on which weights answer.
+        options: dict[str, Any] = {}
+        if group.native_transforms is not None:
+            # Upstream pairs members with norm methods round robin, as the
+            # planner assigned them, so the distinct tokens in order suffice.
+            options["norm_methods"] = list(
+                dict.fromkeys(group.native_transforms)
             )
-        _progress.check_progress(self.progress)
-        self.device_ = _device.resolve_device(self.device)
-
-        # Fetch the weights ourselves and hand over the path, rather than
-        # letting TabICL pick its own default. Its default is a separate
-        # constant that upstream is free to bump, and if it did, the
-        # checkpoint `lazy.download_checkpoint("tabicl")` pre-fetches would
-        # stop being the one actually loaded -- silently breaking offline runs
-        # and silently un-pinning the weights. This way there is one
-        # checkpoint and one download path, and `CHECKPOINTS` is the authority
-        # on both.
-        spec = _hub.get_checkpoint("tabicl", self.version)
-        self.checkpoint_ = spec.download()
-        self.provenance_ = spec.provenance(device=self.device_)
-        self._log(
-            f"fitting TabICL on {len(X)} context rows ({self.device_}), "
-            f"{self.checkpoint_.name}"
-        )
+        if not group.feature_shuffle:
+            options["feat_shuffle_method"] = "none"
+        tabicl = self._import_backend()
         regressor = tabicl.TabICLRegressor(
-            n_estimators=self.n_estimators,
+            n_estimators=group.n_members,
             device=self.device_,
-            kv_cache=False,
-            random_state=self.random_state,
+            kv_cache=self.kv_cache,
+            random_state=group.seed,
             model_path=str(self.checkpoint_),
             verbose=False,
+            **options,
         )
-        regressor.fit(
-            X.to_numpy(dtype=np.float32), np.asarray(y, dtype=np.float32)
+        regressor.fit(X.astype(np.float32), y.astype(np.float32))
+        low, high = float(y.min()), float(y.max())
+        if group.index > 0:
+            low, high = min(low, self._support[0]), max(high, self._support[1])
+        self._support = (low, high)
+        return regressor
+
+    def _predict_group(
+        self, handle: Any, X: _typing.FloatArray
+    ) -> distributions.QuantileDistribution:
+        quantiles = np.asarray(
+            handle.predict(X.astype(np.float32), output_type="raw_quantiles"),
+            dtype=np.float64,
         )
-        self.regressor_ = regressor
-        self.n_context_ = len(X)
+        self.n_quantiles_ = int(quantiles.shape[1])
+        return distributions.QuantileDistribution(
+            quantile_levels(self.n_quantiles_), quantiles
+        )
 
-    def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
-    ) -> _typing.FloatArray:
-        size = self.chunk_size if self.chunk_size > 0 else len(X)
-        blocks: list[_typing.FloatArray] = []
-        with _progress.bar(
-            self.progress,
-            total=len(X),
-            desc=f"TabICL {self.version}",
-            unit="gal",
-        ) as progress:
-            progress.set_postfix(context=self.n_context_)
-            for start in range(0, len(X), size):
-                stop = min(start + size, len(X))
-                self._log(f"rows {start}:{stop} of {len(X)}")
-                quantiles = self.regressor_.predict(
-                    X.iloc[start:stop].to_numpy(dtype=np.float32),
-                    output_type="raw_quantiles",
-                )
-                quantiles = np.asarray(quantiles, dtype=np.float64)
-                self.n_quantiles_ = int(quantiles.shape[1])
-                blocks.append(
-                    grid.from_quantiles(
-                        quantiles, quantile_levels(self.n_quantiles_)
-                    )
-                )
-                del quantiles
-                progress.set_postfix(
-                    context=self.n_context_,
-                    quantiles=self.n_quantiles_,
-                    refresh=False,
-                )
-                progress.update(stop - start)
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+    def _native_grid(self) -> grid_lib.RedshiftGrid:
+        low, high = self._support
+        pad = 0.02 * (high - low) if high > low else 0.01
+        start = max(low - pad, 0.0) if low >= 0 else low - pad
+        return grid_lib.RedshiftGrid.linear(
+            start, high + pad, NATIVE_QUANTILE_BINS, normalization="histogram"
+        )
 
-    def _log(self, message: str) -> None:
-        if self.verbose:
-            print(f"[TabICLQuantile] {message}", flush=True)
+    def _progress_postfix(
+        self, dist: distributions.Distribution
+    ) -> dict[str, Any]:
+        del dist  # Unused: the count is recorded when predicting.
+        return {"quantiles": getattr(self, "n_quantiles_", None)}

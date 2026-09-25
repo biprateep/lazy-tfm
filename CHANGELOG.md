@@ -69,6 +69,11 @@ The first release. Everything below is new.
 - `LazyModel` builds its backend at `fit`, as the fitted attribute
   `estimator_`, rather than in `__init__`. An unknown backend name or parameter
   is reported at `fit`, and `set_params` rejects unknown parameter names.
+- `TabICLQuantile` runs on the uniform feature layer: its key/value cache is
+  on by default (`kv_cache`, exact), `transforms` map onto its
+  `norm_methods`, `bag_size` is scaffolded (one regressor per bag, quantile
+  functions averaged), and its default grid is its native one (1,000 bins over
+  the training redshifts).
 - The code follows the Google Python Style Guide, with Google-style
   docstrings throughout; scikit-learn's `X` and `y` keep their names.
 - `feature_names_in_` follows scikit-learn: it is set only when the features

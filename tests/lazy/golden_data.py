@@ -44,7 +44,11 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
 }
 
 #: The same models in the current API.
-CURRENT_PARAMS: dict[str, dict[str, Any]] = RECORDED_PARAMS
+CURRENT_PARAMS: dict[str, dict[str, Any]] = {
+    **RECORDED_PARAMS,
+    # The recorded run had no key/value cache.
+    "tabicl": {**RECORDED_PARAMS["tabicl"], "kv_cache": False},
+}
 
 
 def problem() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
