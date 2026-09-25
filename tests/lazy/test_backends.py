@@ -227,11 +227,19 @@ class TestTabPFN:
         with pytest.raises(ValueError, match="chunk_size"):
             lazy.get_estimator("tabpfn", chunk_size=-1).fit(X, z)
 
-    def test_the_batched_fit_mode_is_rejected(self, tiny):
-        """Upstream has it, but for `predict_batched`, not `predict`."""
+    def test_an_unknown_cache_mode_is_rejected(self, tiny):
+        """Only full precision and upstream's two quantised modes exist."""
         X, z = tiny
-        with pytest.raises(ValueError, match="fit_mode must be one of"):
-            lazy.get_estimator("tabpfn", fit_mode="batched").fit(X, z)
+        with pytest.raises(ValueError, match="kv_cache must be one of"):
+            lazy.get_estimator("tabpfn", kv_cache="int4").fit(X, z)
+
+    def test_the_cache_is_exact_unless_quantisation_is_asked_for(self):
+        assert tabpfn._cache_options(True) == {
+            "fit_mode": "fit_with_cache",
+            "kv_cache_precision": "auto",
+        }
+        assert tabpfn._cache_options("int8")["kv_cache_precision"] == "int8"
+        assert tabpfn._cache_options(False) == {"fit_mode": "fit_preprocessors"}
 
     def test_an_unknown_version_is_rejected_before_anything_is_downloaded(
         self, tiny

@@ -46,8 +46,16 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
 #: The same models in the current API.
 CURRENT_PARAMS: dict[str, dict[str, Any]] = {
     **RECORDED_PARAMS,
-    # The recorded run had no key/value cache.
+    # The recorded runs had no key/value cache.
     "tabicl": {**RECORDED_PARAMS["tabicl"], "kv_cache": False},
+    "tabpfn": {
+        **{
+            k: v
+            for k, v in RECORDED_PARAMS["tabpfn"].items()
+            if k != "fit_mode"
+        },
+        "kv_cache": False,
+    },
 }
 
 

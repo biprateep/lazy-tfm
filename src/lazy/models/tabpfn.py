@@ -1,34 +1,28 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z densities from TabPFN-3's bar distribution.
+"""Photo-z distributions from TabPFN's bar distribution.
 
-TabPFN-3 (Prior Labs, 2026) is an in-context tabular foundation model, and its
+TabPFN (Prior Labs) is an in-context tabular foundation model, and its
 regressor does not answer with a number: internally it is a classifier over a
 fixed set of *buckets* of the target, and its native output is the probability
-mass in each one -- a ``FullSupportBarDistribution``, in the upstream name. The
-bucket borders are placed by the distribution of the context targets, so they
-are narrow where galaxies are crowded and wide in the tails.
+mass in each one -- a ``FullSupportBarDistribution``, in the upstream name.
+The bucket borders are a fixed array stored in the checkpoint (5,000 buckets
+on v3), stretched and shifted by the context redshifts' mean and standard
+deviation: uniform over the bulk, widening far into both tails.
 
-That is already a conditional density estimate, and it is the same object
-:class:`lazy.models.tabfm.TabFMHistogram` has to assemble by hand from a
-hierarchy of ten-class classifiers -- here one forward pass produces it, and
-with five thousand buckets rather than a hundred. So
-:class:`TabPFNBarDistribution` does no post-processing: it takes the bucket
-masses and maps them onto the output grid by exact, mass-conserving
-integration (:meth:`lazy.grid.RedshiftGrid.rebin`).
+That is already a conditional density estimate, so
+:class:`TabPFNBarDistribution` does no post-processing: its predictions are
+:class:`~lazy.distributions.HistogramDistribution` objects over those buckets,
+mapped onto any grid by exact, mass-conserving integration
+(:meth:`lazy.grid.RedshiftGrid.rebin`), and its native grid is the buckets
+themselves, in full. The bucket masses rather than quantiles, because upstream
+computes its quantiles by inverting this same piecewise-uniform CDF.
 
-The bucket masses, rather than the quantiles
-:class:`lazy.models.tabicl.TabICLQuantile` is restricted to, because here the
-quantiles are the derived quantity: upstream
-computes them by inverting this same piecewise-uniform bucket CDF, so going
-through them would only re-encode the density at a coarser resolution than the
-model actually has.
-
-Mass the model places outside ``[z_min, z_max]`` is dropped and each row
-renormalised, the same convention every backend here follows. The outermost
-two buckets are the ones to know about: they carry the distribution's tails,
-and upstream's own CDF -- the one its quantiles and its mean come from -- treats
-them as uniform, which is what ``rebin`` reproduces.
+The uniform features all map onto TabPFN's own machinery: ``kv_cache`` onto
+its fit-time key/value cache (at full precision, so exact), the
+``transforms`` it has onto its ``PREPROCESS_TRANSFORMS``, ``feature_shuffle``
+onto its ``FEATURE_SHIFT_METHOD``, and ``bag_size`` onto its per-member row
+subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own bags.
 """
 
 from __future__ import annotations
@@ -36,33 +30,56 @@ from __future__ import annotations
 from collections.abc import Mapping
 import os
 import pathlib
+import types
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 from lazy import _typing
-from lazy import base
+from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
-from lazy.models import _hub
+from lazy.models import _ensemble
+from lazy.models import _members
 from lazy.models import _progress
 
 __all__ = [
-    "FIT_MODES",
     "TabPFNBarDistribution",
     "bucket_masses",
     "path_for_tabpfn",
 ]
 
-#: ``fit_mode`` values this backend accepts. Upstream also has ``"batched"``,
-#: which belongs to ``predict_batched`` -- a different call than the one made
-#: here -- so it is not among them.
-FIT_MODES = ("low_memory", "fit_preprocessors", "fit_with_cache")
+
+def _native_transforms() -> dict[str, tuple[str, bool]]:
+    """Uniform transform names TabPFN implements, as (name, append_original)."""
+    names = {
+        "none": "none",
+        "power": "power",
+        "quantile": "quantile_norm",
+        "quantile_uniform": "quantile_uni",
+        "robust": "robust",
+    }
+    native: dict[str, tuple[str, bool]] = {}
+    for uniform, upstream in names.items():
+        native[uniform] = (upstream, False)
+        native[f"{uniform}+original"] = (upstream, True)
+    return native
 
 
-class TabPFNBarDistribution(base.BasePhotoZEstimator):
-    """Conditional density from the bucket masses TabPFN-3's regressor predicts.
+def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
+    """TabPFN's fit mode and cache precision for a ``kv_cache`` value.
+
+    Upstream quantises its cache to int8 by default on v3 and later, which
+    changes the outputs; ``True`` asks for full precision, so caching is
+    exact.
+    """
+    if kv_cache is False:
+        return {"fit_mode": "fit_preprocessors"}
+    precision = "auto" if kv_cache is True else kv_cache
+    return {"fit_mode": "fit_with_cache", "kv_cache_precision": precision}
+
+
+class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
+    """Redshift distributions from the bucket masses TabPFN predicts.
 
     Args:
         version: Which TabPFN to run, in upstream's own vocabulary: ``"v2"``,
@@ -74,62 +91,59 @@ class TabPFNBarDistribution(base.BasePhotoZEstimator):
             only one under a commercial-use licence, and it and ``"v2.5"``
             declare much smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
-        n_estimators: TabPFN ensemble members: repeats of the forward pass
-            over differently preprocessed views of the same data, averaged.
-            Costs scale linearly. ``"auto"`` defers to the count the
-            checkpoint names.
-        z_grid: Output grid: a :class:`lazy.grid.RedshiftGrid`, an array of
-            bin centres, or ``None`` for :data:`lazy.grid.DC1_GRID`.
+        n_estimators: Ensemble members, each a forward pass over a differently
+            preprocessed view of the data; costs scale linearly. ``"auto"``
+            defers to the count the checkpoint names.
+        transforms: Per-member feature transforms: ``"auto"`` (the
+            checkpoint's own tuned recipe), a recipe name, a transform name or
+            a sequence of them; see :mod:`lazy.models._transforms`. TabPFN
+            implements all but ``quantile_rtdl`` itself. Its per-member target
+            transforms always stay the checkpoint's.
+        feature_shuffle: Whether members see the columns in different orders
+            (TabPFN's own feature shuffling).
+        bag_size: Context rows per member: an int count, a float fraction in
+            (0, 1], or None for all of them. Native: TabPFN's own per-member
+            row subsampling, handed the package's bags.
+        kv_cache: Cache the context's keys and values at fit, so each chunk
+            of queries skips the context forward pass: ``True`` (exact, full
+            precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
+            exact), or ``False``. Worth its memory whenever the query set is
+            much larger than the context.
+        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+            array of bin centres, ``"native"``, or None for the native grid
+            (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
-        random_state: Seed for TabPFN's ensemble construction.
+        random_state: Seed for the ensemble.
         softmax_temperature: Temperature on the bucket logits, which sets how
             sharp the densities are. ``"auto"`` takes the checkpoint's own
             value, which is the one it was evaluated with; lower sharpens,
             higher broadens.
-        fit_mode: What ``fit`` precomputes, trading memory for speed at
-            predict time. ``"low_memory"`` keeps nothing,
-            ``"fit_preprocessors"`` (the default, and upstream's) caches the
-            fitted preprocessors and the transformed context, and
-            ``"fit_with_cache"`` additionally caches the context's key/value
-            tensors, so each chunk of query rows skips the context forward
-            pass -- the analogue of ``inference="stream"`` on
-            :class:`~lazy.models.tabfm.TabFMHistogram`, and worth its memory
-            when the query set is much larger than the context.
         ignore_pretraining_limits: Pass ``True`` to run a context larger than
             the row count the checkpoint declares it was pretrained for, which
             otherwise raises. Predictions beyond that limit are extrapolation,
-            so this is opt-in rather than the default -- though TabPFN-3
-            declares a million rows, so a photo-z context is unlikely to reach
-            it.
-        chunk_size: Query rows predicted at a time, to bound peak memory.
-            ``0`` does them in one pass. Chunking is numerically exact --
-            TabPFN's attention builds its keys and values from the context
-            rows alone, and its preprocessors are fitted on the context at
-            ``fit`` time, so a query row's prediction never depends on which
-            other query rows share its chunk -- and is verified bit-identical
-            in the test suite.
-        progress: A progress bar over the query galaxies: ``"auto"`` (the
-            default) shows it on a terminal or in a notebook and not when
-            output goes to a file, ``True`` always, ``False`` never. It
-            advances one chunk at a time and shows the context size and how
-            many buckets the bar distribution has.
+            so this is opt-in -- though TabPFN-3 declares a million rows.
+        chunk_size: Query rows predicted at a time, to bound peak memory;
+            ``0`` does them in one pass. Exact: TabPFN's attention builds its
+            keys and values from the context rows alone and its preprocessors
+            are fitted on the context, so a row's answer never depends on the
+            other rows in its chunk.
+        progress: A progress bar over the query galaxies: ``"auto"`` shows it
+            on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
 
     Attributes:
-        grid_: The resolved output grid, a :class:`lazy.grid.RedshiftGrid`.
-        checkpoint_: The pinned checkpoint file the weights were loaded from,
-            a :class:`pathlib.Path`.
-        provenance_: Which weights and which code answered, as a dict:
-            backend, version, repository, revision, package versions and
-            device. See :meth:`lazy.models._hub.Checkpoint.provenance`.
-        regressor_: The fitted ``tabpfn.TabPFNRegressor``.
-        borders_: The bar distribution's bucket borders, in redshift, shape
-            ``(n_buckets_ + 1,)``. Set by the first prediction; fixed by the
-            context redshifts, so every query row and every chunk shares
-            them.
-        n_buckets_: How many buckets the bar distribution has,
-            ``borders_.size - 1``.
+        grid_: The resolved default output grid.
+        native_grid_: The bar distribution's buckets in redshift, a
+            histogram-normalised grid, set at fit.
+        checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
+        provenance_: Which weights, code and ensemble answered, as a dict.
+        regressor_: The fitted ``tabpfn.TabPFNRegressor``, when one serves
+            the whole ensemble.
+        handles_: Every fitted regressor, one per member group.
+        borders_: The bucket borders in redshift, shape (n_buckets_ + 1,);
+            fixed at fit by the context redshifts' mean and spread.
+        n_buckets_: How many buckets the bar distribution has.
         n_context_: Context rows ``fit`` was given.
 
     Examples:
@@ -141,17 +155,28 @@ class TabPFNBarDistribution(base.BasePhotoZEstimator):
     """
 
     backend = "tabpfn"
+    display_name = "TabPFN"
+    extra = "tabpfn"
+    native_output = "histogram"
+    native_transforms = _native_transforms()
+    supports_native_bagging = True
+    kv_cache_modes = (True, False, "int8", "fp8")
+    kv_cache_rtol = 1e-5
+    accepts_auto_estimators = True
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
         version: str = "v3",
         n_estimators: int | str = 8,
+        transforms: str | tuple[str, ...] = "auto",
+        feature_shuffle: bool = True,
+        bag_size: int | float | None = None,
+        kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int = 42,
         softmax_temperature: float | str = "auto",
-        fit_mode: str = "fit_preprocessors",
         ignore_pretraining_limits: bool = False,
         chunk_size: int = 16_384,
         progress: _progress.Progress = "auto",
@@ -159,19 +184,20 @@ class TabPFNBarDistribution(base.BasePhotoZEstimator):
     ):
         self.version = version
         self.n_estimators = n_estimators
+        self.transforms = transforms
+        self.feature_shuffle = feature_shuffle
+        self.bag_size = bag_size
+        self.kv_cache = kv_cache
         self.z_grid = z_grid
         self.device = device
         self.random_state = random_state
         self.softmax_temperature = softmax_temperature
-        self.fit_mode = fit_mode
         self.ignore_pretraining_limits = ignore_pretraining_limits
         self.chunk_size = chunk_size
         self.progress = progress
         self.verbose = verbose
 
-    # -- estimator protocol -------------------------------------------------
-
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+    def _import_backend(self) -> types.ModuleType:
         try:
             import tabpfn  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
@@ -179,83 +205,84 @@ class TabPFNBarDistribution(base.BasePhotoZEstimator):
                 "TabPFNBarDistribution needs the tabpfn backend: "
                 "pip install 'lazy-photoz[tabpfn]'"
             ) from error
+        return tabpfn
 
-        if self.chunk_size < 0:
-            raise ValueError(
-                "chunk_size must be non-negative (0 means one pass)"
-            )
-        if self.fit_mode not in FIT_MODES:
-            raise ValueError(
-                f"fit_mode must be one of {FIT_MODES}, got {self.fit_mode!r}"
-            )
-        _progress.check_progress(self.progress)
-        self.device_ = _device.resolve_device(self.device)
-
-        # Fetch the weights ourselves and hand over the path, rather than
-        # letting TabPFN resolve its own default. Its default is the newest
-        # model version it knows about, which changes with the package -- so
-        # `version` would not mean anything, the checkpoint
-        # `lazy.download_checkpoint("tabpfn")` pre-fetches would stop being
-        # the one actually loaded, and an upgrade of `tabpfn` would silently
-        # swap the model. This way `CHECKPOINTS` is the authority on which
-        # TabPFN this is.
-        spec = _hub.get_checkpoint("tabpfn", self.version)
-        self.checkpoint_ = spec.download()
-        self.provenance_ = spec.provenance(device=self.device_)
-        self._log(
-            f"fitting TabPFN {self.version} on {len(X)} context rows "
-            f"({self.device_}), {self.checkpoint_.name}"
-        )
+    def _fit_group(
+        self,
+        X: _typing.FloatArray,
+        y: _typing.FloatArray,
+        group: _members.MemberGroup,
+    ) -> Any:
+        # The pinned checkpoint is handed over by path, never left to
+        # TabPFN's own default (the newest version it knows, which moves with
+        # the package): this way `CHECKPOINTS` is the authority on which
+        # TabPFN answers, and `version` means something.
+        tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
-            n_estimators=self.n_estimators,
+            n_estimators=(
+                self.n_estimators
+                if self.n_estimators == "auto"
+                else group.n_members
+            ),
             model_path=path_for_tabpfn(self.checkpoint_),
             device=self.device_,
-            random_state=self.random_state,
+            random_state=group.seed,
             softmax_temperature=self.softmax_temperature,
-            fit_mode=self.fit_mode,
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
+            inference_config=self._inference_config(group) or None,
+            **_cache_options(self.kv_cache),
         )
-        regressor.fit(
-            X.to_numpy(dtype=np.float64), np.asarray(y, dtype=np.float64)
+        regressor.fit(X, y)
+        borders = regressor.raw_space_bardist_.borders
+        self.borders_ = np.maximum.accumulate(
+            np.asarray(borders.detach().cpu().numpy(), dtype=np.float64)
         )
-        self.regressor_ = regressor
-        self.n_context_ = len(X)
+        self.n_buckets_ = int(self.borders_.size - 1)
+        return regressor
 
-    def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
-    ) -> _typing.FloatArray:
-        size = self.chunk_size if self.chunk_size > 0 else len(X)
-        blocks: list[_typing.FloatArray] = []
-        with _progress.bar(
-            self.progress,
-            total=len(X),
-            desc=f"TabPFN {self.version}",
-            unit="gal",
-        ) as progress:
-            progress.set_postfix(context=self.n_context_)
-            for start in range(0, len(X), size):
-                stop = min(start + size, len(X))
-                self._log(f"rows {start}:{stop} of {len(X)}")
-                output = self.regressor_.predict(
-                    X.iloc[start:stop].to_numpy(dtype=np.float64),
-                    output_type="full",
-                )
-                borders, masses = bucket_masses(output)
-                self.borders_, self.n_buckets_ = borders, int(borders.size - 1)
-                blocks.append(grid.rebin(masses, borders))
-                del output, masses
-                progress.set_postfix(
-                    context=self.n_context_,
-                    buckets=self.n_buckets_,
-                    refresh=False,
-                )
-                progress.update(stop - start)
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+    def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
+        """The upstream overrides a group needs; empty for the defaults."""
+        overrides: dict[str, Any] = {}
+        if group.native_transforms is not None:
+            import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
 
-    def _log(self, message: str) -> None:
-        if self.verbose:
-            print(f"[TabPFNBarDistribution] {message}", flush=True)
+            configs = tabpfn.preprocessing.configs
+
+            # Upstream spreads its transforms evenly across members, as the
+            # planner assigned them, so the distinct tokens in order suffice.
+            # The settings are those the paper's recipe runs used.
+            overrides["PREPROCESS_TRANSFORMS"] = [
+                configs.PreprocessorConfig(
+                    name,
+                    append_original=original,
+                    categorical_name="ordinal_shuffled",
+                    max_features_per_estimator=768,
+                )
+                for name, original in dict.fromkeys(group.native_transforms)
+            ]
+        if not group.feature_shuffle:
+            overrides["FEATURE_SHIFT_METHOD"] = None
+        if group.member_rows is not None:
+            overrides["SUBSAMPLE_SAMPLES"] = list(group.member_rows)
+        return overrides
+
+    def _predict_group(
+        self, handle: Any, X: _typing.FloatArray
+    ) -> distributions.HistogramDistribution:
+        borders, masses = bucket_masses(handle.predict(X, output_type="full"))
+        return distributions.HistogramDistribution(borders, masses)
+
+    def _native_grid(self) -> grid_lib.RedshiftGrid:
+        return grid_lib.RedshiftGrid.from_edges(
+            np.unique(self.borders_), normalization="histogram"
+        )
+
+    def _progress_postfix(
+        self, dist: distributions.Distribution
+    ) -> dict[str, Any]:
+        del dist  # Unused: the bucket count is fixed at fit.
+        return {"buckets": self.n_buckets_}
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:

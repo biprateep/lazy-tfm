@@ -74,6 +74,13 @@ The first release. Everything below is new.
   `norm_methods`, `bag_size` is scaffolded (one regressor per bag, quantile
   functions averaged), and its default grid is its native one (1,000 bins over
   the training redshifts).
+- `TabPFNBarDistribution` runs on the uniform feature layer. `kv_cache`
+  (default on) replaces `fit_mode` and caches at full precision, so it is
+  exact; upstream's int8 cache, which shifts densities by up to about half a
+  per cent and which earlier `fit_mode="fit_with_cache"` runs used, is
+  `kv_cache="int8"`. `transforms` map onto its `PREPROCESS_TRANSFORMS`,
+  `bag_size` onto its per-member `SUBSAMPLE_SAMPLES`. Its default grid is its
+  native one: the bar distribution's buckets, in full.
 - The code follows the Google Python Style Guide, with Google-style
   docstrings throughout; scikit-learn's `X` and `y` keep their names.
 - `feature_names_in_` follows scikit-learn: it is set only when the features
