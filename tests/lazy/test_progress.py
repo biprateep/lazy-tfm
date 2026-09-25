@@ -9,6 +9,7 @@ run only with ``LAZY_RUN_CHECKPOINT_TESTS=1``, like the rest of
 
 import os
 
+import backend_settings
 import numpy as np
 import pandas as pd
 import pytest
@@ -69,16 +70,7 @@ def test_every_backend_takes_the_parameter_and_clones_it(name):
 # -- what each backend actually reports ---------------------------------------
 
 #: Small enough for CPU, with the settings each backend's own tests use.
-SETTINGS = {
-    "tabpfn": {"n_estimators": 2, "chunk_size": 7},
-    "tabicl": {"n_estimators": 2, "chunk_size": 7},
-    "tabfm": {
-        "n_coarse_bins": 2,
-        "n_fine_bins": 2,
-        "n_estimators": 1,
-        "n_dither": 2,
-    },
-}
+SETTINGS = backend_settings.BACKEND_SETTINGS
 
 #: What the finished bar must say: the unit it counts in and the final tally.
 #: TabPFN and TabICL count galaxies, TabFM counts in-context stages --

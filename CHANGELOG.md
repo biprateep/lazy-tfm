@@ -50,6 +50,11 @@ The first release. Everything below is new.
   own machinery where it has it and scaffolded where it does not. The default
   output grid is the model's native grid. `ContextSizeWarning` when a context
   exceeds what a model handles without bagging.
+- `lazy.models.registry.register(name, cls)`: backends join the registry only
+  through it, and it refuses a class that lacks the uniform features. A
+  two-tier conformance suite runs every registered backend: parameter and
+  planning checks always, and behavioural checks (cache, chunking, bagging,
+  transforms, quantiles, native grid) with the checkpoints.
 - `predict_distribution(X)` (the model's native distributions) and
   `predict_quantiles(X, quantiles)` (exact, from the native distribution) on
   every estimator; `z_grid="native"` asks a model for its own grid.

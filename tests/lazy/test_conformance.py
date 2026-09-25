@@ -16,9 +16,11 @@ from sklearn import base as sklearn_base
 import standins
 
 import lazy
+from lazy.models import _conformance
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _transforms
+from lazy.models import registry
 
 
 @pytest.fixture
@@ -285,3 +287,68 @@ def test_missing_values_reach_the_model(data):
     X[::4, 1] = np.nan
     model = standins.HistogramStandIn(transforms="limix").fit(X, z)
     assert np.isfinite(model.predict_proba(X_test)).all()
+
+
+# -- the registry enforces the contract --------------------------------------
+
+REGISTERED = [lazy.ESTIMATORS[name] for name in sorted(lazy.ESTIMATORS)]
+
+
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
+def test_every_registered_backend_meets_the_static_contract(name):
+    assert _conformance.problems(lazy.ESTIMATORS[name], name) == []
+
+
+@pytest.mark.parametrize("cls", REGISTERED, ids=lambda c: c.__name__)
+def test_registered_backends_take_the_uniform_parameters(cls):
+    test_the_uniform_parameters_are_keyword_only_with_fixed_defaults(cls)
+    test_clone_reproduces_every_parameter(cls)
+
+
+@pytest.mark.parametrize("cls", REGISTERED, ids=lambda c: c.__name__)
+@pytest.mark.parametrize(
+    ("params", "match"),
+    [
+        ({"kv_cache": "maybe"}, "kv_cache must be one of"),
+        ({"transforms": "banana"}, "unknown transform"),
+        ({"bag_size": -3}, "must be positive"),
+        ({"n_estimators": 0}, "positive int"),
+    ],
+)
+def test_registered_backends_reject_bad_parameters_before_loading(
+    cls, params, match, data, monkeypatch
+):
+    X, z, _ = data
+    monkeypatch.setattr(cls, "_import_backend", lambda self: None)
+    with pytest.raises(ValueError, match=match):
+        cls(**params).fit(X, z)
+
+
+def test_a_backend_without_the_uniform_features_cannot_register():
+    class Incomplete(standins.HistogramStandIn):
+        backend = "incomplete"
+
+        def __init__(self, *, n_estimators=4, z_grid=None, device="cpu"):
+            self.n_estimators = n_estimators
+            self.z_grid = z_grid
+            self.device = device
+
+    with pytest.raises(TypeError, match="cannot be registered") as error:
+        registry.register("incomplete", Incomplete)
+    message = str(error.value)
+    assert "no pinned checkpoint" in message
+    assert "lacks the uniform parameter 'kv_cache'" in message
+    assert "'device' defaults to 'cpu'" in message
+    assert "incomplete" not in lazy.ESTIMATORS
+
+
+def test_only_uniform_layer_backends_can_register():
+    class Plain(lazy.BasePhotoZEstimator):
+        def _fit(self, X, y):
+            pass
+
+        def _predict_pdf(self, X, grid):
+            return None
+
+    with pytest.raises(TypeError, match="ContextEnsembleEstimator"):
+        registry.register("plain", Plain)

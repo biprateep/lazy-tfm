@@ -5,9 +5,12 @@
 Kept in its own module so that :class:`lazy.models.lazy_model.LazyModel` can
 look a backend up without :mod:`lazy.models` having to import it first.
 
-Adding a backend means writing a :class:`lazy.base.BasePhotoZEstimator`
-subclass and adding one line to :data:`ESTIMATORS`; nothing else in the
-library needs to know it exists.
+Adding a backend means writing a
+:class:`lazy.models.ContextEnsembleEstimator` subclass, pinning its
+checkpoint in :mod:`lazy.models._hub`, and calling :func:`register`, which
+refuses a class that does not support the uniform features
+(:mod:`lazy.models._conformance`); the conformance tests then run it
+automatically. Nothing else in the library needs to know it exists.
 """
 
 from __future__ import annotations
@@ -15,19 +18,37 @@ from __future__ import annotations
 from typing import Any
 
 from lazy import base
+from lazy.models import _conformance
 from lazy.models import tabfm
 from lazy.models import tabicl
 from lazy.models import tabpfn
 
-__all__ = ["ESTIMATORS", "get_estimator", "list_estimators"]
+__all__ = ["ESTIMATORS", "get_estimator", "list_estimators", "register"]
 
 #: Short name -> estimator class. These names are what :class:`LazyModel` and
-#: :func:`get_estimator` accept, and what the benchmark tables record.
-ESTIMATORS: dict[str, type[base.BasePhotoZEstimator]] = {
-    "tabfm": tabfm.TabFMHistogram,
-    "tabicl": tabicl.TabICLQuantile,
-    "tabpfn": tabpfn.TabPFNBarDistribution,
-}
+#: :func:`get_estimator` accept, and what the benchmark tables record. Filled
+#: only through :func:`register`.
+ESTIMATORS: dict[str, type[base.BasePhotoZEstimator]] = {}
+
+
+def register(name: str, cls: type[base.BasePhotoZEstimator]) -> None:
+    """Adds a backend to the registry, once it meets the backend contract.
+
+    Args:
+        name: The short name :class:`LazyModel` will know it by.
+        cls: The backend class.
+
+    Raises:
+        TypeError: If the class does not support the uniform features; the
+            message lists every problem.
+    """
+    _conformance.check_static(cls, name)
+    ESTIMATORS[name] = cls
+
+
+register("tabfm", tabfm.TabFMHistogram)
+register("tabicl", tabicl.TabICLQuantile)
+register("tabpfn", tabpfn.TabPFNBarDistribution)
 
 
 def list_estimators() -> list[str]:
