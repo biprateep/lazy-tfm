@@ -20,7 +20,7 @@ then enforced at predict time, as ``feature_names_in_`` is in scikit-learn.
 Typical usage example:
 
   frame, named = _inputs.as_feature_frame(table)
-  redshifts = _inputs.as_target(table["z"])
+  target = _inputs.as_target(table["z"])
 """
 
 from typing import Any
@@ -76,14 +76,14 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
 
 
 def as_target(target: Any) -> _typing.FloatArray:
-    """Converts redshifts to a flat float64 array; masked entries become NaN.
+    """Converts target values to a flat float64 array; masked become NaN.
 
     Args:
-        target: Redshifts, shape (n_samples,): an array, list, pandas
+        target: Target values, shape (n_samples,): an array, list, pandas
             Series, astropy Column or Quantity, or masked array.
 
     Returns:
-        The redshifts, shape (n_samples,).
+        The values, shape (n_samples,).
     """
     values = getattr(target, "value", target)  # astropy Quantity
     if np.ma.isMaskedArray(values):

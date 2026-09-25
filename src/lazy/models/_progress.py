@@ -8,7 +8,7 @@ their time in different shapes:
 
 * :class:`~lazy.models.tabpfn.TabPFNBarDistribution` and
   :class:`~lazy.models.tabicl.TabICLQuantile` answer in chunks of query rows,
-  so their bars count **galaxies**, and a chunk is one update;
+  so their bars count **rows**, and a chunk is one update;
 * :class:`~lazy.models.tabfm.TabFMHistogram` is a hierarchy of in-context
   classifications -- per dither, one coarse stage and then one fine stage per
   coarse bin -- each over *every* query row, so its bar counts **stages**, and

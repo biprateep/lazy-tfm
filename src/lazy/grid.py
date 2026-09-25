@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Redshift grids: the output format every :mod:`lazy` estimator writes onto.
+"""Grids: the output format every :mod:`lazy` estimator writes onto.
 
-A conditional density estimate here is always a table: one row per galaxy,
-one column per redshift bin, holding a *density* (not a probability) at the
+A conditional density estimate here is always a table: one row per object,
+one column per bin of the target, holding a *density* (not a probability) at the
 bin centre. :class:`Grid` owns the bin edges, so the same object gives
 you the centres the metrics integrate over, the edges that mass-conserving
 rebinning needs, and the normalisation convention.
@@ -15,9 +15,11 @@ the *hierarchy* it builds internally, never the grid you ask for output on
 (:mod:`lazy.models.tabfm`). :data:`DC1_GRID` is provided because reproducing
 the Data Challenge numbers requires exactly that grid.
 
-Normalisation is trapezoidal over the bin centres. That is the ``qp`` and DC1
-convention and it is what :func:`lazy.metrics.cde_loss` integrates with, so
-normalising any other way would leave ``trapz(p) != 1`` inside the loss.
+Normalisation is trapezoidal over the bin centres by default. That is the
+``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
+integrates with. Native grids, whose bins are far from uniform, are
+``"histogram"``-normalised instead (constant density across each bin), and
+the metrics take ``bin_edges=`` to score them exactly.
 
 Typical usage example:
 
@@ -53,7 +55,7 @@ NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
 
 @dataclasses.dataclass(frozen=True)
 class Grid:
-    """A binned redshift axis defined by its ``n_bins + 1`` edges.
+    """A binned axis of the target, defined by its ``n_bins + 1`` edges.
 
     Attributes:
         edges: The bin edges, strictly increasing and finite, shape
@@ -243,7 +245,7 @@ class Grid:
         over the centres, or ``sum(p * widths)`` for a histogram grid.
 
         Rows that carry no mass at all (all-zero, or all non-finite) become a
-        uniform density rather than NaN, so a single degenerate galaxy cannot
+        uniform density rather than NaN, so a single degenerate row cannot
         poison an array-wide metric.
 
         Args:
@@ -339,7 +341,7 @@ class Grid:
         neighbours and would not conserve mass.
 
         Args:
-            values: Redshift quantiles, shape (n_rows, n_quantiles).
+            values: Quantiles of the target, shape (n_rows, n_quantiles).
             levels: The cumulative probabilities of the quantile columns,
                 shape (n_quantiles,).
 
@@ -359,7 +361,7 @@ class Grid:
         return self.normalize(np.clip(density, 0.0, None))
 
     def bin_index(self, values: npt.ArrayLike) -> _typing.IntArray:
-        """Index of the bin each redshift falls in, clipped to the grid.
+        """Index of the bin each value falls in, clipped to the grid.
 
         Args:
             values: Target values, any shape.

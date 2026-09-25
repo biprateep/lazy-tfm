@@ -12,7 +12,7 @@ applied to any rows: a query's features never depend on which other queries
 share its chunk. The distribution and shuffle steps are upstream's own
 classes, seeded exactly as upstream seeds them; the column filter is
 upstream's rule restricted to the context; categorical encoding is skipped,
-as photometry has no categorical columns.
+as every feature is treated as numeric.
 
 Each member is described by a *token* naming its rebalancing step (see
 :data:`PIPELINES`); :data:`AUTO_TOKENS` is upstream's recommended regression

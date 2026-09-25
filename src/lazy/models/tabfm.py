@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z densities from TabFM's in-context classifier, as a bin hierarchy.
+"""Densities from TabFM's in-context classifier, as a bin hierarchy.
 
 TabFM (Google, 2026) is an in-context tabular foundation model: it is never
 trained on your data, it reads labelled rows as context and answers queries
-against them. Its classifier handles at most ten classes, which is far short of
-the resolution a photo-z PDF needs, so :class:`TabFMHistogram` builds the
-density as a two-level hierarchy of *equal-mass* redshift bins:
+against them. Its classifier handles at most ten classes, which is far short
+of the resolution a conditional density needs, so :class:`TabFMHistogram`
+builds the density as a two-level hierarchy of *equal-mass* bins of the target:
 
 * one classifier over ``n_coarse_bins`` quantile bins of the context values;
 * one classifier per coarse bin over ``n_fine_bins`` quantile bins inside it,
-  with only that bin's context galaxies as context.
+  with only that bin's context rows as context.
 
 Then ``P(bin | x) = P(coarse | x) * P(fine | coarse, x)``: a
 :class:`~lazy.distributions.HistogramDistribution` over the equal-mass bins.
@@ -27,8 +27,9 @@ streaming prefill/decode path (:mod:`lazy.models._icl_stream`),
 ``feature_shuffle`` and the transforms it has onto its classifier's own
 shuffles and ``norm_methods``, and ``bag_size`` onto its per-member row cap.
 
-Because the bins are equal-mass they are narrow where galaxies are crowded, so
-in the busy part of N(z) they are routinely *narrower* than the output bin.
+Because the bins are equal-mass they are narrow where the targets are crowded,
+so in the busy part of the distribution they are routinely *narrower* than
+the output bin.
 Mapping them onto the output grid is therefore done by exact, mass-conserving
 integration (:meth:`lazy.grid.Grid.rebin`), not by sampling the density
 at the output bin centres, which would drop whole bins and lose probability.
@@ -141,9 +142,10 @@ def prior_shift_em(
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Label-shift correction of classifier posteriors (Saerens et al. 2002).
 
-    A classifier's posteriors carry the redshift distribution of its context.
-    When the context is a spectroscopic training set and the queries are a
-    photometric sample, those distributions differ, and the posteriors inherit
+    A classifier's posteriors carry the target distribution of its context.
+    When the context and the queries come from different populations (in
+    photo-z, a spectroscopic training set and a photometric sample), those
+    distributions differ, and the posteriors inherit
     the wrong prior. This estimates the query set's own bin prior by EM and
     re-weights the posteriors by the ratio.
 
@@ -177,7 +179,7 @@ def prior_shift_em(
 
 
 class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
-    """Redshift distributions from TabFM's classifier over a bin hierarchy.
+    """Target distributions from TabFM's classifier over a bin hierarchy.
 
     Args:
         version: Which pinned TabFM checkpoint to load; see
@@ -423,7 +425,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         with _progress.bar(
             self.progress,
             total=self.n_dither * (1 + self.n_coarse_bins),
-            desc=f"TabFM {self.version} ({len(X):,} gal)",
+            desc=f"TabFM {self.version} ({len(X):,} rows)",
             unit="stage",
         ) as progress:
             for i, shift in enumerate(shifts):
@@ -466,7 +468,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """Returns a tuple (all edges, coarse edges, fine edges per coarse bin).
 
         The equal-mass edges for one dither, spanning ``support_``; the top
-        edge is nudged up so the largest redshift falls inside.
+        edge is nudged up so the largest value falls inside.
         """
         low, high = self.support_
         span = high - low if high > low else 1.0

@@ -39,7 +39,7 @@ def test_anything_else_is_rejected(value):
 
 
 def test_forced_on_writes_to_stderr_not_stdout(capsys):
-    with _progress.bar(True, total=4, desc="demo", unit="gal") as progress:
+    with _progress.bar(True, total=4, desc="demo", unit="row") as progress:
         progress.update(4)
     captured = capsys.readouterr()
     assert not captured.out
@@ -48,13 +48,13 @@ def test_forced_on_writes_to_stderr_not_stdout(capsys):
 
 def test_auto_stays_quiet_when_output_is_not_a_terminal(capsys):
     """Pytest captures stderr, which is exactly the batch-job log case."""
-    with _progress.bar("auto", total=4, desc="demo", unit="gal") as progress:
+    with _progress.bar("auto", total=4, desc="demo", unit="row") as progress:
         progress.update(4)
     assert not capsys.readouterr().err
 
 
 def test_off_is_off(capsys):
-    with _progress.bar(False, total=4, desc="demo", unit="gal") as progress:
+    with _progress.bar(False, total=4, desc="demo", unit="row") as progress:
         progress.update(4)
     assert not capsys.readouterr().err
 

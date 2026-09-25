@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""The standard photo-z diagnostic figures, drawn from PDFs and truth.
+"""The standard diagnostic figures, drawn from PDFs and truth.
 
-These are the plots that decide whether a photo-z estimator is any good, and
+These are the plots that decide whether a conditional density estimator is any
+good (photo-z's standard set; the calibration plots apply to any target), and
 the reason they live in the library rather than in a notebook is that the
 comparison only means anything when every method is drawn the same way, on the
 same axes, at the same limits. Each function draws into an axes you supply (or
@@ -18,14 +19,14 @@ rcParams::
 Two families of diagnostic, and they answer different questions:
 
 * **Point accuracy** -- :func:`plot_zphot_ztrue`, :func:`plot_residuals`. How
-  close is the single redshift you would quote? Scatter, bias, outliers.
+  close is the single value you would quote? Scatter, bias, outliers.
 * **Calibration** -- :func:`plot_pit`, :func:`plot_pit_qq`,
   :func:`plot_coverage`. Are the *widths* honest? A model can have excellent
   point accuracy and badly wrong error bars, and only these plots show it.
 
 :func:`plot_nz` is a third thing again: whether the stacked PDFs recover the
-redshift distribution of the sample, which is what cosmological analyses
-actually consume.
+distribution of the target over the sample -- for redshift, the n(z) that
+cosmological analyses actually consume.
 """
 
 from __future__ import annotations
@@ -76,19 +77,19 @@ def plot_zphot_ztrue(
     cmap: str | None = None,
     **kwargs: Any,
 ) -> mpl_axes.Axes:
-    """Plots predicted against true redshift as a log-density image.
+    """Plots predicted against true values as a log-density image.
 
     A scatter plot of a survey-sized sample is a black blob, so this is a 2D
     histogram on a log colour scale -- which is also the only way the outlier
-    islands (catastrophic failures at the wrong redshift) stay visible against
+    islands (catastrophic failures at the wrong value) stay visible against
     the main locus.
 
     Args:
-        z_true: True redshifts, shape (n_galaxies,).
-        z_pred: Point-estimate redshifts, shape (n_galaxies,).
+        z_true: True values, shape (n_objects,).
+        z_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width square figure if None.
         bins: Number of histogram bins along each axis.
-        z_max: Upper limit of both axes; the largest redshift if None.
+        z_max: Upper limit of both axes; the largest value if None.
         outlier_lines: Draw the DC1 outlier boundary
             ``|z_pred - z_true| = 0.06 (1 + z_true)``, so the fraction of
             points outside it is readable by eye.
@@ -133,19 +134,19 @@ def plot_residuals(
     n_bins: int = 20,
     quantiles: tuple[float, float, float] = (16.0, 50.0, 84.0),
 ) -> mpl_axes.Axes:
-    """Plots the scaled residual against true redshift.
+    """Plots the scaled residual against the true value.
 
     The scaled residual is ``(z_phot - z_true) / (1 + z_true)``. The running
     median and its 16th-84th percentile band say where the bias lives: a
     model can have a fine global bias and still be systematically high at
-    low redshift and low at high redshift, which this shows and a single
+    low z and low at high z, which this shows and a single
     number hides.
 
     Args:
-        z_true: True redshifts, shape (n_galaxies,).
-        z_pred: Point-estimate redshifts, shape (n_galaxies,).
+        z_true: True values, shape (n_objects,).
+        z_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width figure if None.
-        n_bins: Number of equal-count bins in true redshift.
+        n_bins: Number of equal-count bins in the true value.
         quantiles: Lower edge, centre line and upper edge of the band, as
             percentiles between 0 and 100.
 
@@ -191,8 +192,8 @@ def plot_pit(
     biased, and a spike at 0 or 1 counts catastrophic outliers.
 
     Args:
-        pit: Probability integral transform of each galaxy, in [0, 1],
-            shape (n_galaxies,).
+        pit: Probability integral transform of each object, in [0, 1],
+            shape (n_objects,).
         ax: The axes to draw into; a new column-width figure if None.
         n_bins: Number of histogram bins on [0, 1].
         label: Legend label.
@@ -234,8 +235,8 @@ def plot_pit_qq(
     the same units as the probability itself.
 
     Args:
-        pit: Probability integral transform of each galaxy, in [0, 1],
-            shape (n_galaxies,).
+        pit: Probability integral transform of each object, in [0, 1],
+            shape (n_objects,).
         ax: The axes to draw into; a new column-width square figure if None.
         label: Legend label.
         **kwargs: Passed to ``ax.plot``.
@@ -265,14 +266,14 @@ def plot_coverage(
 ) -> mpl_axes.Axes:
     """Empirical against nominal coverage of central credible intervals.
 
-    For each nominal level ``q``, the fraction of galaxies whose true redshift
+    For each nominal level ``q``, the fraction of objects whose true value
     falls inside the central ``q`` credible interval of its own PDF. This is
     the plot to quote when someone asks "if I take your 68% interval, how often
     is it right?" -- the answer should be 68% of the time, i.e. the diagonal.
 
     Args:
-        pit: Probability integral transform of each galaxy, in [0, 1],
-            shape (n_galaxies,).
+        pit: Probability integral transform of each object, in [0, 1],
+            shape (n_objects,).
         ax: The axes to draw into; a new column-width square figure if None.
         label: Legend label.
         **kwargs: Passed to ``ax.plot``.
@@ -305,16 +306,16 @@ def plot_nz(
     truth_label: str | None = "truth",
     **kwargs: Any,
 ) -> mpl_axes.Axes:
-    """Plots the sample redshift distribution: stacked PDFs against the truth.
+    """Plots the sample distribution of the target: stacked PDFs against truth.
 
     Stacking is only an estimator of N(z) under assumptions that photo-z PDFs
     rarely satisfy exactly, but it is what most analyses do, so how badly it
     fails is worth knowing.
 
     Args:
-        z_grid: Redshift grid centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
-        z_true: True redshifts, shape (n_galaxies,). If given, histogrammed
+        z_grid: Grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
+        z_true: True values, shape (n_objects,). If given, histogrammed
             on the same grid for comparison.
         ax: The axes to draw into; a new column-width figure if None.
         label: Legend label of the stacked PDFs.
@@ -352,28 +353,28 @@ def plot_pdfs(
     *,
     z_true: npt.ArrayLike | None = None,
     indices: npt.ArrayLike | None = None,
-    n_galaxies: int = 6,
+    n_objects: int = 6,
     random_state: int = 0,
     axes: mpl_axes.Axes
     | Sequence[mpl_axes.Axes]
     | npt.NDArray[np.object_]
     | None = None,
 ) -> npt.NDArray[np.object_]:
-    """Plots a handful of individual PDFs, with their true redshifts marked.
+    """Plots a handful of individual PDFs, with their true values marked.
 
     Summary statistics hide multimodality; this is where you see it. By
-    default ``n_galaxies`` galaxies are drawn at random (reproducibly), or pass
+    default ``n_objects`` objects are drawn at random (reproducibly), or pass
     ``indices`` to pick them yourself.
 
     Args:
-        z_grid: Redshift grid centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
-        z_true: True redshifts, shape (n_galaxies,), marked as dashed
+        z_grid: Grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
+        z_true: True values, shape (n_objects,), marked as dashed
             vertical lines if given.
-        indices: Rows of ``pdfs`` to draw; ``n_galaxies`` random rows if None.
-        n_galaxies: Number of galaxies drawn at random when ``indices`` is None.
+        indices: Rows of ``pdfs`` to draw; ``n_objects`` random rows if None.
+        n_objects: Number of objects drawn at random when ``indices`` is None.
         random_state: Seed of the random draw.
-        axes: Axes to draw into, one per galaxy; a new text-width grid of
+        axes: Axes to draw into, one per object; a new text-width grid of
             up to three columns if None. Spare axes are hidden.
 
     Returns:
@@ -384,7 +385,7 @@ def plot_pdfs(
     if indices is None:
         rng = np.random.default_rng(random_state)
         indices = rng.choice(
-            len(pdfs), size=min(n_galaxies, len(pdfs)), replace=False
+            len(pdfs), size=min(n_objects, len(pdfs)), replace=False
         )
     indices = np.atleast_1d(np.asarray(indices, dtype=int))
     if axes is None:
@@ -430,9 +431,9 @@ def diagnostic_panel(
     open; closing it is up to the caller.
 
     Args:
-        z_true: True redshifts, shape (n_galaxies,).
-        z_grid: Redshift grid centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_galaxies, n_grid).
+        z_true: True values, shape (n_objects,).
+        z_grid: Grid centres, shape (n_grid,).
+        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
         point: Point estimate to use, a key of
             :func:`lazy.metrics.grid_point_estimates`.
         label: Legend label and figure title.

@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z metrics, following the LSST DESC PZ Data Challenge (DC1) definitions.
+"""Density metrics, as the LSST DESC PZ Data Challenge (DC1) defined them.
 
 Every definition here is the one used to produce the published DC1 numbers,
 read off ``LSSTDESC/PZDC1paper/metric_scripts/individual_metrics.py`` rather
 than paraphrased from the text, so that our columns and Schmidt et al. (2020)
 Tables 2, 3 and B1 are directly comparable.
+
+The PDF metrics (CDE loss, PIT and its goodness-of-fit statistics) apply to
+any continuous target. The point metrics are photo-z's: they scale every
+residual by ``1 + z_true``, which suits redshift and little else; for another
+target, compute point metrics directly on ``z_pred - z_true``.
 
 Point estimates (Appendix B1)::
 
@@ -142,8 +147,8 @@ def scaled_residual(
     wavelength shift, not with z itself.
 
     Args:
-        z_true: True redshifts, finite, shape (n,).
-        z_pred: Point redshifts, finite, shape (n,).
+        z_true: True values, finite, shape (n,).
+        z_pred: Point estimates, finite, shape (n,).
 
     Returns:
         The scaled residuals ``ez``, shape (n,).
@@ -153,12 +158,12 @@ def scaled_residual(
     if truth.shape != pred.shape or truth.ndim != 1:
         raise ValueError("z_true and z_pred must be equal-length 1D arrays")
     if not (np.isfinite(truth).all() and np.isfinite(pred).all()):
-        raise ValueError("non-finite redshift values supplied")
+        raise ValueError("non-finite values supplied")
     return (pred - truth) / (1.0 + truth)
 
 
 def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
-    """Bias, scatter and outlier rate of a set of point redshifts.
+    """Bias, scatter and outlier rate of a set of point estimates.
 
     ``sigma_iqr`` and ``sigma_mad`` are both robust widths; they differ when
     the residual distribution has heavy tails, and reporting both is what DC1
@@ -167,8 +172,8 @@ def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
     because its own threshold shrank.
 
     Args:
-        z_true: True redshifts, finite, shape (n,).
-        z_pred: Point redshifts, finite, shape (n,).
+        z_true: True values, finite, shape (n,).
+        z_pred: Point estimates, finite, shape (n,).
 
     Returns:
         The statistics.
@@ -436,7 +441,7 @@ def evaluate_grid_at_truth(
     ``integrate`` computes.
 
     Args:
-        z_true: True redshifts, one per PDF, shape (n,).
+        z_true: True values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
@@ -496,7 +501,7 @@ def cde_loss(
     truth's density. It is the single number this project optimises.
 
     Args:
-        z_true: True redshifts, one per PDF, shape (n,).
+        z_true: True values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
@@ -602,7 +607,7 @@ def pdf_metrics(
     """Scores grid PDFs with the CDE loss and the PIT statistics.
 
     Args:
-        z_true: True redshifts, one per PDF, shape (n,).
+        z_true: True values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
@@ -634,7 +639,7 @@ def evaluate_grid_pdfs(
     """Convenience: point metrics from a PDF reduction plus the PDF metrics.
 
     Args:
-        z_true: True redshifts, one per PDF, shape (n,).
+        z_true: True values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         point: The reduction to score as the point estimate: a key of
@@ -671,7 +676,7 @@ def summarize(
     gives the comparison table that the tutorials and the paper both report.
 
     Args:
-        z_true: True redshifts, one per PDF, shape (n,).
+        z_true: True values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         point: The point-estimate reduction, as in

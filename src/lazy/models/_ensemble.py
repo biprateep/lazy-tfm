@@ -184,7 +184,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         Args:
             X: The group's context features, already restricted to its rows,
                 transformed and permuted, shape (n_rows, n_features').
-            y: Their redshifts, shape (n_rows,).
+            y: Their target values, shape (n_rows,).
             group: The members to serve and how.
         """
 
@@ -421,7 +421,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             self.progress,
             total=len(features),
             desc=f"{self.display_name} {self.version}",
-            unit="gal",
+            unit="row",
         ) as progress:
             progress.set_postfix(context=self.n_context_)
             for start in range(0, len(features), max(size, 1)):

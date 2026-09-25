@@ -45,7 +45,7 @@ __all__ = ["LazyModel"]
 
 
 class LazyModel(base.BaseDensityRegressor):
-    """A photo-z model addressed by backend name.
+    """A model addressed by backend name.
 
     The backend's parameters are reachable by ordinary attribute access, and
     after ``fit`` so are its fitted attributes (``inference_``,

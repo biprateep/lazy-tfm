@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z distributions from LimiX-2's bucket probabilities.
+"""Target distributions from LimiX-2's bucket probabilities.
 
 LimiX-2 (Stable AI) is an in-context tabular foundation model whose regressor
 is, underneath, a classifier over 5,000 buckets of the standardised target:
 buckets fixed in the checkpoint, stretched and shifted by the context
-redshifts' mean and standard deviation. Upstream's ``predict`` averages its
+targets' mean and standard deviation. Upstream's ``predict`` averages its
 ensemble members' bucket probabilities and returns their mean; the density is
 there and is thrown away one line before the return.
 :class:`LimiXBarDistribution` keeps it, as a
@@ -65,7 +65,7 @@ _CACHE_MEMORY_FRACTION = 0.6
 
 
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
-    """Redshift distributions from LimiX-2's bucket probabilities.
+    """Target distributions from LimiX-2's bucket probabilities.
 
     Args:
         version: Which pinned LimiX checkpoint to load; see
@@ -94,7 +94,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         chunk_size: Query rows predicted at a time, to bound peak memory;
             ``0`` does them in one pass. A query's answer does not depend on
             the others in its chunk, up to float rounding.
-        progress: A progress bar over the query galaxies: ``"auto"`` shows it
+        progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
         softmax_temperature: Temperature on the bucket logits; 0.9 is
@@ -103,8 +103,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     Attributes:
         grid_: The resolved default output grid.
-        native_grid_: The native grid: the buckets, mapped to redshift with
-            the whole context's mean and standard deviation.
+        native_grid_: The native grid: the buckets, mapped to the target's
+            units with the whole context's mean and standard deviation.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         handles_: Every fitted member group.

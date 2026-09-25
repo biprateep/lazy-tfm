@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z distributions from TabPFN's bar distribution.
+"""Target distributions from TabPFN's bar distribution.
 
 TabPFN (Prior Labs) is an in-context tabular foundation model, and its
 regressor does not answer with a number: internally it is a classifier over a
 fixed set of *buckets* of the target, and its native output is the probability
 mass in each one -- a ``FullSupportBarDistribution``, in the upstream name.
 The bucket borders are a fixed array stored in the checkpoint (5,000 buckets
-on v3), stretched and shifted by the context redshifts' mean and standard
+on v3), stretched and shifted by the context targets' mean and standard
 deviation: uniform over the bulk, widening far into both tails.
 
 That is already a conditional density estimate, so
@@ -79,7 +79,7 @@ def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
 
 
 class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
-    """Redshift distributions from the bucket masses TabPFN predicts.
+    """Target distributions from the bucket masses TabPFN predicts.
 
     Args:
         version: Which TabPFN to run, in upstream's own vocabulary: ``"v2"``,
@@ -128,21 +128,22 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             keys and values from the context rows alone and its preprocessors
             are fitted on the context, so a row's answer never depends on the
             other rows in its chunk.
-        progress: A progress bar over the query galaxies: ``"auto"`` shows it
+        progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
 
     Attributes:
         grid_: The resolved default output grid.
-        native_grid_: The bar distribution's buckets in redshift, a
+        native_grid_: The bar distribution's buckets in the target's units, a
             histogram-normalised grid, set at fit.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabpfn.TabPFNRegressor``, when one serves
             the whole ensemble.
         handles_: Every fitted regressor, one per member group.
-        borders_: The bucket borders in redshift, shape (``n_buckets_`` + 1,);
-            fixed at fit by the context redshifts' mean and spread.
+        borders_: The bucket borders in the target's units, shape
+            (``n_buckets_`` + 1,);
+            fixed at fit by the context targets' mean and spread.
         n_buckets_: How many buckets the bar distribution has.
         n_context_: Context rows ``fit`` was given.
 
@@ -343,7 +344,7 @@ def bucket_masses(
 
     ``output["logits"]`` are log-probabilities over the buckets of
     ``output["criterion"]``, whose ``borders`` are in the raw target's units
-    -- redshift, here. A softmax turns the first into per-bucket probability
+    -- the target, here. A softmax turns the first into per-bucket probability
     mass, which is what every upstream reduction (the mean, the quantiles)
     integrates over too, so this is the model's own density and not a reading
     of it.
@@ -353,9 +354,9 @@ def bucket_masses(
             returns; only its ``"criterion"`` and ``"logits"`` are read.
 
     Returns:
-        A tuple ``(borders, masses)``: the bucket borders in redshift, made
-        non-decreasing, shape ``(n_buckets + 1,)``; and the probability mass
-        in each bucket, shape ``(n_rows, n_buckets)``.
+        A tuple ``(borders, masses)``: the bucket borders in the target's
+        units, made non-decreasing, shape ``(n_buckets + 1,)``; and the
+        probability mass in each bucket, shape ``(n_rows, n_buckets)``.
 
     Raises:
         RuntimeError: If the logits do not match the bar distribution's

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Per-galaxy redshift distributions in the form each model produces them.
+"""Per-object distributions of the target, in the form each model produces.
 
 A model's native answer is a *distribution*, not a table on some grid. The
 bar-distribution models (TabPFN, LimiX) and TabFM's bin hierarchy give
@@ -51,7 +51,7 @@ __all__ = [
     "from_qp",
 ]
 
-#: Optional per-galaxy metadata carried alongside a distribution, as in qp:
+#: Optional per-object metadata carried alongside a distribution, as in qp:
 #: each value has one entry per row.
 Ancil: TypeAlias = Mapping[str, npt.NDArray[Any]]
 
@@ -101,7 +101,7 @@ class _Base:
 
     @property
     def npdf(self) -> int:
-        """The number of rows (galaxies), as qp calls it."""
+        """The number of rows (objects), as qp calls it."""
         raise NotImplementedError
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
@@ -133,7 +133,7 @@ class _Base:
         return self.ppf(levels)
 
     def median(self) -> _typing.FloatArray:
-        """The median redshift of each row, shape (n_rows,)."""
+        """The median of each row, shape (n_rows,)."""
         return self.ppf([0.5])[:, 0]
 
     def interval(self, confidence: float) -> _typing.FloatArray:
@@ -216,7 +216,7 @@ class HistogramDistribution(_Base):
 
     @property
     def npdf(self) -> int:
-        """The number of rows (galaxies)."""
+        """The number of rows (objects)."""
         return int(self.masses.shape[0])
 
     @property
@@ -309,7 +309,7 @@ class HistogramDistribution(_Base):
         return out
 
     def mean(self) -> _typing.FloatArray:
-        """The mean redshift of each row, shape (n_rows,)."""
+        """The mean of each row, shape (n_rows,)."""
         centres = 0.5 * (self.bins[:-1] + self.bins[1:])
         return self.probabilities @ centres
 
@@ -370,7 +370,7 @@ class QuantileDistribution(_Base):
     Attributes:
         quants: The cumulative levels, shape (n_levels,), strictly
             increasing inside [0, 1].
-        locs: The redshift at each level, shape (n_rows, n_levels), made
+        locs: The value at each level, shape (n_rows, n_levels), made
             non-decreasing on construction (crossing quantiles are sorted).
         ancil: Optional per-row metadata, each value of length n_rows.
     """
@@ -400,7 +400,7 @@ class QuantileDistribution(_Base):
 
     @property
     def npdf(self) -> int:
-        """The number of rows (galaxies)."""
+        """The number of rows (objects)."""
         return int(self.locs.shape[0])
 
     def __getitem__(self, rows: Any) -> QuantileDistribution:
@@ -493,7 +493,7 @@ class QuantileDistribution(_Base):
         return first, second
 
     def mean(self) -> _typing.FloatArray:
-        """The mean redshift of each row, shape (n_rows,)."""
+        """The mean of each row, shape (n_rows,)."""
         return self._segment_moments()[0]
 
     def var(self) -> _typing.FloatArray:
@@ -586,7 +586,7 @@ class MixtureDistribution(_Base):
 
     @property
     def npdf(self) -> int:
-        """The number of rows (galaxies)."""
+        """The number of rows (objects)."""
         return self.components[0].npdf
 
     @property
@@ -637,7 +637,7 @@ class MixtureDistribution(_Base):
         return self.to_histogram()._ppf_rows(levels)  # noqa: SLF001 - same module.
 
     def mean(self) -> _typing.FloatArray:
-        """The mean redshift of each row, shape (n_rows,)."""
+        """The mean of each row, shape (n_rows,)."""
         return self._weighted([c.mean() for c in self.components])
 
     def var(self) -> _typing.FloatArray:
@@ -662,7 +662,7 @@ class MixtureDistribution(_Base):
         return self.to_histogram().to_qp()
 
 
-#: Any per-galaxy distribution this module defines.
+#: Any per-object distribution this module defines.
 Distribution: TypeAlias = (
     HistogramDistribution | QuantileDistribution | MixtureDistribution
 )
@@ -672,7 +672,7 @@ def concatenate(parts: Sequence[Distribution]) -> Distribution:
     """Stacks the rows of distributions of the same kind and parameters.
 
     Args:
-        parts: Distributions from consecutive chunks of galaxies: histograms
+        parts: Distributions from consecutive chunks of rows: histograms
             with the same bins, quantiles at the same levels, or mixtures
             with the same weights and aligned components.
 

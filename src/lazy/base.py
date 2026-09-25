@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""The estimator protocol every :mod:`lazy` photo-z model implements.
+"""The estimator protocol every :mod:`lazy` model implements.
 
-The API is scikit-learn's, with one difference: the natural output of a
-photo-z model is a conditional density, not a number, so :meth:`predict_proba`
-is the primary method and :meth:`predict` is a documented reduction of it::
+The API is scikit-learn's, with one difference: the natural output of these
+models is a conditional density of the target, not a number, so
+:meth:`predict_proba` is the primary method and :meth:`predict` is a
+documented reduction of it::
 
     model = LazyModel("tabfm", n_estimators=4)
     model.fit(X_train, z_train)
@@ -15,12 +16,13 @@ is the primary method and :meth:`predict` is a documented reduction of it::
 
 ``z_grid`` is an argument to the *prediction*, not to the constructor.
 Nothing about fitting depends on the output binning -- these models place
-their internal bins by the quantiles of the context redshifts, and the grid
+their internal bins by the distribution of the context targets, and the grid
 only enters at the final, exact rebinning step -- so one fitted model can
 answer on as many grids as you like without refitting. The constructor still
 accepts ``z_grid`` as a per-model default for when every call would pass the
 same thing; a grid given at call time wins, and ``None`` at both levels means
-:data:`lazy.grid.DC1_GRID`.
+the model's native grid (:data:`lazy.grid.DC1_GRID` for an estimator that
+has none).
 
 Everything scikit-learn expects of an estimator holds: parameters are stored
 verbatim by ``__init__`` and never validated there, all validation and all
@@ -61,7 +63,7 @@ from lazy import metrics
 
 __all__ = ["POINT_ESTIMATORS", "BaseDensityRegressor"]
 
-#: Reductions of a density to a single redshift, accepted by the ``method``
+#: Reductions of a density to a single value, accepted by the ``method``
 #: argument of :meth:`BaseDensityRegressor.predict`. ``z_peak`` and
 #: ``z_weight`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see
 #: :mod:`lazy.metrics`).
@@ -74,7 +76,7 @@ _Features: TypeAlias = Any
 
 
 class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
-    """A conditional-density photo-z estimator with a scikit-learn API.
+    """A regressor that predicts conditional densities, with a scikit-learn API.
 
     Subclasses must accept a ``z_grid`` parameter and pass it through
     unchanged; see the module docstring.
@@ -109,7 +111,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Validated features, shape (n_samples, n_features).
-            y: Finite redshifts, shape (n_samples,).
+            y: Finite target values, shape (n_samples,).
         """
 
     @abc.abstractmethod
@@ -174,7 +176,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     # -- the public API ----------------------------------------------------
 
     def fit(self, X: _Features, y: npt.ArrayLike) -> BaseDensityRegressor:  # noqa: GS030 - scikit-learn's X, y.
-        """Fits on labelled photometry.
+        """Fits on labelled rows.
 
         Args:
             X: Features, shape (n_samples, n_features): a NumPy array, a
@@ -182,7 +184,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 Table, or anything with ``to_pandas()``. Missing values are
                 NaN. Column names, when the input has them, are remembered
                 and enforced at predict time.
-            y: Finite redshifts, shape (n_samples,).
+            y: Finite target values, shape (n_samples,).
 
         Returns:
             The fitted estimator itself.
@@ -192,7 +194,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         if y.size != len(X):
             raise ValueError(f"X has {len(X)} rows but y has {y.size} values")
         if not np.isfinite(y).all():
-            raise ValueError("y contains non-finite redshifts")
+            raise ValueError("y contains non-finite values")
         self._fit(X, y)
         # After _fit: a model's native grid is known only once it has seen
         # its context.
@@ -235,7 +237,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         return grid.normalize(pdfs)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
-        """The model's native per-galaxy distributions, on no grid at all.
+        """The model's native per-row distributions, on no grid at all.
 
         A bar-distribution model answers with a
         :class:`~lazy.distributions.HistogramDistribution` over its own
@@ -260,7 +262,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         X: _Features,
         quantiles: npt.ArrayLike = (0.16, 0.5, 0.84),
     ) -> _typing.FloatArray:
-        """Redshift quantiles of each galaxy's distribution, exactly.
+        """Quantiles of each row's distribution, exactly.
 
         Computed on the native distribution (:meth:`predict_distribution`),
         never on a grid, so they carry the model's full resolution.
@@ -271,7 +273,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             quantiles: Cumulative probabilities within [0, 1], shape (k,).
 
         Returns:
-            The redshift at each level, shape (n_samples, k).
+            The value at each level, shape (n_samples, k).
         """
         return self.predict_distribution(X).ppf(quantiles)
 
@@ -313,7 +315,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         method: str = "z_peak",
         z_grid: grid_lib.GridLike = None,
     ) -> _typing.FloatArray:
-        """One redshift per row, reducing each density by ``method``.
+        """One value per row, reducing each density by ``method``.
 
         The four definitions disagree exactly when a PDF is multimodal,
         which is the interesting case: ``z_mean`` lands between two peaks,
@@ -332,7 +334,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 default.
 
         Returns:
-            Point redshifts, shape (n_samples,).
+            Point estimates, shape (n_samples,).
         """
         grid = self._resolve_grid(z_grid)
         return self.point_estimates(self.predict_proba(X, grid), grid)[
@@ -349,7 +351,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True redshifts, shape (n_samples,).
+            y: True target values, shape (n_samples,).
             z_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
@@ -380,7 +382,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True redshifts, shape (n_samples,).
+            y: True target values, shape (n_samples,).
             method: The point estimate to score, one of
                 :data:`POINT_ESTIMATORS`.
             z_grid: The grid to evaluate on; ``None`` for this model's
@@ -431,7 +433,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Returns:
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
-            redshifts, shape (n_samples,).
+            values, shape (n_samples,).
         """
         grid = self._resolve_grid(z_grid)
         return metrics.grid_point_estimates(

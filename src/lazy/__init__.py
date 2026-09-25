@@ -1,33 +1,32 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""LAZY -- Lazy but Accurate photo-Z for Yinz.
+"""LAZY -- Lazy but Accurate *z* for Yinz.
 
-Photometric redshift PDFs from tabular foundation models. The models are
-pretrained and never fine-tuned: you hand them labelled galaxies as *context*
-and they answer queries in one forward pass, so there is no training loop, no
-hyper-parameter search and no per-survey retraining -- hence lazy::
+*z* is any continuous quantity you want to predict from tabular features: a
+redshift, a metallicity, a mass, a yield. LAZY predicts its full conditional
+distribution with pretrained tabular foundation models. They are never
+fine-tuned: you hand them labelled rows as *context* and they answer queries
+in one forward pass, so there is no training loop, no hyper-parameter search
+and no per-dataset retraining -- hence lazy::
 
-    from lazy import LazyModel, Grid
-    from lazy.datasets import fetch_dc1
+    from lazy import LazyModel
 
-    train, test = fetch_dc1(split=True)
-    X_train, X_test = train.features("mag-color"), test.features("mag-color")
+    model = LazyModel("tabpfn", version="v3.5")
+    model.fit(X_train, z_train)
 
-    model = LazyModel("tabfm", n_estimators=4, n_dither=3)
-    model.fit(X_train, train.redshift)
-
-    grid = Grid.linear(0.0, 2.0, 200)
-    pdfs = model.predict_proba(X_test, grid)           # (n, 200) densities
+    pdfs = model.predict_proba(X_test)                 # densities, native grid
+    lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
     z = model.predict(X_test, method="z_peak")         # point estimates
-    model.evaluate(X_test, test.redshift)              # the full metric table
+    model.score(X_test, z_test)                        # negative CDE loss
 
 The API is scikit-learn's, with ``predict_proba`` returning a density on a
-redshift grid rather than class probabilities, because that is the natural
-output of a photo-z model. Three backends ship today -- ``tabfm`` builds the
-density from a hierarchy of in-context classifiers, ``tabicl`` from a quantile
-regression head, ``tabpfn`` from the bucket masses TabPFN-3 predicts natively
--- and all of them write onto whatever :class:`~lazy.grid.Grid` you
-pass, at prediction time, without refitting.
+grid of the target rather than class probabilities. Four backends ship --
+``tabpfn`` and ``limix`` predict bucket masses natively, ``tabicl`` quantiles,
+``tabfm`` a hierarchy of in-context classifiers -- behind one set of
+parameters, and all of them write onto whatever :class:`~lazy.grid.Grid` you
+pass, at prediction time, without refitting. The package grew out of
+photometric redshifts, and its benchmark tools (the DC1 catalogue, the HSC
+selection function, the Data Challenge metrics) are photo-z's.
 
 The package is laid out as follows.
 
@@ -37,8 +36,11 @@ The package is laid out as follows.
 :mod:`lazy.grid`
     :class:`~lazy.grid.Grid`: the output binning, normalisation and
     mass-conserving rebinning.
+:mod:`lazy.distributions`
+    Each model's native answer, with exact ``pdf``, ``cdf``, ``ppf``, moments
+    and sampling, and ``to_qp()``.
 :mod:`lazy.metrics`
-    LSST DESC PZ Data Challenge point and PDF metrics, and
+    The LSST DESC PZ Data Challenge PDF and point metrics, and
     :func:`~lazy.metrics.summarize` for the comparison table.
 :mod:`lazy.plotting`
     The publication style, and the standard diagnostic figures.

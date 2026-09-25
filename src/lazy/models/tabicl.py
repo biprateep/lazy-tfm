@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Photo-z distributions from TabICLv2's quantile regression head.
+"""Target distributions from TabICLv2's quantile regression head.
 
 TabICLv2 (Qu et al. 2026) is an in-context tabular foundation model whose
 regressor answers with a *distribution*: 999 quantiles of the predictive CDF
@@ -64,7 +64,7 @@ def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
 
 
 class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
-    """Redshift distributions from the quantiles TabICLv2's regressor predicts.
+    """Target distributions from the quantiles TabICLv2's regressor predicts.
 
     Args:
         version: Which pinned TabICL checkpoint to load; see
@@ -86,7 +86,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             either way, up to floating-point rounding.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
-            (1,000 bins spanning the training redshifts).
+            (1,000 bins spanning the training targets).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
         random_state: Seed for the ensemble.
@@ -95,14 +95,15 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             pass. Exact: TabICL builds its keys and values from the context
             rows alone, so a row's answer never depends on the other rows in
             its chunk.
-        progress: A progress bar over the query galaxies: ``"auto"`` shows it
+        progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
 
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The native grid, 1,000 histogram-normalised bins over
-            the training redshifts padded by 2% (not below zero).
+            the training targets padded by 2% (never below zero when the targets
+            are all non-negative).
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
@@ -134,7 +135,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     kv_cache_modes = (True, False, "repr")
     kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
 
-    # The training redshifts' range, recorded by _fit_group for the grid.
+    # The training targets' range, recorded by _fit_group for the grid.
     _support: tuple[float, float]
 
     def __init__(  # noqa: D107 - arguments documented on the class.

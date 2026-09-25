@@ -66,7 +66,7 @@ class Member:
 
     Attributes:
         x: Preprocessed context features, shape (n_rows, n_features).
-        y: Standardised context redshifts, shape (n_rows,).
+        y: Standardised context targets, shape (n_rows,).
         seed: Seed of the feature positional embedding's generator.
     """
 

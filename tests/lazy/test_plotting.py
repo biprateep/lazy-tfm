@@ -69,7 +69,7 @@ def test_nz_plot_overlays_the_truth(predictions):
 
 def test_pdf_examples_make_one_axes_per_galaxy(predictions):
     _, pdfs, _ = predictions
-    axes = plotting.plot_pdfs(lazy.DC1_GRID.centers, pdfs, n_galaxies=4)
+    axes = plotting.plot_pdfs(lazy.DC1_GRID.centers, pdfs, n_objects=4)
     assert sum(bool(a.get_visible()) for a in axes) == 4
 
 

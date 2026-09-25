@@ -86,7 +86,10 @@ The first release. Everything below is new.
 
 - The package is for any continuous target, not only redshift, and its
   generic API says so: `RedshiftGrid` is now `Grid` and `BasePhotoZEstimator`
-  is `BaseDensityRegressor`.
+  is `BaseDensityRegressor`; parameters that took redshifts take `values`,
+  `plot_pdfs(n_galaxies=)` is `n_objects=`, and progress bars count rows.
+  Docstrings speak of the target, keeping redshift for the photo-z tools
+  (`datasets`, `selection`, and the point metrics' `1 + z` scaling).
 - The distribution is named `lazy-tfm` (`pip install lazy-tfm`); the import
   name stays `lazy`. The benchmark-catalogue cache moved from
   `~/.cache/lazy-photoz` to `~/.cache/lazy-tfm` (move an existing cache there,
@@ -124,7 +127,7 @@ The first release. Everything below is new.
   `lazy.datasets.build_features`, with the same arguments.
 - One-letter public parameters have descriptive names:
   `Grid.bin_index(values)`, `tabfm.quantile_edges(values, ...)`,
-  `plotting.plot_pdfs(..., n_galaxies=...)`, `style.set_palette(n_colors=...)`,
+  `plotting.plot_pdfs(..., n_objects=...)`, `style.set_palette(n_colors=...)`,
   `style.better_step(bin_edges, heights, ...)`,
   `style.binned_quantiles(x_values, y_values, ..., percentiles=...)` and
   `style.running_median(ax, x_values, y_values, ...)`.
