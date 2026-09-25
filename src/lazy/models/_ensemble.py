@@ -195,7 +195,7 @@ class ContextEnsembleEstimator(base.BasePhotoZEstimator, abc.ABC):
         """Predicts one group's distributions for prepared query features."""
 
     @abc.abstractmethod
-    def _native_grid(self) -> grid_lib.RedshiftGrid:
+    def _native_grid(self) -> grid_lib.Grid:
         """The model's own output grid; called at the end of ``_fit``."""
 
     def _load_checkpoint(self) -> None:
@@ -442,13 +442,13 @@ class ContextEnsembleEstimator(base.BasePhotoZEstimator, abc.ABC):
         return distributions.concatenate(list(self._chunks(X)))
 
     def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
+        self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
         # Chunk by chunk, so the full native container never exists at once.
         blocks = [dist.on_grid(grid) for dist in self._chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
-    def _default_grid(self) -> grid_lib.RedshiftGrid:
+    def _default_grid(self) -> grid_lib.Grid:
         """The constructor's grid, else this model's native grid."""
         if self.z_grid is None:
             return self.native_grid

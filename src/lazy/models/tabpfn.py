@@ -14,7 +14,7 @@ That is already a conditional density estimate, so
 :class:`TabPFNBarDistribution` does no post-processing: its predictions are
 :class:`~lazy.distributions.HistogramDistribution` objects over those buckets,
 mapped onto any grid by exact, mass-conserving integration
-(:meth:`lazy.grid.RedshiftGrid.rebin`), and its native grid is the buckets
+(:meth:`lazy.grid.Grid.rebin`), and its native grid is the buckets
 themselves, in full. The bucket masses rather than quantiles, because upstream
 computes its quantiles by inverting this same piecewise-uniform CDF.
 
@@ -109,7 +109,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
             exact), or ``False``. Worth its memory whenever the query set is
             much larger than the context.
-        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
@@ -273,8 +273,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         borders, masses = bucket_masses(handle.predict(X, output_type="full"))
         return distributions.HistogramDistribution(borders, masses)
 
-    def _native_grid(self) -> grid_lib.RedshiftGrid:
-        return grid_lib.RedshiftGrid.from_edges(
+    def _native_grid(self) -> grid_lib.Grid:
+        return grid_lib.Grid.from_edges(
             np.unique(self.borders_), normalization="histogram"
         )
 

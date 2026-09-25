@@ -19,7 +19,7 @@ serves them all without approximation:
 The method names are those of :mod:`scipy.stats` and LSST DESC's ``qp``:
 ``pdf``, ``cdf``, ``ppf``, ``sf``, ``rvs``, ``mean``, ``median``, ``mode``,
 ``std``, ``var``, ``interval``. :meth:`on_grid` gives the bin-averaged
-densities on a :class:`~lazy.grid.RedshiftGrid`, which is what
+densities on a :class:`~lazy.grid.Grid`, which is what
 ``predict_proba`` returns, and ``to_qp`` / :func:`from_qp` convert to and from
 qp ensembles (install ``lazy-tfm[qp]``) for RAIL.
 
@@ -243,10 +243,10 @@ class HistogramDistribution(_Base):
             _slice_ancil(self.ancil, rows),
         )
 
-    def on_grid(self, grid: grid_lib.RedshiftGrid) -> _typing.FloatArray:
+    def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Bin-averaged densities on ``grid``, shape (n_rows, grid.n_bins).
 
-        Exact and mass-conserving (:meth:`lazy.grid.RedshiftGrid.rebin`);
+        Exact and mass-conserving (:meth:`lazy.grid.Grid.rebin`);
         probability outside the grid is dropped, so rows need not integrate
         to one over the grid.
         """
@@ -364,7 +364,7 @@ class QuantileDistribution(_Base):
     between consecutive knots, so the density is constant there. Beyond the
     outermost levels the remaining probability sits on the outermost values:
     ``quants[0]`` at ``locs[:, 0]`` and ``1 - quants[-1]`` at ``locs[:, -1]``.
-    This is the convention :meth:`lazy.grid.RedshiftGrid.from_quantiles` has
+    This is the convention :meth:`lazy.grid.Grid.from_quantiles` has
     always used, so densities on a grid are unchanged.
 
     Attributes:
@@ -432,10 +432,10 @@ class QuantileDistribution(_Base):
         locs = np.tensordot(weight, np.stack([p.locs for p in parts]), axes=1)
         return cls(quants, locs, parts[0].ancil)
 
-    def on_grid(self, grid: grid_lib.RedshiftGrid) -> _typing.FloatArray:
+    def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Bin-averaged densities on ``grid``, shape (n_rows, grid.n_bins).
 
-        Exactly :meth:`lazy.grid.RedshiftGrid.from_quantiles`.
+        Exactly :meth:`lazy.grid.Grid.from_quantiles`.
         """
         return grid.from_quantiles(self.locs, self.quants)
 
@@ -614,7 +614,7 @@ class MixtureDistribution(_Base):
             total = total + weight * value
         return total
 
-    def on_grid(self, grid: grid_lib.RedshiftGrid) -> _typing.FloatArray:
+    def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """The weighted average of the components' densities on ``grid``."""
         total = np.zeros((self.npdf, grid.n_bins))
         for weight, component in zip(

@@ -515,7 +515,7 @@ def load_trainz(
     Every row is the same training-set N(z): the challenge's deliberately
     trivial estimator, and the floor any real method must clear. The stored
     array is a per-bin probability on a 0.01-wide grid, so normalise it as a
-    density (:meth:`lazy.grid.RedshiftGrid.normalize`) before scoring.
+    density (:meth:`lazy.grid.Grid.normalize`) before scoring.
 
     Args:
         split: Follows :func:`fetch_dc1`: ``False`` stacks the two files in

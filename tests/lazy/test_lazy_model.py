@@ -143,7 +143,7 @@ def test_repr_names_the_backend_and_only_non_default_parameters():
 
 
 def test_the_grid_default_is_carried_down_to_the_backend():
-    grid = lazy.RedshiftGrid.linear(0.0, 3.0, 37)
+    grid = lazy.Grid.linear(0.0, 3.0, 37)
     model = lazy.LazyModel("tabicl", z_grid=grid)
     assert model.z_grid is grid
     assert model._build().z_grid is grid
@@ -189,12 +189,10 @@ def test_a_call_time_grid_overrides_the_default(registered):
     X = np.random.default_rng(0).normal(size=(5, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 5)
     model = lazy.LazyModel(
-        registered, z_grid=lazy.RedshiftGrid.linear(0.0, 2.0, 50)
+        registered, z_grid=lazy.Grid.linear(0.0, 2.0, 50)
     ).fit(X, z)
     assert model.predict_proba(X).shape == (5, 50)
-    assert model.predict_proba(
-        X, lazy.RedshiftGrid.linear(0.0, 3.0, 11)
-    ).shape == (
+    assert model.predict_proba(X, lazy.Grid.linear(0.0, 3.0, 11)).shape == (
         5,
         11,
     )

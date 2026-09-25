@@ -85,7 +85,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             each chunk of queries attend to the result. Exact; costs about
             2 GB of GPU memory per member at 20,000 context rows. Falls back
             to the uncached path, with a warning, when that does not fit.
-        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
@@ -255,9 +255,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         edges = self.borders_ * handle["std"] + handle["mean"]
         return distributions.HistogramDistribution(edges, masses)
 
-    def _native_grid(self) -> grid_lib.RedshiftGrid:
+    def _native_grid(self) -> grid_lib.Grid:
         mean, std = self._scale
-        return grid_lib.RedshiftGrid.from_edges(
+        return grid_lib.Grid.from_edges(
             np.unique(self.borders_ * std + mean), normalization="histogram"
         )
 

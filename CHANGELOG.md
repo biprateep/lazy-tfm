@@ -21,7 +21,7 @@ The first release. Everything below is new.
   selects one by name.
 - Pinned checkpoint revisions for every backend version, `provenance_` on every
   fitted model, and `download_checkpoint` / `is_cached` for offline use.
-- `RedshiftGrid`: output binning, normalisation and exact, mass-conserving
+- `Grid`: output binning, normalisation and exact, mass-conserving
   rebinning. The grid is chosen at prediction time, so one fitted model answers
   on any grid.
 - `lazy.metrics`: the LSST DESC PZ Data Challenge point and PDF metrics, and
@@ -35,7 +35,7 @@ The first release. Everything below is new.
   query rows to bound memory (`chunk_size`).
 - A `TabFMPerformanceWarning` when TabFM falls back to its uncached path.
 - Support for Python 3.12, 3.13 and 3.14.
-- `RedshiftGrid(normalization="histogram")`: densities constant across each
+- `Grid(normalization="histogram")`: densities constant across each
   bin, normalised as `sum(p * widths) == 1`; the metrics (`cde_loss`,
   `summarize`, `grid_point_estimates`, ...) take `bin_edges=` to score such
   grids exactly, and estimators use it automatically. Existing grids keep the
@@ -84,6 +84,8 @@ The first release. Everything below is new.
 
 ### Changed
 
+- The package is for any continuous target, not only redshift, and its
+  generic API says so: `RedshiftGrid` is now `Grid`.
 - The distribution is named `lazy-tfm` (`pip install lazy-tfm`); the import
   name stays `lazy`. The benchmark-catalogue cache moved from
   `~/.cache/lazy-photoz` to `~/.cache/lazy-tfm` (move an existing cache there,
@@ -120,7 +122,7 @@ The first release. Everything below is new.
 - `Catalog.build_features` is now the module-level function
   `lazy.datasets.build_features`, with the same arguments.
 - One-letter public parameters have descriptive names:
-  `RedshiftGrid.bin_index(redshifts)`, `tabfm.quantile_edges(redshifts, ...)`,
+  `Grid.bin_index(redshifts)`, `tabfm.quantile_edges(redshifts, ...)`,
   `plotting.plot_pdfs(..., n_galaxies=...)`, `style.set_palette(n_colors=...)`,
   `style.better_step(bin_edges, heights, ...)`,
   `style.binned_quantiles(x_values, y_values, ..., percentiles=...)` and

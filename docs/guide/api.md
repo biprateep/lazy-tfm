@@ -79,11 +79,11 @@ one fitted model answers on as many grids as you like, without refitting:
 
 ```python
 import numpy as np
-from lazy import DC1_GRID, RedshiftGrid
+from lazy import DC1_GRID, Grid
 
 model.predict_proba(X_test)                     # the model's native grid
 model.predict_proba(X_test, DC1_GRID)           # the Data Challenge grid
-model.predict_proba(X_test, RedshiftGrid.linear(0.0, 3.0, 300))
+model.predict_proba(X_test, Grid.linear(0.0, 3.0, 300))
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))   # bin centres
 ```
 
@@ -108,11 +108,11 @@ asks for the native grid explicitly. A plain
 ## Two normalisations
 
 A density on a grid can be normalised two ways, and a
-{class}`~lazy.grid.RedshiftGrid` records which it uses:
+{class}`~lazy.grid.Grid` records which it uses:
 
 - **`"trapezoid"`**, the default and the DC1 convention: unit trapezoid mass
   over the bin centres, `np.trapezoid(pdf, grid.centers) == 1`. Every grid you
-  build with `RedshiftGrid.linear`, `from_edges` or `from_centers` uses it,
+  build with `Grid.linear`, `from_edges` or `from_centers` uses it,
   and so does {data}`~lazy.grid.DC1_GRID`, so numbers on those grids are
   directly comparable with the Data Challenge.
 - **`"histogram"`**: the density is constant across each bin,

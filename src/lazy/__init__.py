@@ -7,7 +7,7 @@ pretrained and never fine-tuned: you hand them labelled galaxies as *context*
 and they answer queries in one forward pass, so there is no training loop, no
 hyper-parameter search and no per-survey retraining -- hence lazy::
 
-    from lazy import LazyModel, RedshiftGrid
+    from lazy import LazyModel, Grid
     from lazy.datasets import fetch_dc1
 
     train, test = fetch_dc1(split=True)
@@ -16,7 +16,7 @@ hyper-parameter search and no per-survey retraining -- hence lazy::
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     model.fit(X_train, train.redshift)
 
-    grid = RedshiftGrid.linear(0.0, 2.0, 200)
+    grid = Grid.linear(0.0, 2.0, 200)
     pdfs = model.predict_proba(X_test, grid)           # (n, 200) densities
     z = model.predict(X_test, method="z_peak")         # point estimates
     model.evaluate(X_test, test.redshift)              # the full metric table
@@ -26,7 +26,7 @@ redshift grid rather than class probabilities, because that is the natural
 output of a photo-z model. Three backends ship today -- ``tabfm`` builds the
 density from a hierarchy of in-context classifiers, ``tabicl`` from a quantile
 regression head, ``tabpfn`` from the bucket masses TabPFN-3 predicts natively
--- and all of them write onto whatever :class:`~lazy.grid.RedshiftGrid` you
+-- and all of them write onto whatever :class:`~lazy.grid.Grid` you
 pass, at prediction time, without refitting.
 
 The package is laid out as follows.
@@ -35,7 +35,7 @@ The package is laid out as follows.
     :class:`~lazy.models.lazy_model.LazyModel`, the concrete backends, and the
     registry they are looked up in.
 :mod:`lazy.grid`
-    :class:`~lazy.grid.RedshiftGrid`: the output binning, normalisation and
+    :class:`~lazy.grid.Grid`: the output binning, normalisation and
     mass-conserving rebinning.
 :mod:`lazy.metrics`
     LSST DESC PZ Data Challenge point and PDF metrics, and
@@ -66,7 +66,7 @@ from lazy.base import BasePhotoZEstimator
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
 from lazy.grid import DC1_GRID
-from lazy.grid import RedshiftGrid
+from lazy.grid import Grid
 from lazy.models import CHECKPOINTS
 from lazy.models import ContextSizeWarning
 from lazy.models import DEFAULT_VERSIONS
@@ -102,7 +102,7 @@ __all__ = [
     "LazyModel",
     "LimiXBarDistribution",
     "PerformanceWarning",
-    "RedshiftGrid",
+    "Grid",
     "TabFMHistogram",
     "TabICLQuantile",
     "TabPFNBarDistribution",

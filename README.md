@@ -42,7 +42,7 @@ cache ahead of time with `lazy.download_checkpoint("tabfm")`.
 ## Use
 
 ```python
-from lazy import LazyModel, RedshiftGrid
+from lazy import LazyModel, Grid
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)        # or fetch_dc1() for both, concatenated
@@ -51,7 +51,7 @@ X_train, X_test = train.features("mag-color"), test.features("mag-color")
 model = LazyModel("tabpfn", version="v3.5")
 model.fit(X_train, train.redshift)
 
-pdfs = model.predict_proba(X_test, RedshiftGrid.linear(0, 2, 200))
+pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
 z = model.predict(X_test, method="z_peak")  # or z_mean, z_weight, z_median
 lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
 print(model.evaluate(X_test, test.redshift))
@@ -72,7 +72,7 @@ without refitting:
 
 ```python
 model.predict_proba(X_test)                                  # the native grid
-model.predict_proba(X_test, RedshiftGrid.linear(0, 3, 300))
+model.predict_proba(X_test, Grid.linear(0, 3, 300))
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))  # or bin centres
 ```
 
@@ -145,7 +145,7 @@ queries are chunked; the backend runs its network with a ported cache,
 context-only preprocessing and a dedicated random generator, which removes
 both. Built with StableAI LimiX.
 
-They all write onto any `RedshiftGrid` you ask for — any number of bins, any
+They all write onto any `Grid` you ask for — any number of bins, any
 spacing, any range. (TabFM's ten-class ceiling constrains its internal
 hierarchy, never your output grid.)
 
@@ -288,7 +288,7 @@ Memory is bounded by default on every backend via `chunk_size` (8,192 or
 | Module           | Contents                                                                     |
 | ---------------- | ---------------------------------------------------------------------------- |
 | `lazy.models`    | `LazyModel`, the concrete backends, and the name registry                    |
-| `lazy.grid`      | `RedshiftGrid`: binning, normalisation, mass-conserving rebinning            |
+| `lazy.grid`      | `Grid`: binning, normalisation, mass-conserving rebinning            |
 | `lazy.metrics`   | LSST DESC PZ Data Challenge point and PDF metrics, and `summarize`           |
 | `lazy.selection` | The HSC spectroscopic selection function, for biasing a catalogue of your own |
 | `lazy.plotting`  | Publication figure style, and the standard diagnostic figures                |

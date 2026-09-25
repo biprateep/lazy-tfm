@@ -15,7 +15,7 @@
 pages document every parameter. Use `LazyModel` when the backend is a
 configuration value, as in a benchmark loop.
 
-All of them write onto whatever {class}`~lazy.grid.RedshiftGrid` you ask for,
+All of them write onto whatever {class}`~lazy.grid.Grid` you ask for,
 and each has a native grid it answers on by default; see {doc}`api`.
 
 ## One set of parameters

@@ -329,7 +329,7 @@ def plot_nz(
     ax = _axes(ax, width="column", aspect="golden")
     ax.plot(z_grid, pdfs.mean(axis=0), label=label, **kwargs)
     if z_true is not None:
-        edges = grid.RedshiftGrid.from_centers(z_grid).edges
+        edges = grid.Grid.from_centers(z_grid).edges
         ax.hist(
             np.asarray(z_true, dtype=float),
             bins=edges.tolist(),

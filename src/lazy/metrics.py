@@ -15,7 +15,7 @@ Point estimates (Appendix B1)::
     sigma_MAD = 1.4826 * median(|ez - median(ez)|)
     outlier   = fraction(|ez| > max(0.06, 3 * sigma_IQR))
 
-PDF metrics on a grid of bin centres (:class:`lazy.grid.RedshiftGrid`)::
+PDF metrics on a grid of bin centres (:class:`lazy.grid.Grid`)::
 
     CDE loss  = mean_i [ trapz(p_i^2, z) - 2 p_i(z_nearest to z_true_i) ]
     PIT_i     = integral of the gridded (linearly interpolated) p_i from 0

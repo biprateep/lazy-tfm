@@ -47,7 +47,7 @@ def _integral_moments(dist, lo, hi, n=400_001):
 
 
 def test_histogram_on_grid_is_exactly_the_rebinning(histogram):
-    grid = lazy.RedshiftGrid.linear(0.0, 3.0, 57)
+    grid = lazy.Grid.linear(0.0, 3.0, 57)
     np.testing.assert_array_equal(
         histogram.on_grid(grid), grid.rebin(histogram.masses, histogram.bins)
     )
@@ -135,7 +135,7 @@ def test_histogram_validation(bins, masses, match):
 
 
 def test_quantile_on_grid_is_exactly_from_quantiles(quantiles):
-    grid = lazy.RedshiftGrid.linear(0.0, 2.0, 80)
+    grid = lazy.Grid.linear(0.0, 2.0, 80)
     np.testing.assert_array_equal(
         quantiles.on_grid(grid),
         grid.from_quantiles(quantiles.locs, quantiles.quants),
@@ -194,7 +194,7 @@ def mixture(histogram):
 
 
 def test_mixture_on_grid_is_the_weighted_average(mixture):
-    grid = lazy.RedshiftGrid.linear(0.0, 4.0, 40)
+    grid = lazy.Grid.linear(0.0, 4.0, 40)
     first, second = mixture.components
     np.testing.assert_allclose(
         mixture.on_grid(grid),

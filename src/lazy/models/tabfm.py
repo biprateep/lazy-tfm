@@ -30,7 +30,7 @@ shuffles and ``norm_methods``, and ``bag_size`` onto its per-member row cap.
 Because the bins are equal-mass they are narrow where galaxies are crowded, so
 in the busy part of N(z) they are routinely *narrower* than the output bin.
 Mapping them onto the output grid is therefore done by exact, mass-conserving
-integration (:meth:`lazy.grid.RedshiftGrid.rebin`), not by sampling the density
+integration (:meth:`lazy.grid.Grid.rebin`), not by sampling the density
 at the output bin centres, which would drop whole bins and lose probability.
 
 The ten-class limit constrains the hierarchy, never the output: ``z_grid`` can
@@ -210,7 +210,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             build, and falls back with a :class:`TabFMPerformanceWarning`
             without it), or re-encode the context for every chunk of queries
             (``False``).
-        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
             sets the range the equal-mass bins span; without one they span the
@@ -447,16 +447,14 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             return parts[0]
         return distributions.MixtureDistribution.equal(parts)
 
-    def _native_grid(self) -> grid_lib.RedshiftGrid:
+    def _native_grid(self) -> grid_lib.Grid:
         shifts = [d / self.n_dither for d in range(self.n_dither)]
         edges = np.unique(
             np.concatenate(
                 [self._edges(self.z_context_, shift)[0] for shift in shifts]
             )
         )
-        return grid_lib.RedshiftGrid.from_edges(
-            edges, normalization="histogram"
-        )
+        return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     # -- the hierarchy ------------------------------------------------------
 

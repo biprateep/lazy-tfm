@@ -1,7 +1,7 @@
 # Quickstart
 
 ```python
-from lazy import LazyModel, RedshiftGrid
+from lazy import LazyModel, Grid
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)
@@ -10,7 +10,7 @@ X_train, X_test = train.features("mag-color"), test.features("mag-color")
 model = LazyModel("tabpfn", version="v3.5")
 model.fit(X_train, train.redshift)
 
-pdfs = model.predict_proba(X_test, RedshiftGrid.linear(0, 2, 200))
+pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
 z = model.predict(X_test, method="z_peak")
 print(model.evaluate(X_test, test.redshift))
 ```

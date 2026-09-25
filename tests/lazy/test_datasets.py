@@ -32,8 +32,7 @@ def isolated_home(tmp_path, monkeypatch):
 
 def test_default_is_under_the_users_cache(isolated_home):
     assert (
-        datasets.data_home()
-        == isolated_home / "home" / ".cache" / "lazy-tfm"
+        datasets.data_home() == isolated_home / "home" / ".cache" / "lazy-tfm"
     )
 
 
@@ -45,8 +44,7 @@ def test_xdg_cache_home_is_honoured(isolated_home, monkeypatch):
 def test_an_empty_xdg_cache_home_falls_back(isolated_home, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", "")
     assert (
-        datasets.data_home()
-        == isolated_home / "home" / ".cache" / "lazy-tfm"
+        datasets.data_home() == isolated_home / "home" / ".cache" / "lazy-tfm"
     )
 
 

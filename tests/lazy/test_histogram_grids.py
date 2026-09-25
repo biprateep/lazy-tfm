@@ -55,7 +55,7 @@ def _native_scores(edges, masses, truth):
 
 def test_histogram_grid_normalises_to_unit_mass(bar):
     edges, masses, _ = bar
-    grid = lazy.RedshiftGrid.from_edges(edges, normalization="histogram")
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
     density = grid.normalize(3.0 * masses / grid.widths)
     np.testing.assert_allclose(density @ grid.widths, 1.0)
     np.testing.assert_allclose(density * grid.widths, masses, atol=1e-15)
@@ -63,7 +63,7 @@ def test_histogram_grid_normalises_to_unit_mass(bar):
 
 def test_histogram_cde_loss_and_pit_match_the_native_scores(bar):
     edges, masses, truth = bar
-    grid = lazy.RedshiftGrid.from_edges(edges, normalization="histogram")
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
     density = masses / grid.widths
     expected_cde, expected_pit = _native_scores(edges, masses, truth)
     loss = metrics.cde_loss(truth, grid.centers, density, bin_edges=grid.edges)
@@ -76,7 +76,7 @@ def test_histogram_cde_loss_and_pit_match_the_native_scores(bar):
 
 def test_histogram_point_estimates_agree_with_the_distribution(bar):
     edges, masses, _ = bar
-    grid = lazy.RedshiftGrid.from_edges(edges, normalization="histogram")
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
     estimates = metrics.grid_point_estimates(
         grid.centers, masses / grid.widths, bin_edges=grid.edges
     )
@@ -88,7 +88,7 @@ def test_histogram_point_estimates_agree_with_the_distribution(bar):
 
 def test_histogram_cdf_at_centres_is_exact(bar):
     edges, masses, _ = bar
-    grid = lazy.RedshiftGrid.from_edges(edges, normalization="histogram")
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
     dist = distributions.HistogramDistribution(edges, masses)
     np.testing.assert_allclose(
         grid.cdf(masses / grid.widths), dist.cdf(grid.centers), atol=1e-12
@@ -97,7 +97,7 @@ def test_histogram_cdf_at_centres_is_exact(bar):
 
 def test_summarize_takes_bin_edges(bar):
     edges, masses, truth = bar
-    grid = lazy.RedshiftGrid.from_edges(edges, normalization="histogram")
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
     row = metrics.summarize(
         truth, grid.centers, masses / grid.widths, bin_edges=grid.edges
     )
@@ -106,10 +106,8 @@ def test_summarize_takes_bin_edges(bar):
 
 
 def test_normalization_is_part_of_grid_identity():
-    trapezoid = lazy.RedshiftGrid.linear(0.0, 2.0, 10)
-    histogram = lazy.RedshiftGrid.linear(
-        0.0, 2.0, 10, normalization="histogram"
-    )
+    trapezoid = lazy.Grid.linear(0.0, 2.0, 10)
+    histogram = lazy.Grid.linear(0.0, 2.0, 10, normalization="histogram")
     assert trapezoid != histogram
     assert trapezoid.histogram_edges is None
     np.testing.assert_array_equal(histogram.histogram_edges, histogram.edges)
@@ -118,7 +116,7 @@ def test_normalization_is_part_of_grid_identity():
 
 def test_an_unknown_normalization_is_rejected():
     with pytest.raises(ValueError, match="normalization must be one of"):
-        lazy.RedshiftGrid.linear(0.0, 1.0, 4, normalization="simpson")
+        lazy.Grid.linear(0.0, 1.0, 4, normalization="simpson")
 
 
 def test_bin_edges_must_match_the_grid():

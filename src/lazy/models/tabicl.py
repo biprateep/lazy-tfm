@@ -7,7 +7,7 @@ regressor answers with a *distribution*: 999 quantiles of the predictive CDF
 per query row, not a single number. :class:`TabICLQuantile` returns them as a
 :class:`~lazy.distributions.QuantileDistribution`, whose densities on any
 grid come from evaluating the quantile CDF at the bin edges and differencing
-(:meth:`lazy.grid.RedshiftGrid.from_quantiles`): every bin gets exactly the
+(:meth:`lazy.grid.Grid.from_quantiles`): every bin gets exactly the
 mass the quantiles place inside it.
 
 The uniform features map onto TabICL's own machinery: ``kv_cache`` onto its
@@ -84,7 +84,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             ``"kv"`` cache), ``"repr"`` (cached row representations, far
             smaller, re-running the in-context layers) or ``False``. Exact
             either way, up to floating-point rounding.
-        z_grid: Default output grid: a :class:`lazy.grid.RedshiftGrid`, an
+        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (1,000 bins spanning the training redshifts).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
@@ -223,11 +223,11 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             quantile_levels(self.n_quantiles_), quantiles
         )
 
-    def _native_grid(self) -> grid_lib.RedshiftGrid:
+    def _native_grid(self) -> grid_lib.Grid:
         low, high = self._support
         pad = 0.02 * (high - low) if high > low else 0.01
         start = max(low - pad, 0.0) if low >= 0 else low - pad
-        return grid_lib.RedshiftGrid.linear(
+        return grid_lib.Grid.linear(
             start, high + pad, NATIVE_QUANTILE_BINS, normalization="histogram"
         )
 

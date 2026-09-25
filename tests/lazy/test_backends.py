@@ -344,7 +344,7 @@ class TestTabPFN:
                 "b": generator.normal(size=160),
             }
         )
-        grid = lazy.RedshiftGrid.linear(0.0, 2.0, 200)
+        grid = lazy.Grid.linear(0.0, 2.0, 200)
 
         model = lazy.LazyModel(
             "tabpfn", version=version, n_estimators=2, device="cpu"
@@ -378,7 +378,7 @@ class TestTabPFN:
         )
         X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
 
-        grid = lazy.RedshiftGrid.linear(0.0, 2.0, 2000)
+        grid = lazy.Grid.linear(0.0, 2.0, 2000)
         model = lazy.get_estimator("tabpfn", n_estimators=2, device="cpu").fit(
             X_ctx, z[:200]
         )

@@ -107,9 +107,7 @@ def test_score_is_negated_cde_loss_so_higher_is_better(data):
 def test_a_grid_passed_at_call_time_is_used(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    assert est.predict_proba(
-        X, lazy.RedshiftGrid.linear(0.0, 3.0, 37)
-    ).shape == (
+    assert est.predict_proba(X, lazy.Grid.linear(0.0, 3.0, 37)).shape == (
         len(X),
         37,
     )
@@ -123,8 +121,8 @@ def test_a_grid_passed_at_call_time_is_used(data):
 def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
     X, y = data
     est = GaussianDummy(sigma=0.05).fit(X, y)
-    coarse = est.predict(X, z_grid=lazy.RedshiftGrid.linear(0.0, 2.0, 50))
-    fine = est.predict(X, z_grid=lazy.RedshiftGrid.linear(0.0, 2.0, 400))
+    coarse = est.predict(X, z_grid=lazy.Grid.linear(0.0, 2.0, 50))
+    fine = est.predict(X, z_grid=lazy.Grid.linear(0.0, 2.0, 400))
     assert est.offset_ is not None  # nothing was refitted
     # Same estimator, coarser resolution.
     assert np.abs(coarse - fine).max() < 0.05
@@ -132,12 +130,10 @@ def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
 
 def test_the_constructor_grid_is_the_default(data):
     X, y = data
-    est = GaussianDummy(z_grid=lazy.RedshiftGrid.linear(0.0, 3.0, 37)).fit(X, y)
+    est = GaussianDummy(z_grid=lazy.Grid.linear(0.0, 3.0, 37)).fit(X, y)
     assert est.predict_proba(X).shape == (len(X), 37)
     # ... and a call-time grid still wins
-    assert est.predict_proba(
-        X, lazy.RedshiftGrid.linear(0.0, 2.0, 11)
-    ).shape == (
+    assert est.predict_proba(X, lazy.Grid.linear(0.0, 2.0, 11)).shape == (
         len(X),
         11,
     )
@@ -236,7 +232,7 @@ class _WithNativeGrid(GaussianDummy):
 
     def _fit(self, X, y):
         super()._fit(X, y)
-        self.native_grid_ = lazy.RedshiftGrid.linear(
+        self.native_grid_ = lazy.Grid.linear(
             0.0, 3.0, 30, normalization="histogram"
         )
 

@@ -4,7 +4,7 @@
 
 A conditional density estimate here is always a table: one row per galaxy,
 one column per redshift bin, holding a *density* (not a probability) at the
-bin centre. :class:`RedshiftGrid` owns the bin edges, so the same object gives
+bin centre. :class:`Grid` owns the bin edges, so the same object gives
 you the centres the metrics integrate over, the edges that mass-conserving
 rebinning needs, and the normalisation convention.
 
@@ -21,7 +21,7 @@ normalising any other way would leave ``trapz(p) != 1`` inside the loss.
 
 Typical usage example:
 
-  grid = RedshiftGrid.linear(0.0, 3.0, 300)
+  grid = Grid.linear(0.0, 3.0, 300)
   densities = grid.normalize(raw_densities)
 """
 
@@ -41,18 +41,18 @@ __all__ = [
     "NATIVE",
     "NORMALIZATIONS",
     "GridLike",
-    "RedshiftGrid",
+    "Grid",
     "as_grid",
 ]
 
-#: How a density on a grid integrates to one; see RedshiftGrid.
+#: How a density on a grid integrates to one; see Grid.
 Normalization: TypeAlias = Literal["trapezoid", "histogram"]
-#: The accepted values of RedshiftGrid.normalization.
+#: The accepted values of Grid.normalization.
 NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
 
 
 @dataclasses.dataclass(frozen=True)
-class RedshiftGrid:
+class Grid:
     """A binned redshift axis defined by its ``n_bins + 1`` edges.
 
     Attributes:
@@ -66,7 +66,7 @@ class RedshiftGrid:
             bar-distribution models, where the trapezoid rule is not.
 
     Examples:
-        >>> grid = RedshiftGrid.linear(0.0, 2.0, 200)
+        >>> grid = Grid.linear(0.0, 2.0, 200)
         >>> grid.n_bins, float(grid.centers[0]), float(grid.centers[-1])
         (200, 0.005, 1.995)
     """
@@ -102,7 +102,7 @@ class RedshiftGrid:
         n_bins: int,
         *,
         normalization: Normalization = "trapezoid",
-    ) -> RedshiftGrid:
+    ) -> Grid:
         """``n_bins`` equal-width bins spanning ``[z_min, z_max]``.
 
         Args:
@@ -123,7 +123,7 @@ class RedshiftGrid:
         edges: npt.ArrayLike,
         *,
         normalization: Normalization = "trapezoid",
-    ) -> RedshiftGrid:
+    ) -> Grid:
         """A grid from explicit bin edges (any spacing).
 
         Args:
@@ -137,7 +137,7 @@ class RedshiftGrid:
         return cls(np.asarray(edges, dtype=float), normalization)
 
     @classmethod
-    def from_centers(cls, centers: npt.ArrayLike) -> RedshiftGrid:
+    def from_centers(cls, centers: npt.ArrayLike) -> Grid:
         """A grid from bin centres.
 
         The inner edges split the gaps between centres and the outer edges
@@ -152,8 +152,8 @@ class RedshiftGrid:
             The grid.
 
         Examples:
-            >>> grid = RedshiftGrid.linear(0.0, 2.0, 200)
-            >>> RedshiftGrid.from_centers(grid.centers) == grid
+            >>> grid = Grid.linear(0.0, 2.0, 200)
+            >>> Grid.from_centers(grid.centers) == grid
             True
         """
         centers = np.asarray(centers, dtype=float)
@@ -203,7 +203,7 @@ class RedshiftGrid:
         return self.n_bins
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, RedshiftGrid):
+        if not isinstance(other, Grid):
             return NotImplemented
         return (
             self.normalization == other.normalization
@@ -221,7 +221,7 @@ class RedshiftGrid:
             else f", normalization={self.normalization!r}"
         )
         return (
-            f"RedshiftGrid(n_bins={self.n_bins}, z_min={self.z_min:g},"
+            f"Grid(n_bins={self.n_bins}, z_min={self.z_min:g},"
             f" z_max={self.z_max:g}{extra})"
         )
 
@@ -378,25 +378,25 @@ class RedshiftGrid:
 #: The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
 #: ``0 < z < 2``. Reproducing the published DC1 numbers requires this grid;
 #: nothing else in the library does.
-DC1_GRID = RedshiftGrid.linear(0.0, 2.0, 200)
+DC1_GRID = Grid.linear(0.0, 2.0, 200)
 
 
 #: What every ``z_grid`` argument accepts: a grid, an array of bin centres,
 #: ``"native"`` for the model's own grid, or ``None`` for the default.
-GridLike: TypeAlias = RedshiftGrid | npt.ArrayLike | Literal["native"] | None
+GridLike: TypeAlias = Grid | npt.ArrayLike | Literal["native"] | None
 
 #: The ``z_grid`` value that asks an estimator for its native grid.
 NATIVE = "native"
 
 
-def as_grid(grid: GridLike) -> RedshiftGrid:
-    """Coerce a user-supplied ``z_grid`` argument to a :class:`RedshiftGrid`.
+def as_grid(grid: GridLike) -> Grid:
+    """Coerce a user-supplied ``z_grid`` argument to a :class:`Grid`.
 
     This is what every estimator calls on its ``z_grid`` parameter, so
     ``z_grid=np.linspace(0, 3, 300)`` works anywhere.
 
     Args:
-        grid: A :class:`RedshiftGrid`, an array of bin centres, or ``None``
+        grid: A :class:`Grid`, an array of bin centres, or ``None``
             for :data:`DC1_GRID`.
 
     Returns:
@@ -410,11 +410,11 @@ def as_grid(grid: GridLike) -> RedshiftGrid:
     """
     if grid is None:
         return DC1_GRID
-    if isinstance(grid, RedshiftGrid):
+    if isinstance(grid, Grid):
         return grid
     if isinstance(grid, str):
         raise ValueError(
             f"z_grid={grid!r} is not a grid; only a fitted estimator knows its "
             "native grid, so pass it to the estimator, not to as_grid"
         )
-    return RedshiftGrid.from_centers(grid)
+    return Grid.from_centers(grid)

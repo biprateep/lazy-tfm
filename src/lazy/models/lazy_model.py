@@ -62,7 +62,7 @@ class LazyModel(base.BasePhotoZEstimator):
             classifiers, ``"tabicl"`` from a quantile regression head,
             ``"tabpfn"`` from the bucket masses TabPFN-3 predicts natively.
         z_grid: Default output grid for this model: a
-            :class:`lazy.grid.RedshiftGrid`, an array of bin centres, or
+            :class:`lazy.grid.Grid`, an array of bin centres, or
             ``None`` for :data:`lazy.grid.DC1_GRID`. Every prediction method
             takes a ``z_grid`` that overrides it per call.
         **params: Passed straight to the backend's constructor. See
@@ -136,7 +136,7 @@ class LazyModel(base.BasePhotoZEstimator):
         self.estimator_.fit(X if named else X.to_numpy(), y)
 
     def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
+        self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
         # Validation already ran in this wrapper, so the backend's hook is
         # called directly rather than through its public method.
@@ -147,7 +147,7 @@ class LazyModel(base.BasePhotoZEstimator):
     ) -> distributions.Distribution:
         return self.estimator_._predict_distribution(X)  # noqa: SLF001 - delegate.
 
-    def _default_grid(self) -> grid_lib.RedshiftGrid:
+    def _default_grid(self) -> grid_lib.Grid:
         # The backend has already resolved its default (native or not).
         return self.estimator_.grid_
 

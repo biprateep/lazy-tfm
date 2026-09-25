@@ -30,7 +30,7 @@ unmodified.
 
 A subclass implements :meth:`_fit` and :meth:`_predict_pdf` and nothing else.
 Both receive a :class:`pandas.DataFrame` with the columns ``fit`` was given,
-and ``_predict_pdf`` is handed the :class:`~lazy.grid.RedshiftGrid` to answer
+and ``_predict_pdf`` is handed the :class:`~lazy.grid.Grid` to answer
 on; the base class takes care of validation, grid resolution and
 normalisation.
 
@@ -84,7 +84,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             :data:`lazy.ESTIMATORS`), set as a class attribute by each
             backend; ``None`` on a subclass that is not one.
         z_grid: The default output grid as passed to the constructor: a
-            :class:`~lazy.grid.RedshiftGrid`, bin centres, or ``None``.
+            :class:`~lazy.grid.Grid`, bin centres, or ``None``.
         grid_: The resolved default output grid, set by :meth:`fit`.
         is_fitted_: ``True`` once :meth:`fit` has run.
         n_features_in_: Number of feature columns seen by :meth:`fit`.
@@ -114,7 +114,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
 
     @abc.abstractmethod
     def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.RedshiftGrid
+        self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
         """Returns un-normalised densities on ``grid``, one row per row of X.
 
@@ -146,7 +146,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
             grid.edges, density * grid.widths
         )
 
-    def _default_grid(self) -> grid_lib.RedshiftGrid:
+    def _default_grid(self) -> grid_lib.Grid:
         """The grid to answer on when none is given; called after ``_fit``.
 
         The constructor's ``z_grid`` (``"native"`` meaning the model's own),
@@ -158,7 +158,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         return grid_lib.as_grid(self.z_grid)
 
     @property
-    def native_grid(self) -> grid_lib.RedshiftGrid:
+    def native_grid(self) -> grid_lib.Grid:
         """The model's own output grid, available after ``fit``.
 
         Raises:
@@ -208,7 +208,7 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         Args:
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
-            z_grid: A :class:`~lazy.grid.RedshiftGrid`, an array of bin
+            z_grid: A :class:`~lazy.grid.Grid`, an array of bin
                 centres, ``"native"`` for the model's own grid, or ``None``
                 for this model's default.
 
@@ -439,12 +439,12 @@ class BasePhotoZEstimator(sklearn_base.BaseEstimator, abc.ABC):
         )
 
     @property
-    def grid(self) -> grid_lib.RedshiftGrid:
+    def grid(self) -> grid_lib.Grid:
         """This model's default output grid. Available only after ``fit``."""
         validation.check_is_fitted(self, "grid_")
         return self.grid_
 
-    def _resolve_grid(self, z_grid: grid_lib.GridLike) -> grid_lib.RedshiftGrid:
+    def _resolve_grid(self, z_grid: grid_lib.GridLike) -> grid_lib.Grid:
         """A call-time grid, this model's default, or the DC1 grid, in order."""
         if isinstance(z_grid, str) and z_grid == grid_lib.NATIVE:
             return self.native_grid

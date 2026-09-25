@@ -124,7 +124,7 @@ class HistogramStandIn(_KNNStandIn):
         return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self):
-        return grid_lib.RedshiftGrid.from_edges(
+        return grid_lib.Grid.from_edges(
             self.handles_[0]["borders"], normalization="histogram"
         )
 
@@ -164,7 +164,7 @@ class QuantileStandIn(_KNNStandIn):
     def _native_grid(self):
         low, high = self.support_
         pad = 0.02 * (high - low)
-        return grid_lib.RedshiftGrid.linear(
+        return grid_lib.Grid.linear(
             low - pad, high + pad, 100, normalization="histogram"
         )
 
