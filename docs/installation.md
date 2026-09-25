@@ -108,8 +108,8 @@ See {doc}`guide/clusters` for caches and running offline.
 ## From source
 
 ```console
-git clone https://github.com/biprateep/lazy-photoz
-cd lazy-photoz
+git clone https://github.com/biprateep/lazy-tfm
+cd lazy-tfm
 uv sync --extra all
 ```
 

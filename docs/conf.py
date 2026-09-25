@@ -78,14 +78,14 @@ html_theme = "pydata_sphinx_theme"
 html_title = "lazy-tfm"
 html_show_sourcelink = False
 html_theme_options = {
-    "github_url": "https://github.com/biprateep/lazy-photoz",
+    "github_url": "https://github.com/biprateep/lazy-tfm",
     "use_edit_page_button": True,
     "navigation_with_keys": False,
     "show_toc_level": 2,
 }
 html_context = {
     "github_user": "biprateep",
-    "github_repo": "lazy-photoz",
+    "github_repo": "lazy-tfm",
     "github_version": "main",
     "doc_path": "docs",
 }

@@ -14,7 +14,7 @@ authors:
   - family-names: Dey
     given-names: Biprateep
     affiliation: University of Pittsburgh
-repository-code: "https://github.com/biprateep/lazy-photoz"
+repository-code: "https://github.com/biprateep/lazy-tfm"
 url: "https://lazy-tfm.readthedocs.io"
 license: MIT
 keywords:

@@ -1,7 +1,7 @@
 # Contributing to lazy-tfm
 
 Bug reports, questions and pull requests are welcome on
-[GitHub](https://github.com/biprateep/lazy-photoz/issues).
+[GitHub](https://github.com/biprateep/lazy-tfm/issues).
 
 ## Development setup
 
@@ -9,8 +9,8 @@ The project is managed with [uv](https://docs.astral.sh/uv/), and `uv.lock`
 pins every dependency, so everyone works in the same environment:
 
 ```bash
-git clone https://github.com/biprateep/lazy-photoz
-cd lazy-photoz
+git clone https://github.com/biprateep/lazy-tfm
+cd lazy-tfm
 uv sync                     # the package, editable, plus the dev tools
 uv sync --extra all         # ...and all three foundation-model backends
 uv run pre-commit install   # lint and format on every commit
@@ -78,7 +78,7 @@ One-time setup, before the first release:
 
 1. On [PyPI](https://pypi.org/manage/account/publishing/) and
    [TestPyPI](https://test.pypi.org/manage/account/publishing/), add a trusted
-   publisher: owner `biprateep`, repository `lazy-photoz`, workflow
+   publisher: owner `biprateep`, repository `lazy-tfm`, workflow
    `publish-to-pypi.yml`, and environment `pypi` or `testpypi` respectively.
 2. In the GitHub repository settings, create the environments `pypi` and
    `testpypi`. Requiring a reviewer on `pypi` is recommended.

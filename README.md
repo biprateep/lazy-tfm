@@ -8,7 +8,7 @@ redshift, a metallicity, a mass, a yield.
 
 [![PyPI](https://img.shields.io/pypi/v/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
 [![Python](https://img.shields.io/pypi/pyversions/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
-[![Unit test and code coverage](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-photoz/actions/workflows/testing-and-coverage.yml)
+[![Unit test and code coverage](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml)
 [![Documentation](https://readthedocs.org/projects/lazy-tfm/badge/?version=latest)](https://lazy-tfm.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -305,8 +305,8 @@ Memory is bounded by default on every backend via `chunk_size` (8,192 or
 ## Develop
 
 ```console
-git clone https://github.com/biprateep/lazy-photoz
-cd lazy-photoz
+git clone https://github.com/biprateep/lazy-tfm
+cd lazy-tfm
 uv sync                  # locked environment, including dev tooling
 uv run pre-commit install
 uv run pytest

@@ -141,4 +141,4 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-photoz/commits/main
+[Unreleased]: https://github.com/biprateep/lazy-tfm/commits/main
