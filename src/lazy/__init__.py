@@ -61,6 +61,7 @@ thereafter; :func:`download_checkpoint` warms that cache ahead of time.
 
 from importlib import metadata
 
+from lazy import _namespace
 from lazy.base import BasePhotoZEstimator
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
@@ -87,6 +88,8 @@ try:
     __version__ = metadata.version("lazy-tfm")
 except metadata.PackageNotFoundError:  # pragma: no cover - a source tree only.
     __version__ = "0.0.0.dev0"
+
+_namespace.warn_if_shared()  # noqa: GS026 - the check must run at import.
 
 __all__ = [
     "CHECKPOINTS",

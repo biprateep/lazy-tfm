@@ -75,6 +75,8 @@ The first release. Everything below is new.
   ported key/value cache (`kv_cache`, default on) runs the context through the
   network once, at fit. `ContextSizeWarning` above 20,000 unbagged context
   rows. Built with StableAI LimiX.
+- An `ImportNameWarning` at `import lazy` when the unrelated PyPI package
+  `lazy`, which installs the same import name, is in the environment too.
 - Features may be given as NumPy arrays, structured or record arrays, pandas
   DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
   are `NaN` and pass through to each model's own handling; infinities and

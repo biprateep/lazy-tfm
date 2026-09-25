@@ -16,6 +16,23 @@ With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[tabpfn]'` in a
 project or `uv pip install` in an environment. The wheel is pure Python, so it
 installs the same way on Linux, macOS and Windows.
 
+## One `lazy` per environment
+
+The package is installed as `lazy-tfm` and imported as `lazy`. An unrelated
+PyPI package, [`lazy`](https://pypi.org/project/lazy/) (lazy attributes for
+Python objects), also installs a top-level `lazy`, and two packages cannot
+share an import name in one environment: the one installed last overwrites
+the other's files. Aliasing the import (`import lazy as lz`) does not help,
+since there is only one `lazy` on disk. If both are installed, `import lazy`
+raises an `ImportNameWarning`, or, when the other package was installed
+last, `lazy.LazyModel` does not exist at all. Either way, use an environment
+without the other package:
+
+```console
+pip uninstall lazy lazy-tfm
+pip install lazy-tfm
+```
+
 ## PyTorch and GPUs
 
 The backends run on PyTorch, which the extras pull in. The default PyTorch
