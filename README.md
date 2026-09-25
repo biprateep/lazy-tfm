@@ -1,7 +1,10 @@
 # LAZY
 
-**L**azy but **A**ccurate photo-**Z** for **Y**inz — photometric redshift PDFs
-from pretrained tabular foundation models.
+**L**azy but **A**ccurate ***z***\* for **Y**inz — full conditional distributions
+of a continuous target from pretrained tabular foundation models.
+
+\*where *z* is whatever you want to predict from tabular features: a
+redshift, a metallicity, a mass, a yield.
 
 [![PyPI](https://img.shields.io/pypi/v/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
 [![Python](https://img.shields.io/pypi/pyversions/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
@@ -9,9 +12,14 @@ from pretrained tabular foundation models.
 [![Documentation](https://readthedocs.org/projects/lazy-tfm/badge/?version=latest)](https://lazy-tfm.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The models are pretrained and never fine-tuned. You hand them labelled galaxies
-as *context* and they answer queries in one forward pass — no training loop, no
-hyper-parameter search, no per-survey retraining. Hence lazy.
+The models are pretrained and never fine-tuned. You hand them labelled rows as
+*context* and they answer queries in one forward pass — no training loop, no
+hyper-parameter search, no per-dataset retraining. Hence lazy.
+
+The package grew out of photometric redshifts, so its worked examples and
+benchmark tools (the LSST DESC DC1 catalogue, the HSC spectroscopic selection,
+the Data Challenge metrics) are photo-z's; the estimators work on any tabular
+regression problem.
 
 > **Pre-release.** The API is still moving and the paper numbers are not final.
 > Pin a version if you depend on this.
@@ -60,13 +68,13 @@ print(model.evaluate(X_test, test.redshift))
 `LazyModel(name, ...)` picks the backend by name, so switching is a string
 change; the concrete classes (`TabPFNBarDistribution`, `LimiXBarDistribution`,
 `TabICLQuantile`, `TabFMHistogram`) are importable and identical. The API is scikit-learn's, except `predict_proba` returns a
-density on a redshift grid rather than class probabilities — that is the natural
-output of a photo-z model. `get_params`/`set_params`/`clone` work, so models drop
+density on a grid of the target rather than class probabilities — the natural
+output of a model that knows its own uncertainty. `get_params`/`set_params`/`clone` work, so models drop
 into scikit-learn pipelines and search objects unmodified.
 
 **`z_grid` belongs to the prediction, not the fit.** Nothing about fitting
 depends on the output binning — these models place their internal bins by the
-quantiles of the context redshifts, and the grid only enters at the final exact
+distribution of the context targets, and the grid only enters at the final exact
 rebinning step — so one fitted model answers on as many grids as you like
 without refitting:
 
@@ -87,7 +95,7 @@ LSST DESC's qp, and `.to_qp()` for RAIL.
 | `tabpfn` | Bucket masses of the bar distribution | `v2` … `v3.5` | 41 MB – 880 MB |
 | `limix`  | Bucket masses of LimiX-2's 5,000-bucket head | `v2` | ~1.6 GB |
 | `tabicl` | Quantiles of an in-context regression head | `v2` | ~100 MB |
-| `tabfm`  | Hierarchy of in-context classifiers over equal-mass redshift bins | `v1.0` | ~6.6 GB  |
+| `tabfm`  | Hierarchy of in-context classifiers over equal-mass bins of the target | `v1.0` | ~6.6 GB  |
 
 **One set of parameters, on every model.** `kv_cache` (process the context
 once, at fit; exact; on by default), `n_estimators`, `feature_shuffle`,
@@ -109,7 +117,7 @@ query row's answer never depends on which other query rows share its chunk
 but has no KV-cache API: every chunk of query rows re-encodes the whole training
 context, about **13.7 ms per member-row against 0.53 ms** on the cached path,
 roughly **26× the compute** for identical answers. For anything beyond a few
-thousand galaxies, install the repository build as well:
+thousand query rows, install the repository build as well:
 
 ```bash
 pip install 'lazy-tfm[tabfm]'
@@ -156,13 +164,13 @@ model's loop actually iterates over. For 20,000 DC1 test galaxies on a
 1,000-galaxy context (one GB10 GPU):
 
 ```
-TabPFN v3.5: 100%|██████████| 20000/20000 [00:15<00:00, 1279.46gal/s, buckets=5000, context=1000]
-TabICL v2: 100%|██████████| 20000/20000 [00:10<00:00, 1968.82gal/s, context=1000, quantiles=999]
-TabFM v1.0 (20,000 gal): 100%|██████████| 33/33 [08:47<00:00, 16.00s/stage, context=34, dither=3/3, level=fine 10/10]
+TabPFN v3.5: 100%|██████████| 20000/20000 [00:15<00:00, 1279.46row/s, buckets=5000, context=1000]
+TabICL v2: 100%|██████████| 20000/20000 [00:10<00:00, 1968.82row/s, context=1000, quantiles=999]
+TabFM v1.0 (20,000 rows): 100%|██████████| 33/33 [08:47<00:00, 16.00s/stage, context=34, dither=3/3, level=fine 10/10]
 ```
 
-TabPFN and TabICL answer in chunks of query rows, so their bars count
-galaxies. TabFM is a hierarchy of in-context classifications, each over every
+TabPFN, LimiX and TabICL answer in chunks of query rows, so their bars count
+rows. TabFM is a hierarchy of in-context classifications, each over every
 query row, so its bar counts *stages* — `n_dither × (1 + n_coarse_bins)` of
 them — and shows which dither and level is running on how many context rows.
 

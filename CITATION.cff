@@ -4,10 +4,11 @@ cff-version: 1.2.0
 message: >-
   If you use lazy-tfm, please cite it, and the pretrained checkpoints you
   used: a fitted model's provenance_ records exactly which ones.
-title: "LAZY: Lazy but Accurate photo-Z for Yinz"
+title: "LAZY: Lazy but Accurate z for Yinz"
 abstract: >-
-  Photometric redshift probability densities from pretrained tabular
-  foundation models, behind the scikit-learn API.
+  Conditional probability distributions of a continuous target (a redshift,
+  a metallicity, any z) from pretrained tabular foundation models, behind
+  the scikit-learn API.
 type: software
 authors:
   - family-names: Dey

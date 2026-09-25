@@ -7,8 +7,8 @@ readme = "README.md"
 authors = [
     { name = "Biprateep Dey", email = "biprateep@pitt.edu" },
 ]
-description = "Lazy but Accurate photo-Z for Yinz"
-keywords = ["photometric redshift", "astronomy", "foundation model", "tabular", "LSST"]
+description = "Lazy but Accurate z for Yinz: conditional distributions from tabular foundation models"
+keywords = ["foundation model", "tabular", "in-context learning", "probabilistic regression", "conditional density estimation", "photometric redshift", "astronomy"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

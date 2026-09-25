@@ -50,7 +50,7 @@ raises an error on a machine without one, rather than quietly running on CPU.
 
 TabFM's PyPI release works, but it has no KV-cache API, so every chunk of query
 rows re-encodes the whole training context: about 26 times the compute of the
-cached path, for identical answers. For more than a few thousand galaxies,
+cached path, for identical answers. For more than a few thousand query rows,
 install the repository build as well:
 
 ```console

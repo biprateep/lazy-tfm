@@ -5,7 +5,7 @@
 | `tabpfn` | Bucket masses of TabPFN's bar distribution.                                | 41 MB – 880 MB |
 | `limix`  | Bucket masses of LimiX-2's 5,000-bucket head.                              | ~1.6 GB        |
 | `tabicl` | Quantiles of TabICLv2's regression head.                                   | ~100 MB        |
-| `tabfm`  | A hierarchy of TabFM in-context classifiers over equal-mass redshift bins. | ~6.6 GB        |
+| `tabfm`  | A hierarchy of TabFM in-context classifiers over equal-mass bins of the target. | ~6.6 GB        |
 
 `LazyModel("tabpfn", ...)` and the concrete classes
 ({class}`~lazy.models.tabpfn.TabPFNBarDistribution`,
@@ -124,7 +124,7 @@ pip install "lazy-tfm[limix]"
 
 or point `$LAZY_LIMIX_SRC` at a checkout. `lazy` loads two parts of it under
 private module names and runs LimiX-2's network directly, with three changes
-that make a galaxy's answer independent of which other galaxies share its
+that make a row's answer independent of which other rows share its
 chunk: each member's preprocessing is fitted on the context alone (upstream
 fits one step on context and queries together), the feature positional
 embedding has its own random generator (upstream draws it from the global one
@@ -178,8 +178,8 @@ the only one whose weights allow commercial use.
 
 Peak memory is bounded by `chunk_size` on every backend, except on TabFM's
 streaming path, where `query_block_rows` and `decode_chunk_rows` do the same
-job. Chunking is exact: a galaxy's answer never depends on which other
-galaxies share its chunk, bit for bit on TabPFN and TabICL and to float
+job. Chunking is exact: a row's answer never depends on which other
+rows share its chunk, bit for bit on TabPFN and TabICL and to float
 rounding on LimiX-2. Lower `chunk_size` on a small GPU; set it to `0` for a
 single pass.
 

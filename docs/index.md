@@ -1,11 +1,15 @@
 # LAZY
 
-**Lazy but Accurate photo-Z for Yinz**: photometric redshift probability
-densities from pretrained tabular foundation models.
+**Lazy but Accurate *z*\* for Yinz**: full conditional distributions of a
+continuous target from pretrained tabular foundation models.
 
-The models are never fine-tuned. You hand them labelled galaxies as *context*
-and they answer queries in one forward pass, so there is no training loop, no
-hyper-parameter search and no per-survey retraining. Hence lazy.
+\*where *z* is whatever you want to predict from tabular features: a redshift,
+a metallicity, a mass, a yield.
+
+The models are never fine-tuned. You hand them labelled rows as *context* and
+they answer queries in one forward pass, so there is no training loop, no
+hyper-parameter search and no per-dataset retraining. Hence lazy. The examples
+use photometric redshifts, where the package began.
 
 ```{warning}
 Pre-release. The API is still moving and the numbers in the paper are not
@@ -24,9 +28,8 @@ pdfs = model.predict_proba(X_test)            # densities on its native grid
 print(model.evaluate(X_test, test.redshift))  # the full metric table
 ```
 
-The API is scikit-learn's, with `predict_proba` returning a density on a
-redshift grid rather than class probabilities, because that is the natural
-output of a photo-z model.
+The API is scikit-learn's, with `predict_proba` returning a density on a grid
+of the target rather than class probabilities.
 
 ::::{grid} 1 1 2 2
 :gutter: 3

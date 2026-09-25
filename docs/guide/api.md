@@ -1,9 +1,9 @@
 # The estimator API
 
-It is scikit-learn's, with one difference. A photo-z model's natural output is a
+It is scikit-learn's, with one difference. These models' natural output is a
 distribution rather than a number, so
 {meth}`~lazy.base.BaseDensityRegressor.predict_proba` returns a density on a
-redshift grid rather than class probabilities, and `predict` is a documented
+grid of the target rather than class probabilities, and `predict` is a documented
 reduction of it:
 
 | Method                              | Returns                                                     |
@@ -13,8 +13,8 @@ reduction of it:
 | `predict_pdf(X, z_grid)`            | The same; an alias for when "pdf" reads better.             |
 | `predict_cdf(X, z_grid)`            | The cumulative distributions.                               |
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
-| `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` redshifts, exact.                |
-| `predict(X, method="z_peak")`       | One redshift per row: `z_peak`, `z_weight`, `z_mean` or `z_median`. |
+| `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                |
+| `predict(X, method="z_peak")`       | One value per row: `z_peak`, `z_weight`, `z_mean` or `z_median`. |
 | `score(X, y)`                       | Negative CDE loss, so higher is better.                     |
 | `evaluate(X, y)`                    | A one-row table of every diagnostic metric.                 |
 
@@ -38,7 +38,7 @@ used by position with a warning).
 Mark missing values with `NaN`; masked entries of an astropy table or masked
 array become `NaN` too. Each model handles them its own way: TabPFN and LimiX
 add missing-value indicators, TabICL and TabFM impute inside their
-preprocessing. Infinities and non-numeric columns are rejected. Redshifts must
+preprocessing. Infinities and non-numeric columns are rejected. Target values must
 be finite.
 
 ## Distributions, quantiles and densities
@@ -51,14 +51,14 @@ in a {mod}`lazy.distributions` object whose methods follow scipy.stats and
 LSST DESC's [qp](https://github.com/LSSTDESC/qp):
 
 ```python
-dist = model.predict_distribution(X_test)   # one per galaxy
-dist.pdf(z)            # densities at any redshifts
+dist = model.predict_distribution(X_test)   # one per row
+dist.pdf(z)            # densities at any values of z
 dist.cdf(z)            # cumulative probabilities
 dist.ppf([0.16, 0.5, 0.84])                # quantiles, exact
 dist.mean(), dist.median(), dist.mode(), dist.std()
 dist.interval(0.68)    # central credible interval
 dist.rvs(100, random_state=0)              # samples
-dist[:10]              # the first ten galaxies
+dist[:10]              # the first ten rows
 ensemble = dist.to_qp()   # a qp.Ensemble, for RAIL (the qp extra)
 ```
 
@@ -73,7 +73,7 @@ through a grid.
 ## The grid belongs to the prediction
 
 Nothing about fitting depends on the output binning: the models place their
-internal bins by the distribution of the *context* redshifts, and a grid only
+internal bins by the distribution of the *context* targets, and a grid only
 enters at the final, exact integration of the distribution over its bins. So
 one fitted model answers on as many grids as you like, without refitting:
 
@@ -96,7 +96,7 @@ loses nothing:
 | -------- | ------------------------------------------------------------------- |
 | `tabpfn` | The bar distribution's buckets, in full (5,000 on v3).               |
 | `limix`  | LimiX-2's 5,000 buckets, mapped with the context's mean and spread. |
-| `tabicl` | 1,000 equal bins over the context redshifts, padded by 2%.          |
+| `tabicl` | 1,000 equal bins over the context targets, padded by 2%.          |
 | `tabfm`  | The union of every shifted copy's bin edges.                        |
 
 Native bucket grids reach far into both tails, below zero included, because
@@ -125,7 +125,7 @@ exactly, and `score`, `evaluate` and `point_estimates` pass it for you.
 
 ```{note}
 Probability outside the grid is dropped and each density renormalised. If your
-galaxies reach beyond a grid, pass one that covers them.
+targets reach beyond a grid, pass one that covers them.
 ```
 
 ## Point estimates
