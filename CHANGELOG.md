@@ -40,6 +40,16 @@ The first release. Everything below is new.
   `summarize`, `grid_point_estimates`, ...) take `bin_edges=` to score such
   grids exactly, and estimators use it automatically. Existing grids keep the
   trapezoid (DC1) convention, byte for byte.
+- A uniform feature layer for every foundation-model backend
+  (`lazy.models.ContextEnsembleEstimator`): the same parameters mean the same
+  thing on every model -- `kv_cache`, `n_estimators`, `feature_shuffle`,
+  `transforms` (a shared vocabulary: `none`, `power`, `quantile`,
+  `quantile_uniform`, `quantile_rtdl`, `robust`, each optionally
+  `+original`, plus recipes such as `"limix"`; `"auto"` keeps each model's
+  own), and `bag_size` (per-member row subsets) -- translated to each model's
+  own machinery where it has it and scaffolded where it does not. The default
+  output grid is the model's native grid. `ContextSizeWarning` when a context
+  exceeds what a model handles without bagging.
 - `predict_distribution(X)` (the model's native distributions) and
   `predict_quantiles(X, quantiles)` (exact, from the native distribution) on
   every estimator; `z_grid="native"` asks a model for its own grid.

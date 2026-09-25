@@ -67,6 +67,7 @@ from lazy.grid import as_grid
 from lazy.grid import DC1_GRID
 from lazy.grid import RedshiftGrid
 from lazy.models import CHECKPOINTS
+from lazy.models import ContextSizeWarning
 from lazy.models import DEFAULT_VERSIONS
 from lazy.models import download_checkpoint
 from lazy.models import ESTIMATORS
@@ -76,6 +77,7 @@ from lazy.models import is_cached
 from lazy.models import LazyModel
 from lazy.models import list_estimators
 from lazy.models import list_versions
+from lazy.models import PerformanceWarning
 from lazy.models import TabFMHistogram
 from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
@@ -92,7 +94,9 @@ __all__ = [
     "ESTIMATORS",
     "POINT_ESTIMATORS",
     "BasePhotoZEstimator",
+    "ContextSizeWarning",
     "LazyModel",
+    "PerformanceWarning",
     "RedshiftGrid",
     "TabFMHistogram",
     "TabICLQuantile",

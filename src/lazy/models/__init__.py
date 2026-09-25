@@ -21,6 +21,9 @@ the first prediction and cached from then on (:func:`download_checkpoint`).
 # This file's imports re-export the public API by name; that is its purpose.
 # ruff: noqa: GS001
 
+from lazy.models._ensemble import ContextEnsembleEstimator
+from lazy.models._ensemble import ContextSizeWarning
+from lazy.models._ensemble import PerformanceWarning
 from lazy.models._hub import CHECKPOINTS
 from lazy.models._hub import DEFAULT_VERSIONS
 from lazy.models._hub import download_checkpoint
@@ -39,7 +42,10 @@ __all__ = [
     "CHECKPOINTS",
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
+    "ContextEnsembleEstimator",
+    "ContextSizeWarning",
     "LazyModel",
+    "PerformanceWarning",
     "TabFMHistogram",
     "TabICLQuantile",
     "TabPFNBarDistribution",
