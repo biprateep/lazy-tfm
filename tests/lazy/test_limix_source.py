@@ -61,11 +61,12 @@ def test_a_directory_without_the_code_is_refused(clean_env, tmp_path):
         _limix_source.locate()
 
 
-def test_no_source_says_how_to_install_it(clean_env):
-    def missing(name):
-        raise metadata.PackageNotFoundError(name)
+def _not_installed(name):
+    raise metadata.PackageNotFoundError(name)
 
-    clean_env.setattr(_limix_source.metadata, "distribution", missing)
+
+def test_no_source_says_how_to_install_it(clean_env):
+    clean_env.setattr(_limix_source.metadata, "distribution", _not_installed)
     with pytest.raises(ImportError, match=r"lazy-photoz\[limix\]"):
         _limix_source.locate()
 
