@@ -59,7 +59,11 @@ class LazyModel(base.BaseDensityRegressor):
     objects work with no prefix: ``GridSearchCV(model, {"n_dither": [1, 3]})``.
 
     Args:
-        model: Which backend to use; one of :func:`lazy.list_estimators`.
+        model: Which backend to use; one of :func:`lazy.list_estimators`,
+            by default ``"tabpfn"`` (at its default version, TabPFN-3.5).
+            Most backends want a GPU: on a machine where PyTorch sees none,
+            ``device="auto"`` falls back to the CPU and ``fit`` warns unless
+            the backend is CPU-friendly (``"tabicl"``).
             ``"tabfm"`` builds the density from a hierarchy of in-context
             classifiers, ``"tabicl"`` from a quantile regression head,
             ``"tabpfn"`` and ``"limix"`` from the bucket masses TabPFN and
@@ -95,7 +99,7 @@ class LazyModel(base.BaseDensityRegressor):
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
-        model: str = "tabfm",
+        model: str = "tabpfn",
         *,
         z_grid: grid_lib.GridLike = None,
         **params: Any,

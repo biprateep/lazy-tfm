@@ -12,7 +12,7 @@ Revisions are pinned. A foundation model's weights are part of the method, so
 an unpinned checkpoint would silently change published numbers.
 
 A backbone is not one model but a family of them, so a checkpoint is named by
-*backend and version* -- ``"tabpfn:v3"``, not ``"tabpfn"`` -- in the version
+*backend and version* -- ``"tabpfn:v3.5"``, not ``"tabpfn"`` -- in the version
 string upstream itself uses. Every estimator takes that version as an ordinary
 parameter, defaulting to the one in :data:`DEFAULT_VERSIONS`, and records what
 it actually loaded in its ``provenance_`` (:meth:`Checkpoint.provenance`).
@@ -83,7 +83,7 @@ class Checkpoint:
 
         Examples:
             >>> get_checkpoint("tabpfn").key
-            'tabpfn:v3'
+            'tabpfn:v3.5'
         """
         return f"{self.backend}:{self.version}"
 
@@ -338,7 +338,7 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "limix": "v2",
     "tabfm": "v1.0",
     "tabicl": "v2",
-    "tabpfn": "v3",
+    "tabpfn": "v3.5",
 }
 
 
@@ -361,7 +361,7 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
 
     Examples:
         >>> get_checkpoint("tabpfn").version
-        'v3'
+        'v3.5'
         >>> get_checkpoint("tabpfn:v2.5").repo_id
         'Prior-Labs/tabpfn_2_5'
     """
