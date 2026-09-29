@@ -17,6 +17,8 @@ Typical usage example:
 # ruff: noqa: GS004
 
 from importlib import metadata
+import pathlib
+import subprocess
 from typing import Any
 
 from sphinx import application
@@ -38,15 +40,60 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
-exclude_patterns = ["_build", "**.ipynb_checkpoints"]
+exclude_patterns = ["_build", "build", "**.ipynb_checkpoints"]
 root_doc = "index"
 
 # -- MyST and notebooks ------------------------------------------------------
-myst_enable_extensions = ["colon_fence", "deflist"]
+myst_enable_extensions = ["colon_fence", "deflist", "dollarmath"]
 myst_heading_anchors = 3
-# Notebooks will be committed with their outputs (they need a GPU), so the docs
-# build never executes them.
+# The tutorials need a GPU, so the docs build never executes them. main tracks
+# their py:percent source; the executed notebooks, outputs included, live on
+# the orphan branch `tutorials` (docs/tutorials/execute.sh writes them), and
+# are fetched from there when the working tree has none.
 nb_execution_mode = "off"
+TUTORIALS = pathlib.Path(__file__).parent / "tutorials"
+TUTORIALS_BRANCH = "tutorials"
+
+
+def _fetch_tutorials() -> None:
+    """Writes each tutorial's executed notebook from the ``tutorials`` branch.
+
+    A notebook already in the working tree (a fresh ``execute.sh`` run) is
+    kept, so a local build shows the local outputs.
+
+    Raises:
+        RuntimeError: If a notebook is neither present nor on the branch.
+    """
+    missing = [
+        script.with_suffix(".ipynb")
+        for script in sorted(TUTORIALS.glob("*.py"))
+        if not script.with_suffix(".ipynb").exists()
+    ]
+    if not missing:
+        return
+    git = ["git", "-C", str(TUTORIALS)]
+    fetch = subprocess.run(
+        [*git, "fetch", "--quiet", "--depth=1", "origin", TUTORIALS_BRANCH],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode:
+        raise RuntimeError(
+            f"cannot fetch the executed tutorials from the {TUTORIALS_BRANCH!r}"
+            f" branch: {fetch.stderr.strip()}"
+        )
+    for notebook in missing:
+        notebook.write_bytes(
+            subprocess.run(
+                [*git, "show", f"FETCH_HEAD:{notebook.name}"],
+                capture_output=True,
+                check=True,
+            ).stdout
+        )
+
+
+_fetch_tutorials()
 
 # -- API reference -------------------------------------------------------------
 autoapi_type = "python"
@@ -122,5 +169,27 @@ def _skip_public_reexports(  # Sphinx's event signature.
     return skip
 
 
+def _edit_tutorial_source(  # Sphinx's event signature.
+    app: application.Sphinx,  # noqa: ARG001
+    pagename: str,
+    templatename: str,  # noqa: ARG001
+    context: dict[str, Any],
+    doctree: object,  # noqa: ARG001
+) -> None:
+    """Points a tutorial's "Edit on GitHub" link at its py:percent source.
+
+    The page is built from the executed notebook, which is not on main.
+    """
+    if pagename.startswith("tutorials/"):
+        context["meta"] = {
+            **(context.get("meta") or {}),
+            "github_url": (
+                "https://github.com/biprateep/lazy-tfm/blob/main/docs/"
+                f"{pagename}.py"
+            ),
+        }
+
+
 def setup(app: application.Sphinx) -> None:  # noqa: D103 - Sphinx's extension hook.
     app.connect("autoapi-skip-member", _skip_public_reexports)
+    app.connect("html-page-context", _edit_tutorial_source)

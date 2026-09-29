@@ -46,6 +46,12 @@ pip or uv, the optional backends, checkpoints and their licences.
 From a catalogue to densities, point estimates and metrics.
 :::
 
+:::{grid-item-card} Tutorial
+:link: tutorials/introduction
+:link-type: doc
+A notebook to run on Colab: photo-z PDFs, their quality, and two models compared.
+:::
+
 :::{grid-item-card} User guide
 :link: guide/index
 :link-type: doc
@@ -65,6 +71,7 @@ Every public class and function, from the docstrings.
 
 installation
 quickstart
+Tutorial <tutorials/introduction>
 guide/index
 API reference <autoapi/lazy/index>
 changelog

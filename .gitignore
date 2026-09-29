@@ -39,3 +39,7 @@ data/
 # The paper's production code and results are a separate repository, checked
 # out beside this one; this repository is the installable package only.
 paper/
+
+# Executed tutorials. main tracks their py:percent source; the notebooks,
+# outputs included, live on the orphan branch `tutorials` (docs/conf.py).
+docs/tutorials/*.ipynb

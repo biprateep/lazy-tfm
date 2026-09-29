@@ -99,7 +99,7 @@ docs = [
     "sphinx-autoapi>=3",
     "sphinx-copybutton>=0.5",
     "sphinx-design>=0.6",
-    "myst-nb>=1.1", # MyST Markdown pages, and the notebooks once there are tutorials
+    "myst-nb>=1.1", # MyST Markdown pages and the tutorial notebooks
     "sphinx-rtd-theme>=3",
 ]
 
@@ -206,6 +206,8 @@ dummy-variable-rgx = "^(_|unused_.*|dummy_.*)$"
 # may read protected members, need no annotations, and take pytest fixtures
 # that the body never names.
 "tests/**" = ["D101", "D102", "D103", "D107", "ANN", "SLF001", "ARG"]
+# A notebook cell shows its last expression, so a bare one is the point.
+"docs/tutorials/**" = ["B018"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"  # §3.8: Args:, Returns:, Raises:

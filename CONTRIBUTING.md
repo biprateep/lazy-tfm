@@ -66,7 +66,28 @@ uv run sphinx-build -W -b html docs docs/_build/html
 ```
 
 The API reference is generated from the docstrings, which follow the Google
-style (rendered by napoleon). Add a line to `CHANGELOG.md`, under `[Unreleased]`, for every
+style (rendered by napoleon).
+
+### Tutorials
+
+Tutorials are py:percent scripts in `docs/tutorials/`, and main tracks only
+those. They need a GPU, so neither CI nor Read the Docs runs them: the executed
+notebooks, with their outputs and figures, live on the orphan branch
+`tutorials`, where the docs build fetches them and the Colab and GitHub buttons
+open them. That keeps megabytes of images out of main's history. After
+changing a tutorial, re-execute it on a GPU machine and commit the notebook to
+that branch:
+
+```bash
+docs/tutorials/execute.sh introduction   # writes docs/tutorials/introduction.ipynb (git-ignored)
+git worktree add ../lazy-tutorials tutorials
+cp docs/tutorials/introduction.ipynb ../lazy-tutorials/
+git -C ../lazy-tutorials commit -am "Re-execute the introduction"
+git push origin tutorials
+```
+
+A local docs build uses the notebook in `docs/tutorials/` if there is one, and
+fetches it from the branch otherwise. Add a line to `CHANGELOG.md`, under `[Unreleased]`, for every
 user-visible change.
 
 ## Making a release

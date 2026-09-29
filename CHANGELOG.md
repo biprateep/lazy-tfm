@@ -81,6 +81,8 @@ The first release. Everything below is new.
   DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
   are `NaN` and pass through to each model's own handling; infinities and
   non-numeric columns are rejected with the offending columns named.
+- An introductory tutorial notebook, rendered in the docs with buttons to open
+  it in Colab or on GitHub. Its executed copy lives on the `tutorials` branch.
 - A **Supported models** page in the docs: each model's weights, parameter
   count, licence, measured cost on GPU and CPU, and hardware needs.
 - `lazy.PerformanceWarning` at `fit` when `device="auto"` finds no GPU for a
