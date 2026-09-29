@@ -347,6 +347,19 @@ def test_a_scaffold_is_fitted_on_its_groups_context_rows(data):
         )
 
 
+@pytest.mark.parametrize("fill", [np.nan, 2.0], ids=["all_nan", "constant"])
+def test_the_power_scaffold_passes_a_column_without_spread_through(fill):
+    X = np.random.default_rng(0).normal(size=(50, 3))
+    X[:, 1] = fill
+    spec = _transforms.TransformSpec("power", original=True)
+    transform = _transforms.ScaffoldTransform(spec, seed=0).fit(X)
+    out = transform.transform(X)
+    assert out.shape == (50, 6)
+    np.testing.assert_array_equal(out[:, 1], X[:, 1])
+    np.testing.assert_allclose(out[:, [0, 2]].mean(axis=0), 0.0, atol=1e-12)
+    np.testing.assert_array_equal(out[:, 3:], X)
+
+
 def test_missing_values_reach_the_model(data):
     X, z, X_test = data
     X = X.copy()
