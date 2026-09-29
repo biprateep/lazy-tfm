@@ -185,6 +185,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         try:
             import torch  # noqa: PLC0415, F401 - an optional, heavy extra.
         except ImportError as error:
+            if (error.name or "").partition(".")[0] != "torch":
+                raise  # torch is there but broken: its own error says how.
             raise _limix_source.missing_dependency("torch") from error
         return _limix_source.load().loading
 

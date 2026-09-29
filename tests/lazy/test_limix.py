@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Biprateep Dey
 """LimiXBarDistribution: what the uniform conformance suite does not cover."""
 
+import builtins
 import os
 import pathlib
 import pickle
@@ -313,3 +314,18 @@ def test_fitting_a_target_with_a_tiny_spread_says_to_centre_it(data):
     X, z, _ = data
     with pytest.raises(ValueError, match="Centre or rescale"):
         _model().fit(X, 1e10 + 1e-5 * z)
+
+
+def test_a_broken_torch_install_is_not_reworded(monkeypatch, data):
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "torch":
+            raise ImportError("libtorch_cuda.so: cannot open", name="_C")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    X, z, _ = data
+    with pytest.raises(ImportError, match="libtorch_cuda") as caught:
+        _model().fit(X, z)
+    assert "lazy-tfm" not in str(caught.value)
