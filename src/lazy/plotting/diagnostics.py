@@ -14,7 +14,13 @@ rcParams::
     from lazy import plotting
 
     plotting.use_style()
-    fig = plotting.diagnostic_panel(z_true, grid.centers, pdfs)
+    fig = plotting.diagnostic_panel(z_true, est.grid_, pdfs)
+
+The PDF plots take the grid the densities are on: a
+:class:`lazy.grid.Grid`, which says how they integrate (a
+``"histogram"`` grid, such as a model's native one, holds each density
+constant across its bin), or bare, uniformly spaced bin centres, read by the
+trapezoid rule, with ``bin_edges=`` to mark them as histograms.
 
 Two families of diagnostic, and they answer different questions:
 
@@ -57,6 +63,13 @@ __all__ = [
 ]
 
 _OUTLIER_FLOOR = 0.06
+# The share of stacked PDF mass left outside the x-axis at each end.
+_TAIL_MASS = 1e-3
+# How far the x-axis reaches past the truth and the central mass, as a share
+# of their span.
+_MARGIN = 0.02
+
+_GridLike = npt.ArrayLike | grid.Grid
 
 
 def _axes(ax: mpl_axes.Axes | None, **kwargs: Any) -> mpl_axes.Axes:
@@ -64,6 +77,103 @@ def _axes(ax: mpl_axes.Axes | None, **kwargs: Any) -> mpl_axes.Axes:
     if ax is not None:
         return ax
     return plt.subplots(figsize=style.figsize(**kwargs))[1]
+
+
+def _geometry(
+    z_grid: _GridLike, bin_edges: npt.ArrayLike | None
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
+    """The grid's centres, and its bin edges if its densities are histograms.
+
+    Args:
+        z_grid: A :class:`lazy.grid.Grid`, or bin centres, shape (g,).
+        bin_edges: The edges of histogram densities on centres, shape
+            (g + 1,), or None.
+
+    Returns:
+        A tuple (centres, edges): centres shape (g,), and the histogram
+        edges, shape (g + 1,), or None for trapezoid densities.
+
+    Raises:
+        ValueError: If both a Grid and ``bin_edges`` are given, the edges
+            do not fit the centres, or bare centres are not uniformly
+            spaced, which leaves their bins unknown.
+    """
+    if isinstance(z_grid, grid.Grid):
+        if bin_edges is not None:
+            raise ValueError(
+                "pass either a Grid or bin_edges, not both: the Grid "
+                "carries its own edges"
+            )
+        return z_grid.centers, z_grid.histogram_edges
+    centers = np.asarray(z_grid, dtype=float)
+    if bin_edges is not None:
+        edges = np.asarray(bin_edges, dtype=float)
+        if edges.shape != (centers.size + 1,):
+            raise ValueError(
+                f"bin_edges must have one more value than z_grid: "
+                f"{edges.shape=}, {centers.shape=}"
+            )
+        return centers, edges
+    spacing = np.diff(centers)
+    if spacing.size and not np.allclose(spacing, spacing[0], rtol=1e-6):
+        raise ValueError(
+            "z_grid's centres are not uniformly spaced, so their bins "
+            "cannot be told from them: pass the lazy.grid.Grid the PDFs are "
+            "on (e.g. est.grid_) or bin_edges="
+        )
+    return centers, None
+
+
+def _stairs_or_line(
+    ax: mpl_axes.Axes,
+    centers: npt.NDArray[np.float64],
+    edges: npt.NDArray[np.float64] | None,
+    values: npt.NDArray[np.float64],
+    **kwargs: Any,
+) -> None:
+    """Draws densities as steps on histogram bins, else as a line."""
+    if edges is None:
+        ax.plot(centers, values, **kwargs)
+    else:
+        ax.stairs(values, edges, **kwargs)
+
+
+def _central_range(
+    centers: npt.NDArray[np.float64],
+    edges: npt.NDArray[np.float64] | None,
+    density: npt.NDArray[np.float64],
+    truth: npt.NDArray[np.float64] | None = None,
+) -> tuple[float, float]:
+    """The x-range holding the central mass of a density, and the truth.
+
+    Args:
+        centers: Bin centres, shape (g,).
+        edges: Histogram edges, shape (g + 1,), or None for trapezoid.
+        density: A normalised density on the grid, shape (g,).
+        truth: True values to keep in view, or None.
+
+    Returns:
+        A tuple (lo, hi): from the density's 0.1st to 99.9th mass
+        percentiles, widened to the finite truth and by a small margin, and
+        clipped to the grid.
+    """
+    if edges is None:
+        where = centers
+        cdf = metrics.grid_cdf(centers, density[None, :])[0]
+    else:
+        where = edges
+        cdf = np.concatenate([[0.0], np.cumsum(density * np.diff(edges))])
+    lo_grid, hi_grid = float(where[0]), float(where[-1])
+    if not cdf[-1] > 0:
+        return lo_grid, hi_grid
+    cdf = cdf / cdf[-1]
+    lo = float(np.interp(_TAIL_MASS, cdf, where))
+    hi = float(np.interp(1.0 - _TAIL_MASS, cdf, where))
+    if truth is not None and np.isfinite(truth).any():
+        lo = min(lo, float(np.nanmin(truth)))
+        hi = max(hi, float(np.nanmax(truth)))
+    margin = _MARGIN * (hi - lo)
+    return max(lo - margin, lo_grid), min(hi + margin, hi_grid)
 
 
 def plot_zphot_ztrue(
@@ -297,50 +407,68 @@ def plot_coverage(
 
 
 def plot_nz(
-    z_grid: npt.ArrayLike,
+    z_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
     z_true: npt.ArrayLike | None = None,
     ax: mpl_axes.Axes | None = None,
     label: str | None = "stacked PDFs",
     truth_label: str | None = "truth",
+    bin_edges: npt.ArrayLike | None = None,
+    truth_bins: int | str | npt.ArrayLike = "auto",
     **kwargs: Any,
 ) -> mpl_axes.Axes:
     """Plots the sample distribution of the target: stacked PDFs against truth.
 
     Stacking is only an estimator of N(z) under assumptions that photo-z PDFs
     rarely satisfy exactly, but it is what most analyses do, so how badly it
-    fails is worth knowing.
+    fails is worth knowing. Each PDF is normalised by its grid's own rule
+    before stacking, and the x-axis spans the truth and the central 99.8% of
+    the stacked mass, not the whole grid -- a model's native grid reaches far
+    into the tails.
 
     Args:
-        z_grid: Grid centres, shape (n_grid,).
+        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+            uniformly spaced bin centres, shape (n_grid,).
         pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
         z_true: True values, shape (n_objects,). If given, histogrammed
-            on the same grid for comparison.
+            on ``truth_bins`` for comparison.
         ax: The axes to draw into; a new column-width figure if None.
         label: Legend label of the stacked PDFs.
         truth_label: Legend label of the true histogram.
-        **kwargs: Passed to ``ax.plot`` for the stacked PDFs.
+        bin_edges: With bare centres, the bin edges of histogram densities,
+            shape (n_grid + 1,); see :func:`lazy.metrics.normalize_grid_pdfs`.
+        truth_bins: The true histogram's bins, as :func:`numpy.histogram`
+            takes them, over the finite true values.
+        **kwargs: Passed to ``ax.plot`` for the stacked PDFs, or to
+            ``ax.stairs`` on a histogram grid.
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If bare centres are not uniformly spaced; pass the Grid
+            or ``bin_edges``.
     """
-    z_grid = np.asarray(z_grid, dtype=float)
-    pdfs = np.asarray(pdfs, dtype=float)
+    centers, edges = _geometry(z_grid, bin_edges)
+    _, density = metrics.normalize_grid_pdfs(centers, pdfs, bin_edges=edges)
+    stacked = density.mean(axis=0)
     ax = _axes(ax, width="column", aspect="golden")
-    ax.plot(z_grid, pdfs.mean(axis=0), label=label, **kwargs)
+    _stairs_or_line(ax, centers, edges, stacked, label=label, **kwargs)
+    truth = None
     if z_true is not None:
-        edges = grid.Grid.from_centers(z_grid).edges
+        truth = np.asarray(z_true, dtype=float)
+        finite = truth[np.isfinite(truth)]
         ax.hist(
-            np.asarray(z_true, dtype=float),
-            bins=edges.tolist(),
+            finite,
+            bins=np.histogram_bin_edges(finite, bins=truth_bins).tolist(),
             density=True,
             histtype="step",
             color="k",
             lw=0.8,
             label=truth_label,
         )
-    ax.set_xlim(z_grid[0], z_grid[-1])
+    ax.set_xlim(*_central_range(centers, edges, stacked, truth))
     ax.set_ylim(bottom=0)
     ax.set_xlabel(r"$z$")
     ax.set_ylabel(r"$n(z)$")
@@ -348,7 +476,7 @@ def plot_nz(
 
 
 def plot_pdfs(
-    z_grid: npt.ArrayLike,
+    z_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
     z_true: npt.ArrayLike | None = None,
@@ -359,15 +487,18 @@ def plot_pdfs(
     | Sequence[mpl_axes.Axes]
     | npt.NDArray[np.object_]
     | None = None,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> npt.NDArray[np.object_]:
     """Plots a handful of individual PDFs, with their true values marked.
 
     Summary statistics hide multimodality; this is where you see it. By
     default ``n_objects`` objects are drawn at random (reproducibly), or pass
-    ``indices`` to pick them yourself.
+    ``indices`` to pick them yourself. The shared x-axis spans the drawn
+    objects' true values and the central 99.8% of each one's mass.
 
     Args:
-        z_grid: Grid centres, shape (n_grid,).
+        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+            uniformly spaced bin centres, shape (n_grid,).
         pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
         z_true: True values, shape (n_objects,), marked as dashed
             vertical lines if given.
@@ -376,11 +507,17 @@ def plot_pdfs(
         random_state: Seed of the random draw.
         axes: Axes to draw into, one per object; a new text-width grid of
             up to three columns if None. Spare axes are hidden.
+        bin_edges: With bare centres, the bin edges of histogram densities,
+            shape (n_grid + 1,), drawn as steps.
 
     Returns:
         The flattened array of axes.
+
+    Raises:
+        ValueError: If bare centres are not uniformly spaced; pass the Grid
+            or ``bin_edges``.
     """
-    z_grid = np.asarray(z_grid, dtype=float)
+    centers, edges = _geometry(z_grid, bin_edges)
     pdfs = np.asarray(pdfs, dtype=float)
     if indices is None:
         rng = np.random.default_rng(random_state)
@@ -399,16 +536,22 @@ def plot_pdfs(
             sharex=True,
         )
     axes_array = np.atleast_1d(np.asarray(axes, dtype=object)).ravel()
+    truth = None if z_true is None else np.asarray(z_true, dtype=float)
+    _, density = metrics.normalize_grid_pdfs(
+        centers, pdfs[indices], bin_edges=edges
+    )
+    ranges = [
+        _central_range(
+            centers, edges, row, None if truth is None else truth[[index]]
+        )
+        for row, index in zip(density, indices, strict=True)
+    ]
+    xlim = (min(lo for lo, _ in ranges), max(hi for _, hi in ranges))
     for ax, row in zip(axes_array, indices, strict=False):
-        ax.plot(z_grid, pdfs[row], color="C0")
-        if z_true is not None:
-            ax.axvline(
-                float(np.asarray(z_true, dtype=float)[row]),
-                color="k",
-                ls="--",
-                lw=0.8,
-            )
-        ax.set_xlim(z_grid[0], z_grid[-1])
+        _stairs_or_line(ax, centers, edges, pdfs[row], color="C0")
+        if truth is not None:
+            ax.axvline(float(truth[row]), color="k", ls="--", lw=0.8)
+        ax.set_xlim(*xlim)
         ax.set_ylim(bottom=0)
         ax.set_xlabel(r"$z$")
     for ax in axes_array[len(indices) :]:
@@ -418,11 +561,12 @@ def plot_pdfs(
 
 def diagnostic_panel(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
     point: str = "z_peak",
     label: str | None = None,
+    bin_edges: npt.ArrayLike | None = None,
 ) -> mpl_figure.Figure:
     """Draws the four-panel summary of one estimator.
 
@@ -432,19 +576,30 @@ def diagnostic_panel(
 
     Args:
         z_true: True values, shape (n_objects,).
-        z_grid: Grid centres, shape (n_grid,).
+        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+            uniformly spaced bin centres, shape (n_grid,). Point estimates
+            and PIT follow its normalisation, so a histogram grid's
+            densities are read as constant across their bins.
         pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
         point: Point estimate to use, a key of
             :func:`lazy.metrics.grid_point_estimates`.
         label: Legend label and figure title.
+        bin_edges: With bare centres, the bin edges of histogram densities,
+            shape (n_grid + 1,).
 
     Returns:
         The new :class:`matplotlib.figure.Figure`.
+
+    Raises:
+        ValueError: If bare centres are not uniformly spaced; pass the Grid
+            or ``bin_edges``.
     """
     z_true = np.asarray(z_true, dtype=float)
-    z_grid = np.asarray(z_grid, dtype=float)
-    z_pred = metrics.grid_point_estimates(z_grid, pdfs)[point]
-    _, _, pit = metrics.evaluate_grid_pdfs(z_true, z_grid, pdfs, point=point)
+    centers, edges = _geometry(z_grid, bin_edges)
+    z_pred = metrics.grid_point_estimates(centers, pdfs, bin_edges=edges)[point]
+    _, _, pit = metrics.evaluate_grid_pdfs(
+        z_true, centers, pdfs, point=point, bin_edges=edges
+    )
 
     fig, axes = plt.subplots(
         2, 2, figsize=style.figsize(width="text", aspect=0.85)
@@ -452,7 +607,7 @@ def diagnostic_panel(
     plot_zphot_ztrue(z_true, z_pred, ax=axes[0, 0])
     plot_residuals(z_true, z_pred, ax=axes[0, 1])
     plot_pit_qq(pit, ax=axes[1, 0], label=label)
-    plot_nz(z_grid, pdfs, z_true=z_true, ax=axes[1, 1])
+    plot_nz(z_grid, pdfs, z_true=z_true, ax=axes[1, 1], bin_edges=bin_edges)
     axes[1, 1].legend(loc="upper right")
     if label:
         fig.suptitle(label)
