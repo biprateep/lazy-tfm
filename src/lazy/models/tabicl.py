@@ -108,7 +108,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             tabulating a row that puts more than 1% of its probability
             outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
         random_state: Seed for the ensemble. None draws a fresh seed at fit,
             recorded as ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory

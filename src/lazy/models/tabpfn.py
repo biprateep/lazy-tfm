@@ -118,7 +118,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             array of bin centres, ``"native"``, or None for the native grid
             (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
         random_state: Seed for the ensemble. None draws a fresh seed at fit,
             recorded as ``random_state_`` and in ``provenance_``.
         softmax_temperature: Temperature on the bucket logits, which sets how

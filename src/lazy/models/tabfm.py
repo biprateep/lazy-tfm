@@ -231,7 +231,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             biased spectroscopic sample. ``None`` (default) leaves the
             posteriors alone.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
         random_state: Seed for TabFM's ensemble construction. None draws a
             fresh seed at fit, recorded as ``random_state_`` and in
             ``provenance_``.
