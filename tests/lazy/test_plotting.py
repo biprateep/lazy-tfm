@@ -245,3 +245,20 @@ def test_a_wrong_rcparam_still_raises():
         ):
             warnings.simplefilter("ignore")  # this machine's font, if any
             plotting.verify_style()
+
+
+def test_one_pdf_can_be_drawn_on_its_own(predictions):
+    z_true, pdfs, _ = predictions
+    axes = plotting.plot_pdfs(lazy.DC1_GRID, pdfs[0], z_true=z_true[0])
+    assert sum(bool(a.get_visible()) for a in axes) == 1
+    assert axes[0].lines
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [{"n_objects": 0}, {"n_objects": -2}, {"n_objects": 1.5}, {"indices": []}],
+)
+def test_asking_for_no_pdf_is_refused(predictions, arguments):
+    _, pdfs, _ = predictions
+    with pytest.raises(ValueError, match="n_objects|no PDF"):
+        plotting.plot_pdfs(lazy.DC1_GRID, pdfs, **arguments)

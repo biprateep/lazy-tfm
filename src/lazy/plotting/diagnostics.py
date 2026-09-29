@@ -534,6 +534,54 @@ def plot_nz(
     return ax
 
 
+def _rows_to_draw(
+    n_rows: int,
+    indices: npt.ArrayLike | None,
+    n_objects: int,
+    random_state: int,
+) -> npt.NDArray[np.int_]:
+    """The rows :func:`plot_pdfs` draws: ``indices``, or a random few.
+
+    Raises:
+        ValueError: If ``n_objects`` is not a positive integer, or there is
+            no row to draw.
+    """
+    if indices is None:
+        if isinstance(n_objects, bool) or not (
+            isinstance(n_objects, int | np.integer) and n_objects >= 1
+        ):
+            raise ValueError(
+                f"n_objects must be a positive integer: {n_objects=}"
+            )
+        rng = np.random.default_rng(random_state)
+        indices = rng.choice(n_rows, size=min(n_objects, n_rows), replace=False)
+    indices = np.atleast_1d(np.asarray(indices, dtype=int))
+    if not indices.size or not n_rows:
+        raise ValueError("there is no PDF to draw")
+    return indices
+
+
+def _pdf_axes(
+    axes: mpl_axes.Axes
+    | Sequence[mpl_axes.Axes]
+    | npt.NDArray[np.object_]
+    | None,
+    n_panels: int,
+) -> npt.NDArray[np.object_]:
+    """``axes`` flattened, or a new grid of up to three columns of them."""
+    if axes is None:
+        ncols = min(3, n_panels)
+        nrows = int(np.ceil(n_panels / ncols))
+        _, axes = plt.subplots(
+            nrows,
+            ncols,
+            figsize=style.figsize(width="text", aspect=0.33 * nrows),
+            squeeze=False,
+            sharex=True,
+        )
+    return np.atleast_1d(np.asarray(axes, dtype=object)).ravel()
+
+
 def plot_pdfs(
     z_grid: _GridLike,
     pdfs: npt.ArrayLike,
@@ -558,11 +606,13 @@ def plot_pdfs(
     Args:
         z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
             uniformly spaced bin centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
+        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid), or one PDF,
+            shape (n_grid,).
         z_true: True values, shape (n_objects,), marked as dashed
-            vertical lines if given.
+            vertical lines if given; a scalar with one PDF.
         indices: Rows of ``pdfs`` to draw; ``n_objects`` random rows if None.
-        n_objects: Number of objects drawn at random when ``indices`` is None.
+        n_objects: Number of objects drawn at random when ``indices`` is
+            None, at least one.
         random_state: Seed of the random draw.
         axes: Axes to draw into, one per object; a new text-width grid of
             up to three columns if None. Spare axes are hidden.
@@ -573,29 +623,23 @@ def plot_pdfs(
         The flattened array of axes.
 
     Raises:
-        ValueError: If bare centres are not uniformly spaced; pass the Grid
-            or ``bin_edges``.
+        ValueError: If bare centres are not uniformly spaced (pass the Grid
+            or ``bin_edges``), ``pdfs`` does not fit the grid, or there is
+            no object to draw.
     """
     centers, edges = _geometry(z_grid, bin_edges)
-    pdfs = np.asarray(pdfs, dtype=float)
-    if indices is None:
-        rng = np.random.default_rng(random_state)
-        indices = rng.choice(
-            len(pdfs), size=min(n_objects, len(pdfs)), replace=False
+    pdfs = np.atleast_2d(np.asarray(pdfs, dtype=float))
+    if pdfs.ndim != 2 or pdfs.shape[1] != centers.size:
+        raise ValueError(
+            f"pdfs must have shape (n_objects, {centers.size}): {pdfs.shape=}"
         )
-    indices = np.atleast_1d(np.asarray(indices, dtype=int))
-    if axes is None:
-        ncols = min(3, len(indices))
-        nrows = int(np.ceil(len(indices) / ncols))
-        _, axes = plt.subplots(
-            nrows,
-            ncols,
-            figsize=style.figsize(width="text", aspect=0.33 * nrows),
-            squeeze=False,
-            sharex=True,
-        )
-    axes_array = np.atleast_1d(np.asarray(axes, dtype=object)).ravel()
-    truth = None if z_true is None else np.asarray(z_true, dtype=float)
+    indices = _rows_to_draw(len(pdfs), indices, n_objects, random_state)
+    axes_array = _pdf_axes(axes, len(indices))
+    truth = (
+        None
+        if z_true is None
+        else np.atleast_1d(np.asarray(z_true, dtype=float))
+    )
     _, density = metrics.normalize_grid_pdfs(
         centers, pdfs[indices], bin_edges=edges
     )
