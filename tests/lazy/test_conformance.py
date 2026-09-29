@@ -436,13 +436,13 @@ def _missing_backend(self):
 
 
 @pytest.mark.parametrize("cls", REGISTERED, ids=lambda c: c.__name__)
-def test_an_unknown_version_is_reported_before_the_backend_import(
+def test_a_missing_backend_is_reported_before_bad_parameters(
     cls, data, monkeypatch
 ):
     X, z, _ = data
     monkeypatch.setattr(cls, "_import_backend", _missing_backend)
-    with pytest.raises(ValueError, match="unknown version"):
-        cls(version="v99").fit(X, z)
+    with pytest.raises(ImportError, match="not installed"):
+        cls(version="v99", n_estimators=0).fit(X, z)
 
 
 def test_a_backend_without_the_uniform_features_cannot_register():

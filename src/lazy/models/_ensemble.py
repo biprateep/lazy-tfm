@@ -222,8 +222,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         # Set below only when one group serves the whole ensemble, so a
         # refit into several groups must not keep the previous fit's.
         self.__dict__.pop("regressor_", None)
-        self._check_uniform_params()
+        # A missing backend package is the likeliest reason a first fit
+        # fails, so it is reported before any parameter complaint.
         self._import_backend()
+        self._check_uniform_params()
         self._check_backend_params()
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
@@ -274,7 +276,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.provenance_ = {**self.provenance_, **self._recipe()}
 
     def _check_uniform_params(self) -> None:
-        """Validates the uniform parameters, before anything is imported."""
+        """Validates the uniform parameters, before anything is loaded."""
         known = _hub.list_versions(self.backend or "")
         if known and self.version not in known:
             raise ValueError(
