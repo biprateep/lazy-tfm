@@ -17,6 +17,9 @@ Typical usage example:
 # ruff: noqa: GS004
 
 from importlib import metadata
+from typing import Any
+
+from sphinx import application
 
 project = "lazy-tfm"
 author = "Biprateep Dey"
@@ -92,7 +95,14 @@ html_context = {
 }
 
 
-def _skip_public_reexports(app, what, name, obj, skip, options):  # noqa: ARG001 - Sphinx's event signature.
+def _skip_public_reexports(  # Sphinx's event signature.
+    app: application.Sphinx,  # noqa: ARG001
+    what: str,  # noqa: ARG001
+    name: str,  # noqa: ARG001
+    obj: Any,  # An autoapi mapper object.
+    skip: bool,
+    options: object,  # noqa: ARG001
+) -> bool:
     """Documents a re-exported name only where it has no public home.
 
     ``lazy`` and ``lazy.models`` re-export names from private modules (the
@@ -109,5 +119,5 @@ def _skip_public_reexports(app, what, name, obj, skip, options):  # noqa: ARG001
     return skip
 
 
-def setup(app):  # noqa: D103 - Sphinx's extension hook.
+def setup(app: application.Sphinx) -> None:  # noqa: D103 - Sphinx's extension hook.
     app.connect("autoapi-skip-member", _skip_public_reexports)
