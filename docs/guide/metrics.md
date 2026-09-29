@@ -10,20 +10,25 @@ import pandas as pd
 from lazy.metrics import summarize
 
 table = pd.concat([
-    summarize(z_true, grid.centers, pdfs_a, label="TabPFN"),
-    summarize(z_true, grid.centers, pdfs_b, label="TabICL"),
+    summarize(z_true, grid, pdfs_a, label="TabPFN"),
+    summarize(z_true, grid, pdfs_b, label="TabICL"),
 ])
 ```
 
 `model.evaluate(X, y)` is the same table for one fitted model.
 
-Densities on a histogram-normalised grid -- a model's native grid, whose bins
-are far from uniform -- are scored exactly by passing the grid's edges:
-`summarize(z_true, grid.centers, pdfs, bin_edges=grid.histogram_edges)`, and
-likewise for {func}`~lazy.metrics.cde_loss` and the other metrics. The
-estimators' `score` and `evaluate` do this themselves. On the usual
-trapezoid grids, such as {data}`~lazy.grid.DC1_GRID`, leave it out: the
-numbers are then the Data Challenge's, byte for byte.
+Pass the {class}`~lazy.grid.Grid` the densities are on, and each metric scores
+them by the grid's own normalisation: exactly, bin by bin, on a model's
+histogram-normalised native grid, and by the Data Challenge's trapezoid rule
+on grids such as {data}`~lazy.grid.DC1_GRID`, where the numbers are then the
+challenge's, byte for byte. (Bin centres alone also work, and are read as a
+trapezoid grid.)
+
+The PDF metrics -- CDE loss, PIT and its goodness-of-fit statistics -- apply
+to any target. The point metrics (bias, scatter, outlier rates) follow the
+photo-z convention of dividing each residual by `1 + z_true`; for any other
+target pass `scale="none"` to `summarize` or `evaluate`, which uses plain
+residuals `z_pred - z_true`.
 
 {mod}`lazy.plotting` draws the standard diagnostics (accuracy, calibration and
 N(z)) identically for every method, so comparisons hold up by eye:
