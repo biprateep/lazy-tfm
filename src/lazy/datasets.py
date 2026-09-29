@@ -65,6 +65,7 @@ import tempfile
 import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -135,6 +136,10 @@ _SIZES = {
     "trainz_test.npz": 694_374_957,
     _HSC_FILE: 13_823_712,
 }
+# The default cache directory's name before the package became lazy-tfm, and
+# the old caches already warned of.
+_LEGACY_HOME = "lazy-photoz"
+_warned_legacy: set[pathlib.Path] = set()
 
 # Seconds a download may wait on the server before giving up, and the size of
 # the pieces it is read in.
@@ -426,16 +431,45 @@ def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
         The cache directory, with ``~`` expanded.
     """
     explicit = data_home or os.environ.get("LAZY_DATA_HOME")
-    if explicit:
-        root = pathlib.Path(explicit)
-    else:
-        cache = (
-            os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
-        )
-        root = pathlib.Path(cache) / "lazy-tfm"
+    root = pathlib.Path(explicit) if explicit else _default_home("lazy-tfm")
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _default_home(name: str) -> pathlib.Path:
+    """The default cache directory ``name``, under the user's cache."""
+    cache = os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
+    return pathlib.Path(cache).expanduser() / name
+
+
+def _legacy_copy(
+    filename: str, root: str | pathlib.Path | None, size: int
+) -> pathlib.Path | None:
+    """A complete copy of ``filename`` in the cache used before the rename.
+
+    Looked for only when no cache directory was chosen, by argument or by
+    ``$LAZY_DATA_HOME``: the package cached in ``lazy-photoz`` before it
+    became ``lazy-tfm``. The first use of the old cache warns, once.
+
+    Returns:
+        The old copy, or None if there is none, or one was chosen.
+    """
+    if root or os.environ.get("LAZY_DATA_HOME"):
+        return None
+    legacy = _default_home(_LEGACY_HOME) / filename
+    if not _is_complete(legacy, size):
+        return None
+    if legacy.parent not in _warned_legacy:
+        _warned_legacy.add(legacy.parent)
+        warnings.warn(
+            f"lazy.datasets is using {legacy} from its old cache directory, "
+            f"{legacy.parent}; the cache is now {data_home()}. Move the "
+            "files there to silence this.",
+            UserWarning,
+            skip_file_prefixes=(os.path.dirname(os.path.abspath(__file__)),),
+        )
+    return legacy
 
 
 @typing.overload
@@ -622,12 +656,17 @@ def _cached_file(
     """Returns the cached copy of one remote file, fetched and checksummed.
 
     A cached copy whose size is not the published file's is fetched again,
-    or refused when ``download_if_missing`` is False.
+    or refused when ``download_if_missing`` is False. With no cache
+    directory chosen, a copy in the cache used before the package's rename
+    is used, with a warning, rather than fetched again.
     """
     dest = data_home(root) / filename
     size = _SIZES[filename]
     if _is_complete(dest, size):
         return dest
+    legacy = _legacy_copy(filename, root, size)
+    if legacy is not None:
+        return legacy
     if dest.exists():
         message = (
             f"{dest} is {dest.stat().st_size} bytes, not the {size} "

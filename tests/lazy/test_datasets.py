@@ -11,6 +11,7 @@ import concurrent.futures
 import hashlib
 import io
 import time
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -32,6 +33,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.delenv("LAZY_DATA_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / "home").mkdir()
+    monkeypatch.setattr(datasets, "_warned_legacy", set())
     return tmp_path
 
 
@@ -585,3 +587,37 @@ def test_a_truncated_cached_file_is_fetched_again(isolated_home, monkeypatch):
 
 def test_every_published_file_has_a_size_and_a_checksum():
     assert set(datasets._SIZES) == set(datasets._SHA256)
+
+
+def _legacy_file(isolated_home, payload):
+    legacy = isolated_home / "home" / ".cache" / "lazy-photoz"
+    legacy.mkdir(parents=True)
+    (legacy / "fake.bin").write_bytes(payload)
+    return legacy / "fake.bin"
+
+
+def test_a_file_in_the_old_cache_is_used_with_one_warning(
+    isolated_home, monkeypatch
+):
+    _serve(monkeypatch, b"the whole file")
+    old = _legacy_file(isolated_home, b"the whole file")
+    with pytest.warns(UserWarning, match="old cache directory") as record:
+        assert _fetch_fake(None) == old
+    assert record[0].filename == __file__
+    assert "lazy-tfm" in str(record[0].message)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _fetch_fake(None) == old  # warned once
+
+
+def test_the_old_cache_is_ignored_when_a_cache_is_chosen(
+    isolated_home, monkeypatch
+):
+    timeouts = _serve(monkeypatch, b"the whole file")
+    old = _legacy_file(isolated_home, b"the whole file")
+    chosen = isolated_home / "chosen"
+    assert _fetch_fake(chosen) == chosen / "fake.bin"
+    monkeypatch.setenv("LAZY_DATA_HOME", str(isolated_home / "env"))
+    assert _fetch_fake(None) == isolated_home / "env" / "fake.bin"
+    assert len(timeouts) == 2  # both downloaded, neither used the old copy
+    assert old.exists()
