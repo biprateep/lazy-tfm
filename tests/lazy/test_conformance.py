@@ -97,6 +97,17 @@ def test_bagging_silences_the_warning(data):
         _Limited().fit(X[:50], z[:50])
 
 
+def test_a_bag_of_a_handful_of_rows_warns(data):
+    X, z, _ = data
+    with pytest.warns(UserWarning, match="bag_size=1.0 all of them"):
+        standins.HistogramStandIn(bag_size=1).fit(X, z)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        standins.HistogramStandIn(bag_size=1.0).fit(X, z)
+        standins.HistogramStandIn(bag_size=10).fit(X, z)
+        standins.HistogramStandIn().fit(X[:5], z[:5])
+
+
 def test_bags_larger_than_the_limit_still_warn(data):
     X, z, _ = data
     with pytest.warns(lazy.ContextSizeWarning, match="each bag has 60"):

@@ -232,6 +232,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.n_context_ = int(n_rows)
         self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
         self.bagging_ = self.bag_rows_ < n_rows
+        self._warn_if_bags_too_small()
         self._warn_if_context_too_large(n_rows)
         self.kv_cache_: bool | str = self.kv_cache
         self.member_groups_ = _members.plan(
@@ -323,6 +324,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"n_estimators must be a positive int: {self.n_estimators=}"
             )
         return int(n_estimators)
+
+    def _warn_if_bags_too_small(self) -> None:
+        """Warns when bags are so small an int was likely meant as a float."""
+        if not self.bagging_ or self.bag_rows_ >= _members.MIN_BAG_ROWS:
+            return
+        warnings.warn(
+            f"bag_size={self.bag_size!r} gives each member only "
+            f"{self.bag_rows_} context row(s). An int bag_size is a row "
+            "count and a float one a fraction of the context: bag_size=1 is "
+            "one row, bag_size=1.0 all of them.",
+            UserWarning,
+            stacklevel=4,
+        )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
         """Warns when a member's context exceeds what the model handles."""

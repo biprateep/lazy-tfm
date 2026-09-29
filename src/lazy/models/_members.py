@@ -57,6 +57,9 @@ __all__ = [
 #: Seed offset between groups; the paper's two-group TabFM runs used it.
 GROUP_SEED_STRIDE = 1000
 
+#: Fewer context rows per bag than this draws a warning at fit.
+MIN_BAG_ROWS = 10
+
 
 @dataclasses.dataclass(frozen=True)
 class MemberSpec:
@@ -114,7 +117,8 @@ def resolve_bag_size(bag_size: float | None, n_rows: int) -> int:
 
     Args:
         bag_size: An integer count (Python or NumPy), a float fraction in
-            (0, 1], or None for all.
+            (0, 1], or None for all. The type decides: ``1`` is one row,
+            ``1.0`` the whole context.
         n_rows: The context size.
 
     Returns:
