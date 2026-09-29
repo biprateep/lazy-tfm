@@ -426,3 +426,22 @@ def test_feature_name_warnings_point_at_the_callers_line(data, call):
     with pytest.warns(UserWarning, match="feature names") as record:
         call(est, X.to_numpy(), y)
     assert record[0].filename == __file__
+
+
+def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
+    data, monkeypatch
+):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    pdfs = est.predict_proba(X)
+    grid = lazy.DC1_GRID
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 10 * 8 * grid.n_bins)
+    np.testing.assert_array_equal(
+        est.predict(X, method="z_median"),
+        lazy.metrics.grid_point_estimates(grid, pdfs)["z_median"],
+    )
+    assert est.score(X, y) == -lazy.metrics.cde_loss(y, grid, pdfs)
+    pd.testing.assert_frame_equal(
+        est.evaluate(X, y),
+        lazy.metrics.summarize(y, grid, pdfs, label=est.name_),
+    )

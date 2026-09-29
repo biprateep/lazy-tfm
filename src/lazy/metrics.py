@@ -562,12 +562,46 @@ def cde_loss(
     Returns:
         The loss, averaged over objects.
     """
+    terms, _ = per_object_scores(z_true, z_grid, pdfs, bin_edges=bin_edges)
+    return float(np.mean(terms))
+
+
+def per_object_scores(
+    z_true: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+    """Each object's contribution to the CDE loss, and its PIT.
+
+    Every PDF metric is a statistic of these two per-object arrays, so they
+    can be computed a block of rows at a time and joined:
+    :func:`cde_loss` is the mean of the first, and :func:`summarize_scores`
+    turns both, with the point estimates, into the :func:`summarize` table.
+
+    Args:
+        z_true: Finite true values, one per PDF, shape (n,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
+
+    Returns:
+        A tuple (cde_terms, pit): ``integral p_i^2 - 2 p_i(z_true_i)`` per
+        object, shape (n,), and the PIT values, shape (n,).
+    """
     z_grid, bin_edges = _split_grid(z_grid, bin_edges)
-    grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(
+    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
         z_true, z_grid, pdfs, bin_edges=bin_edges
     )
     squared = _integral_of_square(grid, density, bin_edges)
-    return float(np.mean(squared - 2.0 * pdf_at_truth))
+    return squared - 2.0 * pdf_at_truth, pit
 
 
 # --------------------------------------------------------------------------
@@ -674,15 +708,19 @@ def pdf_metrics(
         A tuple (metrics, pit): the metric bundle and the per-object PIT
         values, shape (n,).
     """
-    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
-    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
-        z_true, z_grid, pdfs, bin_edges=bin_edges
-    )
-    squared = _integral_of_square(grid, density, bin_edges)
-    loss = float(np.mean(squared - 2.0 * pdf_at_truth))
+    terms, pit = per_object_scores(z_true, z_grid, pdfs, bin_edges=bin_edges)
+    return _pdf_metrics_from(terms, pit), pit
+
+
+def _pdf_metrics_from(
+    cde_terms: _typing.FloatArray, pit: _typing.FloatArray
+) -> PDFMetrics:
+    """The PDF metric bundle from the per-object scores."""
     return PDFMetrics(
-        n=int(pit.size), cde_loss=loss, **pit_statistics(pit)
-    ), pit
+        n=int(pit.size),
+        cde_loss=float(np.mean(cde_terms)),
+        **pit_statistics(pit),
+    )
 
 
 def evaluate_grid_pdfs(
@@ -766,8 +804,47 @@ def summarize(
         ['uniform']
     """
     z_grid, bin_edges = _split_grid(z_grid, bin_edges)
-    point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(
-        z_true, z_grid, pdfs, point=point, bin_edges=bin_edges
+    estimates = grid_point_estimates(z_grid, pdfs, bin_edges=bin_edges)
+    if point not in estimates:
+        raise ValueError(f"point must be one of {sorted(estimates)}")
+    cde_terms, pit = per_object_scores(
+        z_true, z_grid, pdfs, bin_edges=bin_edges
+    )
+    return summarize_scores(
+        z_true, estimates[point], cde_terms, pit, point=point, label=label
+    )
+
+
+def summarize_scores(
+    z_true: npt.ArrayLike,
+    z_pred: npt.ArrayLike,
+    cde_terms: npt.ArrayLike,
+    pit: npt.ArrayLike,
+    point: str = "z_peak",
+    label: str | None = None,
+) -> pd.DataFrame:
+    """The :func:`summarize` table from per-object pieces.
+
+    For data too large to hold as one ``(n, g)`` array: compute the point
+    estimates and :func:`per_object_scores` a block of rows at a time,
+    join them, and pass them here. The table is the one :func:`summarize`
+    gives on the whole array.
+
+    Args:
+        z_true: Finite true values, shape (n,).
+        z_pred: The point estimates, shape (n,).
+        cde_terms: Each object's CDE-loss term, shape (n,).
+        pit: Each object's PIT value, shape (n,).
+        point: The name of the point estimate, for the table.
+        label: Model name for a leading ``model`` column; no such column
+            when ``None``.
+
+    Returns:
+        The one-row table :func:`summarize` describes.
+    """
+    point_metrics_ = point_metrics(z_true, z_pred)
+    pdf_metrics_ = _pdf_metrics_from(
+        np.asarray(cde_terms, dtype=float), np.asarray(pit, dtype=float)
     )
     row: dict[str, object] = {}
     if label is not None:

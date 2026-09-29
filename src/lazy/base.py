@@ -46,6 +46,7 @@ estimator can implement the same protocol.
 from __future__ import annotations
 
 import abc
+from collections.abc import Iterator
 import os
 from typing import Any, TypeAlias
 import warnings
@@ -78,6 +79,12 @@ _Features: TypeAlias = Any
 # Warnings skip every frame inside this package, so that they point at the
 # user's call however deep in the package they are raised.
 _PACKAGE_PREFIX = os.path.dirname(os.path.abspath(__file__)) + os.sep
+
+# predict, score and evaluate reduce each row's density as they go, a block
+# of rows at a time, so that no more than about this many bytes of float64
+# densities exist at once: all of DC1 on a 5,000-bin native grid would
+# otherwise be one 15.6 GB array.
+_BLOCK_BYTES = 256 * 2**20
 
 
 class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
@@ -340,6 +347,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         :func:`lazy.metrics.grid_point_estimates` rather than re-running the
         model per definition.
 
+        Rows are predicted and reduced a block at a time, so the densities
+        of all of ``X`` never exist at once, whatever the grid.
+
         Args:
             X: Features, shape (n_samples, n_features).
             method: One of :data:`POINT_ESTIMATORS`: ``"z_peak"`` (the mode,
@@ -354,7 +364,13 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self)
         method = _check_method(method)
         grid = self._resolve_grid(z_grid)
-        return self.point_estimates(self.predict_proba(X, grid), grid)[method]
+        X = self._check_features(X, reset=False)
+        return np.concatenate(
+            [
+                metrics.grid_point_estimates(grid, density)[method]
+                for _, density in self._density_blocks(X, grid)
+            ]
+        )
 
     def score(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y: npt.ArrayLike, z_grid: grid_lib.GridLike = None
@@ -363,6 +379,8 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Negated so the scikit-learn convention (greater ``score`` is a better
         model) holds, which is what ``GridSearchCV`` and friends assume.
+        Rows are predicted and scored a block at a time, as in
+        :meth:`predict`.
 
         Args:
             X: Features, shape (n_samples, n_features).
@@ -378,12 +396,11 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
-        return -metrics.cde_loss(
-            y,
-            grid.centers,
-            self._densities(X, grid),
-            bin_edges=grid.histogram_edges,
-        )
+        terms = [
+            metrics.per_object_scores(y[rows], grid, density)[0]
+            for rows, density in self._density_blocks(X, grid)
+        ]
+        return -float(np.mean(np.concatenate(terms)))
 
     def evaluate(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -396,7 +413,8 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         A convenience wrapper over :func:`lazy.metrics.summarize`; that
         function is the general-purpose entry point, taking PDFs you already
-        have.
+        have. Rows are predicted and scored a block at a time, as in
+        :meth:`predict`, with the same table as a result.
 
         Args:
             X: Features, shape (n_samples, n_features).
@@ -415,16 +433,50 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
-        return metrics.summarize(
+        z_pred, cde_terms, pit = [], [], []
+        for rows, density in self._density_blocks(X, grid):
+            z_pred.append(metrics.grid_point_estimates(grid, density)[method])
+            terms, values = metrics.per_object_scores(y[rows], grid, density)
+            cde_terms.append(terms)
+            pit.append(values)
+        return metrics.summarize_scores(
             y,
-            grid.centers,
-            self._densities(X, grid),
+            np.concatenate(z_pred),
+            np.concatenate(cde_terms),
+            np.concatenate(pit),
             point=method,
             label=self.name_,
-            bin_edges=grid.histogram_edges,
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _density_blocks(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> Iterator[tuple[slice, _typing.FloatArray]]:
+        """Normalised densities of validated features, a block at a time.
+
+        Blocks hold about ``_BLOCK_BYTES`` of densities. When the model
+        chunks its own queries (a ``chunk_size`` parameter), a block is a
+        whole number of those chunks, so that the backend sees exactly the
+        chunks it would have seen without blocking.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+            grid: The grid to answer on.
+
+        Yields:
+            Tuples (rows, density): the slice of ``X`` a block covers, and
+            its densities, shape (rows, grid.n_bins). No rows give one
+            empty block.
+        """
+        size = max(1, _BLOCK_BYTES // (8 * grid.n_bins))
+        chunk = getattr(self, "chunk_size", None)
+        if isinstance(chunk, int) and not isinstance(chunk, bool) and chunk > 0:
+            size = max(chunk, size - size % chunk)
+        for start in range(0, max(len(X), 1), size):
+            rows = slice(start, start + size)
+            block = X.iloc[rows].reset_index(drop=True)
+            yield rows, self._densities(block, grid)
 
     def _densities(
         self, X: pd.DataFrame, grid: grid_lib.Grid
