@@ -88,7 +88,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     Args:
         version: Which TabPFN to run, in upstream's own vocabulary: ``"v2"``,
-            ``"v2.5"``, ``"v2.6"``, ``"v3"`` (the default), ``"v3.5"`` or
+            ``"v2.5"``, ``"v2.6"``, ``"v3"``, ``"v3.5"`` (the default) or
             ``"v3.5-fast"``. Each is a separately pinned checkpoint
             (:func:`lazy.list_versions`), so sweeping this parameter compares
             model versions on equal terms, and ``provenance_`` records which
@@ -173,7 +173,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
-        version: str = "v3",
+        version: str = "v3.5",
         n_estimators: int | str = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
