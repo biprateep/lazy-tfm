@@ -99,6 +99,15 @@ The first release. Everything below is new.
   `plot_residuals(scale="none")` for targets other than redshift.
 ### Changed
 
+- TabICL's native grid extends 25% of the training range on each side (1,500
+  bins), no longer clips at zero, and `predict_proba` on it warns when a row
+  puts more than 1% of its probability outside it.
+- TabPFN's bucket borders and TabICL's target scaling are computed in float64,
+  so a narrow target on a large offset keeps its resolution. Densities move at
+  the float32-rounding level (at most 3e-5 relative for TabPFN, 5e-4 for
+  TabICL); no peak moves.
+- TabFM no longer claims bit-exact chunking and caching on a GPU, where it
+  runs in bfloat16 and densities can differ by a few per cent of the peak.
 - A missing LimiX dependency (torch, einops, kditransform, nvtx, triton)
   raises an `ImportError` naming it and both install steps; triton's says it
   is Linux-only.
@@ -164,6 +173,15 @@ The first release. Everything below is new.
 
 ### Fixed
 
+- TabFM fits tied, discrete, zero-inflated and constant targets (it raised
+  `IndexError`), and clips training targets outside its `z_grid` with a
+  warning. TabPFN fits a constant target.
+- Repeated entries in `transforms` keep their weight on TabPFN and TabFM;
+  TabICL rejects them, as upstream would run them as identical members.
+- `kv_cache="int8"` or `"fp8"` on TabPFN v2.x raises instead of silently
+  running at full precision.
+- The "pip install lazy-tfm[...]" hint is given only when the backend package
+  itself is missing; other import errors come through unchanged.
 - A fitted LimiX-2 model unpickles in a fresh process, re-resolving
   `device="auto"` and its checkpoint; its key/value-cache memory check no
   longer counts existing caches twice, and members whose cache fits keep it.
