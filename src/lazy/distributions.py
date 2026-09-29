@@ -77,9 +77,16 @@ def _check_ancil(ancil: Ancil | None, n_rows: int) -> dict[str, Any] | None:
 
 
 def _slice_ancil(ancil: dict[str, Any] | None, rows: Any) -> Any:
-    """The metadata of the selected rows."""
+    """The metadata of the selected rows, one entry per selected row.
+
+    A single integer row selects a one-row distribution, so its metadata is
+    indexed by a one-element array to keep one entry per row rather than a
+    bare scalar.
+    """
     if ancil is None:
         return None
+    if np.ndim(rows) == 0 and np.issubdtype(np.asarray(rows).dtype, np.integer):
+        rows = np.atleast_1d(rows)
     return {key: value[rows] for key, value in ancil.items()}
 
 
