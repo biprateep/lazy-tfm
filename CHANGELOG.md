@@ -7,6 +7,8 @@ change the API.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-29
+
 ### Fixed
 
 - The README, quickstart and docs landing page passed the grid to `evaluate`
@@ -233,5 +235,6 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/biprateep/lazy-tfm/releases/tag/v0.1.0
