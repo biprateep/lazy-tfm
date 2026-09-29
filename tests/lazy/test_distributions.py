@@ -296,3 +296,12 @@ def test_an_integer_row_keeps_its_ancil(request, name, row):
     assert len(one) == 1
     np.testing.assert_array_equal(one.ancil["id"], [np.arange(n)[row]])
     assert one.ancil["pair"].shape == (1, 2)
+
+
+def test_histogram_ppf_ends_at_the_support_despite_empty_edge_buckets():
+    """Levels 0 and 1 are the edges of the buckets that carry mass."""
+    masses = np.r_[0.0, 0.0, np.full(10, 0.1), 0.0, 0.0]
+    dist = distributions.HistogramDistribution(np.arange(15.0), masses)
+    np.testing.assert_array_equal(dist.ppf([0.0, 0.5, 1.0]), [[2.0, 7.0, 12.0]])
+    samples = dist.rvs(2000, random_state=0)
+    assert samples.min() >= 2.0 and samples.max() <= 12.0

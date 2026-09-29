@@ -300,18 +300,32 @@ class HistogramDistribution(_Base):
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
+        n_buckets = probabilities.shape[1]
+        # The support runs from the first bucket with mass to the last.
+        carries = probabilities > 0
+        first = np.argmax(carries, axis=1)
+        last = n_buckets - 1 - np.argmax(carries[:, ::-1], axis=1)
         cumulative = np.cumsum(probabilities, axis=1)
+        # Exactly one from the last bucket with mass on, so that a level
+        # near one is not pushed past a sum rounded to just below it.
+        cumulative[np.arange(n_buckets)[None, :] >= last[:, None]] = 1.0
         out = np.empty(levels.shape)
         for row in range(self.npdf):
             bucket = np.searchsorted(cumulative[row], levels[row], side="left")
-            bucket = np.clip(bucket, 0, probabilities.shape[1] - 1)
+            bucket = np.clip(bucket, 0, n_buckets - 1)
             mass = probabilities[row, bucket]
             below = cumulative[row, bucket] - mass
             with np.errstate(divide="ignore", invalid="ignore"):
                 fraction = np.where(mass > 0, (levels[row] - below) / mass, 0.0)
-            out[row] = (
+            value = (
                 self.bins[bucket]
                 + np.clip(fraction, 0.0, 1.0) * (self.widths[bucket])
+            )
+            # The end levels are the ends of the support exactly, never an
+            # edge of an empty bucket beyond it.
+            value = np.where(levels[row] <= 0.0, self.bins[first[row]], value)
+            out[row] = np.where(
+                levels[row] >= 1.0, self.bins[last[row] + 1], value
             )
         return out
 
