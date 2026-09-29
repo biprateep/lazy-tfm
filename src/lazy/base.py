@@ -348,10 +348,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             Point estimates, shape (n_samples,).
         """
         validation.check_is_fitted(self)
+        method = _check_method(method)
         grid = self._resolve_grid(z_grid)
-        return self.point_estimates(self.predict_proba(X, grid), grid)[
-            _check_method(method)
-        ]
+        return self.point_estimates(self.predict_proba(X, grid), grid)[method]
 
     def score(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y: npt.ArrayLike, z_grid: grid_lib.GridLike = None
@@ -405,12 +404,13 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             A one-row table labelled with :attr:`name_`.
         """
         validation.check_is_fitted(self)
+        method = _check_method(method)
         grid = self._resolve_grid(z_grid)
         return metrics.summarize(
             np.asarray(y, dtype=float).ravel(),
             grid.centers,
             self.predict_proba(X, grid),
-            point=_check_method(method),
+            point=method,
             label=self.name_,
             bin_edges=grid.histogram_edges,
         )

@@ -318,3 +318,26 @@ def test_the_native_grid_error_tells_unfitted_from_absent(data):
     with pytest.raises(AttributeError, match="has no native grid") as info:
         GaussianDummy().fit(X, y).native_grid  # noqa: B018 - as above.
     assert not isinstance(info.value, exceptions.NotFittedError)
+
+
+class _CountingDummy(GaussianDummy):
+    """The stand-in, counting how often inference runs."""
+
+    def _predict_pdf(self, X, grid):
+        self.calls_ = getattr(self, "calls_", 0) + 1
+        return super()._predict_pdf(X, grid)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict(X, method="z_mode"),
+        lambda est, X, y: est.evaluate(X, y, method="z_mode"),
+    ],
+)
+def test_an_unknown_method_is_refused_before_inference(data, call):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match="method must be one of"):
+        call(est, X, y)
+    assert getattr(est, "calls_", 0) == 0
