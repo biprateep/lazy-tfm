@@ -329,6 +329,24 @@ def test_a_refit_into_several_groups_drops_the_single_regressor(data):
     assert not hasattr(model, "regressor_")
 
 
+def test_a_scaffold_is_fitted_on_its_groups_context_rows(data):
+    """As the _transforms docstring says: a bag, or all rows if native."""
+    X, z, _ = data
+    params = {"n_estimators": 2, "transforms": "robust", "bag_size": 40}
+    native = standins.HistogramStandIn(**params).fit(X, z)
+    (fitted,) = native.transformers_
+    np.testing.assert_allclose(
+        fitted._transformer.center_, np.median(X, axis=0)
+    )
+    scaffolded = standins.ScaffoldedHistogramStandIn(**params).fit(X, z)
+    for group, fitted in zip(
+        scaffolded.member_groups_, scaffolded.transformers_, strict=True
+    ):
+        np.testing.assert_allclose(
+            fitted._transformer.center_, np.median(X[group.rows], axis=0)
+        )
+
+
 def test_missing_values_reach_the_model(data):
     X, z, X_test = data
     X = X.copy()

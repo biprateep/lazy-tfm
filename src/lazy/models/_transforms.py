@@ -21,8 +21,13 @@ LimiX-2's own, ``("quantile_uniform+original", "power")``.
 
 A backend translates a name to its model's own implementation when it has
 one; otherwise the transform is applied here, by :class:`ScaffoldTransform`,
-fitted on the member's own context rows only, before the model sees the
-features (the model's internal preprocessing then still runs on top).
+before the model sees the features (the model's internal preprocessing then
+still runs on top). It is fitted on the context rows of the member group it
+serves, never on query rows: under scaffolded bagging each member is a group
+of its own, so that is the member's own bag; for a model that subsamples
+rows natively, the group's members share the whole context, so the
+transform is fitted on all of it and the model then draws each member's
+rows from the transformed features.
 
 Typical usage example:
 
@@ -128,8 +133,9 @@ def _parse_one(name: str) -> TransformSpec:
 class ScaffoldTransform:
     """A transform applied by the package for a model that lacks it.
 
-    Fitted on the member's context rows only, so a query row's features
-    never depend on the other query rows. Missing values (NaN) are ignored
+    Fitted on its member group's context rows only (see the module
+    docstring), so a query row's features never depend on the other query
+    rows. Missing values (NaN) are ignored
     when fitting and stay NaN, for the model to handle.
 
     Attributes:
