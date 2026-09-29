@@ -10,7 +10,7 @@ redshift, a metallicity, a mass, a yield.
 [![Python](https://img.shields.io/pypi/pyversions/lazy-tfm)](https://pypi.org/project/lazy-tfm/)
 [![Unit test and code coverage](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml)
 [![Documentation](https://readthedocs.org/projects/lazy-tfm/badge/?version=latest)](https://lazy-tfm.readthedocs.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/biprateep/lazy-tfm/blob/main/LICENSE)
 
 The models are pretrained and never fine-tuned. You hand them labelled rows as
 *context* and they answer queries in one forward pass — no training loop, no
@@ -25,7 +25,8 @@ regression problem.
 > Pin a version if you depend on this.
 
 **Documentation:** [lazy-tfm.readthedocs.io](https://lazy-tfm.readthedocs.io) ·
-**Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
+**Tutorial:** [open in Colab](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/introduction.ipynb) ·
+**Changelog:** [CHANGELOG.md](https://github.com/biprateep/lazy-tfm/blob/main/CHANGELOG.md) · **Contributing:** [CONTRIBUTING.md](https://github.com/biprateep/lazy-tfm/blob/main/CONTRIBUTING.md)
 
 ## Install
 
@@ -328,7 +329,7 @@ uv run pytest
 ```
 
 The test suite needs neither a GPU nor a checkpoint. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the checks CI runs, building the docs and
+[CONTRIBUTING.md](https://github.com/biprateep/lazy-tfm/blob/main/CONTRIBUTING.md) for the checks CI runs, building the docs and
 making a release.
 
 ## Repository layout
