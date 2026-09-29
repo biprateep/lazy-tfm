@@ -348,6 +348,47 @@ class TestTabICL:
 
         assert np.array_equal(run(0), run(7))
 
+    def test_the_native_grid_leaves_room_to_extrapolate(self):
+        """Padded by a quarter of the range, at the same bin width."""
+        est = tabicl.TabICLQuantile()
+        est._support = (0.05, 1.65)
+        grid = est._native_grid()
+        assert grid.z_min == pytest.approx(-0.35)
+        assert grid.z_max == pytest.approx(2.05)
+        assert grid.n_bins == 1500
+        np.testing.assert_allclose(grid.widths, 1.6 / 1000)
+
+    @pytest.mark.parametrize("value", [0.0, 0.5, -1e4])
+    def test_a_constant_target_is_padded_on_its_own_scale(self, value):
+        est = tabicl.TabICLQuantile()
+        est._support = (value, value)
+        grid = est._native_grid()
+        pad = 0.01 * max(abs(value), 1.0)
+        assert grid.z_min == pytest.approx(value - pad)
+        assert grid.z_max == pytest.approx(value + pad)
+
+    def test_mass_outside_the_native_grid_warns(self, monkeypatch):
+        levels = tabicl.quantile_levels(99)
+        inside = np.linspace(0.1, 0.9, 99)
+        leaking = inside - 0.5  # 3/16 of it below the grid, at -0.25.
+        dist = lazy.distributions.QuantileDistribution(
+            levels, np.stack([inside, leaking])
+        )
+        est = tabicl.TabICLQuantile()
+        est._support = (0.0, 1.0)
+        est.native_grid_ = est._native_grid()
+        outside = tabicl._mass_outside(dist, est.native_grid_)
+        assert outside[0] == 0.0
+        assert outside[1] == pytest.approx(3 / 16, abs=0.011)
+
+        monkeypatch.setattr(est, "_chunks", lambda X: iter([dist]))
+        X = pd.DataFrame({"a": [0.0, 1.0]})
+        with pytest.warns(UserWarning, match="1 of 2 rows put more than 1%"):
+            est._predict_pdf(X, est.native_grid_)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            est._predict_pdf(X, lazy.Grid.linear(-1.0, 1.0, 10))
+
     def test_quantile_levels_are_interior_and_symmetric(self):
         levels = tabicl.quantile_levels(999)
         assert levels.size == 999

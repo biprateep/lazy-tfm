@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import types
 from typing import Any
+import warnings
 
 import numpy as np
+import pandas as pd
 
 from lazy import _typing
 from lazy import distributions
@@ -38,10 +40,24 @@ from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
 
-__all__ = ["NATIVE_QUANTILE_BINS", "TabICLQuantile", "quantile_levels"]
+__all__ = [
+    "NATIVE_PAD",
+    "NATIVE_QUANTILE_BINS",
+    "TabICLQuantile",
+    "quantile_levels",
+]
 
-#: Bins of the native grid: as fine as the 999 quantiles resolve.
+#: Bins of the native grid across the training targets' range: as fine as
+#: the 999 quantiles resolve. The padding adds bins of the same width.
 NATIVE_QUANTILE_BINS = 1000
+
+#: How far the native grid extends beyond the training targets on each
+#: side, as a fraction of their range: TabICL's quantiles extrapolate.
+NATIVE_PAD = 0.25
+
+#: The probability a row may put outside the native grid before
+#: tabulating it there warns.
+_OUTSIDE_TOLERANCE = 0.01
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -86,7 +102,11 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             either way, up to floating-point rounding.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
-            (1,000 bins spanning the training targets).
+            (equal-width bins, 1,000 across the training targets' range,
+            which extend a quarter of that range beyond it on each side).
+            Densities on a grid carry only the mass inside it, renormalised;
+            tabulating a row that puts more than 1% of its probability
+            outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
         random_state: Seed for the ensemble.
@@ -101,9 +121,10 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     Attributes:
         grid_: The resolved default output grid.
-        native_grid_: The native grid, 1,000 histogram-normalised bins over
-            the training targets padded by 2% (never below zero when the targets
-            are all non-negative).
+        native_grid_: The native grid, histogram-normalised: 1,500 bins over
+            the training targets' range padded by a quarter of it on each
+            side (a constant target is padded by 1% of its value, and at
+            least by 0.01).
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
@@ -226,14 +247,66 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     def _native_grid(self) -> grid_lib.Grid:
         low, high = self._support
-        pad = 0.02 * (high - low) if high > low else 0.01
-        start = max(low - pad, 0.0) if low >= 0 else low - pad
+        if high > low:
+            pad = NATIVE_PAD * (high - low)
+            n_bins = round(NATIVE_QUANTILE_BINS * (1.0 + 2.0 * NATIVE_PAD))
+        else:
+            pad = 0.01 * max(abs(high), 1.0)
+            n_bins = NATIVE_QUANTILE_BINS
         return grid_lib.Grid.linear(
-            start, high + pad, NATIVE_QUANTILE_BINS, normalization="histogram"
+            low - pad, high + pad, n_bins, normalization="histogram"
         )
+
+    def _predict_pdf(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> _typing.FloatArray:
+        blocks = []
+        outside = 0
+        for dist in self._chunks(X):
+            blocks.append(dist.on_grid(grid))
+            if grid == self.native_grid_ and isinstance(
+                dist, distributions.QuantileDistribution
+            ):
+                outside += int(
+                    np.count_nonzero(
+                        _mass_outside(dist, grid) > _OUTSIDE_TOLERANCE
+                    )
+                )
+        if outside:
+            warnings.warn(
+                f"{outside} of {len(X)} rows put more than "
+                f"{_OUTSIDE_TOLERANCE:.0%} of their probability outside the "
+                f"native grid [{grid.z_min:g}, {grid.z_max:g}], and their "
+                "densities there are renormalised. Pass a wider z_grid, or "
+                "use predict_distribution, which has full support.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _progress_postfix(
         self, dist: distributions.Distribution
     ) -> dict[str, Any]:
         del dist  # Unused: the count is recorded when predicting.
         return {"quantiles": getattr(self, "n_quantiles_", None)}
+
+
+def _mass_outside(
+    dist: distributions.QuantileDistribution, grid: grid_lib.Grid
+) -> _typing.FloatArray:
+    """Each row's probability outside the grid, to one quantile level.
+
+    Args:
+        dist: The predicted quantiles.
+        grid: The grid they are tabulated on.
+
+    Returns:
+        The probability below ``grid.z_min`` plus that above ``grid.z_max``,
+        shape ``(n_rows,)``: a lower bound, short by at most one quantile
+        level on each side.
+    """
+    levels = np.r_[0.0, dist.quants, 1.0]
+    n_levels = dist.quants.size
+    below = np.count_nonzero(dist.locs < grid.z_min, axis=1)
+    above = np.count_nonzero(dist.locs > grid.z_max, axis=1)
+    return levels[below] + (1.0 - levels[n_levels + 1 - above])
