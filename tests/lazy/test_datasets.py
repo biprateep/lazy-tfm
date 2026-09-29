@@ -524,6 +524,7 @@ def _serve(monkeypatch, payload, *, pause=0.0, checksum=None):
     monkeypatch.setattr(datasets.urllib.request, "urlopen", urlopen)
     digest = checksum or hashlib.sha256(payload).hexdigest()
     monkeypatch.setitem(datasets._SHA256, "fake.bin", digest)
+    monkeypatch.setitem(datasets._SIZES, "fake.bin", len(payload))
     return timeouts
 
 
@@ -557,3 +558,30 @@ def test_a_corrupted_download_leaves_nothing_behind(isolated_home, monkeypatch):
     with pytest.raises(OSError, match="checksum mismatch"):
         _fetch_fake(root)
     assert not list(root.iterdir())
+
+
+def test_a_truncated_cached_file_is_refused_offline(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "cache"
+    root.mkdir()
+    (root / "fake.bin").write_bytes(b"the who")
+    with pytest.raises(OSError, match="incomplete or corrupted"):
+        datasets._cached_file(
+            "fake.bin",
+            "https://example.invalid/fake.bin",
+            root=root,
+            download_if_missing=False,
+            hint="test",
+        )
+
+
+def test_a_truncated_cached_file_is_fetched_again(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "cache"
+    root.mkdir()
+    (root / "fake.bin").write_bytes(b"the who")
+    assert _fetch_fake(root).read_bytes() == b"the whole file"
+
+
+def test_every_published_file_has_a_size_and_a_checksum():
+    assert set(datasets._SIZES) == set(datasets._SHA256)

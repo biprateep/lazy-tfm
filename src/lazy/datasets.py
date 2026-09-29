@@ -127,6 +127,14 @@ _SHA256 = {
         "9621f9e30baeb87c53a2a8e803043f7c598479f93785a3707954e133074328de"
     ),
 }
+# Their sizes in bytes: a cached copy of another size is incomplete or
+# corrupted, a check cheap enough to make on every load, as hashing the
+# 0.35-0.7 GB files is not.
+_SIZES = {
+    "trainz_train.npz": 352_071_750,
+    "trainz_test.npz": 694_374_957,
+    _HSC_FILE: 13_823_712,
+}
 
 # Seconds a download may wait on the server before giving up, and the size of
 # the pieces it is read in.
@@ -486,7 +494,9 @@ def fetch_dc1(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     train = _load_split(
         "train", root=data_home, download_if_missing=download_if_missing
@@ -539,7 +549,9 @@ def load_trainz(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     z_grid, train = _load_trainz_split(
         "train", root=data_home, download_if_missing=download_if_missing
@@ -607,20 +619,41 @@ def _cached_file(
     download_if_missing: bool,
     hint: str,
 ) -> pathlib.Path:
-    """Returns the cached copy of one remote file, fetched and checksummed."""
+    """Returns the cached copy of one remote file, fetched and checksummed.
+
+    A cached copy whose size is not the published file's is fetched again,
+    or refused when ``download_if_missing`` is False.
+    """
     dest = data_home(root) / filename
-    if dest.exists():
+    size = _SIZES[filename]
+    if _is_complete(dest, size):
         return dest
-    if not download_if_missing:
+    if dest.exists():
+        message = (
+            f"{dest} is {dest.stat().st_size} bytes, not the {size} "
+            "published, so the cached copy is incomplete or corrupted"
+        )
+        if not download_if_missing:
+            raise OSError(f"{message}. Delete it and run {hint} again.")
+        print(f"lazy.datasets: {message}; fetching it again", flush=True)
+    elif not download_if_missing:
         raise FileNotFoundError(
             f"{dest} is not cached and download_if_missing=False. "
             f"Run {hint} on a machine with network access first."
         )
-    _download(url, dest, _SHA256[filename])
+    _download(url, dest, _SHA256[filename], size)
     return dest
 
 
-def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
+def _is_complete(path: pathlib.Path, size: int) -> bool:
+    """Whether ``path`` exists and is ``size`` bytes long."""
+    try:
+        return path.stat().st_size == size
+    except FileNotFoundError:
+        return False
+
+
+def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
     """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download.
 
     The download goes to a temporary file of its own next to ``dest``, so
@@ -632,6 +665,7 @@ def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
         url: Where the file is published.
         dest: Where it is cached.
         sha256: Its SHA-256 checksum, as hex.
+        size: Its size in bytes.
 
     Raises:
         OSError: If the download fails, stalls for longer than the timeout,
@@ -656,7 +690,7 @@ def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
                 f"checksum mismatch for {url}\n  got  {digest.hexdigest()}\n"
                 f"  want {sha256}"
             )
-        if not dest.exists():  # Else another process finished first.
+        if not _is_complete(dest, size):  # Else another process was first.
             os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
@@ -796,7 +830,9 @@ def fetch_hsc_grid(
     Raises:
         FileNotFoundError: If the grid is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If the download fails or does not match its checksum.
+        OSError: If the download fails or does not match its checksum, or
+            the cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     path = _cached_file(
         _HSC_FILE,
@@ -1107,7 +1143,9 @@ def fetch_dc1_biased(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
         RuntimeError: If the hold-out solver cannot reach ``n_train``.
 
     Examples:
