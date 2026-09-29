@@ -351,7 +351,8 @@ def build_features(
             ``bands``.
 
     Returns:
-        One row per input row, float32 columns in mag, names chosen to be
+        One row per input row, under its index, float32 columns in mag,
+        names chosen to be
         readable in feature-importance output (``"G-R"``, ``"G-RERR"``, ...).
 
     Raises:
@@ -411,7 +412,7 @@ def build_features(
         out[f"{first}-{second}ERR"] = np.hypot(
             errs[:, index[first]], errs[:, index[second]]
         )
-    return pd.DataFrame(out)
+    return pd.DataFrame(out, index=raw.index)
 
 
 def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:

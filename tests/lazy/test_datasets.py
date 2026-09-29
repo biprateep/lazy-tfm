@@ -621,3 +621,12 @@ def test_the_old_cache_is_ignored_when_a_cache_is_chosen(
     assert _fetch_fake(None) == isolated_home / "env" / "fake.bin"
     assert len(timeouts) == 2  # both downloaded, neither used the old copy
     assert old.exists()
+
+
+@pytest.mark.parametrize("mode", sorted(datasets.FEATURE_MODES))
+def test_the_features_keep_the_input_index(photometry, mode):
+    raw = photometry.set_axis([f"obj{i}" for i in range(len(photometry))])
+    subset = raw.iloc[::3]
+    features = datasets.build_features(subset, mode)
+    pd.testing.assert_index_equal(features.index, subset.index)
+    np.testing.assert_array_equal(features["IERR"], subset["IERR"])
