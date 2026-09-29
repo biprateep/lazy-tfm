@@ -208,8 +208,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             a hierarchy of its own.
         feature_shuffle: Whether members see the columns in different orders
             (TabFM's own feature shuffles).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Native: each classifier's members
+        bag_size: Context rows per member: an int is a row count (1 means
+            one row), a float a fraction in (0, 1] (1.0 means all rows), and
+            None all of them. Native: each classifier's members
             subsample the same fraction of the rows it sees (TabFM's
             ``max_num_rows``).
         kv_cache: Prefill each member's context once and decode the queries

@@ -106,8 +106,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             transforms always stay the checkpoint's.
         feature_shuffle: Whether members see the columns in different orders
             (TabPFN's own feature shuffling).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Native: TabPFN's own per-member
+        bag_size: Context rows per member: an int is a row count (1 means
+            one row), a float a fraction in (0, 1] (1.0 means all rows), and
+            None all of them. Native: TabPFN's own per-member
             row subsampling, handed the package's bags.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (exact, full
