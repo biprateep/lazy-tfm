@@ -450,11 +450,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
+        if X.shape[0] == 0:
+            # The empty answer still carries the model's buckets or levels,
+            # which only a prediction reveals: predict one placeholder row
+            # and keep none of it.
+            placeholder = np.zeros((1, X.shape[1]))
+            return self._predict_chunk(placeholder)[:0]
         return distributions.concatenate(list(self._chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
+        if X.shape[0] == 0:
+            return np.empty((0, grid.n_bins))
         # Chunk by chunk, so the full native container never exists at once.
         blocks = [dist.on_grid(grid) for dist in self._chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)

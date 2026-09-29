@@ -11,6 +11,7 @@ import inspect
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn import base as sklearn_base
 import standins
@@ -304,6 +305,19 @@ def test_the_recipe_is_recorded_in_provenance(data):
     ]
     assert model.provenance_["bag_rows"] == 30
     assert model.provenance_["kv_cache"] is True
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_query_rows_give_an_empty_answer(cls, data):
+    X, z, X_test = data
+    model = cls(n_estimators=3, bag_size=40).fit(X, z)
+    empty = pd.DataFrame(X_test[:0])
+    pdfs = model._predict_pdf(empty, model.grid_)
+    assert pdfs.shape == (0, model.grid_.n_bins)
+    dist = model._predict_distribution(empty)
+    full = model._predict_distribution(pd.DataFrame(X_test))
+    assert type(dist) is type(full)
+    assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
 
 
 def test_missing_values_reach_the_model(data):
