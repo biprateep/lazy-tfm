@@ -297,3 +297,19 @@ def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
     with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught:
         _model().fit(X, z)
     assert "LimiX @ git+" in str(caught.value)
+
+
+def test_a_spread_float64_cannot_resolve_is_refused():
+    borders = np.linspace(-3.0, 3.0, 5001)
+    np.testing.assert_allclose(
+        limix._bucket_edges(borders, 1e10, 1e3), borders * 1e3 + 1e10
+    )
+    with pytest.raises(ValueError, match="Centre or rescale"):
+        limix._bucket_edges(borders, 1e10, 1e-5)
+
+
+@needs_checkpoint
+def test_fitting_a_target_with_a_tiny_spread_says_to_centre_it(data):
+    X, z, _ = data
+    with pytest.raises(ValueError, match="Centre or rescale"):
+        _model().fit(X, 1e10 + 1e-5 * z)

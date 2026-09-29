@@ -233,6 +233,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         group: _members.MemberGroup,
     ) -> Any:
         mean, std = _standardisation(y)
+        _bucket_edges(self.borders_, mean, std)  # Fails early if they merge.
         tokens = group.native_transforms or tuple(
             self.auto_tokens[i % len(self.auto_tokens)]
             for i in range(group.n_members)
@@ -266,13 +267,14 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         for entry in handle["members"]:
             masses += self._member_probabilities(entry, X)
         masses /= len(handle["members"])
-        edges = self.borders_ * handle["std"] + handle["mean"]
+        edges = _bucket_edges(self.borders_, handle["mean"], handle["std"])
         return distributions.HistogramDistribution(edges, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
         mean, std = self._scale
         return grid_lib.Grid.from_edges(
-            np.unique(self.borders_ * std + mean), normalization="histogram"
+            np.unique(_bucket_edges(self.borders_, mean, std)),
+            normalization="histogram",
         )
 
     def _progress_postfix(
@@ -479,6 +481,35 @@ def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
     y = np.asarray(y, dtype=np.float64)
     std = float(y.std(ddof=1)) if y.size > 1 else 0.0
     return float(y.mean()), std if std > 0 else 1.0
+
+
+def _bucket_edges(
+    borders: _typing.FloatArray, mean: float, std: float
+) -> _typing.FloatArray:
+    """The buckets' borders in the target's units.
+
+    Args:
+        borders: The borders in standardised units, shape (n_buckets + 1,).
+        mean: The context targets' mean.
+        std: Their standard deviation.
+
+    Returns:
+        ``borders * std + mean``, the same shape.
+
+    Raises:
+        ValueError: If the spread is so small against the mean that float64
+            cannot tell neighbouring borders apart.
+    """
+    edges = borders * std + mean
+    if np.unique(edges).size < np.unique(borders).size:
+        raise ValueError(
+            f"the target's spread (standard deviation {std:.3g}) is too "
+            f"small against its mean ({mean:.3g}): LimiX's buckets would "
+            "be narrower than float64 resolves there and merge. Centre or "
+            "rescale the target before fitting, e.g. fit y - y.mean() and "
+            "add it back to the predictions."
+        )
+    return edges
 
 
 def _cache_dtype(network: Any, *, mixed_precision: bool) -> Any:
