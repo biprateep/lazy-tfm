@@ -115,6 +115,50 @@ def test_bags_larger_than_the_limit_still_warn(data):
         _Limited(bag_size=60).fit(X, z)
 
 
+# -- the CPU warning -----------------------------------------------------------
+
+
+class _SlowOnCPU(standins.HistogramStandIn):
+    cpu_friendly = False
+
+
+@pytest.fixture
+def no_gpu(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+
+def test_a_gpu_model_falling_back_to_the_cpu_warns(data, no_gpu):
+    X, z, _ = data
+    with pytest.warns(lazy.PerformanceWarning, match="sees no GPU") as info:
+        _SlowOnCPU().fit(X, z)
+    message = str(info[0].message)
+    assert "LazyModel('tabicl')" in message
+    assert "device='cpu'" in message
+    assert "Supported models" in message
+
+
+def test_an_explicit_cpu_or_a_cpu_friendly_model_does_not_warn(data, no_gpu):
+    X, z, _ = data
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.PerformanceWarning)
+        _SlowOnCPU(device="cpu").fit(X, z)
+        _SlowOnCPU(device="CPU").fit(X, z)
+        standins.HistogramStandIn().fit(X, z)
+
+
+def test_only_tabicl_is_cpu_friendly():
+    friendly = [n for n, c in lazy.ESTIMATORS.items() if c.cpu_friendly]
+    assert friendly == ["tabicl"]
+
+
+def test_the_tabpfn_cpu_warning_names_its_context_limit():
+    model = lazy.TabPFNBarDistribution()
+    model.device_ = "cpu"
+    with pytest.warns(lazy.PerformanceWarning, match="5,000 context rows"):
+        model._warn_if_slow_on_cpu()
+
+
 # -- planning ----------------------------------------------------------------
 
 

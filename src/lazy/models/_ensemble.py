@@ -93,6 +93,12 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
 }
 
 
+#: What the CPU warning adds for a backend with more to say about the CPU.
+_CPU_NOTES: dict[str, str] = {
+    "tabpfn": " and, from v3 on, refuses more than 5,000 context rows there",
+}
+
+
 class ContextSizeWarning(UserWarning):
     """The context is larger than the model was pretrained for."""
 
@@ -132,6 +138,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
         accepts_auto_estimators: Whether ``n_estimators="auto"`` is allowed.
+        cpu_friendly: Whether the model runs at a usable speed on a CPU; if
+            not, a fit that falls back to the CPU under ``device="auto"``
+            warns.
     """
 
     display_name: ClassVar[str] = ""
@@ -149,6 +158,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     exact_chunking: ClassVar[bool] = True
     chunks_queries: ClassVar[bool] = True
     accepts_auto_estimators: ClassVar[bool] = False
+    cpu_friendly: ClassVar[bool] = False
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
@@ -230,6 +240,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
         self.device_ = _device.resolve_device(self.device)
+        self._warn_if_slow_on_cpu()
         self._load_checkpoint()
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
@@ -327,6 +338,35 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"n_estimators must be a positive int: {self.n_estimators=}"
             )
         return int(n_estimators)
+
+    def _warn_if_slow_on_cpu(self) -> None:
+        """Warns when ``"auto"`` fell back to the CPU for a GPU model."""
+        # Imported here: the registry imports every backend, hence this.
+        from lazy.models import registry  # noqa: PLC0415
+
+        auto = str(self.device).strip().lower() == "auto"
+        if self.cpu_friendly or not auto or self.device_ != "cpu":
+            return
+        friendly = sorted(
+            name
+            for name, cls in registry.ESTIMATORS.items()
+            if getattr(cls, "cpu_friendly", False)
+        )
+        models = " or ".join(f"LazyModel({name!r})" for name in friendly)
+        suggestion = (
+            f"For CPU work prefer a CPU-friendly model: {models}. "
+            if friendly
+            else ""
+        )
+        warnings.warn(
+            f"PyTorch sees no GPU, so device='auto' runs {self.display_name} "
+            f"on the CPU. {self.display_name} runs slowly on CPU"
+            f"{_CPU_NOTES.get(self.backend or '', '')}. {suggestion}Pass "
+            "device='cpu' to run it there anyway without this warning; see "
+            "'Supported models' in the documentation.",
+            PerformanceWarning,
+            stacklevel=4,
+        )
 
     def _warn_if_bags_too_small(self) -> None:
         """Warns when bags are so small an int was likely meant as a float."""
