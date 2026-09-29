@@ -7,6 +7,12 @@ with a node-local disk, so every part of the path is overridable and none of it
 is hardcoded.
 """
 
+import concurrent.futures
+import hashlib
+import io
+import time
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -27,6 +33,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.delenv("LAZY_DATA_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / "home").mkdir()
+    monkeypatch.setattr(datasets, "_warned_legacy", set())
     return tmp_path
 
 
@@ -488,3 +495,138 @@ def test_asking_for_the_control_leaves_the_rest_of_the_split_alone(
     )
     for name in ("biased", "calibration", "test"):
         assert np.array_equal(with_control.rows[name], split.rows[name]), name
+
+
+class _SlowResponse:
+    """A stand-in for urlopen's response, served in small, slow pieces."""
+
+    def __init__(self, payload, pause):
+        self._stream = io.BytesIO(payload)
+        self._pause = pause
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self, size):
+        time.sleep(self._pause)
+        return self._stream.read(min(size, 64))
+
+
+def _serve(monkeypatch, payload, *, pause=0.0, checksum=None):
+    """Serves ``payload`` for every URL; returns the timeouts asked for."""
+    timeouts = []
+
+    def urlopen(url, timeout=None):
+        timeouts.append(timeout)
+        return _SlowResponse(payload, pause)
+
+    monkeypatch.setattr(datasets.urllib.request, "urlopen", urlopen)
+    digest = checksum or hashlib.sha256(payload).hexdigest()
+    monkeypatch.setitem(datasets._SHA256, "fake.bin", digest)
+    monkeypatch.setitem(datasets._SIZES, "fake.bin", len(payload))
+    return timeouts
+
+
+def _fetch_fake(root):
+    return datasets._cached_file(
+        "fake.bin",
+        "https://example.invalid/fake.bin",
+        root=root,
+        download_if_missing=True,
+        hint="test",
+    )
+
+
+def test_parallel_downloads_to_one_cache_do_not_collide(
+    isolated_home, monkeypatch
+):
+    payload = bytes(range(256)) * 8
+    timeouts = _serve(monkeypatch, payload, pause=0.002)
+    root = isolated_home / "shared"
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        paths = list(pool.map(_fetch_fake, [root, root]))
+    assert paths[0] == paths[1] == root / "fake.bin"
+    assert paths[0].read_bytes() == payload
+    assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
+    assert timeouts and all(t is not None and t > 0 for t in timeouts)
+
+
+def test_a_corrupted_download_leaves_nothing_behind(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"not the file", checksum="0" * 64)
+    root = isolated_home / "cache"
+    with pytest.raises(OSError, match="checksum mismatch"):
+        _fetch_fake(root)
+    assert not list(root.iterdir())
+
+
+def test_a_truncated_cached_file_is_refused_offline(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "cache"
+    root.mkdir()
+    (root / "fake.bin").write_bytes(b"the who")
+    with pytest.raises(OSError, match="incomplete or corrupted"):
+        datasets._cached_file(
+            "fake.bin",
+            "https://example.invalid/fake.bin",
+            root=root,
+            download_if_missing=False,
+            hint="test",
+        )
+
+
+def test_a_truncated_cached_file_is_fetched_again(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "cache"
+    root.mkdir()
+    (root / "fake.bin").write_bytes(b"the who")
+    assert _fetch_fake(root).read_bytes() == b"the whole file"
+
+
+def test_every_published_file_has_a_size_and_a_checksum():
+    assert set(datasets._SIZES) == set(datasets._SHA256)
+
+
+def _legacy_file(isolated_home, payload):
+    legacy = isolated_home / "home" / ".cache" / "lazy-photoz"
+    legacy.mkdir(parents=True)
+    (legacy / "fake.bin").write_bytes(payload)
+    return legacy / "fake.bin"
+
+
+def test_a_file_in_the_old_cache_is_used_with_one_warning(
+    isolated_home, monkeypatch
+):
+    _serve(monkeypatch, b"the whole file")
+    old = _legacy_file(isolated_home, b"the whole file")
+    with pytest.warns(UserWarning, match="old cache directory") as record:
+        assert _fetch_fake(None) == old
+    assert record[0].filename == __file__
+    assert "lazy-tfm" in str(record[0].message)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _fetch_fake(None) == old  # warned once
+
+
+def test_the_old_cache_is_ignored_when_a_cache_is_chosen(
+    isolated_home, monkeypatch
+):
+    timeouts = _serve(monkeypatch, b"the whole file")
+    old = _legacy_file(isolated_home, b"the whole file")
+    chosen = isolated_home / "chosen"
+    assert _fetch_fake(chosen) == chosen / "fake.bin"
+    monkeypatch.setenv("LAZY_DATA_HOME", str(isolated_home / "env"))
+    assert _fetch_fake(None) == isolated_home / "env" / "fake.bin"
+    assert len(timeouts) == 2  # both downloaded, neither used the old copy
+    assert old.exists()
+
+
+@pytest.mark.parametrize("mode", sorted(datasets.FEATURE_MODES))
+def test_the_features_keep_the_input_index(photometry, mode):
+    raw = photometry.set_axis([f"obj{i}" for i in range(len(photometry))])
+    subset = raw.iloc[::3]
+    features = datasets.build_features(subset, mode)
+    pd.testing.assert_index_equal(features.index, subset.index)
+    np.testing.assert_array_equal(features["IERR"], subset["IERR"])

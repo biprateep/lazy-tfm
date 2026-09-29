@@ -2,8 +2,12 @@
 # Copyright (c) 2025 Biprateep Dey
 """LimiXBarDistribution: what the uniform conformance suite does not cover."""
 
+import builtins
 import os
+import pathlib
 import pickle
+import subprocess
+import sys
 import warnings
 
 import numpy as np
@@ -129,7 +133,9 @@ def test_the_native_grid_uses_the_whole_context(data):
 def test_a_cache_that_does_not_fit_falls_back(monkeypatch, data):
     X, z, X_test = data
     monkeypatch.setattr(limix, "_free_device_memory", lambda network: 1)
-    with pytest.warns(lazy.PerformanceWarning, match="without its key/value"):
+    with pytest.warns(
+        lazy.PerformanceWarning, match="2 of its 2 members without"
+    ):
         fallback = _model().fit(X, z)
     assert fallback.kv_cache_ is False
     for handle in fallback.handles_:
@@ -161,3 +167,165 @@ def test_a_large_unbagged_context_warns(monkeypatch, data):
     with warnings.catch_warnings():
         warnings.simplefilter("error", lazy.ContextSizeWarning)
         _model(bag_size=150).fit(X, z)
+
+
+def test_an_unfitted_model_pickles_without_the_source(monkeypatch):
+    monkeypatch.setattr(_limix_source, "load", _missing_source)
+    restored = pickle.loads(pickle.dumps(_model(n_estimators=3)))
+    assert restored.get_params()["n_estimators"] == 3
+
+
+_UNPICKLE_AND_PREDICT = """
+import pickle, sys
+import numpy as np
+with open(sys.argv[1], "rb") as f:
+    model = pickle.load(f)
+np.save(sys.argv[3], model.predict_proba(np.load(sys.argv[2])))
+"""
+
+
+@needs_checkpoint
+def test_a_pickled_model_predicts_the_same_in_a_fresh_process(data, tmp_path):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    with open(tmp_path / "model.pkl", "wb") as f:
+        pickle.dump(model, f)
+    np.save(tmp_path / "X.npy", X_test)
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _UNPICKLE_AND_PREDICT,
+            str(tmp_path / "model.pkl"),
+            str(tmp_path / "X.npy"),
+            str(tmp_path / "out.npy"),
+        ],
+        check=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+    )
+    np.testing.assert_array_equal(
+        np.load(tmp_path / "out.npy"), model.predict_proba(X_test)
+    )
+
+
+@needs_checkpoint
+def test_an_unpickled_model_finds_its_device_and_checkpoint_afresh(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    before = model.predict_proba(X_test)
+    checkpoint = model.checkpoint_
+    # As if fitted with device="auto" on another machine's GPU and cache.
+    model.device = "auto"
+    model.device_ = "cuda:7"
+    model.checkpoint_ = pathlib.Path("/elsewhere/LimiX-2.ckpt")
+    pickled = pickle.dumps(model)
+    monkeypatch.setattr(limix._device, "resolve_device", lambda device: "cpu")
+    restored = pickle.loads(pickled)
+    assert restored.device_ == "cpu"
+    assert restored.provenance_["device"] == "cpu"
+    np.testing.assert_array_equal(restored.predict_proba(X_test), before)
+    assert restored.checkpoint_ == checkpoint
+
+
+def _simulated_gpu(monkeypatch, free_bytes, cache_bytes):
+    """Fakes a GPU whose free memory shrinks as caches are made."""
+    held = [0]
+    calls = []
+
+    def free(network):
+        calls.append(held[0])
+        return free_bytes - held[0]
+
+    prefill = _limix_stream.prefill
+
+    def counted_prefill(*args, **kwargs):
+        held[0] += cache_bytes
+        return prefill(*args, **kwargs)
+
+    monkeypatch.setattr(limix, "_free_device_memory", free)
+    monkeypatch.setattr(
+        _limix_stream, "cache_bytes", lambda *args, **kwargs: cache_bytes
+    )
+    monkeypatch.setattr(_limix_stream, "prefill", counted_prefill)
+    return held, calls
+
+
+@needs_checkpoint
+def test_the_caches_that_fit_are_kept(monkeypatch, data):
+    X, z, X_test = data
+    # 0.6 of 10 units free leaves room for 6 of the 8 members' caches.
+    held, calls = _simulated_gpu(monkeypatch, 10, 1)
+    with pytest.warns(lazy.PerformanceWarning) as record:
+        model = _model(n_estimators=8).fit(X, z)
+    assert len(record) == 1
+    assert "2 of its 8 members without" in str(record[0].message)
+    assert record[0].filename == __file__
+    assert calls == [0]  # measured once, before the first cache
+    assert held[0] == 6
+    assert model.kv_cache_ is True
+    uses = [entry["use_cache"] for entry in model.handles_[0]["members"]]
+    assert uses == [True] * 6 + [False] * 2
+    uncached = _model(n_estimators=8, kv_cache=False).fit(X, z)
+    np.testing.assert_allclose(
+        model.predict_proba(X_test),
+        uncached.predict_proba(X_test),
+        rtol=limix.LimiXBarDistribution.kv_cache_rtol,
+        atol=1e-7,
+    )
+
+
+@needs_checkpoint
+def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    model = _model(n_estimators=4).fit(X, z)
+    before = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    held, calls = _simulated_gpu(monkeypatch, 5, 1)  # room for 3 of 4
+    with pytest.warns(lazy.PerformanceWarning, match="1 of its 4 members"):
+        after = restored.predict_proba(X_test)
+    assert calls == [0]
+    assert held[0] == 3
+    np.testing.assert_allclose(after, before, rtol=1e-4, atol=1e-7)
+
+
+def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
+    monkeypatch.setitem(sys.modules, "torch", None)  # as if not installed
+    X, z, _ = data
+    with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught:
+        _model().fit(X, z)
+    assert "LimiX @ git+" in str(caught.value)
+
+
+def test_a_spread_float64_cannot_resolve_is_refused():
+    borders = np.linspace(-3.0, 3.0, 5001)
+    np.testing.assert_allclose(
+        limix._bucket_edges(borders, 1e10, 1e3), borders * 1e3 + 1e10
+    )
+    with pytest.raises(ValueError, match="Centre or rescale"):
+        limix._bucket_edges(borders, 1e10, 1e-5)
+
+
+@needs_checkpoint
+def test_fitting_a_target_with_a_tiny_spread_says_to_centre_it(data):
+    X, z, _ = data
+    with pytest.raises(ValueError, match="Centre or rescale"):
+        _model().fit(X, 1e10 + 1e-5 * z)
+
+
+def test_a_broken_torch_install_is_not_reworded(monkeypatch, data):
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "torch":
+            raise ImportError("libtorch_cuda.so: cannot open", name="_C")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    X, z, _ = data
+    with pytest.raises(ImportError, match="libtorch_cuda") as caught:
+        _model().fit(X, z)
+    assert "lazy-tfm" not in str(caught.value)

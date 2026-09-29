@@ -46,6 +46,7 @@ __all__ = [
     "Source",
     "load",
     "locate",
+    "missing_dependency",
 ]
 
 #: The LimiX commit the backend was validated against.
@@ -58,8 +59,11 @@ ENV_VARS = ("LAZY_LIMIX_SRC", "LIMIX_SRC")
 _ALIAS = "lazy.models._limix_ext"
 _SUBTREES = {"model": ("model", "v2_0"), "inference": ("inference", "v2_0")}
 # Loaded subtrees, keyed by source root: loading twice would give two copies
-# of every class, which breaks isinstance checks inside LimiX's own code.
+# of every class, which breaks isinstance checks inside LimiX's own code. The
+# first source loaded is the one the process keeps.
 _loaded: dict[pathlib.Path, types.SimpleNamespace] = {}
+# Roots an environment variable named after the first load, already warned of.
+_ignored: set[pathlib.Path] = set()
 
 _INSTALL_HINT = (
     "LimiXBarDistribution needs LimiX's source, which is not on PyPI. "
@@ -67,6 +71,11 @@ _INSTALL_HINT = (
     "and its dependencies with pip install 'lazy-tfm[limix]', or point "
     "$LAZY_LIMIX_SRC at a checkout."
 )
+
+# The top-level modules LimiX's two subtrees import that are not in the
+# standard library or lazy's own requirements: the limix extra's, and triton,
+# which comes with Linux torch wheels.
+_DEPENDENCIES = frozenset({"torch", "einops", "kditransform", "nvtx", "triton"})
 
 
 class LimiXSourceWarning(UserWarning):
@@ -129,6 +138,11 @@ def locate() -> Source:
 def load() -> types.SimpleNamespace:
     """Loads LimiX's network and preprocessing code under private aliases.
 
+    The first successful load is kept for the rest of the process: later
+    calls return it without looking for the source again, and a
+    :class:`LimiXSourceWarning` says so if ``$LAZY_LIMIX_SRC`` or
+    ``$LIMIX_SRC`` has since come to name another checkout.
+
     Returns:
         A namespace with ``loading`` (``model.v2_0.loading``), ``preprocess``
         (``inference.v2_0.preprocess``) and ``source`` (a :class:`Source`).
@@ -138,9 +152,11 @@ def load() -> types.SimpleNamespace:
             dependencies (``torch``, ``einops``, ``kditransform``, ``nvtx``,
             ``triton``) is missing.
     """
+    if _loaded:
+        loaded = next(iter(_loaded.values()))
+        _warn_if_redirected(loaded.source)
+        return loaded
     source = locate()
-    if source.root in _loaded:
-        return _loaded[source.root]
     if source.commit != LIMIX_COMMIT:
         warnings.warn(
             f"LimiX source at {source.root} ({source.origin}) is at commit "
@@ -153,15 +169,68 @@ def load() -> types.SimpleNamespace:
         parent = types.ModuleType(_ALIAS)
         parent.__path__ = []
         sys.modules[_ALIAS] = parent
-    for name, parts in _SUBTREES.items():
-        _load_package(f"{_ALIAS}.{name}", source.root.joinpath(*parts))
-    namespace = types.SimpleNamespace(
-        loading=importlib.import_module(f"{_ALIAS}.model.loading"),
-        preprocess=importlib.import_module(f"{_ALIAS}.inference.preprocess"),
-        source=source,
-    )
+    try:
+        for name, parts in _SUBTREES.items():
+            _load_package(f"{_ALIAS}.{name}", source.root.joinpath(*parts))
+        namespace = types.SimpleNamespace(
+            loading=importlib.import_module(f"{_ALIAS}.model.loading"),
+            preprocess=importlib.import_module(
+                f"{_ALIAS}.inference.preprocess"
+            ),
+            source=source,
+        )
+    except ModuleNotFoundError as error:
+        if (error.name or "").partition(".")[0] not in _DEPENDENCIES:
+            raise
+        raise missing_dependency(error.name or "") from error
     _loaded[source.root] = namespace
     return namespace
+
+
+def _warn_if_redirected(source: Source) -> None:
+    """Warns, once per root, when the environment names another source."""
+    for name in ENV_VARS:
+        value = os.environ.get(name)
+        if not value:
+            continue
+        root = pathlib.Path(value).expanduser().resolve()
+        if root != source.root and root not in _ignored:
+            _ignored.add(root)
+            warnings.warn(
+                f"${name}={value} names another LimiX source than the one "
+                f"this process loaded, {source.root} ({source.origin}); "
+                "LimiX's code cannot be loaded twice, so it keeps using that "
+                "one. Restart Python to switch.",
+                LimiXSourceWarning,
+                stacklevel=3,
+            )
+        return
+
+
+def missing_dependency(name: str) -> ImportError:
+    """The error for one of LimiX's dependencies missing, with the fix.
+
+    Args:
+        name: The module that failed to import, such as ``"einops"``.
+
+    Returns:
+        An :class:`ImportError` naming it and how to install LimiX's
+        dependencies and source.
+    """
+    top = name.partition(".")[0]
+    message = (
+        f"LimiXBarDistribution needs {top!r}, one of LimiX's dependencies, "
+        "which is not installed. Install them with pip install "
+        "'lazy-tfm[limix]', and LimiX's source, which is not on PyPI, with "
+        f'pip install "LimiX @ git+{REPOSITORY}@{LIMIX_COMMIT}".'
+    )
+    if top == "triton":
+        message += (
+            " triton is published for Linux only (it comes with Linux torch "
+            "wheels), and LimiX's network imports it, so the backend runs "
+            "on Linux."
+        )
+    return ImportError(message, name=name)
 
 
 def _has_subtrees(root: pathlib.Path) -> bool:

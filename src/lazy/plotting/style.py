@@ -29,6 +29,7 @@ import dataclasses
 import os
 import pathlib
 from typing import Any
+import warnings
 
 import cycler
 import matplotlib as mpl
@@ -233,7 +234,6 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
     "legend.frameon": False,
     "figure.titlesize": BIG_SIZE,
     "figure.facecolor": "w",
-    "figure.dpi": 300,
     "mathtext.fontset": "cm",
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
@@ -348,13 +348,19 @@ def use_style(
     return _active_journal
 
 
-def verify_style(strict: bool = True) -> dict[str, Any]:
+def verify_style(
+    strict: bool = True, *, strict_font: bool = False
+) -> dict[str, Any]:
     """Checks that the house rcParams are active and the serif face resolved.
 
     The palette is reported, not enforced — a user-stated one is legitimate.
+    A missing paper font is a property of the machine, not of the code, so
+    it warns rather than raises unless ``strict_font`` is set.
 
     Args:
-        strict: Raise if anything is wrong, rather than only reporting it.
+        strict: Raise if an rcParam is wrong, rather than only reporting it.
+        strict_font: Raise, too, if the serif face fell through to DejaVu,
+            rather than warning.
 
     Returns:
         A dict with the keys ``font`` (the path of the font file matplotlib
@@ -365,10 +371,14 @@ def verify_style(strict: bool = True) -> dict[str, Any]:
 
     Raises:
         RuntimeError: With ``strict=True`` (default), if any rcParam differs
-            from :data:`RC_PARAMS` or if the font chain fell through to a
-            DejaVu face — which is what happens on a machine without Nimbus
-            Roman, and which matplotlib otherwise reports only as a
-            debug-level log line.
+            from :data:`RC_PARAMS`; with ``strict_font=True`` as well, if
+            the font chain fell through to a DejaVu face — which is what
+            happens on a machine without Nimbus Roman, and which matplotlib
+            otherwise reports only as a debug-level log line.
+
+    Warns:
+        UserWarning: If the font chain fell through to DejaVu and
+            ``strict_font`` is False.
     """
     expected = mpl.RcParams(RC_PARAMS)  # Runs values through the validators.
     problems = [
@@ -381,14 +391,20 @@ def verify_style(strict: bool = True) -> dict[str, Any]:
             font_manager.FontProperties(family=mpl.rcParams["font.serif"])
         )
     )
+    fatal = list(problems)
     if "dejavu" in font_path.name.lower():
-        problems.append(
+        font_problem = (
             f"serif font resolved to {font_path.name}; install Nimbus Roman "
             "(package urw-base35 / gsfonts / fonts-urw-base35) and clear "
             "~/.cache/matplotlib"
         )
-    if strict and problems:
-        bullets = "\n  - ".join(problems)
+        problems.append(font_problem)
+        if strict_font:
+            fatal.append(font_problem)
+        else:
+            warnings.warn(font_problem, UserWarning, stacklevel=2)
+    if strict and fatal:
+        bullets = "\n  - ".join(fatal)
         raise RuntimeError(f"plot style not in effect:\n  - {bullets}")
     colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", [])
     return {
@@ -772,7 +788,9 @@ def save(
 ) -> pathlib.Path:
     """Saves as a tight 300 dpi PNG — the house output — creating parent dirs.
 
-    A path with no suffix gets ``.png``. Pass an explicit ``.pdf`` only when
+    A path whose suffix is not a format matplotlib can save gets ``.png``
+    appended, so ``"out/model.v2"`` becomes ``out/model.v2.png``. Pass an
+    explicit ``.pdf`` only when
     a vector figure has been specifically requested. The figure stays open:
     it belongs to the caller, who closes it.
 
@@ -783,11 +801,13 @@ def save(
         **kwargs: Passed to ``fig.savefig``.
 
     Returns:
-        The path written, with the suffix added if there was none.
+        The path written, with ``.png`` added if its suffix was not a
+        format.
     """
     path = pathlib.Path(path)
-    if not path.suffix:
-        path = path.with_suffix(".png")
+    formats = fig.canvas.get_supported_filetypes()
+    if path.suffix[1:].lower() not in formats:
+        path = path.with_name(path.name + ".png")
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, bbox_inches="tight", dpi=dpi, **kwargs)
     return path

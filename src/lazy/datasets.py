@@ -61,9 +61,11 @@ import hashlib
 import itertools
 import os
 import pathlib
+import tempfile
 import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -126,6 +128,23 @@ _SHA256 = {
         "9621f9e30baeb87c53a2a8e803043f7c598479f93785a3707954e133074328de"
     ),
 }
+# Their sizes in bytes: a cached copy of another size is incomplete or
+# corrupted, a check cheap enough to make on every load, as hashing the
+# 0.35-0.7 GB files is not.
+_SIZES = {
+    "trainz_train.npz": 352_071_750,
+    "trainz_test.npz": 694_374_957,
+    _HSC_FILE: 13_823_712,
+}
+# The default cache directory's name before the package became lazy-tfm, and
+# the old caches already warned of.
+_LEGACY_HOME = "lazy-photoz"
+_warned_legacy: set[pathlib.Path] = set()
+
+# Seconds a download may wait on the server before giving up, and the size of
+# the pieces it is read in.
+_DOWNLOAD_TIMEOUT = 60.0
+_CHUNK_BYTES = 1 << 20
 
 #: Defaults reproducing the paired split the paper reports: the biased training
 #: set is sized to the DC1 training file, and the calibration sample is stolen
@@ -332,7 +351,8 @@ def build_features(
             ``bands``.
 
     Returns:
-        One row per input row, float32 columns in mag, names chosen to be
+        One row per input row, under its index, float32 columns in mag,
+        names chosen to be
         readable in feature-importance output (``"G-R"``, ``"G-RERR"``, ...).
 
     Raises:
@@ -392,7 +412,7 @@ def build_features(
         out[f"{first}-{second}ERR"] = np.hypot(
             errs[:, index[first]], errs[:, index[second]]
         )
-    return pd.DataFrame(out)
+    return pd.DataFrame(out, index=raw.index)
 
 
 def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
@@ -412,16 +432,45 @@ def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
         The cache directory, with ``~`` expanded.
     """
     explicit = data_home or os.environ.get("LAZY_DATA_HOME")
-    if explicit:
-        root = pathlib.Path(explicit)
-    else:
-        cache = (
-            os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
-        )
-        root = pathlib.Path(cache) / "lazy-tfm"
+    root = pathlib.Path(explicit) if explicit else _default_home("lazy-tfm")
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _default_home(name: str) -> pathlib.Path:
+    """The default cache directory ``name``, under the user's cache."""
+    cache = os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
+    return pathlib.Path(cache).expanduser() / name
+
+
+def _legacy_copy(
+    filename: str, root: str | pathlib.Path | None, size: int
+) -> pathlib.Path | None:
+    """A complete copy of ``filename`` in the cache used before the rename.
+
+    Looked for only when no cache directory was chosen, by argument or by
+    ``$LAZY_DATA_HOME``: the package cached in ``lazy-photoz`` before it
+    became ``lazy-tfm``. The first use of the old cache warns, once.
+
+    Returns:
+        The old copy, or None if there is none, or one was chosen.
+    """
+    if root or os.environ.get("LAZY_DATA_HOME"):
+        return None
+    legacy = _default_home(_LEGACY_HOME) / filename
+    if not _is_complete(legacy, size):
+        return None
+    if legacy.parent not in _warned_legacy:
+        _warned_legacy.add(legacy.parent)
+        warnings.warn(
+            f"lazy.datasets is using {legacy} from its old cache directory, "
+            f"{legacy.parent}; the cache is now {data_home()}. Move the "
+            "files there to silence this.",
+            UserWarning,
+            skip_file_prefixes=(os.path.dirname(os.path.abspath(__file__)),),
+        )
+    return legacy
 
 
 @typing.overload
@@ -480,7 +529,9 @@ def fetch_dc1(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     train = _load_split(
         "train", root=data_home, download_if_missing=download_if_missing
@@ -533,7 +584,9 @@ def load_trainz(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     z_grid, train = _load_trainz_split(
         "train", root=data_home, download_if_missing=download_if_missing
@@ -601,31 +654,84 @@ def _cached_file(
     download_if_missing: bool,
     hint: str,
 ) -> pathlib.Path:
-    """Returns the cached copy of one remote file, fetched and checksummed."""
+    """Returns the cached copy of one remote file, fetched and checksummed.
+
+    A cached copy whose size is not the published file's is fetched again,
+    or refused when ``download_if_missing`` is False. With no cache
+    directory chosen, a copy in the cache used before the package's rename
+    is used, with a warning, rather than fetched again.
+    """
     dest = data_home(root) / filename
-    if dest.exists():
+    size = _SIZES[filename]
+    if _is_complete(dest, size):
         return dest
-    if not download_if_missing:
+    legacy = _legacy_copy(filename, root, size)
+    if legacy is not None:
+        return legacy
+    if dest.exists():
+        message = (
+            f"{dest} is {dest.stat().st_size} bytes, not the {size} "
+            "published, so the cached copy is incomplete or corrupted"
+        )
+        if not download_if_missing:
+            raise OSError(f"{message}. Delete it and run {hint} again.")
+        print(f"lazy.datasets: {message}; fetching it again", flush=True)
+    elif not download_if_missing:
         raise FileNotFoundError(
             f"{dest} is not cached and download_if_missing=False. "
             f"Run {hint} on a machine with network access first."
         )
-    _download(url, dest, _SHA256[filename])
+    _download(url, dest, _SHA256[filename], size)
     return dest
 
 
-def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
-    """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download."""
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    print(f"lazy.datasets: downloading {url}", flush=True)
+def _is_complete(path: pathlib.Path, size: int) -> bool:
+    """Whether ``path`` exists and is ``size`` bytes long."""
     try:
-        urllib.request.urlretrieve(url, tmp)
-        digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-        if digest != sha256:
+        return path.stat().st_size == size
+    except FileNotFoundError:
+        return False
+
+
+def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
+    """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download.
+
+    The download goes to a temporary file of its own next to ``dest``, so
+    that processes fetching the same file into a shared cache never write
+    to, or delete, one another's; the first to finish moves its copy into
+    place and the others keep that one.
+
+    Args:
+        url: Where the file is published.
+        dest: Where it is cached.
+        sha256: Its SHA-256 checksum, as hex.
+        size: Its size in bytes.
+
+    Raises:
+        OSError: If the download fails, stalls for longer than the timeout,
+            or does not match its checksum.
+    """
+    print(f"lazy.datasets: downloading {url}", flush=True)
+    with tempfile.NamedTemporaryFile(
+        dir=dest.parent, prefix=f".{dest.name}.", suffix=".part", delete=False
+    ) as out:
+        tmp = pathlib.Path(out.name)
+    try:
+        digest = hashlib.sha256()
+        with (
+            open(tmp, "wb") as out,
+            urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response,
+        ):
+            while chunk := response.read(_CHUNK_BYTES):
+                out.write(chunk)
+                digest.update(chunk)
+        if digest.hexdigest() != sha256:
             raise OSError(
-                f"checksum mismatch for {url}\n  got  {digest}\n  want {sha256}"
+                f"checksum mismatch for {url}\n  got  {digest.hexdigest()}\n"
+                f"  want {sha256}"
             )
-        tmp.replace(dest)
+        if not _is_complete(dest, size):  # Else another process was first.
+            os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
     print(
@@ -764,7 +870,9 @@ def fetch_hsc_grid(
     Raises:
         FileNotFoundError: If the grid is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If the download fails or does not match its checksum.
+        OSError: If the download fails or does not match its checksum, or
+            the cached file is incomplete and ``download_if_missing`` is
+            ``False``.
     """
     path = _cached_file(
         _HSC_FILE,
@@ -1075,7 +1183,9 @@ def fetch_dc1_biased(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum.
+        OSError: If a download fails or does not match its checksum, or a
+            cached file is incomplete and ``download_if_missing`` is
+            ``False``.
         RuntimeError: If the hold-out solver cannot reach ``n_train``.
 
     Examples:
