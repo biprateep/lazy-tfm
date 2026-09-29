@@ -73,8 +73,7 @@ sees them. Members take the names round robin.
 `"auto"` (the default) is each model's own recipe, untouched. `"limix"` is
 LimiX-2's recipe, `("quantile_uniform+original", "power")`, on any model: the
 paper's "with LimiX transforms" runs. Transforms a model lacks are fitted on
-the context rows and applied by `lazy`, so every name works everywhere;
-{mod}`lazy.models._transforms` has the details.
+the context rows and applied by `lazy`, so every name works everywhere.
 
 ## The key/value cache
 
@@ -172,7 +171,7 @@ a trip through JSON.
 Versions are not interchangeable. TabPFN `v2` is pretrained for at most 10,000
 context rows and `v2.5` for 50,000, against a million for `v3`; `v2` is also
 the only one whose weights allow commercial use.
-{func}`lazy.get_checkpoint` returns each version's licence and size notes.
+{func}`lazy.get_checkpoint <lazy.models.get_checkpoint>` returns each version's licence and size notes.
 
 ## Memory and speed
 

@@ -9,7 +9,7 @@ produced your numbers.
 ## Licences
 
 The package is MIT-licensed. The pretrained checkpoints carry their own
-licences, several of them non-commercial; {data}`lazy.CHECKPOINTS` quotes each
+licences, several of them non-commercial; {data}`lazy.CHECKPOINTS <lazy.models.CHECKPOINTS>` quotes each
 one. The HSC selection grid used by {mod}`lazy.selection` is redistributed by
 DESC's [rail_astro_tools](https://github.com/LSSTDESC/rail_astro_tools) (MIT)
 and derives from HSC PDR2 (Aihara et al. 2019); it is downloaded from there at

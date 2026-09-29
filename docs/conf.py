@@ -56,6 +56,7 @@ autoapi_options = [
     "undoc-members",
     "show-inheritance",
     "show-module-summary",
+    "imported-members",
 ]
 add_module_names = False
 # Attributes: sections render as fields, not as a second copy of the
@@ -89,3 +90,24 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs",
 }
+
+
+def _skip_public_reexports(app, what, name, obj, skip, options):  # noqa: ARG001 - Sphinx's event signature.
+    """Documents a re-exported name only where it has no public home.
+
+    ``lazy`` and ``lazy.models`` re-export names from private modules (the
+    checkpoint registry, the warnings) and from public ones (the backends,
+    the grid). The first have no page of their own, so they are documented
+    where they are re-exported; the second already have one, and a second
+    copy would make every cross-reference to them ambiguous.
+    """
+    original = getattr(obj, "obj", {}).get("original_path") or ""
+    if getattr(obj, "imported", False) and original:
+        module = original.rpartition(".")[0]
+        if not any(part.startswith("_") for part in module.split(".")):
+            return True
+    return skip
+
+
+def setup(app):  # noqa: D103 - Sphinx's extension hook.
+    app.connect("autoapi-skip-member", _skip_public_reexports)

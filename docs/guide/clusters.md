@@ -26,6 +26,6 @@ fetch_dc1(download_if_missing=False)
 
 Setting `HF_HUB_OFFLINE=1` on the compute node has the same effect for the
 weights. The checkpoint a model loads is exactly the one
-{func}`~lazy.download_checkpoint` fetches: the pinned revision is passed to the
+{func}`~lazy.models.download_checkpoint` fetches: the pinned revision is passed to the
 backend rather than left to its own default, so warming the cache cannot
 prefetch the wrong file.
