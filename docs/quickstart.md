@@ -1,19 +1,53 @@
 # Quickstart
 
+Install the package with the default model's backend, TabPFN:
+
+```console
+pip install 'lazy-tfm[tabpfn]'
+```
+
+The first `fit` downloads TabPFN-3.5's weights (~880 MB), which Prior Labs
+releases under a **non-commercial** licence; {doc}`guide/models` lists every
+model's size, licence and hardware needs.
+
 ```python
-from lazy import LazyModel, Grid
+import lazy
 from lazy.datasets import fetch_dc1
 
-train, test = fetch_dc1(split=True)
-X_train, X_test = train.features("mag-color"), test.features("mag-color")
+train, test = fetch_dc1(split=True)            # ~1 GB, cached after the first call
+X_train, z_train = train.features("mag-color"), train.redshift
+X_test = test.features("mag-color").iloc[:20_000]   # 391k rows in all; start small
+z_test = test.redshift[:20_000]
 
-model = LazyModel("tabpfn", version="v3.5")
-model.fit(X_train, train.redshift)
+model = lazy.LazyModel()                        # TabPFN-3.5, the default
+model.fit(X_train, z_train)
 
-pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
-z = model.predict(X_test, method="z_peak")
-print(model.evaluate(X_test, test.redshift))
+pdfs = model.predict_proba(X_test, lazy.DC1_GRID)    # (20000, 200) densities
+z_peak = lazy.metrics.grid_point_estimates(lazy.DC1_GRID.centers, pdfs)["z_peak"]
+print(lazy.metrics.summarize(z_test, lazy.DC1_GRID.centers, pdfs, label="TabPFN-3.5"))
 ```
+
+````{admonition} No GPU?
+:class: tip
+TabPFN-3.5 is built for a GPU: on a CPU it is slow, and it refuses contexts
+larger than 5,000 rows, so `fit` above fails without one (`lazy` warns when
+it finds no GPU). On a laptop, use TabICL, which is small, BSD-licensed and
+quick on a CPU:
+
+```python
+# pip install 'lazy-tfm[tabicl]'
+model = lazy.LazyModel("tabicl")
+```
+
+or give TabPFN a context of at most 5,000 rows (or pass
+`ignore_pretraining_limits=True` and be patient).
+````
+
+Scoring the densities you already have, as above, costs nothing; calling
+`model.evaluate(X_test, z_test, lazy.DC1_GRID)` instead runs the model again.
+Pass `lazy.DC1_GRID` to reproduce the Data Challenge's numbers: without a
+grid, a model answers on its own native grid (5,000 buckets for TabPFN), which
+is finer but not the challenge's convention.
 
 ## The data
 
@@ -39,10 +73,11 @@ DC1 helpers are a convenience, not a requirement.
 
 ## The model
 
-`LazyModel(name, ...)` picks the backend by name and passes everything else to
-it; see {doc}`guide/backends`. `fit` stores the labelled galaxies as context,
-and each prediction is one forward pass over them. The first `fit` downloads
-the backend's checkpoint.
+`LazyModel(name, ...)` picks the backend by name (TabPFN-3.5 when no name is
+given) and passes everything else to it; see {doc}`guide/models` for choosing
+one and {doc}`guide/backends` for the parameters they share. `fit` stores the
+labelled rows as context, and each prediction is one forward pass over them.
+The first `fit` downloads the backend's checkpoint.
 
 ## The outputs
 

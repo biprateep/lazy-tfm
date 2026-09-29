@@ -12,7 +12,7 @@ pins every dependency, so everyone works in the same environment:
 git clone https://github.com/biprateep/lazy-tfm
 cd lazy-tfm
 uv sync                     # the package, editable, plus the dev tools
-uv sync --extra all         # ...and all three foundation-model backends
+uv sync --extra all         # ...and all four foundation-model backends' dependencies
 uv run pre-commit install   # lint and format on every commit
 ```
 
@@ -65,8 +65,8 @@ uv sync --group docs
 uv run sphinx-build -W -b html docs docs/_build/html
 ```
 
-The API reference is generated from the docstrings, which use the numpydoc
-format. Add a line to `CHANGELOG.md`, under `[Unreleased]`, for every
+The API reference is generated from the docstrings, which follow the Google
+style (rendered by napoleon). Add a line to `CHANGELOG.md`, under `[Unreleased]`, for every
 user-visible change.
 
 ## Making a release

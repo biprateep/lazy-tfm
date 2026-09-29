@@ -10,6 +10,7 @@ pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend's dependencies
 pip install 'lazy-tfm[all]'       # + all four
+pip install 'lazy-tfm[qp]'        # + qp interoperability (to_qp / from_qp, for RAIL)
 ```
 
 With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[tabpfn]'` in a
@@ -42,8 +43,10 @@ CUDA version, or ROCm, install PyTorch first by following
 `lazy-tfm`.
 
 Every model chooses its device when it is fitted (`device="auto"`: CUDA if
-available, otherwise CPU). The models run on CPU, but a foundation model on a
-large query set is much faster on a GPU. Passing `device="cuda"` explicitly
+available, otherwise CPU). Most of the models need a GPU to be practical:
+TabPFN-3.5, the default, is slow on a CPU and from v3 on refuses contexts above
+5,000 rows there, and `lazy` warns at `fit` when it finds no GPU. TabICL runs
+well on a laptop CPU. {doc}`guide/models` gives each model's hardware needs. Passing `device="cuda"` explicitly
 raises an error on a machine without one, rather than quietly running on CPU.
 
 ## TabFM: install the repository build too
@@ -55,8 +58,11 @@ install the repository build as well:
 
 ```console
 pip install 'lazy-tfm[tabfm]'
-pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
+pip install --force-reinstall --no-deps 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff'
 ```
+
+`--force-reinstall` matters: the repository build calls itself 1.0.1, like the
+release, so without it pip keeps the release and changes nothing.
 
 On the release build, `TabFMHistogram` warns at `fit` with a
 `TabFMPerformanceWarning`. `lazy.models._icl_stream.streaming_available()`
@@ -74,10 +80,13 @@ pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb319
 ```
 
 or clone the repository and set `LAZY_LIMIX_SRC` to the checkout. `lazy` loads
-two parts of it under private module names, so LimiX's generic top-level
-package names (`model`, `utils`, ...) never shadow anything. Another commit
-works with a `LimiXSourceWarning`. LimiX's network imports `triton`, which
-arrives with PyTorch's Linux wheels.
+two parts of it under private module names and never imports LimiX's generic
+top-level packages (`model`, `inference`, `utils`, `config`), but a `pip
+install` still puts those names into your environment, where they can shadow
+another package's. In a shared environment, prefer the clone and
+`LAZY_LIMIX_SRC`. Another commit works with a `LimiXSourceWarning`. LimiX's
+network imports `triton`, which only has Linux wheels, so the backend is
+Linux-only for now.
 
 ## Pretrained checkpoints
 
@@ -92,7 +101,7 @@ repositories is gated, so no Hugging Face account or token is needed.
 | `tabicl` | `v2`            | ~100 MB        | BSD-3-Clause                                    |
 | `tabpfn` | `v2` to `v3.5`  | 41 MB – 880 MB | Prior Labs, **non-commercial**, except `v2` (Apache-2.0 with attribution) |
 
-Each version is pinned to a fixed revision; {data}`lazy.CHECKPOINTS` lists them,
+Each version is pinned to a fixed revision; {data}`lazy.CHECKPOINTS <lazy.models.CHECKPOINTS>` lists them,
 with the licence text for each. To download ahead of time, for example before
 moving to a machine without a network:
 

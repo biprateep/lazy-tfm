@@ -36,10 +36,11 @@ pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-tfm[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend (its code installs separately)
 pip install 'lazy-tfm[all]'       # + all four
+pip install 'lazy-tfm[qp]'        # + qp interoperability, for RAIL
 ```
 
 Pretrained weights are not bundled: they are fetched from the Hugging Face Hub
-on first prediction and cached thereafter. TabFM's classification checkpoint is
+at the first `fit` and cached thereafter. TabFM's classification checkpoint is
 ~6.6 GB and carries a **non-commercial** licence from Google; TabICLv2's is
 ~100 MB (BSD-3-Clause); the TabPFN checkpoints run from ~41 MB to ~880 MB and
 are **non-commercial** from Prior Labs, except `v2`, which is Apache-2.0 with an
@@ -50,20 +51,28 @@ cache ahead of time with `lazy.download_checkpoint("tabfm")`.
 ## Use
 
 ```python
+import lazy
 from lazy import LazyModel, Grid
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)        # or fetch_dc1() for both, concatenated
 X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
-model = LazyModel("tabpfn", version="v3.5")
+X_test, z_test = X_test.iloc[:20_000], test.redshift[:20_000]  # 391k in all
+
+model = LazyModel()                          # TabPFN-3.5, the default; wants a GPU
 model.fit(X_train, train.redshift)
 
 pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
 z = model.predict(X_test, method="z_peak")  # or z_mean, z_weight, z_median
 lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
-print(model.evaluate(X_test, test.redshift))
+print(model.evaluate(X_test, z_test, lazy.DC1_GRID))
 ```
+
+No GPU? TabPFN is slow on a CPU and refuses contexts above 5,000 rows there;
+`LazyModel("tabicl")` is small, BSD-licensed and quick on a laptop. The
+[supported models](https://lazy-tfm.readthedocs.io/en/latest/guide/models.html)
+page compares them all.
 
 `LazyModel(name, ...)` picks the backend by name, so switching is a string
 change; the concrete classes (`TabPFNBarDistribution`, `LimiXBarDistribution`,
@@ -79,6 +88,8 @@ rebinning step — so one fitted model answers on as many grids as you like
 without refitting:
 
 ```python
+import numpy as np
+
 model.predict_proba(X_test)                                  # the native grid
 model.predict_proba(X_test, Grid.linear(0, 3, 300))
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))  # or bin centres
@@ -121,9 +132,11 @@ thousand query rows, install the repository build as well:
 
 ```bash
 pip install 'lazy-tfm[tabfm]'
-pip install 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm'
+pip install --force-reinstall --no-deps 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff'
 ```
 
+`--force-reinstall` matters: the repository build calls itself 1.0.1, like the
+release, so without it pip keeps the release and changes nothing.
 A checkout of this repository gets the repository build automatically (`uv sync
 --extra all`), pinned through `[tool.uv.sources]`. On the release build the
 backend warns at `fit` with a `TabFMPerformanceWarning` rather than silently
@@ -151,7 +164,8 @@ pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb319
 Upstream LimiX-2 has no key/value cache and its answers depend on how the
 queries are chunked; the backend runs its network with a ported cache,
 context-only preprocessing and a dedicated random generator, which removes
-both. Built with StableAI LimiX.
+both. LimiX's network needs `triton`, so the backend is Linux-only for now.
+Built with StableAI LimiX.
 
 They all write onto any `Grid` you ask for — any number of bins, any
 spacing, any range. (TabFM's ten-class ceiling constrains its internal
@@ -252,16 +266,17 @@ numbers:
 
 ```python
 model.fit(X_train, z_train).provenance_
-# {'backend': 'tabpfn', 'version': 'v3',
-#  'repo_id': 'Prior-Labs/tabpfn_3',
-#  'filename': 'tabpfn-v3-regressor-v3_default.ckpt',
-#  'revision': '24a16a89d245878b846555110985634aa2e656d7',
-#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-tfm 0.1.0.dev0', 'device': 'cuda'}
+# {'backend': 'tabpfn', 'version': 'v2.5',
+#  'repo_id': 'Prior-Labs/tabpfn_2_5',
+#  'filename': 'tabpfn-v2.5-regressor-v2.5_default.ckpt',
+#  'revision': '6c45f3a6d0d07c6c5f62572e04a0c2929de91b8b',
+#  'package': 'tabpfn 9.0.0', 'lazy': 'lazy-tfm 0.1.0', 'device': 'cuda',
+#  'n_estimators': 8, 'transforms': ['auto', ...], 'kv_cache': True, ...}
 ```
 
-It holds the weights *and* the code that read them, and no local paths, so it
-means the same thing on another machine and survives a trip through JSON.
-Settings are not in it — `get_params()` has those. `CHECKPOINTS` is keyed
+It holds the weights, the code that read them and the ensemble that answered,
+and no local paths, so it means the same thing on another machine and
+survives a trip through JSON. The rest of the settings are in `get_params()`. `CHECKPOINTS` is keyed
 `"backend:version"` and is the authority on what each name loads;
 `download_checkpoint("tabpfn", "v2.5")` warms exactly that one.
 
