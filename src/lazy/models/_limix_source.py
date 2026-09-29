@@ -46,6 +46,7 @@ __all__ = [
     "Source",
     "load",
     "locate",
+    "missing_dependency",
 ]
 
 #: The LimiX commit the backend was validated against.
@@ -67,6 +68,11 @@ _INSTALL_HINT = (
     "and its dependencies with pip install 'lazy-tfm[limix]', or point "
     "$LAZY_LIMIX_SRC at a checkout."
 )
+
+# The top-level modules LimiX's two subtrees import that are not in the
+# standard library or lazy's own requirements: the limix extra's, and triton,
+# which comes with Linux torch wheels.
+_DEPENDENCIES = frozenset({"torch", "einops", "kditransform", "nvtx", "triton"})
 
 
 class LimiXSourceWarning(UserWarning):
@@ -153,15 +159,48 @@ def load() -> types.SimpleNamespace:
         parent = types.ModuleType(_ALIAS)
         parent.__path__ = []
         sys.modules[_ALIAS] = parent
-    for name, parts in _SUBTREES.items():
-        _load_package(f"{_ALIAS}.{name}", source.root.joinpath(*parts))
-    namespace = types.SimpleNamespace(
-        loading=importlib.import_module(f"{_ALIAS}.model.loading"),
-        preprocess=importlib.import_module(f"{_ALIAS}.inference.preprocess"),
-        source=source,
-    )
+    try:
+        for name, parts in _SUBTREES.items():
+            _load_package(f"{_ALIAS}.{name}", source.root.joinpath(*parts))
+        namespace = types.SimpleNamespace(
+            loading=importlib.import_module(f"{_ALIAS}.model.loading"),
+            preprocess=importlib.import_module(
+                f"{_ALIAS}.inference.preprocess"
+            ),
+            source=source,
+        )
+    except ModuleNotFoundError as error:
+        if (error.name or "").partition(".")[0] not in _DEPENDENCIES:
+            raise
+        raise missing_dependency(error.name or "") from error
     _loaded[source.root] = namespace
     return namespace
+
+
+def missing_dependency(name: str) -> ImportError:
+    """The error for one of LimiX's dependencies missing, with the fix.
+
+    Args:
+        name: The module that failed to import, such as ``"einops"``.
+
+    Returns:
+        An :class:`ImportError` naming it and how to install LimiX's
+        dependencies and source.
+    """
+    top = name.partition(".")[0]
+    message = (
+        f"LimiXBarDistribution needs {top!r}, one of LimiX's dependencies, "
+        "which is not installed. Install them with pip install "
+        "'lazy-tfm[limix]', and LimiX's source, which is not on PyPI, with "
+        f'pip install "LimiX @ git+{REPOSITORY}@{LIMIX_COMMIT}".'
+    )
+    if top == "triton":
+        message += (
+            " triton is published for Linux only (it comes with Linux torch "
+            "wheels), and LimiX's network imports it, so the backend runs "
+            "on Linux."
+        )
+    return ImportError(message, name=name)
 
 
 def _has_subtrees(root: pathlib.Path) -> bool:

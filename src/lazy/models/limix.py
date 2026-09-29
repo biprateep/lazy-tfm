@@ -185,10 +185,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         try:
             import torch  # noqa: PLC0415, F401 - an optional, heavy extra.
         except ImportError as error:
-            raise ImportError(
-                "LimiXBarDistribution needs the limix extra: "
-                "pip install 'lazy-tfm[limix]'"
-            ) from error
+            raise _limix_source.missing_dependency("torch") from error
         return _limix_source.load().loading
 
     def _check_backend_params(self) -> None:

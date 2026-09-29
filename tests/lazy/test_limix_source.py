@@ -84,3 +84,37 @@ def test_load_uses_private_names_and_warns_on_another_commit(
         sys.modules["model"], "VALUE"
     )
     assert _limix_source.load() is limix  # loaded once
+
+
+@pytest.mark.parametrize("module", ["kditransform", "einops", "triton"])
+def test_a_missing_dependency_says_how_to_install_it(
+    clean_env, tmp_path, module
+):
+    root = _fake_source(tmp_path / "L")
+    (root / "inference" / "v2_0" / "preprocess.py").write_text(
+        f"import {module}\n"
+    )
+    clean_env.setenv("LAZY_LIMIX_SRC", str(root))
+    clean_env.setitem(sys.modules, module, None)  # as if not installed
+    with (
+        pytest.warns(_limix_source.LimiXSourceWarning),
+        pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught,
+    ):
+        _limix_source.load()
+    message = str(caught.value)
+    assert repr(module) in message
+    assert "LimiX @ git+" in message
+    assert ("Linux only" in message) == (module == "triton")
+
+
+def test_other_missing_modules_are_not_reworded(clean_env, tmp_path):
+    root = _fake_source(tmp_path / "L")
+    (root / "model" / "v2_0" / "loading.py").write_text(
+        "import lazy_no_such_module\n"
+    )
+    clean_env.setenv("LAZY_LIMIX_SRC", str(root))
+    with (
+        pytest.warns(_limix_source.LimiXSourceWarning),
+        pytest.raises(ModuleNotFoundError, match="lazy_no_such_module"),
+    ):
+        _limix_source.load()

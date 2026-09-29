@@ -289,3 +289,11 @@ def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
     assert calls == [0]
     assert held[0] == 3
     np.testing.assert_allclose(after, before, rtol=1e-4, atol=1e-7)
+
+
+def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
+    monkeypatch.setitem(sys.modules, "torch", None)  # as if not installed
+    X, z, _ = data
+    with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught:
+        _model().fit(X, z)
+    assert "LimiX @ git+" in str(caught.value)
