@@ -313,6 +313,7 @@ def test_registered_backends_take_the_uniform_parameters(cls):
         ({"transforms": "banana"}, "unknown transform"),
         ({"bag_size": -3}, "must be positive"),
         ({"n_estimators": 0}, "positive int"),
+        ({"version": "v99"}, r"unknown version 'v99'.*known: \['"),
     ],
 )
 def test_registered_backends_reject_bad_parameters_before_loading(
@@ -322,6 +323,20 @@ def test_registered_backends_reject_bad_parameters_before_loading(
     monkeypatch.setattr(cls, "_import_backend", lambda self: None)
     with pytest.raises(ValueError, match=match):
         cls(**params).fit(X, z)
+
+
+def _missing_backend(self):
+    raise ImportError("backend not installed")
+
+
+@pytest.mark.parametrize("cls", REGISTERED, ids=lambda c: c.__name__)
+def test_an_unknown_version_is_reported_before_the_backend_import(
+    cls, data, monkeypatch
+):
+    X, z, _ = data
+    monkeypatch.setattr(cls, "_import_backend", _missing_backend)
+    with pytest.raises(ValueError, match="unknown version"):
+        cls(version="v99").fit(X, z)
 
 
 def test_a_backend_without_the_uniform_features_cannot_register():

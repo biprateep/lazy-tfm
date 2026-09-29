@@ -218,8 +218,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     # -- fitting -----------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        self._import_backend()
         self._check_uniform_params()
+        self._import_backend()
         self._check_backend_params()
         _progress.check_progress(self.progress)
         self.device_ = _device.resolve_device(self.device)
@@ -268,7 +268,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.provenance_ = {**self.provenance_, **self._recipe()}
 
     def _check_uniform_params(self) -> None:
-        """Validates the uniform parameters, before anything is loaded."""
+        """Validates the uniform parameters, before anything is imported."""
+        known = _hub.list_versions(self.backend or "")
+        if known and self.version not in known:
+            raise ValueError(
+                f"unknown version {self.version!r} for {self.backend!r}; "
+                f"known: {known}"
+            )
         if not isinstance(self.chunk_size, int) or self.chunk_size < 0:
             raise ValueError(
                 f"chunk_size must be a non-negative int (0 means one pass): "
