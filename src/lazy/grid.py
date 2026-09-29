@@ -143,12 +143,14 @@ class Grid:
         """A grid from bin centres.
 
         The inner edges split the gaps between centres and the outer edges
-        extrapolate the ends. Exact for a uniform grid:
-        ``from_centers(g.centers) == g``.
+        extrapolate the ends. That places each centre midway between its
+        edges only on a uniform grid, so the centres must be evenly spaced:
+        ``from_centers(g.centers) == g`` for a uniform ``g``. Build a
+        non-uniform grid with :meth:`from_edges`.
 
         Args:
-            centers: Strictly increasing bin centres, shape (n_bins,) with
-                n_bins >= 2.
+            centers: Strictly increasing, evenly spaced bin centres, shape
+                (n_bins,) with n_bins >= 2.
 
         Returns:
             The grid.
@@ -163,8 +165,12 @@ class Grid:
             raise ValueError(
                 "centers must be a 1D array of at least two values"
             )
+        if not np.isfinite(centers).all():
+            raise ValueError("centers must all be finite")
+        if not np.all(np.diff(centers) > 0):
+            raise ValueError("centers must be strictly increasing")
         inner = 0.5 * (centers[1:] + centers[:-1])
-        return cls(
+        grid = cls(
             np.concatenate(
                 [
                     [centers[0] - (inner[0] - centers[0])],
@@ -173,6 +179,17 @@ class Grid:
                 ]
             )
         )
+        # Midpoint edges move the centres of a non-uniform grid; refuse
+        # rather than hand back a grid whose centres are not the input.
+        shift = np.abs(grid.centers - centers)
+        if np.any(shift > 1e-9 * grid.widths):
+            raise ValueError(
+                "centers are not evenly spaced, so no grid built from their "
+                "midpoints has them as its centres (the largest shift would "
+                f"be {shift.max():.3g}); pass the bin edges to "
+                "Grid.from_edges instead"
+            )
+        return grid
 
     # -- geometry ----------------------------------------------------------
 
@@ -398,8 +415,8 @@ def as_grid(grid: GridLike) -> Grid:
     ``z_grid=np.linspace(0, 3, 300)`` works anywhere.
 
     Args:
-        grid: A :class:`Grid`, an array of bin centres, or ``None``
-            for :data:`DC1_GRID`.
+        grid: A :class:`Grid`, an array of evenly spaced bin centres (see
+            :meth:`Grid.from_centers`), or ``None`` for :data:`DC1_GRID`.
 
     Returns:
         The grid.

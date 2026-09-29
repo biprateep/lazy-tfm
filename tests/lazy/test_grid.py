@@ -109,3 +109,21 @@ def test_as_grid_accepts_none_centers_and_grid():
 def test_bin_index_clips_outside_the_grid():
     grid = lazy.Grid.linear(0.0, 1.0, 10)
     assert grid.bin_index([-5.0, 0.05, 0.95, 5.0]).tolist() == [0, 0, 9, 9]
+
+
+def test_from_centers_refuses_centres_it_would_move():
+    """Midpoint edges of [0, 1, 3] would put the middle centre at 1.25."""
+    with pytest.raises(ValueError, match="Grid.from_edges"):
+        lazy.Grid.from_centers([0.0, 1.0, 3.0])
+    with pytest.raises(ValueError, match="from_edges"):
+        lazy.as_grid(np.geomspace(0.01, 3.0, 50))
+
+
+def test_from_centers_names_unsorted_centres():
+    with pytest.raises(ValueError, match="centers must be strictly increasing"):
+        lazy.Grid.from_centers([0.0, 2.0, 1.0])
+
+
+def test_from_centers_accepts_float_rounded_uniform_centres():
+    centers = np.linspace(0.005, 2.995, 300)
+    assert np.allclose(lazy.Grid.from_centers(centers).centers, centers)
