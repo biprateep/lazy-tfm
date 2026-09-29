@@ -90,6 +90,10 @@ class Checkpoint:
     def download(self, *, local_files_only: bool = False) -> pathlib.Path:
         """Fetches (or locates) the weights and returns the path they live at.
 
+        A pinned revision cannot change, so the local cache is tried first
+        and the Hub is contacted only when the weights are not there: a
+        cached checkpoint loads with no network traffic at all.
+
         Args:
             local_files_only: Only look in the local Hugging Face cache, never
                 on the network.
@@ -98,6 +102,17 @@ class Checkpoint:
             The checkpoint file, or the snapshot directory when the
             checkpoint is a filtered snapshot rather than one file.
         """
+        if self.revision is not None and not local_files_only:
+            try:
+                return self._fetch(local_files_only=True)
+            except FileNotFoundError:
+                # Not cached (huggingface_hub's LocalEntryNotFoundError is a
+                # FileNotFoundError): fall through to the network.
+                pass
+        return self._fetch(local_files_only=local_files_only)
+
+    def _fetch(self, *, local_files_only: bool) -> pathlib.Path:
+        """One ``huggingface_hub`` download call; see :meth:`download`."""
         import huggingface_hub  # noqa: PLC0415 - kept out of `import lazy`.
 
         if self.filename is not None:
