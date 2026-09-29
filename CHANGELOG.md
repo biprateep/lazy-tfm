@@ -94,8 +94,19 @@ The first release. Everything below is new.
 - `random_state=None` draws a fresh seed at `fit` and records it as
   `random_state_` and in `provenance_`.
 
+- `diagnostic_panel`, `plot_nz` and `plot_pdfs` take a `Grid` (or
+  `bin_edges=`) and draw native histogram grids exactly, framed on the data;
+  `plot_residuals(scale="none")` for targets other than redshift.
 ### Changed
 
+- A missing LimiX dependency (torch, einops, kditransform, nvtx, triton)
+  raises an `ImportError` naming it and both install steps; triton's says it
+  is Linux-only.
+- `use_style` leaves `figure.dpi` alone (figures save at 300 dpi still), and
+  `verify_style` warns rather than raises when the paper font is missing
+  (`strict_font=True` to raise).
+- Files already cached under the old `~/.cache/lazy-photoz` are used, with a
+  one-time warning suggesting you move them.
 - `LazyModel()` defaults to TabPFN, and TabPFN to v3.5.
 - A cached checkpoint loads without contacting the Hugging Face Hub, so there
   is no network round trip and no "unauthenticated requests" notice; the
@@ -153,6 +164,17 @@ The first release. Everything below is new.
 
 ### Fixed
 
+- A fitted LimiX-2 model unpickles in a fresh process, re-resolving
+  `device="auto"` and its checkpoint; its key/value-cache memory check no
+  longer counts existing caches twice, and members whose cache fits keep it.
+  A target whose spread float64 cannot resolve against its mean raises a
+  clear error.
+- Parallel downloads into one data home no longer collide, downloads time out
+  instead of hanging, and a cached file of the wrong size is fetched again.
+- `build_features` keeps the input's index.
+- `plot_zphot_ztrue` works for negative and large targets and small samples;
+  `plot_pdfs` draws a single PDF; `save(fig, "model.v2")` writes
+  `model.v2.png`.
 - `Grid.from_centers` and `as_grid` refuse unevenly spaced centres, which they
   used to move silently; use `Grid.from_edges` for those.
 - An unfitted model raises scikit-learn's `NotFittedError` from every method.
