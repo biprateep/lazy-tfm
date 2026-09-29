@@ -49,7 +49,7 @@ then comes with it (``bin_edges`` is taken from
 histogram-normalised native grid are scored exactly rather than by the
 trapezoid rule over their centres.
 
-Typical usage example:
+Typical usage example::
 
   pdfs = model.predict_proba(X_test)
   table = metrics.summarize(z_true, model.grid_, pdfs, label="tabfm")
