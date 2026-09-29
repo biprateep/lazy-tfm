@@ -4,6 +4,8 @@
 
 import os
 import pickle
+import subprocess
+import sys
 import warnings
 
 import numpy as np
@@ -161,3 +163,42 @@ def test_a_large_unbagged_context_warns(monkeypatch, data):
     with warnings.catch_warnings():
         warnings.simplefilter("error", lazy.ContextSizeWarning)
         _model(bag_size=150).fit(X, z)
+
+
+def test_an_unfitted_model_pickles_without_the_source(monkeypatch):
+    monkeypatch.setattr(_limix_source, "load", _missing_source)
+    restored = pickle.loads(pickle.dumps(_model(n_estimators=3)))
+    assert restored.get_params()["n_estimators"] == 3
+
+
+_UNPICKLE_AND_PREDICT = """
+import pickle, sys
+import numpy as np
+with open(sys.argv[1], "rb") as f:
+    model = pickle.load(f)
+np.save(sys.argv[3], model.predict_proba(np.load(sys.argv[2])))
+"""
+
+
+@needs_checkpoint
+def test_a_pickled_model_predicts_the_same_in_a_fresh_process(data, tmp_path):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    with open(tmp_path / "model.pkl", "wb") as f:
+        pickle.dump(model, f)
+    np.save(tmp_path / "X.npy", X_test)
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _UNPICKLE_AND_PREDICT,
+            str(tmp_path / "model.pkl"),
+            str(tmp_path / "X.npy"),
+            str(tmp_path / "out.npy"),
+        ],
+        check=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+    )
+    np.testing.assert_array_equal(
+        np.load(tmp_path / "out.npy"), model.predict_proba(X_test)
+    )

@@ -356,6 +356,16 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         probabilities = np.exp(scaled)
         return probabilities / probabilities.sum(axis=1, keepdims=True)
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        """Pickles through :func:`_unpickle`, which loads LimiX's code first.
+
+        A fitted model's state holds upstream's preprocessing objects, whose
+        classes live under the private alias ``lazy.models._limix_ext``; a
+        fresh process has to load LimiX's source before it can find them.
+        """
+        fitted = "handles_" in self.__dict__
+        return (_unpickle, (type(self), fitted), self.__getstate__())
+
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the network or the caches, which reload."""
         state = self.__dict__.copy()
@@ -372,6 +382,24 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             ]
             state.pop("regressor_", None)
         return state
+
+
+def _unpickle(
+    cls: type[LimiXBarDistribution], fitted: bool
+) -> LimiXBarDistribution:
+    """An empty estimator to restore a pickle into.
+
+    Args:
+        cls: The estimator's class.
+        fitted: Whether the pickled estimator was fitted, so that its state
+            refers to LimiX's code, which is then loaded first.
+
+    Returns:
+        An uninitialised instance of ``cls``; pickle sets its state.
+    """
+    if fitted:
+        _limix_source.load()
+    return cls.__new__(cls)
 
 
 def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
