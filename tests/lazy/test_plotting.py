@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Biprateep Dey
 """Smoke tests: the diagnostics must draw cleanly and honour a given axes."""
 
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -212,3 +214,34 @@ def test_use_style_leaves_the_on_screen_dpi_alone(sheet, tmp_path):
             plotting.use_style(style_file=tmp_path / "missing.mplstyle")
         assert plt.rcParams["figure.dpi"] == 100
         assert plt.rcParams["savefig.dpi"] == 300
+
+
+def _without_the_paper_font(monkeypatch):
+    monkeypatch.setattr(
+        plotting.style.font_manager,
+        "findfont",
+        lambda properties: "/fonts/DejaVuSerif.ttf",
+    )
+
+
+def test_a_missing_paper_font_warns_rather_than_raises(monkeypatch):
+    _without_the_paper_font(monkeypatch)
+    with plt.rc_context():
+        plotting.use_style()
+        with pytest.warns(UserWarning, match="Nimbus Roman"):
+            report = plotting.verify_style()
+        assert report["problems"] and "DejaVu" in report["problems"][0]
+        with pytest.raises(RuntimeError, match="Nimbus Roman"):
+            plotting.verify_style(strict_font=True)
+
+
+def test_a_wrong_rcparam_still_raises():
+    with plt.rc_context():
+        plotting.use_style()
+        plt.rcParams["xtick.direction"] = "out"
+        with (
+            warnings.catch_warnings(),
+            pytest.raises(RuntimeError, match="xtick.direction"),
+        ):
+            warnings.simplefilter("ignore")  # this machine's font, if any
+            plotting.verify_style()

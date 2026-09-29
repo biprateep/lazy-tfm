@@ -29,6 +29,7 @@ import dataclasses
 import os
 import pathlib
 from typing import Any
+import warnings
 
 import cycler
 import matplotlib as mpl
@@ -347,13 +348,19 @@ def use_style(
     return _active_journal
 
 
-def verify_style(strict: bool = True) -> dict[str, Any]:
+def verify_style(
+    strict: bool = True, *, strict_font: bool = False
+) -> dict[str, Any]:
     """Checks that the house rcParams are active and the serif face resolved.
 
     The palette is reported, not enforced — a user-stated one is legitimate.
+    A missing paper font is a property of the machine, not of the code, so
+    it warns rather than raises unless ``strict_font`` is set.
 
     Args:
-        strict: Raise if anything is wrong, rather than only reporting it.
+        strict: Raise if an rcParam is wrong, rather than only reporting it.
+        strict_font: Raise, too, if the serif face fell through to DejaVu,
+            rather than warning.
 
     Returns:
         A dict with the keys ``font`` (the path of the font file matplotlib
@@ -364,10 +371,14 @@ def verify_style(strict: bool = True) -> dict[str, Any]:
 
     Raises:
         RuntimeError: With ``strict=True`` (default), if any rcParam differs
-            from :data:`RC_PARAMS` or if the font chain fell through to a
-            DejaVu face — which is what happens on a machine without Nimbus
-            Roman, and which matplotlib otherwise reports only as a
-            debug-level log line.
+            from :data:`RC_PARAMS`; with ``strict_font=True`` as well, if
+            the font chain fell through to a DejaVu face — which is what
+            happens on a machine without Nimbus Roman, and which matplotlib
+            otherwise reports only as a debug-level log line.
+
+    Warns:
+        UserWarning: If the font chain fell through to DejaVu and
+            ``strict_font`` is False.
     """
     expected = mpl.RcParams(RC_PARAMS)  # Runs values through the validators.
     problems = [
@@ -380,14 +391,20 @@ def verify_style(strict: bool = True) -> dict[str, Any]:
             font_manager.FontProperties(family=mpl.rcParams["font.serif"])
         )
     )
+    fatal = list(problems)
     if "dejavu" in font_path.name.lower():
-        problems.append(
+        font_problem = (
             f"serif font resolved to {font_path.name}; install Nimbus Roman "
             "(package urw-base35 / gsfonts / fonts-urw-base35) and clear "
             "~/.cache/matplotlib"
         )
-    if strict and problems:
-        bullets = "\n  - ".join(problems)
+        problems.append(font_problem)
+        if strict_font:
+            fatal.append(font_problem)
+        else:
+            warnings.warn(font_problem, UserWarning, stacklevel=2)
+    if strict and fatal:
+        bullets = "\n  - ".join(fatal)
         raise RuntimeError(f"plot style not in effect:\n  - {bullets}")
     colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", [])
     return {
