@@ -87,7 +87,8 @@ def as_target(target: Any) -> _typing.FloatArray:
     """
     values = getattr(target, "value", target)  # astropy Quantity
     if np.ma.isMaskedArray(values):
-        return np.ma.filled(np.ma.asarray(values, dtype=np.float64), np.nan)
+        filled = np.ma.filled(np.ma.asarray(values, dtype=np.float64), np.nan)
+        return np.asarray(filled).ravel()
     return np.asarray(values, dtype=np.float64).ravel()
 
 
