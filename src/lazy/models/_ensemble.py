@@ -95,7 +95,10 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
 
 #: What the CPU warning adds for a backend with more to say about the CPU.
 _CPU_NOTES: dict[str, str] = {
-    "tabpfn": " and, from v3 on, refuses more than 5,000 context rows there",
+    "tabpfn": (
+        " and refuses more than 5,000 context rows there (1,000 before v3)"
+        " unless ignore_pretraining_limits=True"
+    ),
 }
 
 

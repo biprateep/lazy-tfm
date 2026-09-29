@@ -96,7 +96,7 @@ loses nothing:
 | -------- | ------------------------------------------------------------------- |
 | `tabpfn` | The bar distribution's buckets, in full (5,000 on v3).               |
 | `limix`  | LimiX-2's 5,000 buckets, mapped with the context's mean and spread. |
-| `tabicl` | 1,000 equal bins over the context targets, padded by 2%.          |
+| `tabicl` | 1,500 equal bins over the context targets, padded by 25% each side. |
 | `tabfm`  | The union of every shifted copy's bin edges.                        |
 
 Native bucket grids reach far into both tails, below zero included, because
