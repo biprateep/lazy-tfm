@@ -158,7 +158,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     bag_size: int | float | None
     kv_cache: bool | str
     device: str
-    random_state: int
+    random_state: int | None
     chunk_size: int
     progress: _progress.Progress
     verbose: bool
@@ -226,6 +226,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self._import_backend()
         self._check_backend_params()
         _progress.check_progress(self.progress)
+        self.random_state_ = _resolve_seed(self.random_state)
         self.device_ = _device.resolve_device(self.device)
         self._load_checkpoint()
         n_rows, n_features = X.shape
@@ -243,7 +244,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             bag_rows=self.bag_rows_,
             n_rows=n_rows,
             n_features=n_features,
-            random_state=int(self.random_state),
+            random_state=self.random_state_,
             supports_native_bagging=self.supports_native_bagging,
             auto_tokens=self.auto_tokens,
         )
@@ -300,9 +301,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         _transforms.parse(self.transforms)
         _members.resolve_bag_size(self.bag_size, 1)
-        if not _is_integer(self.random_state):
+        if self.random_state is not None and not _is_integer(self.random_state):
             raise ValueError(
-                f"random_state must be an int: {self.random_state=}"
+                f"random_state must be an int or None: {self.random_state=}"
             )
         self._n_members()
 
@@ -374,6 +375,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 for m in sorted(members, key=lambda m: m.index)
             ],
             "feature_shuffle": self.feature_shuffle,
+            "random_state": self.random_state_,
             "bag_rows": self.bag_rows_ if self.bagging_ else None,
             "kv_cache": self.kv_cache_,
             "groups": len(self.member_groups_),
@@ -494,6 +496,17 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Prints a log line when ``verbose``."""
         if self.verbose:
             print(f"[{type(self).__name__}] {message}", flush=True)
+
+
+def _resolve_seed(random_state: int | None) -> int:
+    """The ensemble's seed: ``random_state``, or fresh entropy for None.
+
+    A drawn seed is kept below 2**31, so that every group's offset from it
+    (:mod:`._members`) stays a valid 32-bit seed for the models.
+    """
+    if random_state is None:
+        return int(np.random.SeedSequence().entropy % 2**31)  # type: ignore[operator]  # entropy is an int when drawn
+    return int(random_state)
 
 
 def _is_integer(value: object) -> TypeGuard[int]:

@@ -66,7 +66,8 @@ def test_clone_reproduces_every_parameter(cls):
         ({"chunk_size": -1}, "chunk_size"),
         ({"n_estimators": 0}, "positive int"),
         ({"feature_shuffle": "yes"}, "feature_shuffle"),
-        ({"random_state": None}, "random_state"),
+        ({"random_state": "seven"}, "random_state"),
+        ({"random_state": 1.5}, "random_state"),
     ],
 )
 def test_bad_uniform_parameters_are_rejected_at_fit(data, params, match):
@@ -284,6 +285,21 @@ def test_the_same_seed_repeats_and_another_does_not(cls, data):
     )
     np.testing.assert_array_equal(first, again)
     assert not np.array_equal(first, other)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_seed_draws_one_and_records_it(cls, data):
+    X, z, X_test = data
+    params = {"n_estimators": 3, "bag_size": 40, "random_state": None}
+    first = cls(**params).fit(X, z)
+    second = cls(**params).fit(X, z)
+    assert first.random_state_ != second.random_state_
+    assert first.provenance_["random_state"] == first.random_state_
+    assert 0 <= first.random_state_ < 2**31
+    replay = cls(**{**params, "random_state": first.random_state_})
+    np.testing.assert_array_equal(
+        replay.fit(X, z).predict_proba(X_test), first.predict_proba(X_test)
+    )
 
 
 def test_bagged_bar_members_with_their_own_buckets_form_a_mixture(data):
