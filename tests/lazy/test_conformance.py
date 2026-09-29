@@ -161,6 +161,25 @@ def test_bag_sizes_resolve_as_counts_or_fractions():
     assert _members.resolve_bag_size(0.25, 100) == 25
 
 
+def test_numpy_numbers_are_accepted_as_bag_sizes():
+    assert _members.resolve_bag_size(np.int64(30), 100) == 30
+    assert _members.resolve_bag_size(np.float32(0.25), 100) == 25
+    with pytest.raises(ValueError, match="bag_size"):
+        _members.resolve_bag_size(np.True_, 100)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_numpy_integers_are_accepted_as_counts_and_seeds(cls, data):
+    """Values from np.arange or a parameter grid are NumPy integers."""
+    X, z, X_test = data
+    python = {"n_estimators": 3, "bag_size": 40, "random_state": 7}
+    numpy = {name: np.int64(value) for name, value in python.items()}
+    expected = cls(**python, chunk_size=9).fit(X, z).predict_proba(X_test)
+    model = cls(**numpy, chunk_size=np.int64(9)).fit(X, z)
+    np.testing.assert_array_equal(model.predict_proba(X_test), expected)
+    assert type(model.provenance_["n_estimators"]) is int
+
+
 # -- behaviour, on every stand-in -------------------------------------------
 
 

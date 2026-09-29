@@ -38,8 +38,9 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterator, Mapping
+import numbers
 import types
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, TypeGuard
 import warnings
 
 import numpy as np
@@ -238,7 +239,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             bag_rows=self.bag_rows_,
             n_rows=n_rows,
             n_features=n_features,
-            random_state=self.random_state,
+            random_state=int(self.random_state),
             supports_native_bagging=self.supports_native_bagging,
             auto_tokens=self.auto_tokens,
         )
@@ -275,7 +276,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"unknown version {self.version!r} for {self.backend!r}; "
                 f"known: {known}"
             )
-        if not isinstance(self.chunk_size, int) or self.chunk_size < 0:
+        if not _is_integer(self.chunk_size) or self.chunk_size < 0:
             raise ValueError(
                 f"chunk_size must be a non-negative int (0 means one pass): "
                 f"{self.chunk_size=}"
@@ -295,9 +296,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         _transforms.parse(self.transforms)
         _members.resolve_bag_size(self.bag_size, 1)
-        if isinstance(self.random_state, bool) or not isinstance(
-            self.random_state, int
-        ):
+        if not _is_integer(self.random_state):
             raise ValueError(
                 f"random_state must be an int: {self.random_state=}"
             )
@@ -316,15 +315,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                     "bag_size and transforms need an explicit n_estimators"
                 )
             return 1
-        if (
-            isinstance(n_estimators, bool)
-            or not isinstance(n_estimators, int)
-            or n_estimators < 1
-        ):
+        if not _is_integer(n_estimators) or n_estimators < 1:
             raise ValueError(
                 f"n_estimators must be a positive int: {self.n_estimators=}"
             )
-        return n_estimators
+        return int(n_estimators)
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
         """Warns when the context exceeds what the model handles unbagged."""
@@ -347,7 +342,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         for group in self.member_groups_:
             members.extend(group.members)
         return {
-            "n_estimators": self.n_estimators,
+            "n_estimators": (
+                self.n_estimators
+                if isinstance(self.n_estimators, str)
+                else int(self.n_estimators)
+            ),
             "transforms": [
                 "auto" if m.transform is None else m.transform.name
                 for m in sorted(members, key=lambda m: m.index)
@@ -422,7 +421,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         if not self.chunks_queries:
             yield self._predict_chunk(features)
             return
-        size = self.chunk_size if self.chunk_size > 0 else len(features)
+        chunk_size = int(self.chunk_size)
+        size = chunk_size if chunk_size > 0 else len(features)
         with _progress.bar(
             self.progress,
             total=len(features),
@@ -464,6 +464,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Prints a log line when ``verbose``."""
         if self.verbose:
             print(f"[{type(self).__name__}] {message}", flush=True)
+
+
+def _is_integer(value: object) -> TypeGuard[int]:
+    """Whether ``value`` is a Python or NumPy integer, and not a bool.
+
+    Typed as a guard for ``int``, which NumPy integers stand in for.
+    """
+    return isinstance(value, numbers.Integral) and not isinstance(
+        value, bool | np.bool_
+    )
 
 
 def _mixture(

@@ -37,6 +37,7 @@ Typical usage example:
 from collections.abc import Mapping, Sequence
 import dataclasses
 import math
+import numbers
 from typing import Any
 
 import numpy as np
@@ -112,24 +113,29 @@ def resolve_bag_size(bag_size: float | None, n_rows: int) -> int:
     """The number of context rows each member sees.
 
     Args:
-        bag_size: An int count, a float fraction in (0, 1], or None for all.
+        bag_size: An integer count (Python or NumPy), a float fraction in
+            (0, 1], or None for all.
         n_rows: The context size.
 
     Returns:
         The rows per member, between 1 and ``n_rows``.
+
+    Raises:
+        ValueError: If ``bag_size`` is none of those.
     """
     if bag_size is None:
         return n_rows
-    if isinstance(bag_size, bool) or not isinstance(bag_size, int | float):
+    if isinstance(bag_size, bool) or not isinstance(bag_size, numbers.Real):
         raise ValueError(
             f"bag_size must be an int, a float or None: {bag_size=}"
         )
-    if isinstance(bag_size, float):
-        if not 0.0 < bag_size <= 1.0:
+    if not isinstance(bag_size, numbers.Integral):
+        fraction = float(bag_size)
+        if not 0.0 < fraction <= 1.0:
             raise ValueError(
                 f"a float bag_size must lie in (0, 1]: {bag_size=}"
             )
-        return max(1, min(n_rows, round(bag_size * n_rows)))
+        return max(1, min(n_rows, round(fraction * n_rows)))
     if bag_size < 1:
         raise ValueError(f"an int bag_size must be positive: {bag_size=}")
     return min(int(bag_size), n_rows)
