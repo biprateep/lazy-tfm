@@ -239,6 +239,40 @@ class TestTabFM:
         assert np.isfinite(masses).all()
         np.testing.assert_allclose(masses.sum(axis=1), 1.0)
 
+    @needs_checkpoint
+    def test_cuda_rounding_stays_within_the_declared_tolerance(self):
+        """bfloat16 on CUDA: neither chunking nor the cache is exact there."""
+        torch = pytest.importorskip("torch")
+        if not torch.cuda.is_available():
+            pytest.skip("needs CUDA")
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(360, 3))
+        z = -1.0 + 0.3 * (X[:, 0] + 0.3 * generator.normal(size=360))
+        grid = lazy.Grid.linear(-2.5, 0.5, 301)
+        backbone = None
+
+        def run(**options):
+            nonlocal backbone
+            est = tabfm.TabFMHistogram(
+                n_estimators=1, device="cuda", progress=False, **options
+            ).fit(X[:300], z[:300])
+            if backbone is not None:
+                est._backbone_cache = backbone
+            pdfs = est.predict_proba(X[300:], grid)
+            backbone = est._backbone_cache
+            return pdfs
+
+        whole = run(kv_cache=False, chunk_size=0)
+        rtol = tabfm.TabFMHistogram.kv_cache_rtol
+        assert not tabfm.TabFMHistogram.exact_chunking
+        for other in (
+            run(kv_cache=False, chunk_size=7),
+            run(kv_cache=True),
+        ):
+            np.testing.assert_allclose(
+                other, whole, rtol=rtol, atol=rtol * whole.max()
+            )
+
     def test_a_constant_target_fits_with_a_valid_native_grid(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(200, 2))

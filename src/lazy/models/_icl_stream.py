@@ -14,8 +14,11 @@ directly::
 
 Peak memory is then ``member_batch x block_rows x n_features`` rather than
 ``n_members x n_query_rows x n_features``. The upstream package is used
-unmodified; only the order of operations differs, so results are identical to
-calling ``predict_proba`` on the whole query set at once.
+unmodified; only the order of operations differs. The model computes in
+bfloat16, so the results agree with calling ``predict_proba`` on the whole
+query set at once up to float rounding on the CPU, while on CUDA, whose kernels
+round differently for different batch shapes, densities differ by up to a few
+per cent of their peak.
 
 Raw model outputs (classification logits over ``model.max_classes``) are
 handed to a callback per member batch and query block, leaving the caller to

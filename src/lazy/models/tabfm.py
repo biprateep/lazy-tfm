@@ -91,7 +91,7 @@ _SLOW_PATH_WARNING = (
     "its uncached inference path, which re-encodes the training "
     "context for every chunk of query rows -- roughly 26x the compute "
     "per query row (13.7 ms vs 0.53 ms per member-row). The answers "
-    "are the same; only the runtime differs, so a large prediction "
+    "agree up to rounding; only the runtime differs, so a large prediction "
     "will simply take far longer than expected. The KV-cache API "
     "ships in the repository build but not on PyPI:\n"
     "    pip install 'tabfm[pytorch] @ "
@@ -213,10 +213,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             subsample the same fraction of the rows it sees (TabFM's
             ``max_num_rows``).
         kv_cache: Prefill each member's context once and decode the queries
-            against the cache (``True``, exact; needs TabFM's repository
-            build, and falls back with a :class:`TabFMPerformanceWarning`
-            without it), or re-encode the context for every chunk of queries
-            (``False``).
+            against the cache (``True``; needs TabFM's repository build, and
+            falls back with a :class:`TabFMPerformanceWarning` without it),
+            or re-encode the context for every chunk of queries (``False``).
+            TabFM computes in bfloat16, so the two paths agree to float
+            rounding on the CPU but not on CUDA, whose kernels round
+            differently for different batch shapes: there densities differ
+            by up to a few per cent of their peak.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
@@ -234,13 +237,17 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             upstream default of 0.9 is deliberately not 1.0 and should rarely
             be changed.
         chunk_size: Query rows handed to the upstream ``predict_proba`` at a
-            time when ``kv_cache=False``; ``0`` does them in one pass. Exact:
-            the in-context stage builds its keys and values from the context
-            rows only. The cached path is bounded by ``query_block_rows`` and
-            ``decode_chunk_rows`` instead.
+            time when ``kv_cache=False``; ``0`` does them in one pass. The
+            in-context stage builds its keys and values from the context rows
+            only, so a row's answer never depends on the other rows in its
+            chunk; it is bit-identical on the CPU, and on CUDA changes by the
+            bfloat16 rounding ``kv_cache`` describes. The cached path is
+            bounded by ``query_block_rows`` and ``decode_chunk_rows``
+            instead.
         member_batch_size: Ensemble members processed together on the cached
             path (and TabFM's own ``batch_size``). This and the next three are
-            memory/throughput knobs that never change the result.
+            memory/throughput knobs that change the result only by the
+            rounding ``kv_cache`` describes.
         decode_chunk_rows: Query rows decoded against the cache at a time.
         query_block_rows: Query rows whose member views are built at a time
             on the cached path, bounding host memory.
@@ -285,6 +292,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     }
     auto_tokens = ("none", "power")
     supports_native_bagging = True
+    # bfloat16 on CUDA: chunking and the cache change the rounding.
+    exact_chunking = False
+    kv_cache_rtol = 5e-2
     chunks_queries = False
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -634,11 +644,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         ``predict_proba`` materialises ``n_members x n_query x n_features`` in
         one go, which a survey-sized query set cannot afford. Feeding it chunks
-        caps that at ``n_members x chunk_size x n_features``. The result is
-        bit-identical to a single pass (``tests/lazy/test_backends.py``): the
-        in-context stage builds its keys and values from the context rows
-        alone, so query rows never influence one another. The context forward
-        pass is repeated per chunk, which is the price.
+        caps that at ``n_members x chunk_size x n_features``. The in-context
+        stage builds its keys and values from the context rows alone, so
+        query rows never influence one another: on the CPU the result is
+        bit-identical to a single pass, and on CUDA it differs by bfloat16
+        rounding, the kernels batching differently. The context forward pass
+        is repeated per chunk, which is the price.
         """
         size = self.chunk_size if self.chunk_size > 0 else len(X_query)
         frame = X_query.reset_index(drop=True)
