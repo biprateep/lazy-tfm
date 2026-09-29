@@ -320,6 +320,15 @@ def test_no_query_rows_give_an_empty_answer(cls, data):
     assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
 
 
+def test_a_refit_into_several_groups_drops_the_single_regressor(data):
+    X, z, _ = data
+    model = standins.ScaffoldedHistogramStandIn(n_estimators=3).fit(X, z)
+    assert model.regressor_ is model.handles_[0]
+    model.set_params(bag_size=40).fit(X, z)
+    assert len(model.handles_) == 3
+    assert not hasattr(model, "regressor_")
+
+
 def test_missing_values_reach_the_model(data):
     X, z, X_test = data
     X = X.copy()
