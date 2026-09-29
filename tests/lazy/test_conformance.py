@@ -567,11 +567,19 @@ def test_blocked_scoring_matches_the_whole_array(
     monkeypatch.setattr(type(model), "_predict_pdf", counting)
     # About seven rows of densities per block.
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * grid.n_bins)
-    np.testing.assert_array_equal(
-        model.predict(X_test, method="z_weight"), whole["predict"]
+    # Equal up to rounding: a block of rows goes through a smaller matrix
+    # product than the whole array, which some BLAS builds round differently
+    # in the last bit.
+    np.testing.assert_allclose(
+        model.predict(X_test, method="z_weight"), whole["predict"], rtol=1e-12
     )
     assert max(calls) == (4 if chunk_size else 7) and len(calls) > 1
-    assert model.score(X_test, z_test) == whole["score"]
+    assert model.score(X_test, z_test) == pytest.approx(
+        whole["score"], rel=1e-12
+    )
     pd.testing.assert_frame_equal(
-        model.evaluate(X_test, z_test, method="z_weight"), whole["evaluate"]
+        model.evaluate(X_test, z_test, method="z_weight"),
+        whole["evaluate"],
+        check_exact=False,
+        rtol=1e-12,
     )
