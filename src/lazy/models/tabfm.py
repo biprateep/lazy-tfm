@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import os
 import types
 from typing import Any
 import warnings
@@ -70,6 +71,12 @@ __all__ = [
     "prior_shift_em",
     "quantile_edges",
 ]
+
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package (or LazyModel) they are raised.
+_PACKAGE_PREFIX = (
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+)
 
 
 class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
@@ -393,7 +400,11 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # set that is the difference between one hour and a day, and because
         # both paths produce the same answer the only symptom is a run that
         # never seems to end. Nothing else reports it, so this does.
-        warnings.warn(_SLOW_PATH_WARNING, TabFMPerformanceWarning, stacklevel=5)
+        warnings.warn(
+            _SLOW_PATH_WARNING,
+            TabFMPerformanceWarning,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
+        )
         return "predict_proba"
 
     def _load_checkpoint(self) -> None:
@@ -785,7 +796,7 @@ def _clip_to_support(
             "ends, so their probability piles into the end bins. Pass a "
             "z_grid that covers the targets.",
             UserWarning,
-            stacklevel=5,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
     return np.clip(z, low, high)
 

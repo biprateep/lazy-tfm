@@ -49,6 +49,12 @@ __all__ = [
     "missing_dependency",
 ]
 
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package (or LazyModel) they are raised.
+_PACKAGE_PREFIX = (
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+)
+
 #: The LimiX commit the backend was validated against.
 LIMIX_COMMIT = "516bf396333feb3198cf7aff8a6c10421f218e24"
 #: Where LimiX's source is published.
@@ -163,7 +169,7 @@ def load() -> types.SimpleNamespace:
             f"{source.commit or 'unknown'}; lazy was validated on "
             f"{LIMIX_COMMIT}. Results may differ.",
             LimiXSourceWarning,
-            stacklevel=2,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
     if _ALIAS not in sys.modules:
         parent = types.ModuleType(_ALIAS)
@@ -202,7 +208,7 @@ def _warn_if_redirected(source: Source) -> None:
                 "LimiX's code cannot be loaded twice, so it keeps using that "
                 "one. Restart Python to switch.",
                 LimiXSourceWarning,
-                stacklevel=3,
+                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
         return
 

@@ -26,6 +26,7 @@ than by the data.
 
 from __future__ import annotations
 
+import os
 import types
 from typing import Any
 import warnings
@@ -46,6 +47,12 @@ __all__ = [
     "TabICLQuantile",
     "quantile_levels",
 ]
+
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package (or LazyModel) they are raised.
+_PACKAGE_PREFIX = (
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+)
 
 #: Bins of the native grid across the training targets' range: as fine as
 #: the 999 quantiles resolve. The padding adds bins of the same width.
@@ -301,7 +308,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
                 "densities there are renormalised. Pass a wider z_grid, or "
                 "use predict_distribution, which has full support.",
                 UserWarning,
-                stacklevel=3,
+                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 

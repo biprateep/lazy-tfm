@@ -39,6 +39,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Iterator, Mapping
 import numbers
+import os
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
 import warnings
@@ -63,6 +64,12 @@ __all__ = [
     "ContextSizeWarning",
     "PerformanceWarning",
 ]
+
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package (or LazyModel) they are raised.
+_PACKAGE_PREFIX = (
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+)
 
 #: The parameters every backend's constructor must take, keyword-only.
 UNIFORM_PARAMS: tuple[str, ...] = (
@@ -368,7 +375,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             "device='cpu' to run it there anyway without this warning; see "
             "'Supported models' in the documentation.",
             PerformanceWarning,
-            stacklevel=4,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _warn_if_bags_too_small(self) -> None:
@@ -381,7 +388,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             "count and a float one a fraction of the context: bag_size=1 is "
             "one row, bag_size=1.0 all of them.",
             UserWarning,
-            stacklevel=4,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
@@ -401,7 +408,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             f"pass bag_size={limit} with n_estimators >= {needed} so the "
             "members together cover it.",
             ContextSizeWarning,
-            stacklevel=4,
+            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _recipe(self) -> dict[str, Any]:
