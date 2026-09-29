@@ -445,3 +445,16 @@ def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
         est.evaluate(X, y),
         lazy.metrics.summarize(y, grid, pdfs, label=est.name_),
     )
+
+
+def test_evaluate_can_score_plain_residuals(data):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    table = est.evaluate(X, y, scale="none")
+    assert table["scale"].iloc[0] == "none"
+    assert table["bias"].iloc[0] == np.median(est.predict(X) - y)
+    assert est.evaluate(X, y)["scale"].iloc[0] == "1+z"
+    calls = est.calls_
+    with pytest.raises(ValueError, match="scale must be one of"):
+        est.evaluate(X, y, scale="log")
+    assert est.calls_ == calls

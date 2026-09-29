@@ -8,11 +8,15 @@ than paraphrased from the text, so that our columns and Schmidt et al. (2020)
 Tables 2, 3 and B1 are directly comparable.
 
 The PDF metrics (CDE loss, PIT and its goodness-of-fit statistics) apply to
-any continuous target. The point metrics are photo-z's: they scale every
-residual by ``1 + z_true``, which suits redshift and little else; for another
-target, compute point metrics directly on ``z_pred - z_true``.
+any continuous target. The point metrics are photo-z's by default: they scale
+every residual by ``1 + z_true``, which suits redshift and little else. For
+another target pass ``scale="none"`` to :func:`point_metrics`,
+:func:`summarize` or ``evaluate``: every point statistic is then of the plain
+residual ``z_pred - z_true``, in the target's units, including the outlier
+rates, whose thresholds (the 0.06 floor, the fixed 0.15) are then in those
+units too. The tables say which in their ``scale`` column.
 
-Point estimates (Appendix B1)::
+Point estimates (Appendix B1), with the default ``scale="1+z"``::
 
     ez        = (z_phot - z_true) / (1 + z_true)
     bias      = median(ez)
@@ -54,6 +58,7 @@ Typical usage example:
 from __future__ import annotations
 
 import dataclasses
+from typing import Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -62,6 +67,13 @@ from scipy import stats
 
 from lazy import _typing
 from lazy import grid as grid_lib
+
+#: How the point metrics scale a residual: ``"1+z"`` divides it by
+#: ``1 + z_true`` (photo-z's convention, DC1's numbers), ``"none"`` leaves
+#: ``z_pred - z_true`` as it is.
+Scale: TypeAlias = Literal["1+z", "none"]
+#: The accepted values of ``scale``.
+SCALES: tuple[str, ...] = ("1+z", "none")
 
 OUTLIER_FLOOR = 0.06
 DC1_OUTLIER_THRESHOLD = 0.15
@@ -75,8 +87,10 @@ AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
 class PointMetrics:
     """The DC1 Appendix B1 point-estimate statistics for one sample.
 
-    All statistics are of the scaled residual
-    ``ez = (z_phot - z_true) / (1 + z_true)``.
+    All statistics are of the residual ``ez``: by default the scaled
+    ``(z_phot - z_true) / (1 + z_true)``, or the plain ``z_phot - z_true``
+    when :attr:`scale` is ``"none"``, the thresholds then in the target's
+    units.
 
     Attributes:
         n: Number of objects.
@@ -88,6 +102,7 @@ class PointMetrics:
         outlier_threshold: ``max(0.06, 3 * sigma_iqr)``.
         outlier_rate_015: Fraction of objects with ``|ez| > 0.15``.
         median_abs_ez: Median of ``|ez|``.
+        scale: The residual's scaling, ``"1+z"`` or ``"none"``.
     """
 
     n: int
@@ -98,8 +113,9 @@ class PointMetrics:
     outlier_threshold: float
     outlier_rate_015: float
     median_abs_ez: float
+    scale: str = "1+z"
 
-    def as_dict(self) -> dict[str, float | int]:
+    def as_dict(self) -> dict[str, float | int | str]:
         """Returns the metrics as a plain dict, for building a table row."""
         return dataclasses.asdict(self)
 
@@ -162,16 +178,16 @@ def scaled_residual(
     Returns:
         The scaled residuals ``ez``, shape (n,).
     """
-    truth = np.asarray(z_true, dtype=float)
-    pred = np.asarray(z_pred, dtype=float)
-    if truth.shape != pred.shape or truth.ndim != 1:
-        raise ValueError("z_true and z_pred must be equal-length 1D arrays")
-    if not (np.isfinite(truth).all() and np.isfinite(pred).all()):
-        raise ValueError("non-finite values supplied")
+    truth, pred = _check_pair(z_true, z_pred)
     return (pred - truth) / (1.0 + truth)
 
 
-def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
+def point_metrics(
+    z_true: npt.ArrayLike,
+    z_pred: npt.ArrayLike,
+    *,
+    scale: Scale = "1+z",
+) -> PointMetrics:
     """Bias, scatter and outlier rate of a set of point estimates.
 
     ``sigma_iqr`` and ``sigma_mad`` are both robust widths; they differ when
@@ -183,11 +199,21 @@ def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
     Args:
         z_true: True values, finite, shape (n,).
         z_pred: Point estimates, finite, shape (n,).
+        scale: ``"1+z"`` (the default, photo-z's and DC1's convention) for
+            residuals scaled by ``1 + z_true``; ``"none"`` for the plain
+            ``z_pred - z_true`` of any other target, every statistic and
+            both outlier thresholds then in the target's units.
 
     Returns:
         The statistics.
     """
-    ez = scaled_residual(z_true, z_pred)
+    if scale not in SCALES:
+        raise ValueError(f"scale must be one of {SCALES}: {scale=}")
+    if scale == "1+z":
+        ez = scaled_residual(z_true, z_pred)
+    else:
+        truth, pred = _check_pair(z_true, z_pred)
+        ez = pred - truth
     median = float(np.median(ez))
     q25, q75 = np.percentile(ez, [25.0, 75.0])
     sigma_iqr = float((q75 - q25) / 1.349)
@@ -201,7 +227,21 @@ def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
         outlier_threshold=float(threshold),
         outlier_rate_015=float(np.mean(np.abs(ez) > DC1_OUTLIER_THRESHOLD)),
         median_abs_ez=float(np.median(np.abs(ez))),
+        scale=scale,
     )
+
+
+def _check_pair(
+    z_true: npt.ArrayLike, z_pred: npt.ArrayLike
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+    """True values and point estimates as equal-length finite 1-D arrays."""
+    truth = np.asarray(z_true, dtype=float)
+    pred = np.asarray(z_pred, dtype=float)
+    if truth.shape != pred.shape or truth.ndim != 1:
+        raise ValueError("z_true and z_pred must be equal-length 1D arrays")
+    if not (np.isfinite(truth).all() and np.isfinite(pred).all()):
+        raise ValueError("non-finite values supplied")
+    return truth, pred
 
 
 # --------------------------------------------------------------------------
@@ -730,6 +770,7 @@ def evaluate_grid_pdfs(
     point: str = "z_peak",
     *,
     bin_edges: npt.ArrayLike | None = None,
+    scale: Scale = "1+z",
 ) -> tuple[PointMetrics, PDFMetrics, _typing.FloatArray]:
     """Convenience: point metrics from a PDF reduction plus the PDF metrics.
 
@@ -747,6 +788,8 @@ def evaluate_grid_pdfs(
             A histogram-normalised :class:`~lazy.grid.Grid` passed as
             ``z_grid`` supplies them; given with a Grid, they must be its
             edges.
+        scale: How the point metrics scale residuals: ``"1+z"`` (the
+            default, DC1's) or ``"none"``; see :func:`point_metrics`.
 
     Returns:
         A tuple (point_metrics, pdf_metrics, pit): the point statistics of
@@ -758,7 +801,11 @@ def evaluate_grid_pdfs(
     if point not in estimates:
         raise ValueError(f"point must be one of {sorted(estimates)}")
     distribution, pit = pdf_metrics(z_true, z_grid, pdfs, bin_edges=bin_edges)
-    return point_metrics(z_true, estimates[point]), distribution, pit
+    return (
+        point_metrics(z_true, estimates[point], scale=scale),
+        distribution,
+        pit,
+    )
 
 
 def summarize(
@@ -769,6 +816,7 @@ def summarize(
     label: str | None = None,
     *,
     bin_edges: npt.ArrayLike | None = None,
+    scale: Scale = "1+z",
 ) -> pd.DataFrame:
     """Every point and PDF metric as a one-row table.
 
@@ -790,11 +838,14 @@ def summarize(
             A histogram-normalised :class:`~lazy.grid.Grid` passed as
             ``z_grid`` supplies them; given with a Grid, they must be its
             edges.
+        scale: How the point metrics scale residuals: ``"1+z"`` (the
+            default, DC1's, photo-z's) or ``"none"`` for plain residuals of
+            any other target; see :func:`point_metrics`.
 
     Returns:
-        A one-row table: ``model`` (if labelled), ``point_estimate``, the
-        :class:`PointMetrics` fields and the :class:`PDFMetrics` fields other
-        than ``n``.
+        A one-row table: ``model`` (if labelled), ``point_estimate``,
+        ``scale``, the other :class:`PointMetrics` fields and the
+        :class:`PDFMetrics` fields other than ``n``.
 
     Examples:
         >>> z = np.array([0.5, 1.0])
@@ -803,6 +854,8 @@ def summarize(
         >>> summarize(z, grid, pdfs, label="uniform")["model"].tolist()
         ['uniform']
     """
+    if scale not in SCALES:
+        raise ValueError(f"scale must be one of {SCALES}: {scale=}")
     z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     estimates = grid_point_estimates(z_grid, pdfs, bin_edges=bin_edges)
     if point not in estimates:
@@ -811,7 +864,13 @@ def summarize(
         z_true, z_grid, pdfs, bin_edges=bin_edges
     )
     return summarize_scores(
-        z_true, estimates[point], cde_terms, pit, point=point, label=label
+        z_true,
+        estimates[point],
+        cde_terms,
+        pit,
+        point=point,
+        label=label,
+        scale=scale,
     )
 
 
@@ -822,6 +881,8 @@ def summarize_scores(
     pit: npt.ArrayLike,
     point: str = "z_peak",
     label: str | None = None,
+    *,
+    scale: Scale = "1+z",
 ) -> pd.DataFrame:
     """The :func:`summarize` table from per-object pieces.
 
@@ -838,11 +899,13 @@ def summarize_scores(
         point: The name of the point estimate, for the table.
         label: Model name for a leading ``model`` column; no such column
             when ``None``.
+        scale: How the point metrics scale residuals; see
+            :func:`point_metrics`.
 
     Returns:
         The one-row table :func:`summarize` describes.
     """
-    point_metrics_ = point_metrics(z_true, z_pred)
+    point_metrics_ = point_metrics(z_true, z_pred, scale=scale)
     pdf_metrics_ = _pdf_metrics_from(
         np.asarray(cde_terms, dtype=float), np.asarray(pit, dtype=float)
     )
@@ -850,7 +913,9 @@ def summarize_scores(
     if label is not None:
         row["model"] = label
     row["point_estimate"] = point
-    row.update(point_metrics_.as_dict())
+    point_row = point_metrics_.as_dict()
+    row["scale"] = point_row.pop("scale")
+    row.update(point_row)
     row.update({k: v for k, v in pdf_metrics_.as_dict().items() if k != "n"})
     return pd.DataFrame([row])
 

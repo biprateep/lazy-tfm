@@ -408,6 +408,8 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         y: npt.ArrayLike,
         method: str = "z_peak",
         z_grid: grid_lib.GridLike = None,
+        *,
+        scale: metrics.Scale = "1+z",
     ) -> pd.DataFrame:
         """Scores predictions for ``X`` with the full diagnostic metric set.
 
@@ -423,12 +425,21 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 :data:`POINT_ESTIMATORS`.
             z_grid: The grid to evaluate on; ``None`` for this model's
                 default.
+            scale: How the point metrics (bias, scatter, outlier rates)
+                scale residuals. ``"1+z"``, the default, divides them by
+                ``1 + y``: photo-z's convention, and DC1's numbers.
+                ``"none"`` scores the plain ``prediction - y`` of any other
+                target, in its units, outlier thresholds included; see
+                :func:`lazy.metrics.point_metrics`.
 
         Returns:
-            A one-row table labelled with :attr:`name_`.
+            A one-row table labelled with :attr:`name_`; its ``scale``
+            column records the choice.
         """
         validation.check_is_fitted(self)
         method = _check_method(method)
+        if scale not in metrics.SCALES:
+            raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
         grid = self._resolve_grid(z_grid)
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
@@ -446,6 +457,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             np.concatenate(pit),
             point=method,
             label=self.name_,
+            scale=scale,
         )
 
     # -- helpers -----------------------------------------------------------

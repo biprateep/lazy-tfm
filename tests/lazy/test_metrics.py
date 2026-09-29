@@ -209,3 +209,32 @@ def test_explicit_bin_edges_must_agree_with_the_grid():
     ) == metrics.cde_loss(z_true, grid, pdfs)
     with pytest.raises(ValueError, match="differ from the edges"):
         metrics.cde_loss(z_true, grid, pdfs, bin_edges=grid.edges * 1.01)
+
+
+def test_point_metrics_can_leave_residuals_unscaled():
+    z_true = np.array([0.0, 1.0, 3.0, 10.0])
+    z_pred = np.array([0.1, 1.2, 3.1, 14.0])
+    default = metrics.point_metrics(z_true, z_pred)
+    assert default.scale == "1+z"
+    assert default == metrics.point_metrics(z_true, z_pred, scale="1+z")
+    plain = metrics.point_metrics(z_true, z_pred, scale="none")
+    assert plain.scale == "none"
+    residual = z_pred - z_true
+    assert plain.bias == np.median(residual)
+    assert plain.outlier_rate_015 == np.mean(np.abs(residual) > 0.15)
+    assert plain.median_abs_ez == np.median(np.abs(residual))
+    with pytest.raises(ValueError, match="scale must be one of"):
+        metrics.point_metrics(z_true, z_pred, scale="log")
+
+
+def test_the_summary_table_records_the_residual_scale():
+    grid, pdfs, z_true = _histogram_case()
+    table = metrics.summarize(z_true, grid, pdfs)
+    assert table.columns[:2].tolist() == ["point_estimate", "scale"]
+    assert table["scale"].iloc[0] == "1+z"
+    plain = metrics.summarize(z_true, grid, pdfs, scale="none")
+    assert plain["scale"].iloc[0] == "none"
+    z_pred = metrics.grid_point_estimates(grid, pdfs)["z_peak"]
+    assert plain["bias"].iloc[0] == np.median(z_pred - z_true)
+    pdf_columns = ["cde_loss", "pit_ks", "pit_ad1"]
+    pd.testing.assert_frame_equal(plain[pdf_columns], table[pdf_columns])
