@@ -287,7 +287,10 @@ class Grid:
 
         Returns:
             An array of the same shape as ``density``; column ``j`` is the
-            mass below ``centers[j]``, so column 0 is exactly zero.
+            mass below ``centers[j]``. By the trapezoid rule column 0 is
+            exactly zero, since the rule starts at the first centre; on a
+            histogram grid it is half the first bin's mass, since the mass
+            starts at the first edge.
         """
         return metrics.grid_cdf(
             self.centers,

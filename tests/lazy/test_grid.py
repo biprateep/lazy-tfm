@@ -152,3 +152,16 @@ def test_rebin_accepts_zero_width_input_bins_without_mass():
         [[1.0, 0.0, 1.0, 1.0]], edges
     )
     assert np.isfinite(density).all()
+
+
+def test_cdf_column_zero_follows_the_normalisation_convention():
+    """Zero by the trapezoid rule; half the first bin on a histogram grid."""
+    density = np.random.default_rng(1).uniform(size=(3, 8))
+    trapezoid = lazy.Grid.linear(0.0, 2.0, 8)
+    np.testing.assert_array_equal(trapezoid.cdf(density)[:, 0], 0.0)
+    histogram = lazy.Grid.linear(0.0, 2.0, 8, normalization="histogram")
+    np.testing.assert_allclose(
+        histogram.cdf(density)[:, 0], 0.5 * density[:, 0] * 0.25
+    )
+    assert "histogram grid" in lazy.Grid.cdf.__doc__
+    assert "histogram grid" in lazy.BaseDensityRegressor.predict_cdf.__doc__

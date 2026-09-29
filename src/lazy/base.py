@@ -310,8 +310,10 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 default.
 
         Returns:
-            The mass below each bin centre, shape (n_samples, n_bins);
-            column 0 is zero.
+            The mass below each bin centre, shape (n_samples, n_bins), by
+            the grid's convention (:meth:`lazy.grid.Grid.cdf`): column 0 is
+            zero on a trapezoid grid, and half the first bin's mass on a
+            histogram grid.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
