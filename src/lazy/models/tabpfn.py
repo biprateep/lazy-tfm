@@ -119,7 +119,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
-        random_state: Seed for the ensemble.
+        random_state: Seed for the ensemble. None draws a fresh seed at fit,
+            recorded as ``random_state_`` and in ``provenance_``.
         softmax_temperature: Temperature on the bucket logits, which sets how
             sharp the densities are. ``"auto"`` takes the checkpoint's own
             value, which is the one it was evaluated with; lower sharpens,
@@ -181,7 +182,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int = 42,
+        random_state: int | None = 42,
         softmax_temperature: float | str = "auto",
         ignore_pretraining_limits: bool = False,
         chunk_size: int = 16_384,

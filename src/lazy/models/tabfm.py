@@ -232,7 +232,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             posteriors alone.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
-        random_state: Seed for TabFM's ensemble construction.
+        random_state: Seed for TabFM's ensemble construction. None draws a
+            fresh seed at fit, recorded as ``random_state_`` and in
+            ``provenance_``.
         softmax_temperature: Temperature applied to the classifier logits. The
             upstream default of 0.9 is deliberately not 1.0 and should rarely
             be changed.
@@ -312,7 +314,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         z_grid: grid_lib.GridLike = None,
         prior_shift: str | None = None,
         device: str = "auto",
-        random_state: int = 1,
+        random_state: int | None = 1,
         softmax_temperature: float = 0.9,
         chunk_size: int = 16_384,
         member_batch_size: int = 1,

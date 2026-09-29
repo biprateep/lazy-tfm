@@ -109,7 +109,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"cpu"``.
-        random_state: Seed for the ensemble.
+        random_state: Seed for the ensemble. None draws a fresh seed at fit,
+            recorded as ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory
             (999 quantiles per row is about 8 kB); ``0`` does them in one
             pass. Exact: TabICL builds its keys and values from the context
@@ -173,7 +174,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int = 42,
+        random_state: int | None = 42,
         chunk_size: int = 16_384,
         progress: _progress.Progress = "auto",
         verbose: bool = False,
