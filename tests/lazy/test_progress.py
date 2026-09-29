@@ -73,11 +73,11 @@ def test_every_backend_takes_the_parameter_and_clones_it(name):
 SETTINGS = backend_settings.BACKEND_SETTINGS
 
 #: What the finished bar must say: the unit it counts in and the final tally.
-#: TabPFN and TabICL count galaxies, TabFM counts in-context stages --
+#: TabPFN and TabICL count rows, TabFM counts in-context stages --
 #: n_dither * (1 + n_coarse_bins) = 2 * 3 here.
 EXPECTED = {
-    "tabpfn": ("40/40", "gal", "buckets="),
-    "tabicl": ("40/40", "gal", "quantiles="),
+    "tabpfn": ("40/40", "row", "buckets="),
+    "tabicl": ("40/40", "row", "quantiles="),
     "tabfm": ("6/6", "stage", "level=fine 2/2"),
 }
 
