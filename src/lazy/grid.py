@@ -377,10 +377,11 @@ class Grid:
         Returns:
             Normalised densities on this grid, shape (n_rows, n_bins).
         """
-        q = np.maximum.accumulate(np.asarray(values, dtype=np.float64), axis=1)
+        q = np.asarray(values, dtype=np.float64)
         alphas = np.asarray(levels, dtype=np.float64)
         if q.ndim != 2:
             raise ValueError("values must be a 2D (n_rows, n_quantiles) array")
+        q = np.maximum.accumulate(q, axis=1)
         if alphas.ndim != 1 or alphas.size != q.shape[1]:
             raise ValueError("levels must have one entry per quantile column")
         cdf = np.empty((q.shape[0], self.edges.size))

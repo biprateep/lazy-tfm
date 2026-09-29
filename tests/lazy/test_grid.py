@@ -173,3 +173,8 @@ def test_equal_grids_hash_alike():
     assert nudged == grid
     assert hash(nudged) == hash(grid)
     assert len({grid, nudged}) == 1
+
+
+def test_from_quantiles_names_a_one_dimensional_input():
+    with pytest.raises(ValueError, match="values must be a 2D"):
+        lazy.DC1_GRID.from_quantiles([0.2, 0.5, 0.9], [0.16, 0.5, 0.84])
