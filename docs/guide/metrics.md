@@ -36,5 +36,5 @@ N(z)) identically for every method, so comparisons hold up by eye:
 ```python
 from lazy.plotting import diagnostic_panel
 
-fig = diagnostic_panel(z_true, grid.centers, pdfs, label="TabPFN")
+fig = diagnostic_panel(z_true, grid, pdfs, label="TabPFN")   # a Grid, or bin centres
 ```
