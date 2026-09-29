@@ -65,6 +65,11 @@ def _native_transforms() -> dict[str, tuple[str, bool]]:
     return native
 
 
+#: Versions whose architecture has no quantised key/value cache; upstream
+#: would quietly fall back to full precision.
+_UNQUANTISED_VERSIONS = ("v2", "v2.5", "v2.6")
+
+
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
     """TabPFN's fit mode and cache precision for a ``kv_cache`` value.
 
@@ -107,8 +112,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (exact, full
             precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
-            exact), or ``False``. Worth its memory whenever the query set is
-            much larger than the context.
+            exact; v3 and later only), or ``False``. Worth its memory
+            whenever the query set is much larger than the context.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the bar distribution's own buckets, in full).
@@ -207,6 +212,17 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 "pip install 'lazy-tfm[tabpfn]'"
             ) from error
         return tabpfn
+
+    def _check_backend_params(self) -> None:
+        if (
+            self.kv_cache in ("int8", "fp8")
+            and self.version in _UNQUANTISED_VERSIONS
+        ):
+            raise ValueError(
+                f"TabPFN {self.version} has no quantised key/value cache, so "
+                f"kv_cache={self.kv_cache!r} would run at full precision; "
+                "use kv_cache=True, or version='v3' or later"
+            )
 
     def _fit_group(
         self,

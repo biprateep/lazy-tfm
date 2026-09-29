@@ -486,6 +486,17 @@ class TestTabPFN:
         assert tabpfn._cache_options("int8")["kv_cache_precision"] == "int8"
         assert tabpfn._cache_options(False) == {"fit_mode": "fit_preprocessors"}
 
+    @pytest.mark.parametrize("version", ["v2", "v2.5", "v2.6"])
+    def test_a_quantised_cache_is_rejected_where_upstream_has_none(
+        self, tiny, version
+    ):
+        """Upstream would fall back to full precision behind a warning."""
+        X, z = tiny
+        with pytest.raises(ValueError, match="no quantised key/value cache"):
+            lazy.get_estimator("tabpfn", version=version, kv_cache="int8").fit(
+                X, z
+            )
+
     def test_an_unknown_version_is_rejected_before_anything_is_downloaded(
         self, tiny
     ):
