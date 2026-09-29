@@ -91,7 +91,7 @@ _SLOW_PATH_WARNING = (
     "its uncached inference path, which re-encodes the training "
     "context for every chunk of query rows -- roughly 26x the compute "
     "per query row (13.7 ms vs 0.53 ms per member-row). The answers "
-    "are the same; only the runtime differs, so a large prediction "
+    "agree up to rounding; only the runtime differs, so a large prediction "
     "will simply take far longer than expected. The KV-cache API "
     "ships in the repository build but not on PyPI:\n"
     "    pip install 'tabfm[pytorch] @ "
@@ -119,13 +119,18 @@ def quantile_edges(
             what dithering varies between repeats.
 
     Returns:
-        Non-decreasing edges, shape ``(n_bins + 1,)``.
+        Non-decreasing edges, shape ``(n_bins + 1,)``. With no values at all
+        there are no quantiles to take, and the edges are evenly spaced.
 
     Examples:
         >>> quantile_edges(np.linspace(0, 1, 101), 2, 0.0, 1.0).tolist()
         [0.0, 0.5, 1.0]
+        >>> quantile_edges([], 2, 0.0, 1.0).tolist()
+        [0.0, 0.5, 1.0]
     """
     values = np.asarray(values, dtype=float)
+    if not values.size:
+        return np.linspace(lo, hi, n_bins + 1)
     levels = np.clip(
         np.linspace(0.0, 1.0, n_bins + 1) + shift / n_bins, 0.0, 1.0
     )
@@ -203,15 +208,19 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             a hierarchy of its own.
         feature_shuffle: Whether members see the columns in different orders
             (TabFM's own feature shuffles).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Native: each classifier's members
+        bag_size: Context rows per member: an int is a row count (1 means
+            one row), a float a fraction in (0, 1] (1.0 means all rows), and
+            None all of them. Native: each classifier's members
             subsample the same fraction of the rows it sees (TabFM's
             ``max_num_rows``).
         kv_cache: Prefill each member's context once and decode the queries
-            against the cache (``True``, exact; needs TabFM's repository
-            build, and falls back with a :class:`TabFMPerformanceWarning`
-            without it), or re-encode the context for every chunk of queries
-            (``False``).
+            against the cache (``True``; needs TabFM's repository build, and
+            falls back with a :class:`TabFMPerformanceWarning` without it),
+            or re-encode the context for every chunk of queries (``False``).
+            TabFM computes in bfloat16, so the two paths agree to float
+            rounding on the CPU but not on CUDA, whose kernels round
+            differently for different batch shapes: there densities differ
+            by up to a few per cent of their peak.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
@@ -223,19 +232,25 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             biased spectroscopic sample. ``None`` (default) leaves the
             posteriors alone.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
-        random_state: Seed for TabFM's ensemble construction.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
+        random_state: Seed for TabFM's ensemble construction. None draws a
+            fresh seed at fit, recorded as ``random_state_`` and in
+            ``provenance_``.
         softmax_temperature: Temperature applied to the classifier logits. The
             upstream default of 0.9 is deliberately not 1.0 and should rarely
             be changed.
         chunk_size: Query rows handed to the upstream ``predict_proba`` at a
-            time when ``kv_cache=False``; ``0`` does them in one pass. Exact:
-            the in-context stage builds its keys and values from the context
-            rows only. The cached path is bounded by ``query_block_rows`` and
-            ``decode_chunk_rows`` instead.
+            time when ``kv_cache=False``; ``0`` does them in one pass. The
+            in-context stage builds its keys and values from the context rows
+            only, so a row's answer never depends on the other rows in its
+            chunk; it is bit-identical on the CPU, and on CUDA changes by the
+            bfloat16 rounding ``kv_cache`` describes. The cached path is
+            bounded by ``query_block_rows`` and ``decode_chunk_rows``
+            instead.
         member_batch_size: Ensemble members processed together on the cached
             path (and TabFM's own ``batch_size``). This and the next three are
-            memory/throughput knobs that never change the result.
+            memory/throughput knobs that change the result only by the
+            rounding ``kv_cache`` describes.
         decode_chunk_rows: Query rows decoded against the cache at a time.
         query_block_rows: Query rows whose member views are built at a time
             on the cached path, bounding host memory.
@@ -280,6 +295,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     }
     auto_tokens = ("none", "power")
     supports_native_bagging = True
+    # bfloat16 on CUDA: chunking and the cache change the rounding.
+    exact_chunking = False
+    kv_cache_rtol = 5e-2
     chunks_queries = False
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -297,7 +315,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         z_grid: grid_lib.GridLike = None,
         prior_shift: str | None = None,
         device: str = "auto",
-        random_state: int = 1,
+        random_state: int | None = 1,
         softmax_temperature: float = 0.9,
         chunk_size: int = 16_384,
         member_batch_size: int = 1,
@@ -337,6 +355,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         try:
             import tabfm  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
+            # Only the backend itself missing is a missing extra; anything
+            # it fails to import in turn is reported as it is.
+            if (error.name or "").partition(".")[0] != "tabfm":
+                raise
             raise ImportError(
                 "TabFMHistogram needs the tabfm backend: "
                 "pip install 'lazy-tfm[tabfm]'"
@@ -395,6 +417,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         if self.inference_ == "predict_proba":
             self.kv_cache_ = False
         self.support_ = self._support(y)
+        y = _clip_to_support(y, self.support_)
         self.X_context_ = _frame(X)
         self.z_context_ = y
         return {
@@ -456,6 +479,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 [self._edges(self.z_context_, shift)[0] for shift in shifts]
             )
         )
+        if edges.size < 3:
+            # A constant target has one bin; a grid needs two, and halving
+            # it changes no density.
+            edges = np.r_[edges[0], edges.mean(), edges[-1]]
         return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     # -- the hierarchy ------------------------------------------------------
@@ -468,18 +495,19 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """Returns a tuple (all edges, coarse edges, fine edges per coarse bin).
 
         The equal-mass edges for one dither, spanning ``support_``; the top
-        edge is nudged up so the largest value falls inside.
+        edge is nudged up so the largest value falls inside. Tied targets
+        (discrete, zero-inflated or constant ones) collapse neighbouring
+        quantiles, which leaves zero-width, empty bins: an empty coarse bin
+        gets evenly spaced fine edges across itself, and every empty bin
+        gets zero probability.
         """
         low, high = self.support_
-        span = high - low if high > low else 1.0
+        # A constant target still gets a bin of non-zero width, on its scale.
+        span = high - low if high > low else max(abs(high), 1.0)
         coarse = quantile_edges(
             z, self.n_coarse_bins, low, high + 1e-6 * span, shift
         )
-        labels = np.clip(
-            np.searchsorted(coarse, z, side="right") - 1,
-            0,
-            self.n_coarse_bins - 1,
-        )
+        labels = _bin_labels(coarse, z)
         fine = [
             quantile_edges(
                 z[labels == j],
@@ -521,25 +549,23 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """
         z, X_context = handle["z"], handle["X"]
         edges, coarse_edges, fine_edges = self._edges(z, shift)
-        coarse = np.clip(
-            np.searchsorted(coarse_edges, z, side="right") - 1,
-            0,
-            self.n_coarse_bins - 1,
-        )
+        coarse = _bin_labels(coarse_edges, z)
         _stage(progress, dither, "coarse", z.size)
         p_coarse = self._class_probabilities(
-            model, handle, X_context, coarse, X_query, handle["group"].seed
+            model,
+            handle,
+            X_context,
+            coarse,
+            self.n_coarse_bins,
+            X_query,
+            handle["group"].seed,
         )
         _done(progress)
         prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
         for j in range(self.n_coarse_bins):
             rows = coarse == j
-            fine = np.clip(
-                np.searchsorted(fine_edges[j], z[rows], side="right") - 1,
-                0,
-                self.n_fine_bins - 1,
-            )
+            fine = _bin_labels(fine_edges[j], z[rows])
             _stage(
                 progress,
                 dither,
@@ -551,6 +577,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 handle,
                 X_context.iloc[rows],
                 fine,
+                self.n_fine_bins,
                 X_query,
                 handle["group"].seed + 1 + j,
             )
@@ -571,10 +598,21 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         handle: Any,
         X_context: pd.DataFrame,
         labels: _typing.IntArray,
+        n_classes: int,
         X_query: pd.DataFrame,
         seed: int,
     ) -> _typing.FloatArray:
-        """Member-averaged class posteriors, ``(n_query, n_labels)``."""
+        """Member-averaged class posteriors, ``(n_query, n_classes)``.
+
+        A level with no context rows gives every class zero probability, and
+        one whose rows all share a class gives that class all of it; neither
+        has anything for a classifier to learn, so none is run.
+        """
+        present = np.unique(labels)
+        if present.size < 2:
+            full = np.zeros((len(X_query), n_classes))
+            full[:, present.astype(int)] = 1.0
+            return full
         max_rows = (
             None
             if handle["bag_fraction"] is None
@@ -602,7 +640,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
-        full = np.zeros((probs.shape[0], int(labels.max()) + 1))
+        full = np.zeros((probs.shape[0], n_classes))
         full[:, classes.astype(int)] = probs
         return full
 
@@ -613,11 +651,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         ``predict_proba`` materialises ``n_members x n_query x n_features`` in
         one go, which a survey-sized query set cannot afford. Feeding it chunks
-        caps that at ``n_members x chunk_size x n_features``. The result is
-        bit-identical to a single pass (``tests/lazy/test_backends.py``): the
-        in-context stage builds its keys and values from the context rows
-        alone, so query rows never influence one another. The context forward
-        pass is repeated per chunk, which is the price.
+        caps that at ``n_members x chunk_size x n_features``. The in-context
+        stage builds its keys and values from the context rows alone, so
+        query rows never influence one another: on the CPU the result is
+        bit-identical to a single pass, and on CUDA it differs by bfloat16
+        rounding, the kernels batching differently. The context forward pass
+        is repeated per chunk, which is the price.
         """
         size = self.chunk_size if self.chunk_size > 0 else len(X_query)
         frame = X_query.reset_index(drop=True)
@@ -655,9 +694,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "verbose": False,
         }
         if group.native_transforms is not None:
-            kwargs["norm_methods"] = list(
-                dict.fromkeys(group.native_transforms)
-            )
+            # Upstream cycles its norm methods over the members, so the
+            # per-member list runs exactly as planned, repeats and all.
+            kwargs["norm_methods"] = list(group.native_transforms)
         if not group.feature_shuffle:
             kwargs["feat_shuffle_method"] = "none"
         if max_rows is not None:
@@ -708,6 +747,47 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _bin_labels(
+    edges: _typing.FloatArray, values: _typing.FloatArray
+) -> _typing.IntArray:
+    """The bin each value falls in, ``edges[i] <= value < edges[i + 1]``.
+
+    Of several zero-width bins at one value, a value there falls in the last,
+    the one of non-zero width above them; values outside the edges go to the
+    end bins.
+    """
+    n_bins = edges.size - 1
+    return np.clip(
+        np.searchsorted(edges, values, side="right") - 1, 0, n_bins - 1
+    )
+
+
+def _clip_to_support(
+    z: _typing.FloatArray, support: tuple[float, float]
+) -> _typing.FloatArray:
+    """The targets clipped to the bins' range, warning if any lay outside it.
+
+    Args:
+        z: The context targets, shape ``(n,)``.
+        support: The range the equal-mass bins span, (low, high).
+
+    Returns:
+        ``z`` clipped to ``support``, shape ``(n,)``.
+    """
+    low, high = support
+    outside = int(np.count_nonzero((z < low) | (z > high)))
+    if outside:
+        warnings.warn(
+            f"{outside} of {z.size} training targets lie outside the z_grid "
+            f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
+            "ends, so their probability piles into the end bins. Pass a "
+            "z_grid that covers the targets.",
+            UserWarning,
+            stacklevel=5,
+        )
+    return np.clip(z, low, high)
 
 
 def _frame(features: _typing.FloatArray) -> pd.DataFrame:

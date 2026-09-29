@@ -65,6 +65,11 @@ def _native_transforms() -> dict[str, tuple[str, bool]]:
     return native
 
 
+#: Versions whose architecture has no quantised key/value cache; upstream
+#: would quietly fall back to full precision.
+_UNQUANTISED_VERSIONS = ("v2", "v2.5", "v2.6")
+
+
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
     """TabPFN's fit mode and cache precision for a ``kv_cache`` value.
 
@@ -83,7 +88,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     Args:
         version: Which TabPFN to run, in upstream's own vocabulary: ``"v2"``,
-            ``"v2.5"``, ``"v2.6"``, ``"v3"`` (the default), ``"v3.5"`` or
+            ``"v2.5"``, ``"v2.6"``, ``"v3"``, ``"v3.5"`` (the default) or
             ``"v3.5-fast"``. Each is a separately pinned checkpoint
             (:func:`lazy.list_versions`), so sweeping this parameter compares
             model versions on equal terms, and ``provenance_`` records which
@@ -101,20 +106,22 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             transforms always stay the checkpoint's.
         feature_shuffle: Whether members see the columns in different orders
             (TabPFN's own feature shuffling).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Native: TabPFN's own per-member
+        bag_size: Context rows per member: an int is a row count (1 means
+            one row), a float a fraction in (0, 1] (1.0 means all rows), and
+            None all of them. Native: TabPFN's own per-member
             row subsampling, handed the package's bags.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (exact, full
             precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
-            exact), or ``False``. Worth its memory whenever the query set is
-            much larger than the context.
+            exact; v3 and later only), or ``False``. Worth its memory
+            whenever the query set is much larger than the context.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
-        random_state: Seed for the ensemble.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
+        random_state: Seed for the ensemble. None draws a fresh seed at fit,
+            recorded as ``random_state_`` and in ``provenance_``.
         softmax_temperature: Temperature on the bucket logits, which sets how
             sharp the densities are. ``"auto"`` takes the checkpoint's own
             value, which is the one it was evaluated with; lower sharpens,
@@ -168,7 +175,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
-        version: str = "v3",
+        version: str = "v3.5",
         n_estimators: int | str = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
@@ -176,7 +183,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int = 42,
+        random_state: int | None = 42,
         softmax_temperature: float | str = "auto",
         ignore_pretraining_limits: bool = False,
         chunk_size: int = 16_384,
@@ -202,11 +209,26 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         try:
             import tabpfn  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
+            # Only the backend itself missing is a missing extra; anything
+            # it fails to import in turn is reported as it is.
+            if (error.name or "").partition(".")[0] != "tabpfn":
+                raise
             raise ImportError(
                 "TabPFNBarDistribution needs the tabpfn backend: "
                 "pip install 'lazy-tfm[tabpfn]'"
             ) from error
         return tabpfn
+
+    def _check_backend_params(self) -> None:
+        if (
+            self.kv_cache in ("int8", "fp8")
+            and self.version in _UNQUANTISED_VERSIONS
+        ):
+            raise ValueError(
+                f"TabPFN {self.version} has no quantised key/value cache, so "
+                f"kv_cache={self.kv_cache!r} would run at full precision; "
+                "use kv_cache=True, or version='v3' or later"
+            )
 
     def _fit_group(
         self,
@@ -235,10 +257,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             **_cache_options(self.kv_cache),
         )
         regressor.fit(X, y)
-        borders = regressor.raw_space_bardist_.borders
-        self.borders_ = np.maximum.accumulate(
-            np.asarray(borders.detach().cpu().numpy(), dtype=np.float64)
-        )
+        self.borders_ = _bucket_borders(regressor)
         self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
 
@@ -250,9 +269,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
             configs = tabpfn.preprocessing.configs
 
-            # Upstream spreads its transforms evenly across members, as the
-            # planner assigned them, so the distinct tokens in order suffice.
-            # The settings are those the paper's recipe runs used.
+            # Upstream gives each listed config an equal share of the
+            # members, repeats included, so one cycle of the plan keeps its
+            # weights. The settings are those the paper's recipe runs used.
             overrides["PREPROCESS_TRANSFORMS"] = [
                 configs.PreprocessorConfig(
                     name,
@@ -260,7 +279,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                     categorical_name="ordinal_shuffled",
                     max_features_per_estimator=768,
                 )
-                for name, original in dict.fromkeys(group.native_transforms)
+                for name, original in _cycle(group.native_transforms)
             ]
         if not group.feature_shuffle:
             overrides["FEATURE_SHIFT_METHOD"] = None
@@ -271,19 +290,81 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.HistogramDistribution:
-        borders, masses = bucket_masses(handle.predict(X, output_type="full"))
-        return distributions.HistogramDistribution(borders, masses)
+        _, masses = bucket_masses(handle.predict(X, output_type="full"))
+        return distributions.HistogramDistribution(
+            _bucket_borders(handle), masses
+        )
 
     def _native_grid(self) -> grid_lib.Grid:
-        return grid_lib.Grid.from_edges(
-            np.unique(self.borders_), normalization="histogram"
-        )
+        edges = np.unique(self.borders_)
+        if edges.size < 3:
+            # A constant target has one bucket; a grid needs two, and
+            # halving it changes no density.
+            edges = np.r_[edges[0], edges.mean(), edges[-1]]
+        return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     def _progress_postfix(
         self, dist: distributions.Distribution
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
+    """The shortest prefix of ``tokens`` that repeats to give all of them.
+
+    Upstream shares the members out among its preprocessing configs (and,
+    within each, its target transforms) in equal blocks, so handing it one
+    cycle of the planned transforms, repeats included, keeps their weights:
+    exactly when the member count is a multiple of the cycle's length times
+    the number of target transforms, and to within one block otherwise.
+
+    Args:
+        tokens: TabPFN's token for each member's transform, in member order.
+
+    Returns:
+        The cycle, e.g. ``("power", "power", "none")`` for the tokens of
+        ``transforms=("power", "power", "none")``.
+
+    Examples:
+        >>> _cycle(("a", "b", "a", "b", "a"))
+        ('a', 'b')
+        >>> _cycle(("a", "a", "b", "a", "a", "b"))
+        ('a', 'a', 'b')
+    """
+    for length in range(1, len(tokens)):
+        if all(token == tokens[i % length] for i, token in enumerate(tokens)):
+            return tokens[:length]
+    return tokens
+
+
+def _bucket_borders(regressor: Any) -> _typing.FloatArray:
+    """The fitted regressor's bucket borders in the target's units.
+
+    Upstream keeps them as ``raw_space_bardist_``, but in float32, which
+    cannot resolve a narrow spread about a large offset (for targets
+    ``1e4 + 0.01 * noise`` most buckets come out zero-width). So they are
+    rebuilt here in float64 exactly as upstream builds them, from the
+    z-normalised borders and the context targets' mean and standard
+    deviation; the buckets, and so the masses in them, are the same ones.
+
+    For a constant target upstream skips the model altogether, predicts one
+    bucket around the constant, and keeps that bucket (already in the
+    target's units) as ``znorm_space_bardist_``.
+
+    Args:
+        regressor: A fitted ``tabpfn.TabPFNRegressor``.
+
+    Returns:
+        The borders, made non-decreasing, shape ``(n_buckets + 1,)``.
+    """
+    znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
+    borders = np.asarray(znorm, dtype=np.float64)
+    if not getattr(regressor, "is_constant_target_", False):
+        borders = borders * float(regressor.y_train_std_) + float(
+            regressor.y_train_mean_
+        )
+    return np.maximum.accumulate(borders)
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:

@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import types
 from typing import Any
+import warnings
 
 import numpy as np
+import pandas as pd
 
 from lazy import _typing
 from lazy import distributions
@@ -38,10 +40,24 @@ from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
 
-__all__ = ["NATIVE_QUANTILE_BINS", "TabICLQuantile", "quantile_levels"]
+__all__ = [
+    "NATIVE_PAD",
+    "NATIVE_QUANTILE_BINS",
+    "TabICLQuantile",
+    "quantile_levels",
+]
 
-#: Bins of the native grid: as fine as the 999 quantiles resolve.
+#: Bins of the native grid across the training targets' range: as fine as
+#: the 999 quantiles resolve. The padding adds bins of the same width.
 NATIVE_QUANTILE_BINS = 1000
+
+#: How far the native grid extends beyond the training targets on each
+#: side, as a fraction of their range: TabICL's quantiles extrapolate.
+NATIVE_PAD = 0.25
+
+#: The probability a row may put outside the native grid before
+#: tabulating it there warns.
+_OUTSIDE_TOLERANCE = 0.01
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -76,8 +92,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             sequence of them; see :mod:`lazy.models._transforms`.
         feature_shuffle: Whether members see the columns in different orders
             (TabICL's Latin-square shuffles).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Scaffolded: one regressor per
+        bag_size: Context rows per member: an int is a row count (1 means
+            one row), a float a fraction in (0, 1] (1.0 means all rows), and
+            None all of them. Scaffolded: one regressor per
             bag.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (TabICL's
@@ -86,10 +103,15 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             either way, up to floating-point rounding.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
-            (1,000 bins spanning the training targets).
+            (equal-width bins, 1,000 across the training targets' range,
+            which extend a quarter of that range beyond it on each side).
+            Densities on a grid carry only the mass inside it, renormalised;
+            tabulating a row that puts more than 1% of its probability
+            outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
-        random_state: Seed for the ensemble.
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
+        random_state: Seed for the ensemble. None draws a fresh seed at fit,
+            recorded as ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory
             (999 quantiles per row is about 8 kB); ``0`` does them in one
             pass. Exact: TabICL builds its keys and values from the context
@@ -101,9 +123,10 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     Attributes:
         grid_: The resolved default output grid.
-        native_grid_: The native grid, 1,000 histogram-normalised bins over
-            the training targets padded by 2% (never below zero when the targets
-            are all non-negative).
+        native_grid_: The native grid, histogram-normalised: 1,500 bins over
+            the training targets' range padded by a quarter of it on each
+            side (a constant target is padded by 1% of its value, and at
+            least by 0.01).
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
@@ -138,6 +161,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     # The training targets' range, recorded by _fit_group for the grid.
     _support: tuple[float, float]
+    # The (offset, scale) the targets are standardised by before TabICL's
+    # float32 sees them, recorded by _fit_group.
+    _target_scaling: tuple[float, float]
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -150,7 +176,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int = 42,
+        random_state: int | None = 42,
         chunk_size: int = 16_384,
         progress: _progress.Progress = "auto",
         verbose: bool = False,
@@ -172,6 +198,10 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         try:
             import tabicl  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
+            # Only the backend itself missing is a missing extra; anything
+            # it fails to import in turn is reported as it is.
+            if (error.name or "").partition(".")[0] != "tabicl":
+                raise
             raise ImportError(
                 "TabICLQuantile needs the tabicl backend: "
                 "pip install 'lazy-tfm[tabicl]'"
@@ -189,11 +219,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         # `CHECKPOINTS` is the authority on which weights answer.
         options: dict[str, Any] = {}
         if group.native_transforms is not None:
-            # Upstream pairs members with norm methods round robin, as the
-            # planner assigned them, so the distinct tokens in order suffice.
-            options["norm_methods"] = list(
-                dict.fromkeys(group.native_transforms)
-            )
+            options["norm_methods"] = _norm_methods(group.native_transforms)
         if not group.feature_shuffle:
             options["feat_shuffle_method"] = "none"
         tabicl = self._import_backend()
@@ -206,7 +232,15 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             verbose=False,
             **options,
         )
-        regressor.fit(X.astype(np.float32), y.astype(np.float32))
+        # TabICL works in float32, which cannot resolve a narrow spread about
+        # a large offset; standardising in float64 first keeps it. Every
+        # group shares the first group's scaling, as any one will do.
+        if group.index == 0:
+            self._target_scaling = _target_scaling(y)
+        offset, scale = self._target_scaling
+        regressor.fit(
+            X.astype(np.float32), ((y - offset) / scale).astype(np.float32)
+        )
         low, high = float(y.min()), float(y.max())
         if group.index > 0:
             low, high = min(low, self._support[0]), max(high, self._support[1])
@@ -216,9 +250,16 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
-        quantiles = np.asarray(
-            handle.predict(X.astype(np.float32), output_type="raw_quantiles"),
-            dtype=np.float64,
+        offset, scale = getattr(self, "_target_scaling", (0.0, 1.0))
+        quantiles = (
+            np.asarray(
+                handle.predict(
+                    X.astype(np.float32), output_type="raw_quantiles"
+                ),
+                dtype=np.float64,
+            )
+            * scale
+            + offset
         )
         self.n_quantiles_ = int(quantiles.shape[1])
         return distributions.QuantileDistribution(
@@ -227,14 +268,108 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     def _native_grid(self) -> grid_lib.Grid:
         low, high = self._support
-        pad = 0.02 * (high - low) if high > low else 0.01
-        start = max(low - pad, 0.0) if low >= 0 else low - pad
+        if high > low:
+            pad = NATIVE_PAD * (high - low)
+            n_bins = round(NATIVE_QUANTILE_BINS * (1.0 + 2.0 * NATIVE_PAD))
+        else:
+            pad = 0.01 * max(abs(high), 1.0)
+            n_bins = NATIVE_QUANTILE_BINS
         return grid_lib.Grid.linear(
-            start, high + pad, NATIVE_QUANTILE_BINS, normalization="histogram"
+            low - pad, high + pad, n_bins, normalization="histogram"
         )
+
+    def _predict_pdf(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> _typing.FloatArray:
+        blocks = []
+        outside = 0
+        for dist in self._chunks(X):
+            blocks.append(dist.on_grid(grid))
+            if grid == self.native_grid_ and isinstance(
+                dist, distributions.QuantileDistribution
+            ):
+                outside += int(
+                    np.count_nonzero(
+                        _mass_outside(dist, grid) > _OUTSIDE_TOLERANCE
+                    )
+                )
+        if outside:
+            warnings.warn(
+                f"{outside} of {len(X)} rows put more than "
+                f"{_OUTSIDE_TOLERANCE:.0%} of their probability outside the "
+                f"native grid [{grid.z_min:g}, {grid.z_max:g}], and their "
+                "densities there are renormalised. Pass a wider z_grid, or "
+                "use predict_distribution, which has full support.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _progress_postfix(
         self, dist: distributions.Distribution
     ) -> dict[str, Any]:
         del dist  # Unused: the count is recorded when predicting.
         return {"quantiles": getattr(self, "n_quantiles_", None)}
+
+
+def _norm_methods(tokens: tuple[str, ...]) -> list[str]:
+    """TabICL's ``norm_methods`` for the members' planned transforms.
+
+    Upstream pairs member ``k`` with norm method ``k % len(norm_methods)``,
+    and a norm method listed twice gives two members the same feature
+    shuffle as well, so they are one member counted twice. The distinct
+    tokens in order therefore run the plan only when it cycles through them.
+
+    Args:
+        tokens: TabICL's token for each member's transform, in member order.
+
+    Returns:
+        The distinct tokens, in order.
+
+    Raises:
+        ValueError: If the plan repeats a transform within a cycle, as
+            ``transforms=("power", "power", "none")`` does.
+    """
+    methods = list(dict.fromkeys(tokens))
+    cycled = tuple(methods[i % len(methods)] for i in range(len(tokens)))
+    if cycled != tuple(tokens):
+        raise ValueError(
+            "TabICL runs each of its transforms once per cycle over the "
+            f"members, so it cannot weight them as {tuple(tokens)}; list "
+            "each transform once in transforms"
+        )
+    return methods
+
+
+def _target_scaling(y: _typing.FloatArray) -> tuple[float, float]:
+    """The (offset, scale) that standardise the targets: mean and std.
+
+    Args:
+        y: The context targets, shape ``(n,)``.
+
+    Returns:
+        A tuple ``(offset, scale)``; the scale is 1 for a constant target.
+    """
+    scale = float(np.std(y))
+    return float(np.mean(y)), scale if scale > 0 else 1.0
+
+
+def _mass_outside(
+    dist: distributions.QuantileDistribution, grid: grid_lib.Grid
+) -> _typing.FloatArray:
+    """Each row's probability outside the grid, to one quantile level.
+
+    Args:
+        dist: The predicted quantiles.
+        grid: The grid they are tabulated on.
+
+    Returns:
+        The probability below ``grid.z_min`` plus that above ``grid.z_max``,
+        shape ``(n_rows,)``: a lower bound, short by at most one quantile
+        level on each side.
+    """
+    levels = np.r_[0.0, dist.quants, 1.0]
+    n_levels = dist.quants.size
+    below = np.count_nonzero(dist.locs < grid.z_min, axis=1)
+    above = np.count_nonzero(dist.locs > grid.z_max, axis=1)
+    return levels[below] + (1.0 - levels[n_levels + 1 - above])
