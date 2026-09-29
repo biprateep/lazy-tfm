@@ -284,3 +284,37 @@ def test_an_estimator_without_a_native_grid_says_so(data):
 def test_as_grid_refuses_the_native_sentinel():
     with pytest.raises(ValueError, match="native grid"):
         lazy.as_grid("native")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict_proba(X),
+        lambda est, X, y: est.predict_pdf(X),
+        lambda est, X, y: est.predict_cdf(X),
+        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict_distribution(X),
+        lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.score(X, y),
+        lambda est, X, y: est.evaluate(X, y),
+        lambda est, X, y: est.point_estimates(np.ones((len(X), 200))),
+        lambda est, X, y: est.predict_proba(X, "native"),
+        lambda est, X, y: est.native_grid,
+    ],
+)
+@pytest.mark.parametrize("z_grid", [None, "native"])
+def test_every_method_of_an_unfitted_model_raises_not_fitted(
+    data, call, z_grid
+):
+    X, y = data
+    with pytest.raises(exceptions.NotFittedError):
+        call(_WithNativeGrid(z_grid=z_grid), X, y)
+
+
+def test_the_native_grid_error_tells_unfitted_from_absent(data):
+    X, y = data
+    with pytest.raises(exceptions.NotFittedError, match="not fitted yet"):
+        GaussianDummy().native_grid  # noqa: B018 - the access is the test.
+    with pytest.raises(AttributeError, match="has no native grid") as info:
+        GaussianDummy().fit(X, y).native_grid  # noqa: B018 - as above.
+    assert not isinstance(info.value, exceptions.NotFittedError)

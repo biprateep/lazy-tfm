@@ -164,8 +164,17 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """The model's own output grid, available after ``fit``.
 
         Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted
+                yet.
             AttributeError: If this estimator has no native grid.
         """
+        validation.check_is_fitted(
+            self,
+            msg=(
+                f"This {type(self).__name__} instance is not fitted yet, so "
+                "it has no native grid; call 'fit' first"
+            ),
+        )
         native = getattr(self, "native_grid_", None)
         if native is None:
             raise AttributeError(
@@ -275,6 +284,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             The value at each level, shape (n_samples, k).
         """
+        validation.check_is_fitted(self)
         return self.predict_distribution(X).ppf(quantiles)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
@@ -306,6 +316,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             The mass below each bin centre, shape (n_samples, n_bins);
             column 0 is zero.
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return grid.cdf(self.predict_proba(X, grid))
 
@@ -336,6 +347,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             Point estimates, shape (n_samples,).
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return self.point_estimates(self.predict_proba(X, grid), grid)[
             _check_method(method)
@@ -358,6 +370,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             Minus :func:`lazy.metrics.cde_loss`.
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         y = np.asarray(y, dtype=float).ravel()
         return -metrics.cde_loss(
@@ -391,6 +404,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             A one-row table labelled with :attr:`name_`.
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return metrics.summarize(
             np.asarray(y, dtype=float).ravel(),
@@ -435,6 +449,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
             values, shape (n_samples,).
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return metrics.grid_point_estimates(
             grid.centers, pdfs, bin_edges=grid.histogram_edges
