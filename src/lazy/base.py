@@ -193,7 +193,8 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 Table, or anything with ``to_pandas()``. Missing values are
                 NaN. Column names, when the input has them, are remembered
                 and enforced at predict time.
-            y: Finite target values, shape (n_samples,).
+            y: Finite target values, shape (n_samples,), with
+                n_samples >= 1.
 
         Returns:
             The fitted estimator itself.
@@ -250,10 +251,17 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 (n_samples, n_features).
 
         Returns:
-            One distribution per row of ``X``.
+            One distribution per row of ``X``. For no rows at all, an empty
+            :class:`~lazy.distributions.HistogramDistribution` on the
+            default grid, without running the model.
         """
         validation.check_is_fitted(self)
-        return self._predict_distribution(self._check_features(X, reset=False))
+        X = self._check_features(X, reset=False)
+        if X.empty:
+            return distributions.HistogramDistribution(
+                self.grid_.edges, np.zeros((0, self.grid_.n_bins))
+            )
+        return self._predict_distribution(X)
 
     def predict_quantiles(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -361,6 +369,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         X = self._check_features(X, reset=False)
+        self._check_not_empty(X)
         y = _check_target(y, len(X))
         return -metrics.cde_loss(
             y,
@@ -397,6 +406,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         method = _check_method(method)
         grid = self._resolve_grid(z_grid)
         X = self._check_features(X, reset=False)
+        self._check_not_empty(X)
         y = _check_target(y, len(X))
         return metrics.summarize(
             y,
@@ -419,12 +429,15 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             grid: The grid to answer on.
 
         Returns:
-            Densities, shape (n_samples, grid.n_bins).
+            Densities, shape (n_samples, grid.n_bins); for no rows, an empty
+            array, without running the model.
 
         Raises:
             RuntimeError: If the backend returns densities of the wrong
                 shape.
         """
+        if X.empty:
+            return np.zeros((0, grid.n_bins))
         pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
         if pdfs.shape != (len(X), grid.n_bins):
             raise RuntimeError(
@@ -507,6 +520,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         frame, named = _inputs.as_feature_frame(X)
         if reset:
+            # Before anything is recorded, so that a refused fit leaves an
+            # unfitted estimator unfitted.
+            self._check_not_empty(frame)
             self.n_features_in_ = int(frame.shape[1])
             if named:
                 self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
@@ -519,6 +535,18 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 f"{type(self).__name__} was fitted with {self.n_features_in_}"
             )
         return self._align_to_fit(frame, named)
+
+    def _check_not_empty(self, X: pd.DataFrame) -> None:
+        """Refuses a table with no rows, as scikit-learn does.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+        """
+        if X.empty:
+            raise ValueError(
+                f"Found array with 0 sample(s) (shape={X.shape}) while a "
+                f"minimum of 1 is required by {type(self).__name__}."
+            )
 
     def _align_to_fit(self, frame: pd.DataFrame, named: bool) -> pd.DataFrame:
         """Labels and orders predict-time columns as ``fit`` saw them.

@@ -352,3 +352,22 @@ def test_only_uniform_layer_backends_can_register():
 
     with pytest.raises(TypeError, match="ContextEnsembleEstimator"):
         registry.register("plain", Plain)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
+    X, z, X_test = data
+    model = cls(n_estimators=2, progress=False).fit(X, z)
+    empty = X_test[:0]
+    assert model.predict_proba(empty).shape == (0, model.grid_.n_bins)
+    assert model.predict_cdf(empty).shape == (0, model.grid_.n_bins)
+    assert model.predict(empty).shape == (0,)
+    assert model.predict_quantiles(empty).shape == (0, 3)
+    assert len(model.predict_distribution(empty)) == 0
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_fitting_no_rows_is_refused(cls, data):
+    X, z, _ = data
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        cls(n_estimators=2, progress=False).fit(X[:0], z[:0])
