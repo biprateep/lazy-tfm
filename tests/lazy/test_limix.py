@@ -132,7 +132,9 @@ def test_the_native_grid_uses_the_whole_context(data):
 def test_a_cache_that_does_not_fit_falls_back(monkeypatch, data):
     X, z, X_test = data
     monkeypatch.setattr(limix, "_free_device_memory", lambda network: 1)
-    with pytest.warns(lazy.PerformanceWarning, match="without its key/value"):
+    with pytest.warns(
+        lazy.PerformanceWarning, match="2 of its 2 members without"
+    ):
         fallback = _model().fit(X, z)
     assert fallback.kv_cache_ is False
     for handle in fallback.handles_:
@@ -224,3 +226,66 @@ def test_an_unpickled_model_finds_its_device_and_checkpoint_afresh(
     assert restored.provenance_["device"] == "cpu"
     np.testing.assert_array_equal(restored.predict_proba(X_test), before)
     assert restored.checkpoint_ == checkpoint
+
+
+def _simulated_gpu(monkeypatch, free_bytes, cache_bytes):
+    """Fakes a GPU whose free memory shrinks as caches are made."""
+    held = [0]
+    calls = []
+
+    def free(network):
+        calls.append(held[0])
+        return free_bytes - held[0]
+
+    prefill = _limix_stream.prefill
+
+    def counted_prefill(*args, **kwargs):
+        held[0] += cache_bytes
+        return prefill(*args, **kwargs)
+
+    monkeypatch.setattr(limix, "_free_device_memory", free)
+    monkeypatch.setattr(
+        _limix_stream, "cache_bytes", lambda *args, **kwargs: cache_bytes
+    )
+    monkeypatch.setattr(_limix_stream, "prefill", counted_prefill)
+    return held, calls
+
+
+@needs_checkpoint
+def test_the_caches_that_fit_are_kept(monkeypatch, data):
+    X, z, X_test = data
+    # 0.6 of 10 units free leaves room for 6 of the 8 members' caches.
+    held, calls = _simulated_gpu(monkeypatch, 10, 1)
+    with pytest.warns(lazy.PerformanceWarning) as record:
+        model = _model(n_estimators=8).fit(X, z)
+    assert len(record) == 1
+    assert "2 of its 8 members without" in str(record[0].message)
+    assert record[0].filename == __file__
+    assert calls == [0]  # measured once, before the first cache
+    assert held[0] == 6
+    assert model.kv_cache_ is True
+    uses = [entry["use_cache"] for entry in model.handles_[0]["members"]]
+    assert uses == [True] * 6 + [False] * 2
+    uncached = _model(n_estimators=8, kv_cache=False).fit(X, z)
+    np.testing.assert_allclose(
+        model.predict_proba(X_test),
+        uncached.predict_proba(X_test),
+        rtol=limix.LimiXBarDistribution.kv_cache_rtol,
+        atol=1e-7,
+    )
+
+
+@needs_checkpoint
+def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    model = _model(n_estimators=4).fit(X, z)
+    before = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    held, calls = _simulated_gpu(monkeypatch, 5, 1)  # room for 3 of 4
+    with pytest.warns(lazy.PerformanceWarning, match="1 of its 4 members"):
+        after = restored.predict_proba(X_test)
+    assert calls == [0]
+    assert held[0] == 3
+    np.testing.assert_allclose(after, before, rtol=1e-4, atol=1e-7)

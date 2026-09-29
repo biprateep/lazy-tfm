@@ -41,6 +41,7 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
+import os
 import types
 from typing import Any
 import warnings
@@ -64,6 +65,8 @@ __all__ = ["LimiXBarDistribution"]
 
 # The largest share of free GPU memory the key/value caches may take.
 _CACHE_MEMORY_FRACTION = 0.6
+# Frames in this package, skipped to point warnings at the caller's code.
+_PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
@@ -85,8 +88,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             cover the context.
         kv_cache: Run the context through the network once, at fit, and let
             each chunk of queries attend to the result. Exact; costs about
-            2 GB of GPU memory per member at 20,000 context rows. Falls back
-            to the uncached path, with a warning, when that does not fit.
+            2 GB of GPU memory per member at 20,000 context rows. The
+            caches may take 0.6 of the GPU memory free at fit; members whose
+            caches do not fit run uncached, with a warning.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
@@ -136,6 +140,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     # The whole context's target mean and standard deviation, for the grid.
     _scale: tuple[float, float]
+    # The key/value caches' memory budget and use of it, in bytes, and why
+    # some member runs without one.
+    _cache_budget: float | None
+    _cache_free: int | None
+    _uncached_reason: str | None
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -216,8 +225,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         self._scale = _standardisation(y)
-        self._cache_bytes = 0
+        self._reset_cache_budget()
         super()._fit(X, y)
+        self._warn_if_uncached()
 
     def _fit_group(
         self,
@@ -240,7 +250,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
                 pipeline.transform(X), (y - mean) / std, seed=group.seed
             )
             members.append(
-                {"pipeline": pipeline, "member": member, "cache": None}
+                {
+                    "pipeline": pipeline,
+                    "member": member,
+                    "cache": None,
+                    "use_cache": False,
+                }
             )
         handle = {"members": members, "mean": mean, "std": std}
         if self.kv_cache_:
@@ -290,49 +305,89 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         return network
 
     def _prefill(self, handle: dict[str, Any]) -> None:
-        """Caches each member's context, or falls back when it cannot."""
+        """Caches each member's context that fits in the memory budget."""
         network = self._network()
-        reason = None
         if not _limix_stream.cache_supported(network):
-            reason = "this checkpoint's layer layout is not supported"
+            self.kv_cache_ = False
+            self._uncached_reason = (
+                "this checkpoint's layer layout is not supported"
+            )
+            return
         for entry in handle["members"]:
-            if reason is not None:
-                break
-            needed = self._cache_bytes + _limix_stream.cache_bytes(
-                network,
-                len(entry["member"].y),
-                entry["member"].x.shape[1],
-                _cache_dtype(network, mixed_precision=self.mixed_precision),
-            )
-            free = _free_device_memory(network)
-            if free is not None and needed > _CACHE_MEMORY_FRACTION * free:
-                reason = (
-                    f"the caches need {needed / 1e9:.1f} GB and the device "
-                    f"has {free / 1e9:.1f} GB free"
-                )
-                break
-            entry["cache"] = _limix_stream.prefill(
-                network,
-                entry["member"],
-                mixed_precision=self.mixed_precision,
-            )
-            self._cache_bytes = needed
-        if reason is not None:
-            self._drop_caches(handle)
-            warnings.warn(
-                f"LimiX is predicting without its key/value cache ({reason}),"
-                " so every chunk of queries re-runs the context. The answers"
-                " are the same; pass kv_cache=False to silence this.",
-                _ensemble.PerformanceWarning,
-                stacklevel=6,
-            )
+            self._cache_member(network, entry)
 
-    def _drop_caches(self, current: dict[str, Any]) -> None:
-        """Turns the cache off and frees every member's, ``current``'s too."""
-        self.kv_cache_ = False
-        for handle in [*getattr(self, "handles_", []), current]:
+    def _reset_cache_budget(self) -> None:
+        """Forgets the memory budget, so that the next cache measures it."""
+        self._cache_budget = None
+        self._cache_bytes = 0
+        self._cache_wanted = 0
+        self._cache_free = None
+        self._uncached_reason = None
+
+    def _cache_member(self, network: Any, entry: dict[str, Any]) -> None:
+        """Caches one member's context if it fits, else marks it uncached.
+
+        Free device memory is measured once, before the first cache, and
+        every cache counts against a share of it: memory measured later
+        would already be net of the caches made since.
+        """
+        needed = _limix_stream.cache_bytes(
+            network,
+            len(entry["member"].y),
+            entry["member"].x.shape[1],
+            _cache_dtype(network, mixed_precision=self.mixed_precision),
+        )
+        if self._cache_budget is None:
+            self._cache_free = _free_device_memory(network)
+            self._cache_budget = (
+                np.inf
+                if self._cache_free is None
+                else _CACHE_MEMORY_FRACTION * self._cache_free
+            )
+        self._cache_wanted += needed
+        if self._cache_bytes + needed > self._cache_budget:
+            entry["cache"] = None
+            entry["use_cache"] = False
+            self._uncached_reason = (
+                f"the caches need {self._cache_wanted / 1e9:.1f} GB and the "
+                f"device had {(self._cache_free or 0) / 1e9:.1f} GB free"
+            )
+            return
+        entry["cache"] = _limix_stream.prefill(
+            network, entry["member"], mixed_precision=self.mixed_precision
+        )
+        entry["use_cache"] = True
+        self._cache_bytes += needed
+
+    def _restore_caches(self) -> None:
+        """Rebuilds the caches pickling dropped, within the memory budget."""
+        self._caches_pending = False
+        network = self._network()
+        self._reset_cache_budget()
+        for handle in self.handles_:
             for entry in handle["members"]:
-                entry["cache"] = None
+                if entry["use_cache"]:
+                    self._cache_member(network, entry)
+        self._warn_if_uncached()
+
+    def _warn_if_uncached(self) -> None:
+        """Says, once, how many members run without their cache, and why."""
+        entries = []
+        for handle in self.handles_:
+            entries.extend(handle["members"])
+        uncached = sum(not entry["use_cache"] for entry in entries)
+        if self._uncached_reason is None or not uncached:
+            return
+        if uncached == len(entries):
+            self.kv_cache_ = False
+        warnings.warn(
+            f"LimiX is predicting {uncached} of its {len(entries)} members "
+            f"without the key/value cache ({self._uncached_reason}), so every "
+            "chunk of queries re-runs their context. The answers are the "
+            "same; pass kv_cache=False to silence this.",
+            _ensemble.PerformanceWarning,
+            skip_file_prefixes=(_PACKAGE_DIR,),
+        )
 
     def _member_probabilities(
         self, entry: dict[str, Any], X: _typing.FloatArray
@@ -341,11 +396,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         network = self._network()
         member = entry["member"]
         queries = entry["pipeline"].transform(X)
-        if self.kv_cache_:
-            if entry["cache"] is None:  # dropped on pickling
-                entry["cache"] = _limix_stream.prefill(
-                    network, member, mixed_precision=self.mixed_precision
-                )
+        if self.kv_cache_ and self.__dict__.get("_caches_pending", False):
+            self._restore_caches()
+        if self.kv_cache_ and entry["use_cache"]:
             logits = _limix_stream.decode(
                 network,
                 member,
@@ -385,6 +438,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             self.provenance_ = {**self.provenance_, "device": self.device_}
         if "checkpoint_" in state:
             self._relocate_checkpoint = True
+        if "handles_" in state:
+            self._caches_pending = True
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the network or the caches, which reload."""
