@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import os
 import types
-import typing
 from typing import Any
 import warnings
 
@@ -61,9 +60,6 @@ from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _members
 from lazy.models import _progress
-
-if typing.TYPE_CHECKING:
-    import torch
 
 __all__ = ["LimiXBarDistribution"]
 
@@ -163,7 +159,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         z_grid: grid_lib.GridLike = None,
-        device: str | torch.device = "auto",
+        device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
         progress: _progress.Progress = "auto",
