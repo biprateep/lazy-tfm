@@ -389,6 +389,35 @@ class TestTabICL:
             warnings.simplefilter("error", UserWarning)
             est._predict_pdf(X, lazy.Grid.linear(-1.0, 1.0, 10))
 
+    def test_targets_are_standardised_in_float64(self):
+        """float32 cannot resolve 0.01 of spread about 1e4; float64 can."""
+        y = 1e4 + 0.01 * np.random.default_rng(0).normal(size=100)
+        offset, scale = tabicl._target_scaling(y)
+        standardised = ((y - offset) / scale).astype(np.float32)
+        assert np.unique(standardised).size == y.size
+        np.testing.assert_allclose(
+            standardised.astype(np.float64) * scale + offset, y, atol=1e-8
+        )
+        assert tabicl._target_scaling(np.full(5, 3.0)) == (3.0, 1.0)
+
+    @needs_checkpoint
+    def test_a_large_offset_keeps_its_resolution(self):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(120, 3))
+        noise = 0.3 * generator.normal(size=120)
+
+        def median_error(offset):
+            y = offset + 0.01 * (X[:, 0] + noise)
+            est = tabicl.TabICLQuantile(
+                n_estimators=1, device="cpu", progress=False
+            ).fit(X[:100], y[:100])
+            median = est.predict_distribution(X[100:]).ppf([0.5])[:, 0]
+            return median - offset
+
+        np.testing.assert_allclose(
+            median_error(1e4), median_error(0.0), atol=1e-5
+        )
+
     def test_quantile_levels_are_interior_and_symmetric(self):
         levels = tabicl.quantile_levels(999)
         assert levels.size == 999

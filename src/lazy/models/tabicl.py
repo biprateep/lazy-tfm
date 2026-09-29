@@ -158,6 +158,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     # The training targets' range, recorded by _fit_group for the grid.
     _support: tuple[float, float]
+    # The (offset, scale) the targets are standardised by before TabICL's
+    # float32 sees them, recorded by _fit_group.
+    _target_scaling: tuple[float, float]
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -226,7 +229,15 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             verbose=False,
             **options,
         )
-        regressor.fit(X.astype(np.float32), y.astype(np.float32))
+        # TabICL works in float32, which cannot resolve a narrow spread about
+        # a large offset; standardising in float64 first keeps it. Every
+        # group shares the first group's scaling, as any one will do.
+        if group.index == 0:
+            self._target_scaling = _target_scaling(y)
+        offset, scale = self._target_scaling
+        regressor.fit(
+            X.astype(np.float32), ((y - offset) / scale).astype(np.float32)
+        )
         low, high = float(y.min()), float(y.max())
         if group.index > 0:
             low, high = min(low, self._support[0]), max(high, self._support[1])
@@ -236,9 +247,16 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
-        quantiles = np.asarray(
-            handle.predict(X.astype(np.float32), output_type="raw_quantiles"),
-            dtype=np.float64,
+        offset, scale = getattr(self, "_target_scaling", (0.0, 1.0))
+        quantiles = (
+            np.asarray(
+                handle.predict(
+                    X.astype(np.float32), output_type="raw_quantiles"
+                ),
+                dtype=np.float64,
+            )
+            * scale
+            + offset
         )
         self.n_quantiles_ = int(quantiles.shape[1])
         return distributions.QuantileDistribution(
@@ -289,6 +307,19 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the count is recorded when predicting.
         return {"quantiles": getattr(self, "n_quantiles_", None)}
+
+
+def _target_scaling(y: _typing.FloatArray) -> tuple[float, float]:
+    """The (offset, scale) that standardise the targets: mean and std.
+
+    Args:
+        y: The context targets, shape ``(n,)``.
+
+    Returns:
+        A tuple ``(offset, scale)``; the scale is 1 for a constant target.
+    """
+    scale = float(np.std(y))
+    return float(np.mean(y)), scale if scale > 0 else 1.0
 
 
 def _mass_outside(
