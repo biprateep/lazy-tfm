@@ -190,3 +190,14 @@ def test_residuals_can_skip_the_one_plus_z_scaling():
     assert ax.lines[-1].get_ydata()[0] == pytest.approx(0.1 / 2.0)
     with pytest.raises(ValueError, match="scale must be"):
         plotting.plot_residuals(z_true, z_pred, scale="log")
+
+
+def test_a_small_sample_is_not_a_blank_point_plot():
+    z = np.array([0.2, 0.5, 0.9, 1.3])
+    ax = plotting.plot_zphot_ztrue(z, z + 0.01)
+    mesh = ax.collections[0]
+    assert (mesh.norm.vmin, mesh.norm.vmax) == (1.0, 2.0)
+    counts = np.ma.masked_invalid(mesh.get_array())
+    assert counts.count() == 4  # every object shows, the empty bins do not
+    colours = mesh.to_rgba(counts.compressed())
+    assert np.all(colours[:, 3] > 0)

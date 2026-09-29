@@ -243,12 +243,19 @@ def plot_zphot_ztrue(
     hi = float(z_max if z_max is not None else both.max())
     if not hi > lo:  # One value: centre a unit range on it.
         lo, hi = lo - 0.5, hi + 0.5
+    extent = [[lo, hi], [lo, hi]]
+    counts, _, _ = np.histogram2d(z_true, z_pred, bins=bins, range=extent)
+    # Fixed limits: autoscaling a sample whose every bin holds one object
+    # gives vmin == vmax, and a blank panel.
+    kwargs.setdefault(
+        "norm", mcolors.LogNorm(vmin=1, vmax=max(2.0, float(counts.max())))
+    )
+    kwargs.setdefault("cmin", 1)
     ax.hist2d(
         z_true,
         z_pred,
         bins=bins,
-        range=[[lo, hi], [lo, hi]],
-        norm=mcolors.LogNorm(),
+        range=extent,
         cmap=cmap or plt.rcParams["image.cmap"],
         **kwargs,
     )
