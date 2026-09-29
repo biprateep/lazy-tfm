@@ -201,3 +201,14 @@ def test_a_small_sample_is_not_a_blank_point_plot():
     assert counts.count() == 4  # every object shows, the empty bins do not
     colours = mesh.to_rgba(counts.compressed())
     assert np.all(colours[:, 3] > 0)
+
+
+@pytest.mark.parametrize("sheet", ["shipped", "fallback"])
+def test_use_style_leaves_the_on_screen_dpi_alone(sheet, tmp_path):
+    with plt.rc_context({"figure.dpi": 100}):
+        if sheet == "shipped":
+            plotting.use_style()
+        else:
+            plotting.use_style(style_file=tmp_path / "missing.mplstyle")
+        assert plt.rcParams["figure.dpi"] == 100
+        assert plt.rcParams["savefig.dpi"] == 300

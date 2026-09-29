@@ -43,9 +43,8 @@ image.cmap: viridis
 # --- Legend: never boxed ------------------------------------------------
 legend.frameon: False
 
-# --- Output: tight 300 dpi PNG -------------------------------------------
+# --- Output: tight 300 dpi PNG (figure.dpi, the on-screen size, is left be) --
 figure.facecolor: w
-figure.dpi:       300
 savefig.dpi:      300
 savefig.bbox:     tight
 savefig.format:   png

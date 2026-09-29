@@ -233,7 +233,6 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
     "legend.frameon": False,
     "figure.titlesize": BIG_SIZE,
     "figure.facecolor": "w",
-    "figure.dpi": 300,
     "mathtext.fontset": "cm",
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
