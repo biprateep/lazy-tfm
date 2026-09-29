@@ -130,6 +130,35 @@ def test_set_params_can_switch_backend():
     assert model.n_estimators == 16
 
 
+def test_switching_backend_keeps_the_parameters_both_take():
+    model = lazy.LazyModel("tabfm", n_estimators=3, device="cpu", n_dither=5)
+    model.set_params(model="tabicl")
+    assert model.n_estimators == 3
+    assert model.device == "cpu"
+    assert "n_dither" not in model.get_params()
+    assert model.version == lazy.DEFAULT_VERSIONS["tabicl"]
+    model.set_params(model="tabfm", n_estimators=2)
+    assert model.n_estimators == 2 and model.device == "cpu"
+
+
+def test_a_search_over_backends_keeps_its_fixed_settings():
+    """GridSearchCV clones, which spells every default out, then sets."""
+    base = lazy.LazyModel("tabfm", n_estimators=3, device="cpu")
+    for name in ["tabicl", "tabpfn", "limix"]:
+        model = sklearn_base.clone(base).set_params(model=name)
+        backend = model._build()
+        assert backend.n_estimators == 3
+        assert backend.device == "cpu"
+        assert backend.version == lazy.DEFAULT_VERSIONS[name]
+        defaults = registry.ESTIMATORS[name]().get_params()
+        assert backend.random_state == defaults["random_state"]
+
+
+def test_a_switch_rejects_a_parameter_the_new_backend_does_not_take():
+    with pytest.raises(ValueError, match="n_dither"):
+        lazy.LazyModel("tabfm").set_params(model="tabicl", n_dither=3)
+
+
 def test_an_unknown_backend_set_by_set_params_is_rejected_at_fit():
     model = lazy.LazyModel("tabfm").set_params(model="nope")
     with pytest.raises(ValueError, match="tabfm"):

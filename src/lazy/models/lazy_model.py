@@ -242,7 +242,16 @@ class LazyModel(base.BaseDensityRegressor):
         return params
 
     def set_params(self, **params: Any) -> LazyModel:
-        """Sets parameters, starting the backend's afresh if ``model`` changes.
+        """Sets parameters, carrying what it can over when ``model`` changes.
+
+        Switching backend keeps every parameter set so far that the new
+        backend also takes -- except ``version``, which names the old
+        backend's weights -- and drops the rest; a value equal to the old
+        backend's default is not carried either, so the new backend's own
+        default applies. The other parameters of this call are then set
+        on top. So a search over ``{"model": [...]}`` keeps the fixed
+        settings it was given (``n_estimators``, ``device``, ...) for every
+        backend it tries.
 
         Args:
             **params: New values for ``model``, ``z_grid`` or any parameter
@@ -250,17 +259,25 @@ class LazyModel(base.BaseDensityRegressor):
 
         Returns:
             This model.
+
+        Raises:
+            ValueError: If the backend does not take one of ``params``.
         """
         if "z_grid" in params:
             self.z_grid = params.pop("z_grid")
         model = params.pop("model", self.model)
         if model != self.model:
-            # A different backend takes different parameters, so the old ones
-            # cannot be carried over; only what is passed in this call
-            # survives.
+            old_defaults = _backend_defaults(self.model) or {}
+            new_defaults = _backend_defaults(model)
+            kept = {
+                name: value
+                for name, value in self._params.items()
+                if name != "version"
+                and (new_defaults is None or name in new_defaults)
+                and not _is_default(value, old_defaults, name)
+            }
             self.model = model
-            self._params = dict(params)
-            return self
+            self._params = kept
         defaults = _backend_defaults(self.model)
         if defaults is not None:
             for name in params:
@@ -273,6 +290,16 @@ class LazyModel(base.BaseDensityRegressor):
                     )
         self._params = {**self._params, **params}
         return self
+
+
+def _is_default(value: Any, defaults: dict[str, Any], name: str) -> bool:
+    """Whether ``value`` is the default of parameter ``name``, if it has one."""
+    if name not in defaults:
+        return False
+    try:
+        return bool(value == defaults[name])
+    except (TypeError, ValueError):  # An array, say, with no single truth.
+        return False
 
 
 def _constructor_defaults(
