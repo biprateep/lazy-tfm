@@ -11,13 +11,16 @@ releases under a **non-commercial** licence; {doc}`guide/models` lists every
 model's size, licence and hardware needs.
 
 ```python
+import numpy as np
+
 import lazy
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)            # ~1 GB, cached after the first call
+# 391k test rows in all, sorted by redshift, so start with a random 20k.
+test = test.take(np.random.default_rng(0).choice(len(test), 20_000, replace=False))
 X_train, z_train = train.features("mag-color"), train.redshift
-X_test = test.features("mag-color").iloc[:20_000]   # 391k rows in all; start small
-z_test = test.redshift[:20_000]
+X_test, z_test = test.features("mag-color"), test.redshift
 
 model = lazy.LazyModel()                        # TabPFN-3.5, the default
 model.fit(X_train, z_train)
@@ -39,12 +42,13 @@ quick on a CPU:
 model = lazy.LazyModel("tabicl")
 ```
 
-or give TabPFN a context of at most 5,000 rows (or pass
-`ignore_pretraining_limits=True` and be patient).
+or give TabPFN a context of at most 5,000 rows, drawn at random (the
+catalogue's files are not in random order), or pass
+`ignore_pretraining_limits=True` and be patient.
 ````
 
 Scoring the densities you already have, as above, costs nothing; calling
-`model.evaluate(X_test, z_test, lazy.DC1_GRID)` instead runs the model again.
+`model.evaluate(X_test, z_test, z_grid=lazy.DC1_GRID)` instead runs the model again.
 Pass `lazy.DC1_GRID` to reproduce the Data Challenge's numbers: without a
 grid, a model answers on its own native grid (5,000 buckets for TabPFN), which
 is finer but not the challenge's convention.

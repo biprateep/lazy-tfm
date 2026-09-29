@@ -52,14 +52,17 @@ cache ahead of time with `lazy.download_checkpoint("tabfm")`.
 ## Use
 
 ```python
+import numpy as np
+
 import lazy
 from lazy import LazyModel, Grid
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)        # or fetch_dc1() for both, concatenated
+# 391k test rows in all, sorted by redshift, so take a random 20k.
+test = test.take(np.random.default_rng(0).choice(len(test), 20_000, replace=False))
 X_train, X_test = train.features("mag-color"), test.features("mag-color")
-
-X_test, z_test = X_test.iloc[:20_000], test.redshift[:20_000]  # 391k in all
+z_test = test.redshift
 
 model = LazyModel()                          # TabPFN-3.5, the default; wants a GPU
 model.fit(X_train, train.redshift)
@@ -67,7 +70,7 @@ model.fit(X_train, train.redshift)
 pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
 z = model.predict(X_test, method="z_peak")  # or z_mean, z_weight, z_median
 lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
-print(model.evaluate(X_test, z_test, lazy.DC1_GRID))
+print(model.evaluate(X_test, z_test, z_grid=lazy.DC1_GRID))
 ```
 
 No GPU? TabPFN is slow on a CPU and refuses contexts above 5,000 rows there;

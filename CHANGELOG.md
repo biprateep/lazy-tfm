@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+### Fixed
+
+- The README, quickstart and docs landing page passed the grid to `evaluate`
+  positionally, where it is read as `method`, and failed; they now pass
+  `z_grid=`. They also scored the first 20,000 DC1 test rows, which the file
+  sorts by redshift (median 0.29 against 0.64), and now take a random 20,000.
+
 ## [0.1.0] - 2026-09-29
 
 The first release. Everything below is new.

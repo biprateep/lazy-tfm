@@ -17,15 +17,18 @@ final. Pin a version if you depend on it.
 ```
 
 ```python
+import numpy as np
+
 import lazy
 from lazy.datasets import fetch_dc1
 
 train, test = fetch_dc1(split=True)
-X_train, X_test = train.features("mag-color"), test.features("mag-color")[:20_000]
+test = test.take(np.random.default_rng(0).choice(len(test), 20_000, replace=False))
+X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
 model = lazy.LazyModel().fit(X_train, train.redshift)   # TabPFN-3.5; wants a GPU
 pdfs = model.predict_proba(X_test)                      # densities on its native grid
-print(model.evaluate(X_test, test.redshift[:20_000], lazy.DC1_GRID))
+print(model.evaluate(X_test, test.redshift, z_grid=lazy.DC1_GRID))
 ```
 
 The API is scikit-learn's, with `predict_proba` returning a density on a grid
