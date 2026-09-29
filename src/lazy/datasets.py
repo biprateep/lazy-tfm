@@ -61,6 +61,7 @@ import hashlib
 import itertools
 import os
 import pathlib
+import tempfile
 import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
@@ -126,6 +127,11 @@ _SHA256 = {
         "9621f9e30baeb87c53a2a8e803043f7c598479f93785a3707954e133074328de"
     ),
 }
+
+# Seconds a download may wait on the server before giving up, and the size of
+# the pieces it is read in.
+_DOWNLOAD_TIMEOUT = 60.0
+_CHUNK_BYTES = 1 << 20
 
 #: Defaults reproducing the paired split the paper reports: the biased training
 #: set is sized to the DC1 training file, and the calibration sample is stolen
@@ -615,17 +621,43 @@ def _cached_file(
 
 
 def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
-    """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download."""
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download.
+
+    The download goes to a temporary file of its own next to ``dest``, so
+    that processes fetching the same file into a shared cache never write
+    to, or delete, one another's; the first to finish moves its copy into
+    place and the others keep that one.
+
+    Args:
+        url: Where the file is published.
+        dest: Where it is cached.
+        sha256: Its SHA-256 checksum, as hex.
+
+    Raises:
+        OSError: If the download fails, stalls for longer than the timeout,
+            or does not match its checksum.
+    """
     print(f"lazy.datasets: downloading {url}", flush=True)
+    with tempfile.NamedTemporaryFile(
+        dir=dest.parent, prefix=f".{dest.name}.", suffix=".part", delete=False
+    ) as out:
+        tmp = pathlib.Path(out.name)
     try:
-        urllib.request.urlretrieve(url, tmp)
-        digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-        if digest != sha256:
+        digest = hashlib.sha256()
+        with (
+            open(tmp, "wb") as out,
+            urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response,
+        ):
+            while chunk := response.read(_CHUNK_BYTES):
+                out.write(chunk)
+                digest.update(chunk)
+        if digest.hexdigest() != sha256:
             raise OSError(
-                f"checksum mismatch for {url}\n  got  {digest}\n  want {sha256}"
+                f"checksum mismatch for {url}\n  got  {digest.hexdigest()}\n"
+                f"  want {sha256}"
             )
-        tmp.replace(dest)
+        if not dest.exists():  # Else another process finished first.
+            os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
     print(

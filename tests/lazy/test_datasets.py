@@ -7,6 +7,11 @@ with a node-local disk, so every part of the path is overridable and none of it
 is hardcoded.
 """
 
+import concurrent.futures
+import hashlib
+import io
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -488,3 +493,67 @@ def test_asking_for_the_control_leaves_the_rest_of_the_split_alone(
     )
     for name in ("biased", "calibration", "test"):
         assert np.array_equal(with_control.rows[name], split.rows[name]), name
+
+
+class _SlowResponse:
+    """A stand-in for urlopen's response, served in small, slow pieces."""
+
+    def __init__(self, payload, pause):
+        self._stream = io.BytesIO(payload)
+        self._pause = pause
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self, size):
+        time.sleep(self._pause)
+        return self._stream.read(min(size, 64))
+
+
+def _serve(monkeypatch, payload, *, pause=0.0, checksum=None):
+    """Serves ``payload`` for every URL; returns the timeouts asked for."""
+    timeouts = []
+
+    def urlopen(url, timeout=None):
+        timeouts.append(timeout)
+        return _SlowResponse(payload, pause)
+
+    monkeypatch.setattr(datasets.urllib.request, "urlopen", urlopen)
+    digest = checksum or hashlib.sha256(payload).hexdigest()
+    monkeypatch.setitem(datasets._SHA256, "fake.bin", digest)
+    return timeouts
+
+
+def _fetch_fake(root):
+    return datasets._cached_file(
+        "fake.bin",
+        "https://example.invalid/fake.bin",
+        root=root,
+        download_if_missing=True,
+        hint="test",
+    )
+
+
+def test_parallel_downloads_to_one_cache_do_not_collide(
+    isolated_home, monkeypatch
+):
+    payload = bytes(range(256)) * 8
+    timeouts = _serve(monkeypatch, payload, pause=0.002)
+    root = isolated_home / "shared"
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        paths = list(pool.map(_fetch_fake, [root, root]))
+    assert paths[0] == paths[1] == root / "fake.bin"
+    assert paths[0].read_bytes() == payload
+    assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
+    assert timeouts and all(t is not None and t > 0 for t in timeouts)
+
+
+def test_a_corrupted_download_leaves_nothing_behind(isolated_home, monkeypatch):
+    _serve(monkeypatch, b"not the file", checksum="0" * 64)
+    root = isolated_home / "cache"
+    with pytest.raises(OSError, match="checksum mismatch"):
+        _fetch_fake(root)
+    assert not list(root.iterdir())
