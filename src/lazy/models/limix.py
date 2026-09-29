@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import os
 import types
+import typing
 from typing import Any
 import warnings
 
@@ -60,6 +61,9 @@ from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _members
 from lazy.models import _progress
+
+if typing.TYPE_CHECKING:
+    import torch
 
 __all__ = ["LimiXBarDistribution"]
 
@@ -82,8 +86,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             or a sequence of them; see :mod:`lazy.models._transforms`.
         feature_shuffle: Whether members see the columns in different orders
             (upstream's column shuffler).
-        bag_size: Context rows per member: an int count, a float fraction in
-            (0, 1], or None for all of them. Above about 20,000 context rows
+        bag_size: Context rows per member: an int is a row count (``1``
+            means one row), a float a fraction in (0, 1] (``1.0`` means all
+            rows), and None all of them. Above about 20,000 context rows
             LimiX-2 needs it: pass ``bag_size=20_000`` with enough members to
             cover the context.
         kv_cache: Run the context through the network once, at fit, and let
@@ -95,8 +100,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``.
-        random_state: Seed for the ensemble (upstream's default is 0).
+            ``"mps"``, ``"cpu"``, or a :class:`torch.device`.
+        random_state: Seed for the ensemble (upstream's default is 0). None
+            draws a fresh seed at fit, recorded as ``random_state_`` and in
+            ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory;
             ``0`` does them in one pass. A query's answer does not depend on
             the others in its chunk, up to float rounding.
@@ -156,8 +163,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         z_grid: grid_lib.GridLike = None,
-        device: str = "auto",
-        random_state: int = 0,
+        device: str | torch.device = "auto",
+        random_state: int | None = 0,
         chunk_size: int = 8_192,
         progress: _progress.Progress = "auto",
         verbose: bool = False,
