@@ -108,6 +108,13 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
     if np.ma.isMaskedArray(array):
         array = np.ma.filled(np.ma.asarray(array, dtype=np.float64), np.nan)
     array = np.asarray(array)
+    if array.ndim == 1:
+        raise ValueError(
+            f"X must be 2D, got a 1D array of shape {array.shape}. Reshape "
+            "your data either using array.reshape(-1, 1) if your data has a "
+            "single feature or array.reshape(1, -1) if it contains a single "
+            "sample."
+        )
     if array.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {array.shape}")
     return pd.DataFrame(array), False

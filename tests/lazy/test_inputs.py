@@ -164,3 +164,8 @@ def test_a_masked_column_vector_target_is_flattened():
     values = _inputs.as_target(target)
     assert values.shape == (3,)
     np.testing.assert_array_equal(values, [0.1, np.nan, 0.3])
+
+
+def test_a_one_dimensional_x_gets_scikit_learns_reshape_hint():
+    with pytest.raises(ValueError, match=r"array\.reshape\(-1, 1\)"):
+        _inputs.as_feature_frame(np.arange(5.0))
