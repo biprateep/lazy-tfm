@@ -18,8 +18,9 @@ the Data Challenge numbers requires exactly that grid.
 Normalisation is trapezoidal over the bin centres by default. That is the
 ``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
 integrates with. Native grids, whose bins are far from uniform, are
-``"histogram"``-normalised instead (constant density across each bin), and
-the metrics take ``bin_edges=`` to score them exactly.
+``"histogram"``-normalised instead (constant density across each bin);
+pass the :class:`Grid` itself to the :mod:`lazy.metrics` functions and they
+score its densities by its own convention.
 
 Typical usage example:
 

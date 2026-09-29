@@ -2,9 +2,11 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import numpy as np
+import pandas as pd
 import pytest
 from scipy import stats
 
+from lazy import grid as grid_lib
 from lazy import metrics
 
 GRID = np.linspace(0.0, 2.0, 401)
@@ -132,3 +134,78 @@ def test_a_non_finite_truth_is_refused_rather_than_scored():
     pdfs = np.ones((2, 200))
     with pytest.raises(ValueError, match="non-finite"):
         metrics.cde_loss(np.array([0.5, np.nan]), centers, pdfs)
+
+
+def _histogram_case():
+    edges = np.concatenate([[0.0], np.cumsum(np.geomspace(0.002, 0.2, 40))])
+    grid = grid_lib.Grid.from_edges(edges, normalization="histogram")
+    rng = np.random.default_rng(3)
+    pdfs = rng.gamma(2.0, size=(25, grid.n_bins))
+    z_true = rng.uniform(grid.z_min, grid.z_max, 25)
+    return grid, pdfs, z_true
+
+
+def test_a_histogram_grid_brings_its_own_edges_to_every_metric():
+    grid, pdfs, z_true = _histogram_case()
+    edges = grid.edges
+    pd.testing.assert_frame_equal(
+        metrics.summarize(z_true, grid, pdfs),
+        metrics.summarize(z_true, grid.centers, pdfs, bin_edges=edges),
+    )
+    assert metrics.cde_loss(z_true, grid, pdfs) == metrics.cde_loss(
+        z_true, grid.centers, pdfs, bin_edges=edges
+    )
+    for got, want in zip(
+        metrics.evaluate_grid_at_truth(z_true, grid, pdfs),
+        metrics.evaluate_grid_at_truth(
+            z_true, grid.centers, pdfs, bin_edges=edges
+        ),
+    ):
+        np.testing.assert_array_equal(got, want)
+    np.testing.assert_array_equal(
+        metrics.normalize_grid_pdfs(grid, pdfs)[1], grid.normalize(pdfs)
+    )
+    density = grid.normalize(pdfs)
+    np.testing.assert_array_equal(
+        metrics.grid_cdf(grid, density),
+        metrics.grid_cdf(grid.centers, density, bin_edges=edges),
+    )
+    np.testing.assert_allclose(
+        metrics.normalization_error(grid, density), 0.0, atol=1e-12
+    )
+    np.testing.assert_array_equal(
+        metrics.z_weight(grid, density),
+        metrics.z_weight(grid.centers, density, bin_edges=edges),
+    )
+    np.testing.assert_array_equal(
+        metrics.z_peak(grid, density), metrics.z_peak(grid.centers, density)
+    )
+    estimates = metrics.grid_point_estimates(grid, pdfs)
+    expected = metrics.grid_point_estimates(grid.centers, pdfs, bin_edges=edges)
+    for name, values in expected.items():
+        np.testing.assert_array_equal(estimates[name], values)
+    assert (
+        metrics.pdf_metrics(z_true, grid, pdfs)[0]
+        == (metrics.pdf_metrics(z_true, grid.centers, pdfs, bin_edges=edges)[0])
+    )
+
+
+def test_a_trapezoid_grid_scores_like_its_centres():
+    grid = grid_lib.Grid.linear(0.0, 2.0, 100)
+    rng = np.random.default_rng(4)
+    pdfs = rng.gamma(2.0, size=(10, 100))
+    z_true = rng.uniform(0.0, 2.0, 10)
+    assert metrics.cde_loss(z_true, grid, pdfs) == metrics.cde_loss(
+        z_true, grid.centers, pdfs
+    )
+
+
+def test_explicit_bin_edges_must_agree_with_the_grid():
+    grid, pdfs, z_true = _histogram_case()
+    trapezoid = grid_lib.Grid.from_edges(grid.edges)
+    # Matching edges win, and score a trapezoid grid as a histogram.
+    assert metrics.cde_loss(
+        z_true, trapezoid, pdfs, bin_edges=grid.edges
+    ) == metrics.cde_loss(z_true, grid, pdfs)
+    with pytest.raises(ValueError, match="differ from the edges"):
+        metrics.cde_loss(z_true, grid, pdfs, bin_edges=grid.edges * 1.01)

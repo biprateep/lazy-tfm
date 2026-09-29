@@ -38,9 +38,17 @@ The nearest-grid-point likelihood (rather than linear interpolation) is also
 what the Cal-PIT reference implementation uses, and is exact for the
 piecewise-constant densities this project produces.
 
+Every function that takes ``z_grid`` accepts either the bin centres or the
+:class:`lazy.grid.Grid` itself. Pass the grid: its normalisation convention
+then comes with it (``bin_edges`` is taken from
+:attr:`~lazy.grid.Grid.histogram_edges`), so densities from a model's
+histogram-normalised native grid are scored exactly rather than by the
+trapezoid rule over their centres.
+
 Typical usage example:
 
-  table = metrics.summarize(z_true, grid.centers, pdfs, label="tabfm")
+  pdfs = model.predict_proba(X_test)
+  table = metrics.summarize(z_true, model.grid_, pdfs, label="tabfm")
 """
 
 from __future__ import annotations
@@ -53,6 +61,7 @@ import pandas as pd
 from scipy import stats
 
 from lazy import _typing
+from lazy import grid as grid_lib
 
 OUTLIER_FLOOR = 0.06
 DC1_OUTLIER_THRESHOLD = 0.15
@@ -201,7 +210,7 @@ def point_metrics(z_true: npt.ArrayLike, z_pred: npt.ArrayLike) -> PointMetrics:
 
 
 def normalize_grid_pdfs(
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -215,16 +224,21 @@ def normalize_grid_pdfs(
     and a row with no mass left becomes a uniform density.
 
     Args:
-        z_grid: Strictly increasing bin centres, shape (g,) with g >= 2.
+        z_grid: Strictly increasing bin centres, shape (g,) with g >= 2, or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         A tuple (grid, density): the centres as a float array, shape (g,),
         and the normalised densities, shape (n, g).
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     grid = np.asarray(z_grid, dtype=float)
     density = np.array(pdfs, dtype=float)
     if grid.ndim != 1 or density.ndim != 2 or density.shape[1] != grid.size:
@@ -252,7 +266,7 @@ def normalize_grid_pdfs(
 
 
 def normalization_error(
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -260,15 +274,20 @@ def normalization_error(
     """``|trapz(p, z) - 1|`` per row: the check callers assert on.
 
     Args:
-        z_grid: Bin centres, shape (g,).
+        z_grid: Bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         The absolute normalisation error of each row, shape (n,).
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     grid = np.asarray(z_grid, dtype=float)
     if bin_edges is not None:
         widths = _bin_widths(bin_edges, grid.size)
@@ -279,7 +298,7 @@ def normalization_error(
 
 
 def grid_cdf(
-    z_grid: _typing.FloatArray,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     density: _typing.FloatArray,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -287,42 +306,53 @@ def grid_cdf(
     """Cumulative mass at each grid point, by the trapezoid rule of the norm.
 
     Args:
-        z_grid: Bin centres, shape (g,).
+        z_grid: Bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         The cumulative mass below each centre, shape (n, g). By trapezoid
         column 0 is zero; for a histogram grid each entry is the mass below
         the bin's left edge plus half its own.
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
+    grid = np.asarray(z_grid, dtype=float)
+    density = np.asarray(density, dtype=float)
     if bin_edges is not None:
-        mass = density * _bin_widths(bin_edges, len(z_grid))
+        mass = density * _bin_widths(bin_edges, grid.size)
         return np.cumsum(mass, axis=1) - 0.5 * mass
-    increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(z_grid)
+    increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(grid)
     return np.column_stack(
         (np.zeros(len(density)), np.cumsum(increments, axis=1))
     )
 
 
-def z_peak(z_grid: npt.ArrayLike, density: npt.ArrayLike) -> _typing.FloatArray:
+def z_peak(
+    z_grid: grid_lib.Grid | npt.ArrayLike, density: npt.ArrayLike
+) -> _typing.FloatArray:
     """DC1 ``z_PEAK``: the mode of the PDF.
 
     Args:
-        z_grid: Bin centres, shape (g,).
+        z_grid: Bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
 
     Returns:
         The centre of each row's highest bin, shape (n,).
     """
+    z_grid, _ = _split_grid(z_grid, None)
     grid = np.asarray(z_grid, dtype=float)
     return grid[np.argmax(np.asarray(density, dtype=float), axis=1)]
 
 
 def z_weight(
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     density: npt.ArrayLike,
     frac: float = 0.05,
     *,
@@ -335,17 +365,22 @@ def z_weight(
     probability-weighted mean of ``z`` over that run.
 
     Args:
-        z_grid: Bin centres, shape (g,).
+        z_grid: Bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
         frac: Fraction of the peak density that bounds the main peak.
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         The main-peak weighted mean of each row, shape (n,). A peak one grid
         point wide falls back to the mode.
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     grid = np.asarray(z_grid, dtype=float)
     dens = np.asarray(density, dtype=float)
     n, g = dens.shape
@@ -378,7 +413,7 @@ def z_weight(
 
 
 def grid_point_estimates(
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -388,16 +423,21 @@ def grid_point_estimates(
     The densities are normalised first (see :func:`normalize_grid_pdfs`).
 
     Args:
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         A dict with keys ``"z_peak"``, ``"z_weight"``, ``"z_mean"`` and
         ``"z_median"``, each an array of shape (n,).
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     if bin_edges is not None:
         return _histogram_point_estimates(z_grid, pdfs, bin_edges)
     grid, density = normalize_grid_pdfs(z_grid, pdfs)
@@ -422,7 +462,7 @@ def grid_point_estimates(
 
 def evaluate_grid_at_truth(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -442,11 +482,15 @@ def evaluate_grid_at_truth(
 
     Args:
         z_true: Finite true values, one per PDF, shape (n,).
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
             Then the density at the truth is its bin's, zero outside the
             edges, and the PIT is the exact piecewise-linear CDF.
 
@@ -456,6 +500,7 @@ def evaluate_grid_at_truth(
         shape (n,), zero for a truth more than half a bin outside the grid;
         and the PIT values, shape (n,), in [0, 1].
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     truth = np.asarray(z_true, dtype=float)
     grid, density = normalize_grid_pdfs(z_grid, pdfs, bin_edges=bin_edges)
     if truth.ndim != 1 or truth.size != len(density):
@@ -490,7 +535,7 @@ def evaluate_grid_at_truth(
 
 def cde_loss(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -504,15 +549,20 @@ def cde_loss(
 
     Args:
         z_true: True values, one per PDF, shape (n,).
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         The loss, averaged over objects.
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     grid, density, pdf_at_truth, _ = evaluate_grid_at_truth(
         z_true, z_grid, pdfs, bin_edges=bin_edges
     )
@@ -601,7 +651,7 @@ def pit_statistics(pit: npt.ArrayLike, n_bins: int = 20) -> dict[str, float]:
 
 def pdf_metrics(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -610,16 +660,21 @@ def pdf_metrics(
 
     Args:
         z_true: True values, one per PDF, shape (n,).
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         A tuple (metrics, pit): the metric bundle and the per-object PIT
         values, shape (n,).
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
         z_true, z_grid, pdfs, bin_edges=bin_edges
     )
@@ -632,7 +687,7 @@ def pdf_metrics(
 
 def evaluate_grid_pdfs(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     point: str = "z_peak",
     *,
@@ -642,7 +697,8 @@ def evaluate_grid_pdfs(
 
     Args:
         z_true: True values, one per PDF, shape (n,).
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"z_peak"``, ``"z_weight"``,
@@ -650,12 +706,16 @@ def evaluate_grid_pdfs(
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         A tuple (point_metrics, pdf_metrics, pit): the point statistics of
         the chosen reduction, the PDF metric bundle and the per-object PIT
         values, shape (n,).
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     estimates = grid_point_estimates(z_grid, pdfs, bin_edges=bin_edges)
     if point not in estimates:
         raise ValueError(f"point must be one of {sorted(estimates)}")
@@ -665,7 +725,7 @@ def evaluate_grid_pdfs(
 
 def summarize(
     z_true: npt.ArrayLike,
-    z_grid: npt.ArrayLike,
+    z_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
     point: str = "z_peak",
     label: str | None = None,
@@ -679,7 +739,8 @@ def summarize(
 
     Args:
         z_true: True values, one per PDF, shape (n,).
-        z_grid: Strictly increasing bin centres, shape (g,).
+        z_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
         point: The point-estimate reduction, as in
             :func:`evaluate_grid_pdfs`.
@@ -688,6 +749,9 @@ def summarize(
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
             density as constant across its bin (a ``"histogram"`` grid)
             instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``z_grid`` supplies them; given with a Grid, they must be its
+            edges.
 
     Returns:
         A one-row table: ``model`` (if labelled), ``point_estimate``, the
@@ -701,6 +765,7 @@ def summarize(
         >>> summarize(z, grid, pdfs, label="uniform")["model"].tolist()
         ['uniform']
     """
+    z_grid, bin_edges = _split_grid(z_grid, bin_edges)
     point_metrics_, pdf_metrics_, _ = evaluate_grid_pdfs(
         z_true, z_grid, pdfs, point=point, bin_edges=bin_edges
     )
@@ -716,6 +781,30 @@ def summarize(
 # --------------------------------------------------------------------------
 # Histogram grids: densities constant across each bin
 # --------------------------------------------------------------------------
+
+
+def _split_grid(
+    z_grid: grid_lib.Grid | npt.ArrayLike, bin_edges: npt.ArrayLike | None
+) -> tuple[npt.ArrayLike, npt.ArrayLike | None]:
+    """Returns a tuple (centres, bin_edges) from a Grid or bare centres.
+
+    A :class:`~lazy.grid.Grid` gives its centres and, when it is
+    histogram-normalised, its edges, so its own convention scores it. Bare
+    centres pass through with ``bin_edges`` as given.
+    """
+    if not isinstance(z_grid, grid_lib.Grid):
+        return z_grid, bin_edges
+    if bin_edges is None:
+        return z_grid.centers, z_grid.histogram_edges
+    edges = np.asarray(bin_edges, dtype=float)
+    if edges.shape != z_grid.edges.shape or not np.allclose(
+        edges, z_grid.edges, rtol=0.0, atol=1e-12
+    ):
+        raise ValueError(
+            "bin_edges differ from the edges of the Grid passed as z_grid; "
+            "pass the Grid alone"
+        )
+    return z_grid.centers, edges
 
 
 def _bin_widths(bin_edges: npt.ArrayLike, n_bins: int) -> _typing.FloatArray:
