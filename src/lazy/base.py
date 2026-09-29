@@ -46,6 +46,8 @@ estimator can implement the same protocol.
 from __future__ import annotations
 
 import abc
+from collections.abc import Iterator
+import os
 from typing import Any, TypeAlias
 import warnings
 
@@ -73,6 +75,16 @@ POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
 # objects). Tables from optional packages have no common type, hence Any.
 _Features: TypeAlias = Any
+
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package they are raised.
+_PACKAGE_PREFIX = os.path.dirname(os.path.abspath(__file__)) + os.sep
+
+# predict, score and evaluate reduce each row's density as they go, a block
+# of rows at a time, so that no more than about this many bytes of float64
+# densities exist at once: all of DC1 on a 5,000-bin native grid would
+# otherwise be one 15.6 GB array.
+_BLOCK_BYTES = 256 * 2**20
 
 
 class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
@@ -164,8 +176,17 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """The model's own output grid, available after ``fit``.
 
         Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted
+                yet.
             AttributeError: If this estimator has no native grid.
         """
+        validation.check_is_fitted(
+            self,
+            msg=(
+                f"This {type(self).__name__} instance is not fitted yet, so "
+                "it has no native grid; call 'fit' first"
+            ),
+        )
         native = getattr(self, "native_grid_", None)
         if native is None:
             raise AttributeError(
@@ -184,17 +205,14 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 Table, or anything with ``to_pandas()``. Missing values are
                 NaN. Column names, when the input has them, are remembered
                 and enforced at predict time.
-            y: Finite target values, shape (n_samples,).
+            y: Finite target values, shape (n_samples,), with
+                n_samples >= 1.
 
         Returns:
             The fitted estimator itself.
         """
         X = self._check_features(X, reset=True)
-        y = _inputs.as_target(y)
-        if y.size != len(X):
-            raise ValueError(f"X has {len(X)} rows but y has {y.size} values")
-        if not np.isfinite(y).all():
-            raise ValueError("y contains non-finite values")
+        y = _check_target(y, len(X))
         self._fit(X, y)
         # After _fit: a model's native grid is known only once it has seen
         # its context.
@@ -227,14 +245,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
-        X = self._check_features(X, reset=False)
-        pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
-        if pdfs.shape != (len(X), grid.n_bins):
-            raise RuntimeError(
-                f"{type(self).__name__} returned {pdfs.shape}, expected"
-                f" {(len(X), grid.n_bins)}"
-            )
-        return grid.normalize(pdfs)
+        return self._densities(self._check_features(X, reset=False), grid)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
         """The model's native per-row distributions, on no grid at all.
@@ -252,10 +263,17 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 (n_samples, n_features).
 
         Returns:
-            One distribution per row of ``X``.
+            One distribution per row of ``X``. For no rows at all, an empty
+            :class:`~lazy.distributions.HistogramDistribution` on the
+            default grid, without running the model.
         """
         validation.check_is_fitted(self)
-        return self._predict_distribution(self._check_features(X, reset=False))
+        X = self._check_features(X, reset=False)
+        if X.empty:
+            return distributions.HistogramDistribution(
+                self.grid_.edges, np.zeros((0, self.grid_.n_bins))
+            )
+        return self._predict_distribution(X)
 
     def predict_quantiles(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -275,6 +293,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             The value at each level, shape (n_samples, k).
         """
+        validation.check_is_fitted(self)
         return self.predict_distribution(X).ppf(quantiles)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
@@ -303,9 +322,12 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 default.
 
         Returns:
-            The mass below each bin centre, shape (n_samples, n_bins);
-            column 0 is zero.
+            The mass below each bin centre, shape (n_samples, n_bins), by
+            the grid's convention (:meth:`lazy.grid.Grid.cdf`): column 0 is
+            zero on a trapezoid grid, and half the first bin's mass on a
+            histogram grid.
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return grid.cdf(self.predict_proba(X, grid))
 
@@ -325,6 +347,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         :func:`lazy.metrics.grid_point_estimates` rather than re-running the
         model per definition.
 
+        Rows are predicted and reduced a block at a time, so the densities
+        of all of ``X`` never exist at once, whatever the grid.
+
         Args:
             X: Features, shape (n_samples, n_features).
             method: One of :data:`POINT_ESTIMATORS`: ``"z_peak"`` (the mode,
@@ -336,10 +361,16 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             Point estimates, shape (n_samples,).
         """
+        validation.check_is_fitted(self)
+        method = _check_method(method)
         grid = self._resolve_grid(z_grid)
-        return self.point_estimates(self.predict_proba(X, grid), grid)[
-            _check_method(method)
-        ]
+        X = self._check_features(X, reset=False)
+        return np.concatenate(
+            [
+                metrics.grid_point_estimates(grid, density)[method]
+                for _, density in self._density_blocks(X, grid)
+            ]
+        )
 
     def score(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y: npt.ArrayLike, z_grid: grid_lib.GridLike = None
@@ -348,24 +379,28 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Negated so the scikit-learn convention (greater ``score`` is a better
         model) holds, which is what ``GridSearchCV`` and friends assume.
+        Rows are predicted and scored a block at a time, as in
+        :meth:`predict`.
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True target values, shape (n_samples,).
+            y: Finite true target values, shape (n_samples,).
             z_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
         Returns:
             Minus :func:`lazy.metrics.cde_loss`.
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
-        y = np.asarray(y, dtype=float).ravel()
-        return -metrics.cde_loss(
-            y,
-            grid.centers,
-            self.predict_proba(X, grid),
-            bin_edges=grid.histogram_edges,
-        )
+        X = self._check_features(X, reset=False)
+        self._check_not_empty(X)
+        y = _check_target(y, len(X))
+        terms = [
+            metrics.per_object_scores(y[rows], grid, density)[0]
+            for rows, density in self._density_blocks(X, grid)
+        ]
+        return -float(np.mean(np.concatenate(terms)))
 
     def evaluate(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -373,35 +408,114 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         y: npt.ArrayLike,
         method: str = "z_peak",
         z_grid: grid_lib.GridLike = None,
+        *,
+        scale: metrics.Scale = "1+z",
     ) -> pd.DataFrame:
         """Scores predictions for ``X`` with the full diagnostic metric set.
 
         A convenience wrapper over :func:`lazy.metrics.summarize`; that
         function is the general-purpose entry point, taking PDFs you already
-        have.
+        have. Rows are predicted and scored a block at a time, as in
+        :meth:`predict`, with the same table as a result.
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True target values, shape (n_samples,).
+            y: Finite true target values, shape (n_samples,).
             method: The point estimate to score, one of
                 :data:`POINT_ESTIMATORS`.
             z_grid: The grid to evaluate on; ``None`` for this model's
                 default.
+            scale: How the point metrics (bias, scatter, outlier rates)
+                scale residuals. ``"1+z"``, the default, divides them by
+                ``1 + y``: photo-z's convention, and DC1's numbers.
+                ``"none"`` scores the plain ``prediction - y`` of any other
+                target, in its units, outlier thresholds included; see
+                :func:`lazy.metrics.point_metrics`.
 
         Returns:
-            A one-row table labelled with :attr:`name_`.
+            A one-row table labelled with :attr:`name_`; its ``scale``
+            column records the choice.
         """
+        validation.check_is_fitted(self)
+        method = _check_method(method)
+        if scale not in metrics.SCALES:
+            raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
         grid = self._resolve_grid(z_grid)
-        return metrics.summarize(
-            np.asarray(y, dtype=float).ravel(),
-            grid.centers,
-            self.predict_proba(X, grid),
-            point=_check_method(method),
+        X = self._check_features(X, reset=False)
+        self._check_not_empty(X)
+        y = _check_target(y, len(X))
+        z_pred, cde_terms, pit = [], [], []
+        for rows, density in self._density_blocks(X, grid):
+            z_pred.append(metrics.grid_point_estimates(grid, density)[method])
+            terms, values = metrics.per_object_scores(y[rows], grid, density)
+            cde_terms.append(terms)
+            pit.append(values)
+        return metrics.summarize_scores(
+            y,
+            np.concatenate(z_pred),
+            np.concatenate(cde_terms),
+            np.concatenate(pit),
+            point=method,
             label=self.name_,
-            bin_edges=grid.histogram_edges,
+            scale=scale,
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _density_blocks(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> Iterator[tuple[slice, _typing.FloatArray]]:
+        """Normalised densities of validated features, a block at a time.
+
+        Blocks hold about ``_BLOCK_BYTES`` of densities. When the model
+        chunks its own queries (a ``chunk_size`` parameter), a block is a
+        whole number of those chunks, so that the backend sees exactly the
+        chunks it would have seen without blocking.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+            grid: The grid to answer on.
+
+        Yields:
+            Tuples (rows, density): the slice of ``X`` a block covers, and
+            its densities, shape (rows, grid.n_bins). No rows give one
+            empty block.
+        """
+        size = max(1, _BLOCK_BYTES // (8 * grid.n_bins))
+        chunk = getattr(self, "chunk_size", None)
+        if isinstance(chunk, int) and not isinstance(chunk, bool) and chunk > 0:
+            size = max(chunk, size - size % chunk)
+        for start in range(0, max(len(X), 1), size):
+            rows = slice(start, start + size)
+            block = X.iloc[rows].reset_index(drop=True)
+            yield rows, self._densities(block, grid)
+
+    def _densities(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> _typing.FloatArray:
+        """Normalised densities of validated features on ``grid``.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+            grid: The grid to answer on.
+
+        Returns:
+            Densities, shape (n_samples, grid.n_bins); for no rows, an empty
+            array, without running the model.
+
+        Raises:
+            RuntimeError: If the backend returns densities of the wrong
+                shape.
+        """
+        if X.empty:
+            return np.zeros((0, grid.n_bins))
+        pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
+        if pdfs.shape != (len(X), grid.n_bins):
+            raise RuntimeError(
+                f"{type(self).__name__} returned {pdfs.shape}, expected"
+                f" {(len(X), grid.n_bins)}"
+            )
+        return grid.normalize(pdfs)
 
     @property
     def name_(self) -> str:
@@ -435,6 +549,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
             values, shape (n_samples,).
         """
+        validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
         return metrics.grid_point_estimates(
             grid.centers, pdfs, bin_edges=grid.histogram_edges
@@ -476,6 +591,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         frame, named = _inputs.as_feature_frame(X)
         if reset:
+            # Before anything is recorded, so that a refused fit leaves an
+            # unfitted estimator unfitted.
+            self._check_not_empty(frame)
             self.n_features_in_ = int(frame.shape[1])
             if named:
                 self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
@@ -488,6 +606,18 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 f"{type(self).__name__} was fitted with {self.n_features_in_}"
             )
         return self._align_to_fit(frame, named)
+
+    def _check_not_empty(self, X: pd.DataFrame) -> None:
+        """Refuses a table with no rows, as scikit-learn does.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+        """
+        if X.empty:
+            raise ValueError(
+                f"Found array with 0 sample(s) (shape={X.shape}) while a "
+                f"minimum of 1 is required by {type(self).__name__}."
+            )
 
     def _align_to_fit(self, frame: pd.DataFrame, named: bool) -> pd.DataFrame:
         """Labels and orders predict-time columns as ``fit`` saw them.
@@ -502,7 +632,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                     f"X has feature names, but {type(self).__name__} was "
                     "fitted without feature names; using columns by position",
                     UserWarning,
-                    stacklevel=4,
+                    skip_file_prefixes=(_PACKAGE_PREFIX,),
                 )
             frame.columns = [f"x{i}" for i in range(frame.shape[1])]
             return frame
@@ -512,7 +642,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 f"{type(self).__name__} was fitted with feature names; using "
                 "columns by position",
                 UserWarning,
-                stacklevel=4,
+                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
             frame.columns = list(fitted)
             return frame
@@ -526,6 +656,25 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             f"  fitted:    {list(fitted)}\n"
             f"  predicted: {list(names)}"
         )
+
+
+def _check_target(target: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
+    """Validates target values against the feature rows they label.
+
+    Args:
+        target: Target values, shape (n_rows,), in any form
+            :func:`lazy._inputs.as_target` accepts.
+        n_rows: The number of feature rows.
+
+    Returns:
+        The values as a float64 array, shape (n_rows,).
+    """
+    values = _inputs.as_target(target)
+    if values.size != n_rows:
+        raise ValueError(f"X has {n_rows} rows but y has {values.size} values")
+    if not np.isfinite(values).all():
+        raise ValueError("y contains non-finite values")
+    return values
 
 
 def _check_method(method: str) -> str:

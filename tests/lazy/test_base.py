@@ -284,3 +284,177 @@ def test_an_estimator_without_a_native_grid_says_so(data):
 def test_as_grid_refuses_the_native_sentinel():
     with pytest.raises(ValueError, match="native grid"):
         lazy.as_grid("native")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict_proba(X),
+        lambda est, X, y: est.predict_pdf(X),
+        lambda est, X, y: est.predict_cdf(X),
+        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict_distribution(X),
+        lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.score(X, y),
+        lambda est, X, y: est.evaluate(X, y),
+        lambda est, X, y: est.point_estimates(np.ones((len(X), 200))),
+        lambda est, X, y: est.predict_proba(X, "native"),
+        lambda est, X, y: est.native_grid,
+    ],
+)
+@pytest.mark.parametrize("z_grid", [None, "native"])
+def test_every_method_of_an_unfitted_model_raises_not_fitted(
+    data, call, z_grid
+):
+    X, y = data
+    with pytest.raises(exceptions.NotFittedError):
+        call(_WithNativeGrid(z_grid=z_grid), X, y)
+
+
+def test_the_native_grid_error_tells_unfitted_from_absent(data):
+    X, y = data
+    with pytest.raises(exceptions.NotFittedError, match="not fitted yet"):
+        GaussianDummy().native_grid  # noqa: B018 - the access is the test.
+    with pytest.raises(AttributeError, match="has no native grid") as info:
+        GaussianDummy().fit(X, y).native_grid  # noqa: B018 - as above.
+    assert not isinstance(info.value, exceptions.NotFittedError)
+
+
+class _CountingDummy(GaussianDummy):
+    """The stand-in, counting how often inference runs."""
+
+    def _predict_pdf(self, X, grid):
+        self.calls_ = getattr(self, "calls_", 0) + 1
+        return super()._predict_pdf(X, grid)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict(X, method="z_mode"),
+        lambda est, X, y: est.evaluate(X, y, method="z_mode"),
+    ],
+)
+def test_an_unknown_method_is_refused_before_inference(data, call):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match="method must be one of"):
+        call(est, X, y)
+    assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_refuses_non_finite_targets_before_inference(data, method):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    y = y.copy()
+    y[3] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        getattr(est, method)(X, y)
+    assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match="rows but y has"):
+        getattr(est, method)(X, y[:-1])
+    assert getattr(est, "calls_", 0) == 0
+
+
+def test_fitting_no_rows_is_refused_like_scikit_learn(data):
+    X, y = data
+    est = GaussianDummy()
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        est.fit(X.iloc[:0], y[:0])
+    with pytest.raises(exceptions.NotFittedError):
+        est.predict_proba(X)  # the refused fit left it unfitted
+
+
+@pytest.mark.parametrize(
+    ("call", "shape"),
+    [
+        (lambda est, X: est.predict_proba(X), (0, 30)),
+        (lambda est, X: est.predict_cdf(X), (0, 30)),
+        (lambda est, X: est.predict(X), (0,)),
+        (lambda est, X: est.predict(X, method="z_median"), (0,)),
+        (lambda est, X: est.predict_quantiles(X, [0.1, 0.5]), (0, 2)),
+        (lambda est, X: est.predict_proba(X, lazy.DC1_GRID), (0, 200)),
+    ],
+)
+def test_predicting_no_rows_gives_empty_results_without_inference(
+    data, call, shape
+):
+    X, y = data
+    est = _CountingDummy(z_grid=lazy.Grid.linear(0.0, 3.0, 30)).fit(X, y)
+    out = call(est, X.iloc[:0])
+    assert out.shape == shape
+    assert getattr(est, "calls_", 0) == 0
+
+
+def test_no_rows_give_an_empty_distribution(data):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    dist = est.predict_distribution(X.iloc[:0])
+    assert len(dist) == 0
+    assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_no_rows_is_refused(data, method):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match=r"0 sample\(s\)"):
+        getattr(est, method)(X.iloc[:0], y[:0])
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict_proba(X),
+        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict_cdf(X),
+        lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.score(X, y),
+        lambda est, X, y: est.evaluate(X, y),
+    ],
+)
+def test_feature_name_warnings_point_at_the_callers_line(data, call):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    with pytest.warns(UserWarning, match="feature names") as record:
+        call(est, X.to_numpy(), y)
+    assert record[0].filename == __file__
+
+
+def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
+    data, monkeypatch
+):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    pdfs = est.predict_proba(X)
+    grid = lazy.DC1_GRID
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 10 * 8 * grid.n_bins)
+    np.testing.assert_array_equal(
+        est.predict(X, method="z_median"),
+        lazy.metrics.grid_point_estimates(grid, pdfs)["z_median"],
+    )
+    assert est.score(X, y) == -lazy.metrics.cde_loss(y, grid, pdfs)
+    pd.testing.assert_frame_equal(
+        est.evaluate(X, y),
+        lazy.metrics.summarize(y, grid, pdfs, label=est.name_),
+    )
+
+
+def test_evaluate_can_score_plain_residuals(data):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    table = est.evaluate(X, y, scale="none")
+    assert table["scale"].iloc[0] == "none"
+    assert table["bias"].iloc[0] == np.median(est.predict(X) - y)
+    assert est.evaluate(X, y)["scale"].iloc[0] == "1+z"
+    calls = est.calls_
+    with pytest.raises(ValueError, match="scale must be one of"):
+        est.evaluate(X, y, scale="log")
+    assert est.calls_ == calls

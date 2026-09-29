@@ -109,3 +109,72 @@ def test_as_grid_accepts_none_centers_and_grid():
 def test_bin_index_clips_outside_the_grid():
     grid = lazy.Grid.linear(0.0, 1.0, 10)
     assert grid.bin_index([-5.0, 0.05, 0.95, 5.0]).tolist() == [0, 0, 9, 9]
+
+
+def test_from_centers_refuses_centres_it_would_move():
+    """Midpoint edges of [0, 1, 3] would put the middle centre at 1.25."""
+    with pytest.raises(ValueError, match="Grid.from_edges"):
+        lazy.Grid.from_centers([0.0, 1.0, 3.0])
+    with pytest.raises(ValueError, match="from_edges"):
+        lazy.as_grid(np.geomspace(0.01, 3.0, 50))
+
+
+def test_from_centers_names_unsorted_centres():
+    with pytest.raises(ValueError, match="centers must be strictly increasing"):
+        lazy.Grid.from_centers([0.0, 2.0, 1.0])
+
+
+def test_from_centers_accepts_float_rounded_uniform_centres():
+    centers = np.linspace(0.005, 2.995, 300)
+    assert np.allclose(lazy.Grid.from_centers(centers).centers, centers)
+
+
+@pytest.mark.parametrize(
+    ("probs", "edges", "match"),
+    [
+        (np.ones((2, 4)), [0.0, 0.5, np.inf, 1.5, 2.0], "finite"),
+        (np.ones((2, 4)), [0.0, 0.5, np.nan, 1.5, 2.0], "finite"),
+        (np.ones((2, 4)), [0.0, 1.0, 0.5, 1.5, 2.0], "non-decreasing"),
+        ([[1.0, -0.5, 1.0, 1.0]], [0.0, 0.5, 1.0, 1.5, 2.0], "non-negative"),
+        ([[1.0, np.nan, 1.0, 1.0]], [0.0, 0.5, 1.0, 1.5, 2.0], "finite"),
+    ],
+)
+def test_rebin_refuses_what_a_histogram_distribution_refuses(
+    probs, edges, match
+):
+    with pytest.raises(ValueError, match=match):
+        lazy.Grid.linear(0.0, 2.0, 10).rebin(probs, edges)
+
+
+def test_rebin_accepts_zero_width_input_bins_without_mass():
+    edges = [0.0, 0.5, 0.5, 1.5, 2.0]
+    density = lazy.Grid.linear(0.0, 2.0, 10).rebin(
+        [[1.0, 0.0, 1.0, 1.0]], edges
+    )
+    assert np.isfinite(density).all()
+
+
+def test_cdf_column_zero_follows_the_normalisation_convention():
+    """Zero by the trapezoid rule; half the first bin on a histogram grid."""
+    density = np.random.default_rng(1).uniform(size=(3, 8))
+    trapezoid = lazy.Grid.linear(0.0, 2.0, 8)
+    np.testing.assert_array_equal(trapezoid.cdf(density)[:, 0], 0.0)
+    histogram = lazy.Grid.linear(0.0, 2.0, 8, normalization="histogram")
+    np.testing.assert_allclose(
+        histogram.cdf(density)[:, 0], 0.5 * density[:, 0] * 0.25
+    )
+    assert "histogram grid" in lazy.Grid.cdf.__doc__
+    assert "histogram grid" in lazy.BaseDensityRegressor.predict_cdf.__doc__
+
+
+def test_equal_grids_hash_alike():
+    grid = lazy.Grid.linear(0.0, 2.0, 20)
+    nudged = lazy.Grid.from_edges(grid.edges + 1e-13)
+    assert nudged == grid
+    assert hash(nudged) == hash(grid)
+    assert len({grid, nudged}) == 1
+
+
+def test_from_quantiles_names_a_one_dimensional_input():
+    with pytest.raises(ValueError, match="values must be a 2D"):
+        lazy.DC1_GRID.from_quantiles([0.2, 0.5, 0.9], [0.16, 0.5, 0.84])

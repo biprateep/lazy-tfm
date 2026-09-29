@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Biprateep Dey
 """Exactness of the distribution algebra, and agreement with the grid code."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -280,3 +282,26 @@ def test_qp_agrees_at_the_quantile_levels(quantiles):
     np.testing.assert_allclose(
         quantiles.to_qp().ppf(levels), quantiles.ppf(levels), atol=1e-9
     )
+
+
+@pytest.mark.parametrize("row", [3, -1, np.int64(2)])
+@pytest.mark.parametrize("name", ["histogram", "quantiles", "mixture"])
+def test_an_integer_row_keeps_its_ancil(request, name, row):
+    dist = request.getfixturevalue(name)
+    n = len(dist)
+    tagged = dataclasses.replace(
+        dist, ancil={"id": np.arange(n), "pair": np.ones((n, 2))}
+    )
+    one = tagged[row]
+    assert len(one) == 1
+    np.testing.assert_array_equal(one.ancil["id"], [np.arange(n)[row]])
+    assert one.ancil["pair"].shape == (1, 2)
+
+
+def test_histogram_ppf_ends_at_the_support_despite_empty_edge_buckets():
+    """Levels 0 and 1 are the edges of the buckets that carry mass."""
+    masses = np.r_[0.0, 0.0, np.full(10, 0.1), 0.0, 0.0]
+    dist = distributions.HistogramDistribution(np.arange(15.0), masses)
+    np.testing.assert_array_equal(dist.ppf([0.0, 0.5, 1.0]), [[2.0, 7.0, 12.0]])
+    samples = dist.rvs(2000, random_state=0)
+    assert samples.min() >= 2.0 and samples.max() <= 12.0

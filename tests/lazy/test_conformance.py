@@ -11,6 +11,7 @@ import inspect
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn import base as sklearn_base
 import standins
@@ -352,3 +353,61 @@ def test_only_uniform_layer_backends_can_register():
 
     with pytest.raises(TypeError, match="ContextEnsembleEstimator"):
         registry.register("plain", Plain)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
+    X, z, X_test = data
+    model = cls(n_estimators=2, progress=False).fit(X, z)
+    empty = X_test[:0]
+    assert model.predict_proba(empty).shape == (0, model.grid_.n_bins)
+    assert model.predict_cdf(empty).shape == (0, model.grid_.n_bins)
+    assert model.predict(empty).shape == (0,)
+    assert model.predict_quantiles(empty).shape == (0, 3)
+    assert len(model.predict_distribution(empty)) == 0
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_fitting_no_rows_is_refused(cls, data):
+    X, z, _ = data
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        cls(n_estimators=2, progress=False).fit(X[:0], z[:0])
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("chunk_size", [0, 4])
+def test_blocked_scoring_matches_the_whole_array(
+    cls, chunk_size, data, monkeypatch
+):
+    """predict, score and evaluate never build all rows' densities at once."""
+    X, z, X_test = data
+    z_test = np.linspace(0.2, 1.5, len(X_test))
+    model = cls(n_estimators=2, progress=False, chunk_size=chunk_size)
+    model.fit(X, z)
+    grid = model.grid_
+    pdfs = model.predict_proba(X_test)
+    whole = {
+        "predict": lazy.metrics.grid_point_estimates(grid, pdfs)["z_weight"],
+        "score": -lazy.metrics.cde_loss(z_test, grid, pdfs),
+        "evaluate": lazy.metrics.summarize(
+            z_test, grid, pdfs, point="z_weight", label=model.name_
+        ),
+    }
+    calls = []
+    original = type(model)._predict_pdf
+
+    def counting(self, features, grid):
+        calls.append(len(features))
+        return original(self, features, grid)
+
+    monkeypatch.setattr(type(model), "_predict_pdf", counting)
+    # About seven rows of densities per block.
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * grid.n_bins)
+    np.testing.assert_array_equal(
+        model.predict(X_test, method="z_weight"), whole["predict"]
+    )
+    assert max(calls) == (4 if chunk_size else 7) and len(calls) > 1
+    assert model.score(X_test, z_test) == whole["score"]
+    pd.testing.assert_frame_equal(
+        model.evaluate(X_test, z_test, method="z_weight"), whole["evaluate"]
+    )

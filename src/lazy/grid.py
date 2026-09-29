@@ -18,8 +18,9 @@ the Data Challenge numbers requires exactly that grid.
 Normalisation is trapezoidal over the bin centres by default. That is the
 ``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
 integrates with. Native grids, whose bins are far from uniform, are
-``"histogram"``-normalised instead (constant density across each bin), and
-the metrics take ``bin_edges=`` to score them exactly.
+``"histogram"``-normalised instead (constant density across each bin);
+pass the :class:`Grid` itself to the :mod:`lazy.metrics` functions and they
+score its densities by its own convention.
 
 Typical usage example:
 
@@ -143,12 +144,14 @@ class Grid:
         """A grid from bin centres.
 
         The inner edges split the gaps between centres and the outer edges
-        extrapolate the ends. Exact for a uniform grid:
-        ``from_centers(g.centers) == g``.
+        extrapolate the ends. That places each centre midway between its
+        edges only on a uniform grid, so the centres must be evenly spaced:
+        ``from_centers(g.centers) == g`` for a uniform ``g``. Build a
+        non-uniform grid with :meth:`from_edges`.
 
         Args:
-            centers: Strictly increasing bin centres, shape (n_bins,) with
-                n_bins >= 2.
+            centers: Strictly increasing, evenly spaced bin centres, shape
+                (n_bins,) with n_bins >= 2.
 
         Returns:
             The grid.
@@ -163,8 +166,12 @@ class Grid:
             raise ValueError(
                 "centers must be a 1D array of at least two values"
             )
+        if not np.isfinite(centers).all():
+            raise ValueError("centers must all be finite")
+        if not np.all(np.diff(centers) > 0):
+            raise ValueError("centers must be strictly increasing")
         inner = 0.5 * (centers[1:] + centers[:-1])
-        return cls(
+        grid = cls(
             np.concatenate(
                 [
                     [centers[0] - (inner[0] - centers[0])],
@@ -173,6 +180,17 @@ class Grid:
                 ]
             )
         )
+        # Midpoint edges move the centres of a non-uniform grid; refuse
+        # rather than hand back a grid whose centres are not the input.
+        shift = np.abs(grid.centers - centers)
+        if np.any(shift > 1e-9 * grid.widths):
+            raise ValueError(
+                "centers are not evenly spaced, so no grid built from their "
+                "midpoints has them as its centres (the largest shift would "
+                f"be {shift.max():.3g}); pass the bin edges to "
+                "Grid.from_edges instead"
+            )
+        return grid
 
     # -- geometry ----------------------------------------------------------
 
@@ -214,7 +232,9 @@ class Grid:
         )
 
     def __hash__(self) -> int:
-        return hash((self.n_bins, self.z_min, self.z_max))
+        # Only what __eq__ compares exactly: edges within its tolerance of
+        # each other must hash alike, so no edge value can enter the hash.
+        return hash((self.n_bins, self.normalization))
 
     def __repr__(self) -> str:
         extra = (
@@ -269,7 +289,10 @@ class Grid:
 
         Returns:
             An array of the same shape as ``density``; column ``j`` is the
-            mass below ``centers[j]``, so column 0 is exactly zero.
+            mass below ``centers[j]``. By the trapezoid rule column 0 is
+            exactly zero, since the rule starts at the first centre; on a
+            histogram grid it is half the first bin's mass, since the mass
+            starts at the first edge.
         """
         return metrics.grid_cdf(
             self.centers,
@@ -291,10 +314,10 @@ class Grid:
         produces in the crowded part of N(z).
 
         Args:
-            probs: Non-negative masses, shape (n_rows, n_input_bins); each row
-                is renormalised to sum to one.
-            edges: The edges the masses are defined on, shape
-                (n_input_bins + 1,).
+            probs: Finite, non-negative masses, shape (n_rows, n_input_bins);
+                each row is renormalised to sum to one.
+            edges: The finite, non-decreasing edges the masses are defined
+                on, shape (n_input_bins + 1,).
 
         Returns:
             Densities on this grid, shape (n_rows, n_bins).
@@ -307,6 +330,12 @@ class Grid:
             raise ValueError(
                 "edges must have one more entry than probs has columns"
             )
+        if not np.isfinite(in_edges).all():
+            raise ValueError("edges must all be finite")
+        if np.any(np.diff(in_edges) < 0):
+            raise ValueError("edges must be non-decreasing")
+        if not np.isfinite(p).all() or np.any(p < 0):
+            raise ValueError("probs must be finite and non-negative")
         p = p / np.maximum(p.sum(axis=1, keepdims=True), 1e-300)
         widths = np.diff(in_edges)
         out_edges = self.edges
@@ -348,10 +377,11 @@ class Grid:
         Returns:
             Normalised densities on this grid, shape (n_rows, n_bins).
         """
-        q = np.maximum.accumulate(np.asarray(values, dtype=np.float64), axis=1)
+        q = np.asarray(values, dtype=np.float64)
         alphas = np.asarray(levels, dtype=np.float64)
         if q.ndim != 2:
             raise ValueError("values must be a 2D (n_rows, n_quantiles) array")
+        q = np.maximum.accumulate(q, axis=1)
         if alphas.ndim != 1 or alphas.size != q.shape[1]:
             raise ValueError("levels must have one entry per quantile column")
         cdf = np.empty((q.shape[0], self.edges.size))
@@ -398,8 +428,8 @@ def as_grid(grid: GridLike) -> Grid:
     ``z_grid=np.linspace(0, 3, 300)`` works anywhere.
 
     Args:
-        grid: A :class:`Grid`, an array of bin centres, or ``None``
-            for :data:`DC1_GRID`.
+        grid: A :class:`Grid`, an array of evenly spaced bin centres (see
+            :meth:`Grid.from_centers`), or ``None`` for :data:`DC1_GRID`.
 
     Returns:
         The grid.
