@@ -161,3 +161,32 @@ def test_pdf_examples_on_a_native_grid_frame_the_mass(native):
     lo, hi = axes[0].get_xlim()
     assert hi - lo < 3.0
     assert lo <= min(z_true[:2]) and hi >= max(z_true[:2])
+
+
+def test_the_point_plot_frames_any_range_and_skips_nan_pairs():
+    z = np.linspace(-7.0, -5.0, 50)
+    ax = plotting.plot_zphot_ztrue(z, z)
+    assert ax.get_xlim() == ax.get_ylim() == (-7.0, -5.0)
+    ax = plotting.plot_zphot_ztrue(z + 1e4, z + 1e4, outlier_lines=False)
+    assert ax.get_xlim() == (1e4 - 7.0, 1e4 - 5.0)
+    predicted = z.copy()
+    predicted[3] = np.nan
+    truth = z.copy()
+    truth[0] = np.nan
+    ax = plotting.plot_zphot_ztrue(truth, predicted)
+    assert ax.get_xlim() == (z[1], z[-1])
+    with pytest.raises(ValueError, match="finite"):
+        plotting.plot_zphot_ztrue([np.nan], [1.0])
+
+
+def test_residuals_can_skip_the_one_plus_z_scaling():
+    z_true = np.array([-1.0, 0.5, 1.0, 2.0])
+    z_pred = z_true + 0.1
+    with pytest.raises(ValueError, match="scale='none'"):
+        plotting.plot_residuals(z_true, z_pred)
+    ax = plotting.plot_residuals(z_true, z_pred, scale="none", n_bins=2)
+    np.testing.assert_allclose(ax.lines[-1].get_ydata(), 0.1)
+    ax = plotting.plot_residuals(z_true[1:], z_pred[1:], n_bins=1)
+    assert ax.lines[-1].get_ydata()[0] == pytest.approx(0.1 / 2.0)
+    with pytest.raises(ValueError, match="scale must be"):
+        plotting.plot_residuals(z_true, z_pred, scale="log")

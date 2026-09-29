@@ -38,7 +38,7 @@ cosmological analyses actually consume.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from matplotlib import axes as mpl_axes
 from matplotlib import colors as mcolors
@@ -176,12 +176,33 @@ def _central_range(
     return max(lo - margin, lo_grid), min(hi + margin, hi_grid)
 
 
+def _finite_pairs(
+    z_true: npt.ArrayLike, z_pred: npt.ArrayLike
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """The (true, predicted) pairs where both are finite.
+
+    Raises:
+        ValueError: If the shapes differ or no pair is finite.
+    """
+    z_true = np.asarray(z_true, dtype=float).ravel()
+    z_pred = np.asarray(z_pred, dtype=float).ravel()
+    if z_true.shape != z_pred.shape:
+        raise ValueError(
+            f"z_true and z_pred differ in size: {z_true.size} != {z_pred.size}"
+        )
+    finite = np.isfinite(z_true) & np.isfinite(z_pred)
+    if not finite.any():
+        raise ValueError("no object has a finite true and predicted value")
+    return z_true[finite], z_pred[finite]
+
+
 def plot_zphot_ztrue(
     z_true: npt.ArrayLike,
     z_pred: npt.ArrayLike,
     *,
     ax: mpl_axes.Axes | None = None,
     bins: int = 200,
+    z_min: float | None = None,
     z_max: float | None = None,
     outlier_lines: bool = True,
     cmap: str | None = None,
@@ -192,45 +213,54 @@ def plot_zphot_ztrue(
     A scatter plot of a survey-sized sample is a black blob, so this is a 2D
     histogram on a log colour scale -- which is also the only way the outlier
     islands (catastrophic failures at the wrong value) stay visible against
-    the main locus.
+    the main locus. Objects whose true or predicted value is not finite are
+    left out.
 
     Args:
         z_true: True values, shape (n_objects,).
         z_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width square figure if None.
         bins: Number of histogram bins along each axis.
+        z_min: Lower limit of both axes; the smallest value if None.
         z_max: Upper limit of both axes; the largest value if None.
         outlier_lines: Draw the DC1 outlier boundary
             ``|z_pred - z_true| = 0.06 (1 + z_true)``, so the fraction of
-            points outside it is readable by eye.
+            points outside it is readable by eye. A photo-z convention: turn
+            it off for other targets.
         cmap: Colormap name; the rcParams default if None.
         **kwargs: Passed to ``ax.hist2d``.
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If no object has a finite true and predicted value.
     """
-    z_true = np.asarray(z_true, dtype=float)
-    z_pred = np.asarray(z_pred, dtype=float)
+    z_true, z_pred = _finite_pairs(z_true, z_pred)
     ax = _axes(ax, width="column", aspect="square")
-    hi = float(z_max if z_max is not None else max(z_true.max(), z_pred.max()))
+    both = np.concatenate([z_true, z_pred])
+    lo = float(z_min if z_min is not None else both.min())
+    hi = float(z_max if z_max is not None else both.max())
+    if not hi > lo:  # One value: centre a unit range on it.
+        lo, hi = lo - 0.5, hi + 0.5
     ax.hist2d(
         z_true,
         z_pred,
         bins=bins,
-        range=[[0, hi], [0, hi]],
+        range=[[lo, hi], [lo, hi]],
         norm=mcolors.LogNorm(),
         cmap=cmap or plt.rcParams["image.cmap"],
         **kwargs,
     )
-    style.one_to_one(ax, 0.0, hi)
+    style.one_to_one(ax, lo, hi)
     if outlier_lines:
-        edge = np.array([0.0, hi])
+        edge = np.array([lo, hi])
         for sign in (+1, -1):
             ax.plot(
                 edge, edge + sign * _OUTLIER_FLOOR * (1 + edge), "k:", lw=0.8
             )
-    ax.set_xlim(0, hi)
-    ax.set_ylim(0, hi)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
     ax.set_xlabel(r"$z_{\rm true}$")
     ax.set_ylabel(r"$z_{\rm phot}$")
     return ax
@@ -243,14 +273,17 @@ def plot_residuals(
     ax: mpl_axes.Axes | None = None,
     n_bins: int = 20,
     quantiles: tuple[float, float, float] = (16.0, 50.0, 84.0),
+    scale: Literal["1+z", "none"] = "1+z",
 ) -> mpl_axes.Axes:
     """Plots the scaled residual against the true value.
 
-    The scaled residual is ``(z_phot - z_true) / (1 + z_true)``. The running
-    median and its 16th-84th percentile band say where the bias lives: a
-    model can have a fine global bias and still be systematically high at
-    low z and low at high z, which this shows and a single
-    number hides.
+    The scaled residual is ``(z_phot - z_true) / (1 + z_true)``, photo-z's
+    convention; ``scale="none"`` plots the plain ``z_phot - z_true`` for
+    other targets. The running median and its 16th-84th percentile band say
+    where the bias lives: a model can have a fine global bias and still be
+    systematically high at low z and low at high z, which this shows and a
+    single number hides. Objects whose true or predicted value is not
+    finite are left out.
 
     Args:
         z_true: True values, shape (n_objects,).
@@ -259,12 +292,31 @@ def plot_residuals(
         n_bins: Number of equal-count bins in the true value.
         quantiles: Lower edge, centre line and upper edge of the band, as
             percentiles between 0 and 100.
+        scale: ``"1+z"`` to divide the residual by ``1 + z_true``, or
+            ``"none"``.
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If ``scale`` is unknown, no object has a finite true
+            and predicted value, or ``scale="1+z"`` meets a true value at
+            or below -1, where ``1 + z_true`` is not a scale.
     """
-    z_true = np.asarray(z_true, dtype=float)
-    ez = (np.asarray(z_pred, dtype=float) - z_true) / (1.0 + z_true)
+    if scale not in ("1+z", "none"):
+        raise ValueError(f"scale must be '1+z' or 'none': {scale=}")
+    z_true, z_pred = _finite_pairs(z_true, z_pred)
+    if scale == "1+z":
+        if (z_true <= -1.0).any():
+            raise ValueError(
+                "scale='1+z' needs every true value above -1; pass "
+                "scale='none' for a target that is not a redshift"
+            )
+        ez = (z_pred - z_true) / (1.0 + z_true)
+        ylabel = r"$(z_{\rm phot} - z_{\rm true}) / (1 + z_{\rm true})$"
+    else:
+        ez = z_pred - z_true
+        ylabel = r"$z_{\rm phot} - z_{\rm true}$"
     ax = _axes(ax, width="column", aspect="tall")
     edges = np.quantile(z_true, np.linspace(0, 1, n_bins + 1))
     edges = np.unique(edges)
@@ -283,7 +335,7 @@ def plot_residuals(
     )
     ax.plot(centers, stats[:, 1], color="C0")
     ax.set_xlabel(r"$z_{\rm true}$")
-    ax.set_ylabel(r"$(z_{\rm phot} - z_{\rm true}) / (1 + z_{\rm true})$")
+    ax.set_ylabel(ylabel)
     return ax
 
 
