@@ -235,10 +235,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             **_cache_options(self.kv_cache),
         )
         regressor.fit(X, y)
-        borders = regressor.raw_space_bardist_.borders
-        self.borders_ = np.maximum.accumulate(
-            np.asarray(borders.detach().cpu().numpy(), dtype=np.float64)
-        )
+        self.borders_ = _bucket_borders(regressor)
         self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
 
@@ -275,15 +272,40 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        return grid_lib.Grid.from_edges(
-            np.unique(self.borders_), normalization="histogram"
-        )
+        edges = np.unique(self.borders_)
+        if edges.size < 3:
+            # A constant target has one bucket; a grid needs two, and
+            # halving it changes no density.
+            edges = np.r_[edges[0], edges.mean(), edges[-1]]
+        return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     def _progress_postfix(
         self, dist: distributions.Distribution
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+def _bucket_borders(regressor: Any) -> _typing.FloatArray:
+    """The fitted regressor's bucket borders in the target's units.
+
+    Upstream keeps them as ``raw_space_bardist_``, except for a constant
+    target: it then skips the model altogether, predicts one bucket around
+    the constant, and keeps that bucket (already in the target's units) as
+    ``znorm_space_bardist_``.
+
+    Args:
+        regressor: A fitted ``tabpfn.TabPFNRegressor``.
+
+    Returns:
+        The borders, made non-decreasing, shape ``(n_buckets + 1,)``.
+    """
+    if getattr(regressor, "is_constant_target_", False):
+        bardist = regressor.znorm_space_bardist_
+    else:
+        bardist = regressor.raw_space_bardist_
+    borders = bardist.borders.detach().cpu().numpy()
+    return np.maximum.accumulate(np.asarray(borders, dtype=np.float64))
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:

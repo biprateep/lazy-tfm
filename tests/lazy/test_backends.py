@@ -397,6 +397,31 @@ class TestTabPFN:
             np.array([[0.5, 0.25, 0.25], [0.1, 0.1, 0.8]])
         )
 
+    def test_a_constant_target_reads_the_one_bucket_upstream_keeps(self):
+        """Upstream skips the model then, and has no raw-space borders."""
+        torch = pytest.importorskip("torch")
+
+        regressor = types.SimpleNamespace(
+            is_constant_target_=True,
+            znorm_space_bardist_=types.SimpleNamespace(
+                borders=torch.tensor([0.25, 0.75])
+            ),
+        )
+        assert tabpfn._bucket_borders(regressor).tolist() == [0.25, 0.75]
+
+    @needs_checkpoint
+    def test_a_constant_target_predicts_one_narrow_bucket(self):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(60, 3))
+        est = tabpfn.TabPFNBarDistribution(
+            n_estimators=1, device="cpu", progress=False
+        ).fit(X[:50], np.full(50, 1e4))
+        assert est.n_buckets_ == 1
+        assert est.native_grid_.z_min < 1e4 < est.native_grid_.z_max
+        dist = est.predict_distribution(X[50:])
+        np.testing.assert_allclose(dist.masses.sum(axis=1), 1.0)
+        np.testing.assert_allclose(dist.ppf([0.5])[:, 0], 1e4)
+
     def test_a_logit_count_that_misses_the_buckets_is_reported(self):
         """A mismatch here would otherwise reach `rebin` as a bare error."""
         torch = pytest.importorskip("torch")
