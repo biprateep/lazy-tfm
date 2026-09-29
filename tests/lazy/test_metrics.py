@@ -124,3 +124,11 @@ def test_cde_loss_uses_the_nearest_grid_point():
         - metrics.cde_loss(np.array([0.6]), grid, pdfs)
     ) / 2
     assert at_truth == pytest.approx(pdfs[0, 1])
+
+
+def test_a_non_finite_truth_is_refused_rather_than_scored():
+    """A NaN truth used to match the last grid point and score finitely."""
+    centers = np.linspace(0.005, 1.995, 200)
+    pdfs = np.ones((2, 200))
+    with pytest.raises(ValueError, match="non-finite"):
+        metrics.cde_loss(np.array([0.5, np.nan]), centers, pdfs)

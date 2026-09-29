@@ -441,7 +441,7 @@ def evaluate_grid_at_truth(
     ``integrate`` computes.
 
     Args:
-        z_true: True values, one per PDF, shape (n,).
+        z_true: Finite true values, one per PDF, shape (n,).
         z_grid: Strictly increasing bin centres, shape (g,).
         pdfs: Densities at those centres, shape (n, g).
         bin_edges: The grid's bin edges, shape (g + 1,), to treat each
@@ -460,6 +460,8 @@ def evaluate_grid_at_truth(
     grid, density = normalize_grid_pdfs(z_grid, pdfs, bin_edges=bin_edges)
     if truth.ndim != 1 or truth.size != len(density):
         raise ValueError("z_true must have one value per PDF")
+    if not np.isfinite(truth).all():
+        raise ValueError("z_true contains non-finite values")
     if bin_edges is not None:
         pdf_at_truth, pit = _histogram_at_truth(truth, bin_edges, density)
         return grid, density, pdf_at_truth, pit

@@ -341,3 +341,23 @@ def test_an_unknown_method_is_refused_before_inference(data, call):
     with pytest.raises(ValueError, match="method must be one of"):
         call(est, X, y)
     assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_refuses_non_finite_targets_before_inference(data, method):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    y = y.copy()
+    y[3] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        getattr(est, method)(X, y)
+    assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match="rows but y has"):
+        getattr(est, method)(X, y[:-1])
+    assert getattr(est, "calls_", 0) == 0

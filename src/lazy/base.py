@@ -199,11 +199,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             The fitted estimator itself.
         """
         X = self._check_features(X, reset=True)
-        y = _inputs.as_target(y)
-        if y.size != len(X):
-            raise ValueError(f"X has {len(X)} rows but y has {y.size} values")
-        if not np.isfinite(y).all():
-            raise ValueError("y contains non-finite values")
+        y = _check_target(y, len(X))
         self._fit(X, y)
         # After _fit: a model's native grid is known only once it has seen
         # its context.
@@ -236,14 +232,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
-        X = self._check_features(X, reset=False)
-        pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
-        if pdfs.shape != (len(X), grid.n_bins):
-            raise RuntimeError(
-                f"{type(self).__name__} returned {pdfs.shape}, expected"
-                f" {(len(X), grid.n_bins)}"
-            )
-        return grid.normalize(pdfs)
+        return self._densities(self._check_features(X, reset=False), grid)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
         """The model's native per-row distributions, on no grid at all.
@@ -362,7 +351,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True target values, shape (n_samples,).
+            y: Finite true target values, shape (n_samples,).
             z_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
@@ -371,11 +360,12 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(z_grid)
-        y = np.asarray(y, dtype=float).ravel()
+        X = self._check_features(X, reset=False)
+        y = _check_target(y, len(X))
         return -metrics.cde_loss(
             y,
             grid.centers,
-            self.predict_proba(X, grid),
+            self._densities(X, grid),
             bin_edges=grid.histogram_edges,
         )
 
@@ -394,7 +384,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y: True target values, shape (n_samples,).
+            y: Finite true target values, shape (n_samples,).
             method: The point estimate to score, one of
                 :data:`POINT_ESTIMATORS`.
             z_grid: The grid to evaluate on; ``None`` for this model's
@@ -406,16 +396,42 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self)
         method = _check_method(method)
         grid = self._resolve_grid(z_grid)
+        X = self._check_features(X, reset=False)
+        y = _check_target(y, len(X))
         return metrics.summarize(
-            np.asarray(y, dtype=float).ravel(),
+            y,
             grid.centers,
-            self.predict_proba(X, grid),
+            self._densities(X, grid),
             point=method,
             label=self.name_,
             bin_edges=grid.histogram_edges,
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _densities(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> _typing.FloatArray:
+        """Normalised densities of validated features on ``grid``.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features).
+            grid: The grid to answer on.
+
+        Returns:
+            Densities, shape (n_samples, grid.n_bins).
+
+        Raises:
+            RuntimeError: If the backend returns densities of the wrong
+                shape.
+        """
+        pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
+        if pdfs.shape != (len(X), grid.n_bins):
+            raise RuntimeError(
+                f"{type(self).__name__} returned {pdfs.shape}, expected"
+                f" {(len(X), grid.n_bins)}"
+            )
+        return grid.normalize(pdfs)
 
     @property
     def name_(self) -> str:
@@ -541,6 +557,25 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             f"  fitted:    {list(fitted)}\n"
             f"  predicted: {list(names)}"
         )
+
+
+def _check_target(target: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
+    """Validates target values against the feature rows they label.
+
+    Args:
+        target: Target values, shape (n_rows,), in any form
+            :func:`lazy._inputs.as_target` accepts.
+        n_rows: The number of feature rows.
+
+    Returns:
+        The values as a float64 array, shape (n_rows,).
+    """
+    values = _inputs.as_target(target)
+    if values.size != n_rows:
+        raise ValueError(f"X has {n_rows} rows but y has {values.size} values")
+    if not np.isfinite(values).all():
+        raise ValueError("y contains non-finite values")
+    return values
 
 
 def _check_method(method: str) -> str:
