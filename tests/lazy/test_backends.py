@@ -156,12 +156,95 @@ class TestTabFM:
             handle,
             X_query.iloc[:4],
             np.array([0, 1, 0, 1]),
+            2,
             X_query,
             seed=0,
         )
 
         assert sizes == [7, 7, 7, 7, 7, 5]
         assert np.array_equal(probs[:, 0], X_query["a"].to_numpy())
+
+    @pytest.mark.parametrize(
+        "z",
+        [
+            np.r_[np.zeros(100), np.linspace(0.01, 1.0, 100)],
+            np.arange(300) % 5.0,
+            np.full(200, 0.5),
+            np.full(200, 1e12),
+        ],
+        ids=["zero-inflated", "integer-valued", "constant", "constant-large"],
+    )
+    def test_tied_targets_give_valid_bins(self, z, monkeypatch):
+        """Ties collapse quantiles into empty bins, which must stay valid."""
+        est = tabfm.TabFMHistogram()
+        est.support_ = (float(z.min()), float(z.max()))
+        edges, coarse, fine = est._edges(z, 0.0)
+        assert edges.size == 101
+        assert np.all(np.diff(edges) >= 0)
+        assert all(f.size == 11 and np.all(np.diff(f) >= 0) for f in fine)
+        # Every target falls in a bin of non-zero width.
+        bins = tabfm._bin_labels(edges, z)
+        assert np.all(np.diff(edges)[bins] > 0)
+        _stub_classifier(est, monkeypatch)
+        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_fraction": None}
+        handle["group"] = types.SimpleNamespace(seed=0)
+        probs, edges, prior = est._hierarchy(
+            None, handle, tabfm._frame(z[:7, None]), 0.0
+        )
+        assert probs.shape == (7, 100)
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0)
+        assert np.all(probs[:, np.diff(edges) == 0] == 0.0)
+        lazy.distributions.HistogramDistribution(edges, probs)
+
+    def test_targets_outside_the_constructor_grid_are_clipped(self):
+        """A redshift grid under a metallicity target must not crash fit."""
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(300, 2))
+        z = -1.0 + 0.3 * X[:, 0]
+        est = tabfm.TabFMHistogram(
+            n_estimators=1, z_grid=np.linspace(0.0, 3.0, 301)
+        )
+        with pytest.warns(UserWarning, match="outside the z_grid range"):
+            est.fit(X, z)
+        assert est.z_context_.min() == est.support_[0] == -0.005
+        edges, _, _ = est._edges(est.z_context_, 0.0)
+        assert edges[0] == -0.005 and np.all(np.diff(edges) >= 0)
+
+    @needs_checkpoint
+    @pytest.mark.parametrize("kind", ["zero-inflated", "integer", "outside"])
+    def test_awkward_targets_predict_valid_densities(self, kind):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(130, 2))
+        options = {}
+        if kind == "zero-inflated":
+            z = np.where(X[:, 0] < 0.3, 0.0, np.abs(X[:, 1]))
+        elif kind == "integer":
+            z = np.clip(np.round(X[:, 0] + 2.0), 0.0, 4.0)
+        else:
+            z = -1.0 + 0.3 * X[:, 0]
+            options["z_grid"] = np.linspace(0.0, 3.0, 31)
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=4,
+            n_fine_bins=4,
+            n_estimators=1,
+            device="cpu",
+            progress=False,
+            **options,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            est.fit(X[:120], z[:120])
+        dist = est.predict_distribution(X[120:])
+        masses = dist.masses
+        assert np.isfinite(masses).all()
+        np.testing.assert_allclose(masses.sum(axis=1), 1.0)
+
+    def test_a_constant_target_fits_with_a_valid_native_grid(self):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(200, 2))
+        est = tabfm.TabFMHistogram(n_estimators=1).fit(X, np.full(200, 0.5))
+        assert est.native_grid_.z_min == 0.5
+        assert 0.5 < est.native_grid_.z_max < 0.5 + 1e-5
 
     def test_the_classifier_only_receives_supported_keywords(self, tiny):
         """Cache knobs exist on repository builds, not on the PyPI release."""
@@ -179,6 +262,24 @@ class TestTabFM:
             model=None, group=est.member_groups_[0], seed=0, max_rows=None
         )
         assert set(classifier.get_params()) <= accepted
+
+
+def _stub_classifier(est, monkeypatch):
+    """Replaces TabFM's classifier by one returning its context's class mix."""
+
+    class Frequencies:
+        def fit(self, X, y):
+            self.classes_, counts = np.unique(y, return_counts=True)
+            self.frequencies_ = counts / counts.sum()
+            return self
+
+        def predict_proba(self, X):
+            return np.tile(self.frequencies_, (len(X), 1))
+
+    est.inference_ = "predict_proba"
+    monkeypatch.setattr(
+        est, "_classifier", lambda model, group, seed, rows: Frequencies()
+    )
 
 
 class TestTabICL:

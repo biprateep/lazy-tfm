@@ -119,13 +119,18 @@ def quantile_edges(
             what dithering varies between repeats.
 
     Returns:
-        Non-decreasing edges, shape ``(n_bins + 1,)``.
+        Non-decreasing edges, shape ``(n_bins + 1,)``. With no values at all
+        there are no quantiles to take, and the edges are evenly spaced.
 
     Examples:
         >>> quantile_edges(np.linspace(0, 1, 101), 2, 0.0, 1.0).tolist()
         [0.0, 0.5, 1.0]
+        >>> quantile_edges([], 2, 0.0, 1.0).tolist()
+        [0.0, 0.5, 1.0]
     """
     values = np.asarray(values, dtype=float)
+    if not values.size:
+        return np.linspace(lo, hi, n_bins + 1)
     levels = np.clip(
         np.linspace(0.0, 1.0, n_bins + 1) + shift / n_bins, 0.0, 1.0
     )
@@ -395,6 +400,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         if self.inference_ == "predict_proba":
             self.kv_cache_ = False
         self.support_ = self._support(y)
+        y = _clip_to_support(y, self.support_)
         self.X_context_ = _frame(X)
         self.z_context_ = y
         return {
@@ -456,6 +462,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 [self._edges(self.z_context_, shift)[0] for shift in shifts]
             )
         )
+        if edges.size < 3:
+            # A constant target has one bin; a grid needs two, and halving
+            # it changes no density.
+            edges = np.r_[edges[0], edges.mean(), edges[-1]]
         return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     # -- the hierarchy ------------------------------------------------------
@@ -468,18 +478,19 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """Returns a tuple (all edges, coarse edges, fine edges per coarse bin).
 
         The equal-mass edges for one dither, spanning ``support_``; the top
-        edge is nudged up so the largest value falls inside.
+        edge is nudged up so the largest value falls inside. Tied targets
+        (discrete, zero-inflated or constant ones) collapse neighbouring
+        quantiles, which leaves zero-width, empty bins: an empty coarse bin
+        gets evenly spaced fine edges across itself, and every empty bin
+        gets zero probability.
         """
         low, high = self.support_
-        span = high - low if high > low else 1.0
+        # A constant target still gets a bin of non-zero width, on its scale.
+        span = high - low if high > low else max(abs(high), 1.0)
         coarse = quantile_edges(
             z, self.n_coarse_bins, low, high + 1e-6 * span, shift
         )
-        labels = np.clip(
-            np.searchsorted(coarse, z, side="right") - 1,
-            0,
-            self.n_coarse_bins - 1,
-        )
+        labels = _bin_labels(coarse, z)
         fine = [
             quantile_edges(
                 z[labels == j],
@@ -521,25 +532,23 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """
         z, X_context = handle["z"], handle["X"]
         edges, coarse_edges, fine_edges = self._edges(z, shift)
-        coarse = np.clip(
-            np.searchsorted(coarse_edges, z, side="right") - 1,
-            0,
-            self.n_coarse_bins - 1,
-        )
+        coarse = _bin_labels(coarse_edges, z)
         _stage(progress, dither, "coarse", z.size)
         p_coarse = self._class_probabilities(
-            model, handle, X_context, coarse, X_query, handle["group"].seed
+            model,
+            handle,
+            X_context,
+            coarse,
+            self.n_coarse_bins,
+            X_query,
+            handle["group"].seed,
         )
         _done(progress)
         prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
         for j in range(self.n_coarse_bins):
             rows = coarse == j
-            fine = np.clip(
-                np.searchsorted(fine_edges[j], z[rows], side="right") - 1,
-                0,
-                self.n_fine_bins - 1,
-            )
+            fine = _bin_labels(fine_edges[j], z[rows])
             _stage(
                 progress,
                 dither,
@@ -551,6 +560,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 handle,
                 X_context.iloc[rows],
                 fine,
+                self.n_fine_bins,
                 X_query,
                 handle["group"].seed + 1 + j,
             )
@@ -571,10 +581,21 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         handle: Any,
         X_context: pd.DataFrame,
         labels: _typing.IntArray,
+        n_classes: int,
         X_query: pd.DataFrame,
         seed: int,
     ) -> _typing.FloatArray:
-        """Member-averaged class posteriors, ``(n_query, n_labels)``."""
+        """Member-averaged class posteriors, ``(n_query, n_classes)``.
+
+        A level with no context rows gives every class zero probability, and
+        one whose rows all share a class gives that class all of it; neither
+        has anything for a classifier to learn, so none is run.
+        """
+        present = np.unique(labels)
+        if present.size < 2:
+            full = np.zeros((len(X_query), n_classes))
+            full[:, present.astype(int)] = 1.0
+            return full
         max_rows = (
             None
             if handle["bag_fraction"] is None
@@ -602,7 +623,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
-        full = np.zeros((probs.shape[0], int(labels.max()) + 1))
+        full = np.zeros((probs.shape[0], n_classes))
         full[:, classes.astype(int)] = probs
         return full
 
@@ -708,6 +729,47 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _bin_labels(
+    edges: _typing.FloatArray, values: _typing.FloatArray
+) -> _typing.IntArray:
+    """The bin each value falls in, ``edges[i] <= value < edges[i + 1]``.
+
+    Of several zero-width bins at one value, a value there falls in the last,
+    the one of non-zero width above them; values outside the edges go to the
+    end bins.
+    """
+    n_bins = edges.size - 1
+    return np.clip(
+        np.searchsorted(edges, values, side="right") - 1, 0, n_bins - 1
+    )
+
+
+def _clip_to_support(
+    z: _typing.FloatArray, support: tuple[float, float]
+) -> _typing.FloatArray:
+    """The targets clipped to the bins' range, warning if any lay outside it.
+
+    Args:
+        z: The context targets, shape ``(n,)``.
+        support: The range the equal-mass bins span, (low, high).
+
+    Returns:
+        ``z`` clipped to ``support``, shape ``(n,)``.
+    """
+    low, high = support
+    outside = int(np.count_nonzero((z < low) | (z > high)))
+    if outside:
+        warnings.warn(
+            f"{outside} of {z.size} training targets lie outside the z_grid "
+            f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
+            "ends, so their probability piles into the end bins. Pass a "
+            "z_grid that covers the targets.",
+            UserWarning,
+            stacklevel=5,
+        )
+    return np.clip(z, low, high)
 
 
 def _frame(features: _typing.FloatArray) -> pd.DataFrame:
