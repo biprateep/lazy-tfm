@@ -51,7 +51,9 @@ import pandas as pd
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _device
 from lazy.models import _ensemble
+from lazy.models import _hub
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
@@ -272,9 +274,13 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _network(self) -> Any:
         """The loaded network, cached on the instance per version and device.
 
-        Dropped on pickling: an unpickled estimator reloads it from the local
-        Hugging Face cache on next use.
+        Dropped on pickling: an unpickled estimator finds the checkpoint
+        afresh, in this machine's Hugging Face cache, and reloads it on next
+        use.
         """
+        if self.__dict__.pop("_relocate_checkpoint", False):
+            spec = _hub.get_checkpoint(self.backend, self.version)
+            self.checkpoint_ = spec.download()
         key = (self.version, self.device_)
         cached_key, network = getattr(self, "_network_cache", (None, None))
         if network is None or cached_key != key:
@@ -365,6 +371,20 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         """
         fitted = "handles_" in self.__dict__
         return (_unpickle, (type(self), fitted), self.__getstate__())
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle on this machine, not the one it was made on.
+
+        ``device="auto"`` is resolved again, so a model fitted on a GPU
+        predicts on the CPU where there is none, and the checkpoint is found
+        again through the hub on next use rather than at the pickled path.
+        """
+        super().__setstate__(state)
+        if "device_" in state and self.device == "auto":
+            self.device_ = _device.resolve_device(self.device)
+            self.provenance_ = {**self.provenance_, "device": self.device_}
+        if "checkpoint_" in state:
+            self._relocate_checkpoint = True
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the network or the caches, which reload."""

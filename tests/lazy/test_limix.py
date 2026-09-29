@@ -3,6 +3,7 @@
 """LimiXBarDistribution: what the uniform conformance suite does not cover."""
 
 import os
+import pathlib
 import pickle
 import subprocess
 import sys
@@ -202,3 +203,24 @@ def test_a_pickled_model_predicts_the_same_in_a_fresh_process(data, tmp_path):
     np.testing.assert_array_equal(
         np.load(tmp_path / "out.npy"), model.predict_proba(X_test)
     )
+
+
+@needs_checkpoint
+def test_an_unpickled_model_finds_its_device_and_checkpoint_afresh(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    model = _model().fit(X, z)
+    before = model.predict_proba(X_test)
+    checkpoint = model.checkpoint_
+    # As if fitted with device="auto" on another machine's GPU and cache.
+    model.device = "auto"
+    model.device_ = "cuda:7"
+    model.checkpoint_ = pathlib.Path("/elsewhere/LimiX-2.ckpt")
+    pickled = pickle.dumps(model)
+    monkeypatch.setattr(limix._device, "resolve_device", lambda device: "cpu")
+    restored = pickle.loads(pickled)
+    assert restored.device_ == "cpu"
+    assert restored.provenance_["device"] == "cpu"
+    np.testing.assert_array_equal(restored.predict_proba(X_test), before)
+    assert restored.checkpoint_ == checkpoint
