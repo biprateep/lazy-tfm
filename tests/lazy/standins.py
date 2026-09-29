@@ -27,6 +27,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
 
     display_name = "StandIn"
     extra = "none"
+    cpu_friendly = True  # Milliseconds anywhere; never the CPU warning.
 
     def __init__(
         self,

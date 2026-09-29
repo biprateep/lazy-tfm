@@ -105,6 +105,15 @@ def _declaration_problems(
         "quantiles"
     ):
         found.append("quantile_average needs native_output='quantiles'")
+    for flag in (
+        "supports_native_bagging",
+        "exact_chunking",
+        "chunks_queries",
+        "accepts_auto_estimators",
+        "cpu_friendly",
+    ):
+        if not isinstance(getattr(cls, flag), bool):
+            found.append(f"{flag} must be a bool")
     if True not in cls.kv_cache_modes or False not in cls.kv_cache_modes:
         found.append("kv_cache_modes must include True and False")
     vocabulary = set(_transforms.BASE_TRANSFORMS)

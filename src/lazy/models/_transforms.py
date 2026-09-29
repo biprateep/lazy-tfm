@@ -8,7 +8,10 @@ that ensemble members cycle through. The names are shared by all models:
 
 ========================  ==================================================
 ``none``                  the features as given
-``power``                 Yeo-Johnson power transform, standardised
+``power``                 Yeo-Johnson power transform, standardised; a
+                          column with at most one distinct value in the
+                          context (constant, or all missing) is passed
+                          through unchanged, as it has nothing to fit
 ``quantile``              quantile transform to a normal distribution
 ``quantile_uniform``      quantile transform to a uniform distribution
 ``quantile_rtdl``         quantile transform to normal after a little noise
@@ -21,8 +24,13 @@ LimiX-2's own, ``("quantile_uniform+original", "power")``.
 
 A backend translates a name to its model's own implementation when it has
 one; otherwise the transform is applied here, by :class:`ScaffoldTransform`,
-fitted on the member's own context rows only, before the model sees the
-features (the model's internal preprocessing then still runs on top).
+before the model sees the features (the model's internal preprocessing then
+still runs on top). It is fitted on the context rows of the member group it
+serves, never on query rows: under scaffolded bagging each member is a group
+of its own, so that is the member's own bag; for a model that subsamples
+rows natively, the group's members share the whole context, so the
+transform is fitted on all of it and the model then draws each member's
+rows from the transformed features.
 
 Typical usage example:
 
@@ -128,8 +136,9 @@ def _parse_one(name: str) -> TransformSpec:
 class ScaffoldTransform:
     """A transform applied by the package for a model that lacks it.
 
-    Fitted on the member's context rows only, so a query row's features
-    never depend on the other query rows. Missing values (NaN) are ignored
+    Fitted on its member group's context rows only (see the module
+    docstring), so a query row's features never depend on the other query
+    rows. Missing values (NaN) are ignored
     when fitting and stay NaN, for the model to handle.
 
     Attributes:
@@ -142,6 +151,8 @@ class ScaffoldTransform:
         self.spec = spec
         self.seed = seed
         self._transformer: object | None = None
+        # Columns the transformer is fitted on and applied to; None for all.
+        self._columns: _typing.IntArray | None = None
 
     def fit(self, features: _typing.FloatArray) -> "ScaffoldTransform":
         """Fits on context features, shape (n_rows, n_features).
@@ -155,9 +166,18 @@ class ScaffoldTransform:
         if base == "none":
             self._transformer = None
         elif base == "power":
-            self._transformer = preprocessing.PowerTransformer(
-                method="yeo-johnson", standardize=True
-            ).fit(features)
+            # Yeo-Johnson cannot fit a column with no spread (sklearn fails
+            # cryptically on an all-NaN one), so such columns pass through.
+            self._columns = np.flatnonzero(
+                [np.unique(c[~np.isnan(c)]).size > 1 for c in features.T]
+            )
+            self._transformer = (
+                preprocessing.PowerTransformer(
+                    method="yeo-johnson", standardize=True
+                ).fit(features[:, self._columns])
+                if self._columns.size
+                else None
+            )
         elif base == "robust":
             self._transformer = preprocessing.RobustScaler().fit(features)
         elif base == "quantile_rtdl":
@@ -188,12 +208,11 @@ class ScaffoldTransform:
         With ``+original`` the transformed columns come first, then the
         untransformed ones.
         """
-        if self._transformer is None:
-            out = np.asarray(features, dtype=np.float64)
-        else:
-            out = np.asarray(
-                self._transformer.transform(features),  # type: ignore[attr-defined]  # an sklearn transformer
-                dtype=np.float64,
+        out = np.array(features, dtype=np.float64)
+        if self._transformer is not None:
+            columns = slice(None) if self._columns is None else self._columns
+            out[:, columns] = self._transformer.transform(  # type: ignore[attr-defined]  # an sklearn transformer
+                out[:, columns]
             )
         if self.spec.original:
             out = np.hstack([out, np.asarray(features, dtype=np.float64)])

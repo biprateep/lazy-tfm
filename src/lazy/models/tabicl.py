@@ -134,6 +134,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     member_combination = "quantile_average"
     kv_cache_modes = (True, False, "repr")
     kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
+    cpu_friendly = True
 
     # The training targets' range, recorded by _fit_group for the grid.
     _support: tuple[float, float]

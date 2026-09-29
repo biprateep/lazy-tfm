@@ -2,7 +2,9 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import json
+import re
 
+import huggingface_hub
 import pytest
 
 import lazy
@@ -52,7 +54,9 @@ def test_every_checkpoint_is_pinned():
         )
         assert spec.backend in lazy.ESTIMATORS
         assert spec.repo_id and spec.package and spec.version
-        assert spec.revision is not None or spec.filename is not None
+        assert re.fullmatch("[0-9a-f]{40}", spec.revision or ""), (
+            f"{key} must pin a full commit hash, not {spec.revision!r}"
+        )
         assert spec.license_note
 
 
@@ -120,3 +124,38 @@ def test_constructing_an_estimator_downloads_nothing(monkeypatch):
     monkeypatch.setattr("lazy.models._hub.Checkpoint.download", _explode)
     for name in lazy.list_estimators():
         lazy.get_estimator(name)
+
+
+def _recording_hub(monkeypatch, cached):
+    """Replaces both Hub download calls; returns the local_files_only log."""
+    calls = []
+
+    def fetch(**kwargs):
+        calls.append(kwargs["local_files_only"])
+        if kwargs["local_files_only"] and not cached:
+            raise huggingface_hub.errors.LocalEntryNotFoundError("not cached")
+        return "/cache/weights"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fetch)
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fetch)
+    return calls
+
+
+@pytest.mark.parametrize("key", ["tabicl:v2", "tabfm:v1.0"])
+def test_a_cached_pinned_checkpoint_never_touches_the_network(monkeypatch, key):
+    calls = _recording_hub(monkeypatch, cached=True)
+    assert str(lazy.CHECKPOINTS[key].download()) == "/cache/weights"
+    assert calls == [True]
+
+
+@pytest.mark.parametrize("key", ["tabicl:v2", "tabfm:v1.0"])
+def test_an_uncached_pinned_checkpoint_is_downloaded(monkeypatch, key):
+    calls = _recording_hub(monkeypatch, cached=False)
+    assert str(lazy.CHECKPOINTS[key].download()) == "/cache/weights"
+    assert calls == [True, False]
+
+
+def test_offline_lookup_stays_offline(monkeypatch):
+    calls = _recording_hub(monkeypatch, cached=False)
+    assert not lazy.is_cached("tabicl")
+    assert calls == [True]

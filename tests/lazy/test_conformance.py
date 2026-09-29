@@ -66,7 +66,8 @@ def test_clone_reproduces_every_parameter(cls):
         ({"chunk_size": -1}, "chunk_size"),
         ({"n_estimators": 0}, "positive int"),
         ({"feature_shuffle": "yes"}, "feature_shuffle"),
-        ({"random_state": None}, "random_state"),
+        ({"random_state": "seven"}, "random_state"),
+        ({"random_state": 1.5}, "random_state"),
     ],
 )
 def test_bad_uniform_parameters_are_rejected_at_fit(data, params, match):
@@ -95,6 +96,67 @@ def test_bagging_silences_the_warning(data):
         warnings.simplefilter("error", lazy.ContextSizeWarning)
         _Limited(bag_size=50).fit(X, z)
         _Limited().fit(X[:50], z[:50])
+
+
+def test_a_bag_of_a_handful_of_rows_warns(data):
+    X, z, _ = data
+    with pytest.warns(UserWarning, match="bag_size=1.0 all of them"):
+        standins.HistogramStandIn(bag_size=1).fit(X, z)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        standins.HistogramStandIn(bag_size=1.0).fit(X, z)
+        standins.HistogramStandIn(bag_size=10).fit(X, z)
+        standins.HistogramStandIn().fit(X[:5], z[:5])
+
+
+def test_bags_larger_than_the_limit_still_warn(data):
+    X, z, _ = data
+    with pytest.warns(lazy.ContextSizeWarning, match="each bag has 60"):
+        _Limited(bag_size=60).fit(X, z)
+
+
+# -- the CPU warning -----------------------------------------------------------
+
+
+class _SlowOnCPU(standins.HistogramStandIn):
+    cpu_friendly = False
+
+
+@pytest.fixture
+def no_gpu(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+
+def test_a_gpu_model_falling_back_to_the_cpu_warns(data, no_gpu):
+    X, z, _ = data
+    with pytest.warns(lazy.PerformanceWarning, match="sees no GPU") as info:
+        _SlowOnCPU().fit(X, z)
+    message = str(info[0].message)
+    assert "LazyModel('tabicl')" in message
+    assert "device='cpu'" in message
+    assert "Supported models" in message
+
+
+def test_an_explicit_cpu_or_a_cpu_friendly_model_does_not_warn(data, no_gpu):
+    X, z, _ = data
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.PerformanceWarning)
+        _SlowOnCPU(device="cpu").fit(X, z)
+        _SlowOnCPU(device="CPU").fit(X, z)
+        standins.HistogramStandIn().fit(X, z)
+
+
+def test_only_tabicl_is_cpu_friendly():
+    friendly = [n for n, c in lazy.ESTIMATORS.items() if c.cpu_friendly]
+    assert friendly == ["tabicl"]
+
+
+def test_the_tabpfn_cpu_warning_names_its_context_limit():
+    model = lazy.TabPFNBarDistribution()
+    model.device_ = "cpu"
+    with pytest.warns(lazy.PerformanceWarning, match="5,000 context rows"):
+        model._warn_if_slow_on_cpu()
 
 
 # -- planning ----------------------------------------------------------------
@@ -160,6 +222,25 @@ def test_bag_sizes_resolve_as_counts_or_fractions():
     assert _members.resolve_bag_size(30, 100) == 30
     assert _members.resolve_bag_size(300, 100) == 100
     assert _members.resolve_bag_size(0.25, 100) == 25
+
+
+def test_numpy_numbers_are_accepted_as_bag_sizes():
+    assert _members.resolve_bag_size(np.int64(30), 100) == 30
+    assert _members.resolve_bag_size(np.float32(0.25), 100) == 25
+    with pytest.raises(ValueError, match="bag_size"):
+        _members.resolve_bag_size(np.True_, 100)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_numpy_integers_are_accepted_as_counts_and_seeds(cls, data):
+    """Values from np.arange or a parameter grid are NumPy integers."""
+    X, z, X_test = data
+    python = {"n_estimators": 3, "bag_size": 40, "random_state": 7}
+    numpy = {name: np.int64(value) for name, value in python.items()}
+    expected = cls(**python, chunk_size=9).fit(X, z).predict_proba(X_test)
+    model = cls(**numpy, chunk_size=np.int64(9)).fit(X, z)
+    np.testing.assert_array_equal(model.predict_proba(X_test), expected)
+    assert type(model.provenance_["n_estimators"]) is int
 
 
 # -- behaviour, on every stand-in -------------------------------------------
@@ -250,6 +331,21 @@ def test_the_same_seed_repeats_and_another_does_not(cls, data):
     assert not np.array_equal(first, other)
 
 
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_seed_draws_one_and_records_it(cls, data):
+    X, z, X_test = data
+    params = {"n_estimators": 3, "bag_size": 40, "random_state": None}
+    first = cls(**params).fit(X, z)
+    second = cls(**params).fit(X, z)
+    assert first.random_state_ != second.random_state_
+    assert first.provenance_["random_state"] == first.random_state_
+    assert 0 <= first.random_state_ < 2**31
+    replay = cls(**{**params, "random_state": first.random_state_})
+    np.testing.assert_array_equal(
+        replay.fit(X, z).predict_proba(X_test), first.predict_proba(X_test)
+    )
+
+
 def test_bagged_bar_members_with_their_own_buckets_form_a_mixture(data):
     X, z, X_test = data
     model = standins.ScaffoldedHistogramStandIn(bag_size=0.5).fit(X, z)
@@ -280,6 +376,59 @@ def test_the_recipe_is_recorded_in_provenance(data):
     ]
     assert model.provenance_["bag_rows"] == 30
     assert model.provenance_["kv_cache"] is True
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_no_query_rows_give_an_empty_answer(cls, data):
+    X, z, X_test = data
+    model = cls(n_estimators=3, bag_size=40).fit(X, z)
+    empty = pd.DataFrame(X_test[:0])
+    pdfs = model._predict_pdf(empty, model.grid_)
+    assert pdfs.shape == (0, model.grid_.n_bins)
+    dist = model._predict_distribution(empty)
+    full = model._predict_distribution(pd.DataFrame(X_test))
+    assert type(dist) is type(full)
+    assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
+
+
+def test_a_refit_into_several_groups_drops_the_single_regressor(data):
+    X, z, _ = data
+    model = standins.ScaffoldedHistogramStandIn(n_estimators=3).fit(X, z)
+    assert model.regressor_ is model.handles_[0]
+    model.set_params(bag_size=40).fit(X, z)
+    assert len(model.handles_) == 3
+    assert not hasattr(model, "regressor_")
+
+
+def test_a_scaffold_is_fitted_on_its_groups_context_rows(data):
+    """As the _transforms docstring says: a bag, or all rows if native."""
+    X, z, _ = data
+    params = {"n_estimators": 2, "transforms": "robust", "bag_size": 40}
+    native = standins.HistogramStandIn(**params).fit(X, z)
+    (fitted,) = native.transformers_
+    np.testing.assert_allclose(
+        fitted._transformer.center_, np.median(X, axis=0)
+    )
+    scaffolded = standins.ScaffoldedHistogramStandIn(**params).fit(X, z)
+    for group, fitted in zip(
+        scaffolded.member_groups_, scaffolded.transformers_, strict=True
+    ):
+        np.testing.assert_allclose(
+            fitted._transformer.center_, np.median(X[group.rows], axis=0)
+        )
+
+
+@pytest.mark.parametrize("fill", [np.nan, 2.0], ids=["all_nan", "constant"])
+def test_the_power_scaffold_passes_a_column_without_spread_through(fill):
+    X = np.random.default_rng(0).normal(size=(50, 3))
+    X[:, 1] = fill
+    spec = _transforms.TransformSpec("power", original=True)
+    transform = _transforms.ScaffoldTransform(spec, seed=0).fit(X)
+    out = transform.transform(X)
+    assert out.shape == (50, 6)
+    np.testing.assert_array_equal(out[:, 1], X[:, 1])
+    np.testing.assert_allclose(out[:, [0, 2]].mean(axis=0), 0.0, atol=1e-12)
+    np.testing.assert_array_equal(out[:, 3:], X)
 
 
 def test_missing_values_reach_the_model(data):
@@ -314,6 +463,7 @@ def test_registered_backends_take_the_uniform_parameters(cls):
         ({"transforms": "banana"}, "unknown transform"),
         ({"bag_size": -3}, "must be positive"),
         ({"n_estimators": 0}, "positive int"),
+        ({"version": "v99"}, r"unknown version 'v99'.*known: \['"),
     ],
 )
 def test_registered_backends_reject_bad_parameters_before_loading(
@@ -323,6 +473,20 @@ def test_registered_backends_reject_bad_parameters_before_loading(
     monkeypatch.setattr(cls, "_import_backend", lambda self: None)
     with pytest.raises(ValueError, match=match):
         cls(**params).fit(X, z)
+
+
+def _missing_backend(self):
+    raise ImportError("backend not installed")
+
+
+@pytest.mark.parametrize("cls", REGISTERED, ids=lambda c: c.__name__)
+def test_a_missing_backend_is_reported_before_bad_parameters(
+    cls, data, monkeypatch
+):
+    X, z, _ = data
+    monkeypatch.setattr(cls, "_import_backend", _missing_backend)
+    with pytest.raises(ImportError, match="not installed"):
+        cls(version="v99", n_estimators=0).fit(X, z)
 
 
 def test_a_backend_without_the_uniform_features_cannot_register():

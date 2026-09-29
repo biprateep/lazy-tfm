@@ -12,7 +12,7 @@ Revisions are pinned. A foundation model's weights are part of the method, so
 an unpinned checkpoint would silently change published numbers.
 
 A backbone is not one model but a family of them, so a checkpoint is named by
-*backend and version* -- ``"tabpfn:v3"``, not ``"tabpfn"`` -- in the version
+*backend and version* -- ``"tabpfn:v3.5"``, not ``"tabpfn"`` -- in the version
 string upstream itself uses. Every estimator takes that version as an ordinary
 parameter, defaulting to the one in :data:`DEFAULT_VERSIONS`, and records what
 it actually loaded in its ``provenance_`` (:meth:`Checkpoint.provenance`).
@@ -59,9 +59,9 @@ class Checkpoint:
         allow_patterns: ``snapshot_download`` patterns, for repositories
             holding several models.
         filename: A single file to fetch instead of a filtered snapshot.
-        revision: Pinned git revision; ``None`` means the repository has no
-            history worth pinning because ``filename`` already names an
-            immutable artifact.
+        revision: The pinned git commit of ``repo_id``. ``None`` would track
+            the repository's default branch; no registered checkpoint does,
+            because even a dated filename can be replaced upstream.
         license_note: Anything a user must know before downloading. Surfaced
             in the docs.
         size_note: The download size, and any limit the model declares.
@@ -83,12 +83,16 @@ class Checkpoint:
 
         Examples:
             >>> get_checkpoint("tabpfn").key
-            'tabpfn:v3'
+            'tabpfn:v3.5'
         """
         return f"{self.backend}:{self.version}"
 
     def download(self, *, local_files_only: bool = False) -> pathlib.Path:
         """Fetches (or locates) the weights and returns the path they live at.
+
+        A pinned revision cannot change, so the local cache is tried first
+        and the Hub is contacted only when the weights are not there: a
+        cached checkpoint loads with no network traffic at all.
 
         Args:
             local_files_only: Only look in the local Hugging Face cache, never
@@ -98,6 +102,17 @@ class Checkpoint:
             The checkpoint file, or the snapshot directory when the
             checkpoint is a filtered snapshot rather than one file.
         """
+        if self.revision is not None and not local_files_only:
+            try:
+                return self._fetch(local_files_only=True)
+            except FileNotFoundError:
+                # Not cached (huggingface_hub's LocalEntryNotFoundError is a
+                # FileNotFoundError): fall through to the network.
+                pass
+        return self._fetch(local_files_only=local_files_only)
+
+    def _fetch(self, *, local_files_only: bool) -> pathlib.Path:
+        """One ``huggingface_hub`` download call; see :meth:`download`."""
         import huggingface_hub  # noqa: PLC0415 - kept out of `import lazy`.
 
         if self.filename is not None:
@@ -213,6 +228,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             repo_id="jingang/TabICL",
             package="tabicl",
             filename="tabicl-regressor-v2-20260212.ckpt",
+            revision="4dcd344ece2c00be9e831fdd35bed57b5ad83e19",
             license_note=(
                 "TabICL is released under BSD-3-Clause; see "
                 "https://huggingface.co/jingang/TabICL."
@@ -221,8 +237,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
         ),
         # The TabPFN family. Every filename below names "the default" of its
         # release, which is a moving name -- the repository is free to replace
-        # the file a later release calls that -- so unlike TabICL's dated
-        # filename each one needs the revision as well.
+        # the file a later release calls that -- so the revision is what
+        # fixes the weights.
         Checkpoint(
             backend="tabpfn",
             version="v2",
@@ -322,7 +338,7 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "limix": "v2",
     "tabfm": "v1.0",
     "tabicl": "v2",
-    "tabpfn": "v3",
+    "tabpfn": "v3.5",
 }
 
 
@@ -345,7 +361,7 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
 
     Examples:
         >>> get_checkpoint("tabpfn").version
-        'v3'
+        'v3.5'
         >>> get_checkpoint("tabpfn:v2.5").repo_id
         'Prior-Labs/tabpfn_2_5'
     """

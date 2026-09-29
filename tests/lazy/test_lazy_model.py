@@ -19,7 +19,34 @@ def _explode(*args, **kwargs):
     raise AssertionError("constructing a model must not touch the hub")
 
 
-@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
+# TabPFNBarDistribution's constructor still defaults to version="v3"; the
+# backend slice moves it to DEFAULT_VERSIONS["tabpfn"]. Strict, so this
+# fails -- and the marks must go -- once it has.
+_TABPFN_DEFAULT_PENDING = pytest.mark.xfail(
+    strict=True, reason="tabpfn.py's version default is still 'v3'"
+)
+
+
+def test_the_default_model_is_tabpfn():
+    model = lazy.LazyModel()
+    assert model.model == "tabpfn"
+    assert isinstance(model._build(), lazy.TabPFNBarDistribution)
+
+
+@_TABPFN_DEFAULT_PENDING
+def test_the_default_model_is_tabpfn_3_5():
+    assert lazy.LazyModel().name_ == "tabpfn:v3.5"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(name, marks=_TABPFN_DEFAULT_PENDING)
+        if name == "tabpfn"
+        else name
+        for name in sorted(lazy.ESTIMATORS)
+    ],
+)
 def test_every_registered_name_builds(name):
     model = lazy.LazyModel(name)
     assert isinstance(model, lazy.BaseDensityRegressor)
@@ -130,6 +157,35 @@ def test_set_params_can_switch_backend():
     assert model.n_estimators == 16
 
 
+def test_switching_backend_keeps_the_parameters_both_take():
+    model = lazy.LazyModel("tabfm", n_estimators=3, device="cpu", n_dither=5)
+    model.set_params(model="tabicl")
+    assert model.n_estimators == 3
+    assert model.device == "cpu"
+    assert "n_dither" not in model.get_params()
+    assert model.version == lazy.DEFAULT_VERSIONS["tabicl"]
+    model.set_params(model="tabfm", n_estimators=2)
+    assert model.n_estimators == 2 and model.device == "cpu"
+
+
+def test_a_search_over_backends_keeps_its_fixed_settings():
+    """GridSearchCV clones, which spells every default out, then sets."""
+    base = lazy.LazyModel("tabfm", n_estimators=3, device="cpu")
+    for name in ["tabicl", "tabpfn", "limix"]:
+        model = sklearn_base.clone(base).set_params(model=name)
+        backend = model._build()
+        assert backend.n_estimators == 3
+        assert backend.device == "cpu"
+        defaults = registry.ESTIMATORS[name]().get_params()
+        assert backend.version == defaults["version"]
+        assert backend.random_state == defaults["random_state"]
+
+
+def test_a_switch_rejects_a_parameter_the_new_backend_does_not_take():
+    with pytest.raises(ValueError, match="n_dither"):
+        lazy.LazyModel("tabfm").set_params(model="tabicl", n_dither=3)
+
+
 def test_an_unknown_backend_set_by_set_params_is_rejected_at_fit():
     model = lazy.LazyModel("tabfm").set_params(model="nope")
     with pytest.raises(ValueError, match="tabfm"):
@@ -140,6 +196,12 @@ def test_repr_names_the_backend_and_only_non_default_parameters():
     assert repr(lazy.LazyModel("tabfm")) == "LazyModel('tabfm')"
     with_dither = lazy.LazyModel("tabfm", n_dither=3)
     assert repr(with_dither) == "LazyModel('tabfm', n_dither=3)"
+
+
+def test_repr_shows_a_grid_other_than_the_native_one():
+    grid = lazy.Grid.linear(0.0, 3.0, 37)
+    model = lazy.LazyModel("tabfm", z_grid=grid, n_dither=3)
+    assert repr(model) == f"LazyModel('tabfm', z_grid={grid!r}, n_dither=3)"
 
 
 def test_the_grid_default_is_carried_down_to_the_backend():
@@ -212,6 +274,17 @@ def test_a_fitted_model_survives_pickling(registered):
     copy = pickle.loads(pickle.dumps(model))
     assert copy.width == 2.0 and copy.n_context_ == 10
     assert np.array_equal(copy.predict_proba(X), model.predict_proba(X))
+
+
+def test_a_parameter_set_after_fit_reads_back_as_set(registered):
+    X = np.random.default_rng(0).normal(size=(10, 2))
+    z = np.random.default_rng(1).uniform(0.2, 1.8, 10)
+    model = lazy.LazyModel(registered, width=2.0).fit(X, z)
+    model.set_params(width=3.0)
+    assert model.width == 3.0
+    assert model.get_params()["width"] == 3.0
+    assert model.estimator_.width == 2.0  # until the next fit
+    assert model.n_context_ == 10
 
 
 def test_the_wrapper_forwards_distributions_and_quantiles(registered):

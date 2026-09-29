@@ -38,8 +38,9 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterator, Mapping
+import numbers
 import types
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, TypeGuard
 import warnings
 
 import numpy as np
@@ -92,6 +93,12 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
 }
 
 
+#: What the CPU warning adds for a backend with more to say about the CPU.
+_CPU_NOTES: dict[str, str] = {
+    "tabpfn": " and, from v3 on, refuses more than 5,000 context rows there",
+}
+
+
 class ContextSizeWarning(UserWarning):
     """The context is larger than the model was pretrained for."""
 
@@ -131,6 +138,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
         accepts_auto_estimators: Whether ``n_estimators="auto"`` is allowed.
+        cpu_friendly: Whether the model runs at a usable speed on a CPU; if
+            not, a fit that falls back to the CPU under ``device="auto"``
+            warns.
     """
 
     display_name: ClassVar[str] = ""
@@ -148,6 +158,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     exact_chunking: ClassVar[bool] = True
     chunks_queries: ClassVar[bool] = True
     accepts_auto_estimators: ClassVar[bool] = False
+    cpu_friendly: ClassVar[bool] = False
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
@@ -157,7 +168,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     bag_size: int | float | None
     kv_cache: bool | str
     device: str
-    random_state: int
+    random_state: int | None
     chunk_size: int
     progress: _progress.Progress
     verbose: bool
@@ -218,16 +229,24 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     # -- fitting -----------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        # Set below only when one group serves the whole ensemble, so a
+        # refit into several groups must not keep the previous fit's.
+        self.__dict__.pop("regressor_", None)
+        # A missing backend package is the likeliest reason a first fit
+        # fails, so it is reported before any parameter complaint.
         self._import_backend()
         self._check_uniform_params()
         self._check_backend_params()
         _progress.check_progress(self.progress)
+        self.random_state_ = _resolve_seed(self.random_state)
         self.device_ = _device.resolve_device(self.device)
+        self._warn_if_slow_on_cpu()
         self._load_checkpoint()
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
         self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
         self.bagging_ = self.bag_rows_ < n_rows
+        self._warn_if_bags_too_small()
         self._warn_if_context_too_large(n_rows)
         self.kv_cache_: bool | str = self.kv_cache
         self.member_groups_ = _members.plan(
@@ -238,7 +257,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             bag_rows=self.bag_rows_,
             n_rows=n_rows,
             n_features=n_features,
-            random_state=self.random_state,
+            random_state=self.random_state_,
             supports_native_bagging=self.supports_native_bagging,
             auto_tokens=self.auto_tokens,
         )
@@ -269,7 +288,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _check_uniform_params(self) -> None:
         """Validates the uniform parameters, before anything is loaded."""
-        if not isinstance(self.chunk_size, int) or self.chunk_size < 0:
+        known = _hub.list_versions(self.backend or "")
+        if known and self.version not in known:
+            raise ValueError(
+                f"unknown version {self.version!r} for {self.backend!r}; "
+                f"known: {known}"
+            )
+        if not _is_integer(self.chunk_size) or self.chunk_size < 0:
             raise ValueError(
                 f"chunk_size must be a non-negative int (0 means one pass): "
                 f"{self.chunk_size=}"
@@ -289,11 +314,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         _transforms.parse(self.transforms)
         _members.resolve_bag_size(self.bag_size, 1)
-        if isinstance(self.random_state, bool) or not isinstance(
-            self.random_state, int
-        ):
+        if self.random_state is not None and not _is_integer(self.random_state):
             raise ValueError(
-                f"random_state must be an int: {self.random_state=}"
+                f"random_state must be an int or None: {self.random_state=}"
             )
         self._n_members()
 
@@ -310,27 +333,70 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                     "bag_size and transforms need an explicit n_estimators"
                 )
             return 1
-        if (
-            isinstance(n_estimators, bool)
-            or not isinstance(n_estimators, int)
-            or n_estimators < 1
-        ):
+        if not _is_integer(n_estimators) or n_estimators < 1:
             raise ValueError(
                 f"n_estimators must be a positive int: {self.n_estimators=}"
             )
-        return n_estimators
+        return int(n_estimators)
+
+    def _warn_if_slow_on_cpu(self) -> None:
+        """Warns when ``"auto"`` fell back to the CPU for a GPU model."""
+        # Imported here: the registry imports every backend, hence this.
+        from lazy.models import registry  # noqa: PLC0415
+
+        auto = str(self.device).strip().lower() == "auto"
+        if self.cpu_friendly or not auto or self.device_ != "cpu":
+            return
+        friendly = sorted(
+            name
+            for name, cls in registry.ESTIMATORS.items()
+            if getattr(cls, "cpu_friendly", False)
+        )
+        models = " or ".join(f"LazyModel({name!r})" for name in friendly)
+        suggestion = (
+            f"For CPU work prefer a CPU-friendly model: {models}. "
+            if friendly
+            else ""
+        )
+        warnings.warn(
+            f"PyTorch sees no GPU, so device='auto' runs {self.display_name} "
+            f"on the CPU. {self.display_name} runs slowly on CPU"
+            f"{_CPU_NOTES.get(self.backend or '', '')}. {suggestion}Pass "
+            "device='cpu' to run it there anyway without this warning; see "
+            "'Supported models' in the documentation.",
+            PerformanceWarning,
+            stacklevel=4,
+        )
+
+    def _warn_if_bags_too_small(self) -> None:
+        """Warns when bags are so small an int was likely meant as a float."""
+        if not self.bagging_ or self.bag_rows_ >= _members.MIN_BAG_ROWS:
+            return
+        warnings.warn(
+            f"bag_size={self.bag_size!r} gives each member only "
+            f"{self.bag_rows_} context row(s). An int bag_size is a row "
+            "count and a float one a fraction of the context: bag_size=1 is "
+            "one row, bag_size=1.0 all of them.",
+            UserWarning,
+            stacklevel=4,
+        )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
-        """Warns when the context exceeds what the model handles unbagged."""
+        """Warns when a member's context exceeds what the model handles."""
         limit = self._recommended_max_context()
-        if self.bagging_ or limit is None or n_rows <= limit:
+        if limit is None or self.bag_rows_ <= limit:
             return
         needed = -(-n_rows // limit)
+        seen = (
+            f"each bag has {self.bag_rows_:,} of the context's {n_rows:,}"
+            if self.bagging_
+            else f"this one has {n_rows:,}"
+        )
         warnings.warn(
             f"{self.display_name} degrades on contexts larger than about "
-            f"{limit:,} rows, and this one has {n_rows:,}. Turn on bagging: "
+            f"{limit:,} rows, and {seen}. Bag the context in smaller pieces: "
             f"pass bag_size={limit} with n_estimators >= {needed} so the "
-            "members together cover the context.",
+            "members together cover it.",
             ContextSizeWarning,
             stacklevel=4,
         )
@@ -341,12 +407,17 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         for group in self.member_groups_:
             members.extend(group.members)
         return {
-            "n_estimators": self.n_estimators,
+            "n_estimators": (
+                self.n_estimators
+                if isinstance(self.n_estimators, str)
+                else int(self.n_estimators)
+            ),
             "transforms": [
                 "auto" if m.transform is None else m.transform.name
                 for m in sorted(members, key=lambda m: m.index)
             ],
             "feature_shuffle": self.feature_shuffle,
+            "random_state": self.random_state_,
             "bag_rows": self.bag_rows_ if self.bagging_ else None,
             "kv_cache": self.kv_cache_,
             "groups": len(self.member_groups_),
@@ -416,7 +487,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         if not self.chunks_queries:
             yield self._predict_chunk(features)
             return
-        size = self.chunk_size if self.chunk_size > 0 else len(features)
+        chunk_size = int(self.chunk_size)
+        size = chunk_size if chunk_size > 0 else len(features)
         with _progress.bar(
             self.progress,
             total=len(features),
@@ -439,11 +511,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
+        if X.shape[0] == 0:
+            # The empty answer still carries the model's buckets or levels,
+            # which only a prediction reveals: predict one placeholder row
+            # and keep none of it.
+            placeholder = np.zeros((1, X.shape[1]))
+            return self._predict_chunk(placeholder)[:0]
         return distributions.concatenate(list(self._chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
+        if X.shape[0] == 0:
+            return np.empty((0, grid.n_bins))
         # Chunk by chunk, so the full native container never exists at once.
         blocks = [dist.on_grid(grid) for dist in self._chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
@@ -458,6 +538,27 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Prints a log line when ``verbose``."""
         if self.verbose:
             print(f"[{type(self).__name__}] {message}", flush=True)
+
+
+def _resolve_seed(random_state: int | None) -> int:
+    """The ensemble's seed: ``random_state``, or fresh entropy for None.
+
+    A drawn seed is kept below 2**31, so that every group's offset from it
+    (:mod:`._members`) stays a valid 32-bit seed for the models.
+    """
+    if random_state is None:
+        return int(np.random.SeedSequence().entropy % 2**31)  # type: ignore[operator]  # entropy is an int when drawn
+    return int(random_state)
+
+
+def _is_integer(value: object) -> TypeGuard[int]:
+    """Whether ``value`` is a Python or NumPy integer, and not a bool.
+
+    Typed as a guard for ``int``, which NumPy integers stand in for.
+    """
+    return isinstance(value, numbers.Integral) and not isinstance(
+        value, bool | np.bool_
+    )
 
 
 def _mixture(
