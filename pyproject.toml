@@ -99,8 +99,8 @@ docs = [
     "sphinx-autoapi>=3",
     "sphinx-copybutton>=0.5",
     "sphinx-design>=0.6",
-    "pydata-sphinx-theme>=0.16",
     "myst-nb>=1.1", # MyST Markdown pages, and the notebooks once there are tutorials
+    "sphinx-rtd-theme>=3",
 ]
 
 # Development-only source overrides: honoured by `uv sync` in a checkout, never

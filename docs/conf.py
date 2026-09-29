@@ -35,6 +35,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
     "sphinx_design",
+    "sphinx_rtd_theme",
 ]
 
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]
@@ -78,20 +79,22 @@ copybutton_prompt_text = r"\$ |>>> |\.\.\. "
 copybutton_prompt_is_regexp = True
 
 # -- HTML ---------------------------------------------------------------------
-html_theme = "pydata_sphinx_theme"
+html_theme = "sphinx_rtd_theme"
 html_title = "lazy-tfm"
 html_show_sourcelink = False
 html_theme_options = {
-    "github_url": "https://github.com/biprateep/lazy-tfm",
-    "use_edit_page_button": True,
-    "navigation_with_keys": False,
-    "show_toc_level": 2,
+    "navigation_depth": 3,
+    "collapse_navigation": False,
+    "style_external_links": True,
+    "prev_next_buttons_location": "both",
 }
+# The "Edit on GitHub" link at the top of each page.
 html_context = {
+    "display_github": True,
     "github_user": "biprateep",
     "github_repo": "lazy-tfm",
     "github_version": "main",
-    "doc_path": "docs",
+    "conf_py_path": "/docs/",
 }
 
 

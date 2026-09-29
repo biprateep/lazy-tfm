@@ -99,6 +99,7 @@ The first release. Everything below is new.
   `plot_residuals(scale="none")` for targets other than redshift.
 ### Changed
 
+- The docs use the Read the Docs theme.
 - TabICL's native grid extends 25% of the training range on each side (1,500
   bins), no longer clips at zero, and `predict_proba` on it warns when a row
   puts more than 1% of its probability outside it.
