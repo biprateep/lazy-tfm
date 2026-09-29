@@ -788,7 +788,9 @@ def save(
 ) -> pathlib.Path:
     """Saves as a tight 300 dpi PNG — the house output — creating parent dirs.
 
-    A path with no suffix gets ``.png``. Pass an explicit ``.pdf`` only when
+    A path whose suffix is not a format matplotlib can save gets ``.png``
+    appended, so ``"out/model.v2"`` becomes ``out/model.v2.png``. Pass an
+    explicit ``.pdf`` only when
     a vector figure has been specifically requested. The figure stays open:
     it belongs to the caller, who closes it.
 
@@ -799,11 +801,13 @@ def save(
         **kwargs: Passed to ``fig.savefig``.
 
     Returns:
-        The path written, with the suffix added if there was none.
+        The path written, with ``.png`` added if its suffix was not a
+        format.
     """
     path = pathlib.Path(path)
-    if not path.suffix:
-        path = path.with_suffix(".png")
+    formats = fig.canvas.get_supported_filetypes()
+    if path.suffix[1:].lower() not in formats:
+        path = path.with_name(path.name + ".png")
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, bbox_inches="tight", dpi=dpi, **kwargs)
     return path

@@ -262,3 +262,19 @@ def test_asking_for_no_pdf_is_refused(predictions, arguments):
     _, pdfs, _ = predictions
     with pytest.raises(ValueError, match="n_objects|no PDF"):
         plotting.plot_pdfs(lazy.DC1_GRID, pdfs, **arguments)
+
+
+@pytest.mark.parametrize(
+    ("name", "written"),
+    [
+        ("model", "model.png"),
+        ("model.v2", "model.v2.png"),
+        ("model.pdf", "model.pdf"),
+        ("model.SVG", "model.SVG"),
+    ],
+)
+def test_save_adds_png_unless_the_suffix_is_a_format(tmp_path, name, written):
+    fig = plt.figure()
+    path = plotting.save(fig, tmp_path / "out" / name)
+    assert path == tmp_path / "out" / written
+    assert path.is_file()
