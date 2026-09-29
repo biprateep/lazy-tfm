@@ -46,6 +46,7 @@ estimator can implement the same protocol.
 from __future__ import annotations
 
 import abc
+import os
 from typing import Any, TypeAlias
 import warnings
 
@@ -73,6 +74,10 @@ POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
 # objects). Tables from optional packages have no common type, hence Any.
 _Features: TypeAlias = Any
+
+# Warnings skip every frame inside this package, so that they point at the
+# user's call however deep in the package they are raised.
+_PACKAGE_PREFIX = os.path.dirname(os.path.abspath(__file__)) + os.sep
 
 
 class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
@@ -563,7 +568,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                     f"X has feature names, but {type(self).__name__} was "
                     "fitted without feature names; using columns by position",
                     UserWarning,
-                    stacklevel=4,
+                    skip_file_prefixes=(_PACKAGE_PREFIX,),
                 )
             frame.columns = [f"x{i}" for i in range(frame.shape[1])]
             return frame
@@ -573,7 +578,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 f"{type(self).__name__} was fitted with feature names; using "
                 "columns by position",
                 UserWarning,
-                stacklevel=4,
+                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
             frame.columns = list(fitted)
             return frame

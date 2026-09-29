@@ -407,3 +407,22 @@ def test_scoring_no_rows_is_refused(data, method):
     est = _CountingDummy().fit(X, y)
     with pytest.raises(ValueError, match=r"0 sample\(s\)"):
         getattr(est, method)(X.iloc[:0], y[:0])
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict_proba(X),
+        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict_cdf(X),
+        lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.score(X, y),
+        lambda est, X, y: est.evaluate(X, y),
+    ],
+)
+def test_feature_name_warnings_point_at_the_callers_line(data, call):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    with pytest.warns(UserWarning, match="feature names") as record:
+        call(est, X.to_numpy(), y)
+    assert record[0].filename == __file__
