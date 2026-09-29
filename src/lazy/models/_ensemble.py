@@ -322,16 +322,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return int(n_estimators)
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
-        """Warns when the context exceeds what the model handles unbagged."""
+        """Warns when a member's context exceeds what the model handles."""
         limit = self._recommended_max_context()
-        if self.bagging_ or limit is None or n_rows <= limit:
+        if limit is None or self.bag_rows_ <= limit:
             return
         needed = -(-n_rows // limit)
+        seen = (
+            f"each bag has {self.bag_rows_:,} of the context's {n_rows:,}"
+            if self.bagging_
+            else f"this one has {n_rows:,}"
+        )
         warnings.warn(
             f"{self.display_name} degrades on contexts larger than about "
-            f"{limit:,} rows, and this one has {n_rows:,}. Turn on bagging: "
+            f"{limit:,} rows, and {seen}. Bag the context in smaller pieces: "
             f"pass bag_size={limit} with n_estimators >= {needed} so the "
-            "members together cover the context.",
+            "members together cover it.",
             ContextSizeWarning,
             stacklevel=4,
         )

@@ -96,6 +96,12 @@ def test_bagging_silences_the_warning(data):
         _Limited().fit(X[:50], z[:50])
 
 
+def test_bags_larger_than_the_limit_still_warn(data):
+    X, z, _ = data
+    with pytest.warns(lazy.ContextSizeWarning, match="each bag has 60"):
+        _Limited(bag_size=60).fit(X, z)
+
+
 # -- planning ----------------------------------------------------------------
 
 
