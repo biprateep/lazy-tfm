@@ -5,6 +5,7 @@
 from importlib import metadata
 import pathlib
 import sys
+import warnings
 
 import pytest
 
@@ -35,6 +36,7 @@ def clean_env(monkeypatch):
     for name in [m for m in sys.modules if m.startswith(_ALIAS)]:
         monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(_limix_source, "_loaded", {})
+    monkeypatch.setattr(_limix_source, "_ignored", set())
     return monkeypatch
 
 
@@ -118,3 +120,26 @@ def test_other_missing_modules_are_not_reworded(clean_env, tmp_path):
         pytest.raises(ModuleNotFoundError, match="lazy_no_such_module"),
     ):
         _limix_source.load()
+
+
+def test_load_finds_the_source_once(clean_env, tmp_path):
+    clean_env.setenv("LAZY_LIMIX_SRC", str(_fake_source(tmp_path / "L")))
+    with pytest.warns(_limix_source.LimiXSourceWarning):
+        first = _limix_source.load()
+    calls = []
+    clean_env.setattr(_limix_source, "locate", lambda: calls.append(1))
+    assert _limix_source.load() is first
+    assert not calls
+
+
+def test_switching_the_source_mid_process_warns(clean_env, tmp_path):
+    clean_env.setenv("LAZY_LIMIX_SRC", str(_fake_source(tmp_path / "one")))
+    with pytest.warns(_limix_source.LimiXSourceWarning, match="unknown"):
+        first = _limix_source.load()
+    other = _fake_source(tmp_path / "two")
+    clean_env.setenv("LAZY_LIMIX_SRC", str(other))
+    with pytest.warns(_limix_source.LimiXSourceWarning, match="another"):
+        assert _limix_source.load() is first
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _limix_source.load() is first  # warned once
