@@ -212,11 +212,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         # `CHECKPOINTS` is the authority on which weights answer.
         options: dict[str, Any] = {}
         if group.native_transforms is not None:
-            # Upstream pairs members with norm methods round robin, as the
-            # planner assigned them, so the distinct tokens in order suffice.
-            options["norm_methods"] = list(
-                dict.fromkeys(group.native_transforms)
-            )
+            options["norm_methods"] = _norm_methods(group.native_transforms)
         if not group.feature_shuffle:
             options["feat_shuffle_method"] = "none"
         tabicl = self._import_backend()
@@ -307,6 +303,35 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the count is recorded when predicting.
         return {"quantiles": getattr(self, "n_quantiles_", None)}
+
+
+def _norm_methods(tokens: tuple[str, ...]) -> list[str]:
+    """TabICL's ``norm_methods`` for the members' planned transforms.
+
+    Upstream pairs member ``k`` with norm method ``k % len(norm_methods)``,
+    and a norm method listed twice gives two members the same feature
+    shuffle as well, so they are one member counted twice. The distinct
+    tokens in order therefore run the plan only when it cycles through them.
+
+    Args:
+        tokens: TabICL's token for each member's transform, in member order.
+
+    Returns:
+        The distinct tokens, in order.
+
+    Raises:
+        ValueError: If the plan repeats a transform within a cycle, as
+            ``transforms=("power", "power", "none")`` does.
+    """
+    methods = list(dict.fromkeys(tokens))
+    cycled = tuple(methods[i % len(methods)] for i in range(len(tokens)))
+    if cycled != tuple(tokens):
+        raise ValueError(
+            "TabICL runs each of its transforms once per cycle over the "
+            f"members, so it cannot weight them as {tuple(tokens)}; list "
+            "each transform once in transforms"
+        )
+    return methods
 
 
 def _target_scaling(y: _typing.FloatArray) -> tuple[float, float]:

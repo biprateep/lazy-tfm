@@ -22,6 +22,8 @@ import pytest
 
 import lazy
 from lazy.models import _icl_stream
+from lazy.models import _members
+from lazy.models import _transforms
 from lazy.models import tabfm
 from lazy.models import tabicl
 from lazy.models import tabpfn
@@ -280,6 +282,29 @@ class TestTabFM:
         assert est.native_grid_.z_min == 0.5
         assert 0.5 < est.native_grid_.z_max < 0.5 + 1e-5
 
+    def test_repeated_transforms_keep_their_weights(self, tiny):
+        """Upstream cycles norm_methods, so repeats in it are members."""
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm",
+            n_coarse_bins=2,
+            n_fine_bins=2,
+            n_estimators=6,
+            transforms=("power", "power", "none"),
+        ).fit(X, z)
+        classifier = est._classifier(
+            model=None, group=est.member_groups_[0], seed=0, max_rows=None
+        )
+        assert (
+            classifier.get_params()["norm_methods"]
+            == [
+                "power",
+                "power",
+                "none",
+            ]
+            * 2
+        )
+
     def test_the_classifier_only_receives_supported_keywords(self, tiny):
         """Cache knobs exist on repository builds, not on the PyPI release."""
         upstream = pytest.importorskip("tabfm")
@@ -418,6 +443,18 @@ class TestTabICL:
             median_error(1e4), median_error(0.0), atol=1e-5
         )
 
+    def test_a_plan_cycling_its_transforms_runs_as_planned(self):
+        assert tabicl._norm_methods(("power", "none", "power")) == [
+            "power",
+            "none",
+        ]
+        assert tabicl._norm_methods(("none",) * 4) == ["none"]
+
+    def test_repeated_transforms_are_rejected(self):
+        """Repeats would be identical members upstream, not more of them."""
+        with pytest.raises(ValueError, match="once per cycle"):
+            tabicl._norm_methods(("power", "power", "none"))
+
     def test_quantile_levels_are_interior_and_symmetric(self):
         levels = tabicl.quantile_levels(999)
         assert levels.size == 999
@@ -483,6 +520,37 @@ class TestTabPFN:
         real = tmp_path / "model.safetensors"
         real.write_bytes(b"weights")
         assert tabpfn.path_for_tabpfn(real) is real
+
+    def test_repeated_transforms_keep_their_weights(self):
+        """Upstream shares members equally among the configs it is given."""
+        ensemble = pytest.importorskip("tabpfn.preprocessing.ensemble")
+        (group,) = _members.plan(
+            n_estimators=12,
+            transforms=_transforms.parse(("power", "power", "none")),
+            native_transforms=tabpfn.TabPFNBarDistribution.native_transforms,
+            feature_shuffle=True,
+            bag_rows=10,
+            n_rows=10,
+            n_features=2,
+            random_state=0,
+            supports_native_bagging=True,
+        )
+        est = tabpfn.TabPFNBarDistribution()
+        configs = est._inference_config(group)["PREPROCESS_TRANSFORMS"]
+        assert [c.name for c in configs] == ["power", "power", "none"]
+        members = ensemble.generate_regression_ensemble_configs(
+            num_estimators=12,
+            add_fingerprint_feature=False,
+            polynomial_features="no",
+            feature_shift_decoder=None,
+            preprocessor_configs=configs,
+            target_transforms=[None, None],
+            random_state=0,
+            num_models=1,
+            outlier_removal_std=None,
+        )
+        names = [m.preprocess_config.name for m in members]
+        assert names.count("power") == 2 * names.count("none") == 8
 
     def test_bucket_masses_reads_the_bar_distribution(self):
         """Softmaxed logits and the borders as redshifts, with no reindexing."""

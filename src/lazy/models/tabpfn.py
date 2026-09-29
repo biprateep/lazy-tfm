@@ -247,9 +247,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
             configs = tabpfn.preprocessing.configs
 
-            # Upstream spreads its transforms evenly across members, as the
-            # planner assigned them, so the distinct tokens in order suffice.
-            # The settings are those the paper's recipe runs used.
+            # Upstream gives each listed config an equal share of the
+            # members, repeats included, so one cycle of the plan keeps its
+            # weights. The settings are those the paper's recipe runs used.
             overrides["PREPROCESS_TRANSFORMS"] = [
                 configs.PreprocessorConfig(
                     name,
@@ -257,7 +257,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                     categorical_name="ordinal_shuffled",
                     max_features_per_estimator=768,
                 )
-                for name, original in dict.fromkeys(group.native_transforms)
+                for name, original in _cycle(group.native_transforms)
             ]
         if not group.feature_shuffle:
             overrides["FEATURE_SHIFT_METHOD"] = None
@@ -286,6 +286,34 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
+    """The shortest prefix of ``tokens`` that repeats to give all of them.
+
+    Upstream shares the members out among its preprocessing configs (and,
+    within each, its target transforms) in equal blocks, so handing it one
+    cycle of the planned transforms, repeats included, keeps their weights:
+    exactly when the member count is a multiple of the cycle's length times
+    the number of target transforms, and to within one block otherwise.
+
+    Args:
+        tokens: TabPFN's token for each member's transform, in member order.
+
+    Returns:
+        The cycle, e.g. ``("power", "power", "none")`` for the tokens of
+        ``transforms=("power", "power", "none")``.
+
+    Examples:
+        >>> _cycle(("a", "b", "a", "b", "a"))
+        ('a', 'b')
+        >>> _cycle(("a", "a", "b", "a", "a", "b"))
+        ('a', 'a', 'b')
+    """
+    for length in range(1, len(tokens)):
+        if all(token == tokens[i % length] for i, token in enumerate(tokens)):
+            return tokens[:length]
+    return tokens
 
 
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:

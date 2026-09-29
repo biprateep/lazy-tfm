@@ -687,9 +687,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "verbose": False,
         }
         if group.native_transforms is not None:
-            kwargs["norm_methods"] = list(
-                dict.fromkeys(group.native_transforms)
-            )
+            # Upstream cycles its norm methods over the members, so the
+            # per-member list runs exactly as planned, repeats and all.
+            kwargs["norm_methods"] = list(group.native_transforms)
         if not group.feature_shuffle:
             kwargs["feat_shuffle_method"] = "none"
         if max_rows is not None:
