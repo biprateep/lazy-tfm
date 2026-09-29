@@ -9,6 +9,7 @@ switching between them is a string change rather than an import change::
     model = LazyModel("tabfm", n_estimators=4, n_dither=3)
     model = LazyModel("tabicl", n_estimators=8)
     model = LazyModel("tabpfn", n_estimators=8)
+    model = LazyModel("limix", n_estimators=8)
 
     model.fit(X_train, z_train)
     pdfs = model.predict_proba(X_test, z_grid)
@@ -16,7 +17,8 @@ switching between them is a string change rather than an import change::
 
 The concrete classes (:class:`lazy.models.tabfm.TabFMHistogram`,
 :class:`lazy.models.tabicl.TabICLQuantile`,
-:class:`lazy.models.tabpfn.TabPFNBarDistribution`) remain importable and behave
+:class:`lazy.models.tabpfn.TabPFNBarDistribution`,
+:class:`lazy.models.limix.LimiXBarDistribution`) remain importable and behave
 identically -- a fitted ``LazyModel`` holds one as ``estimator_`` and delegates
 to it. Use the concrete class when you want its parameters documented at your
 fingertips; use ``LazyModel`` when the backend is a configuration value, which
@@ -60,15 +62,18 @@ class LazyModel(base.BaseDensityRegressor):
         model: Which backend to use; one of :func:`lazy.list_estimators`.
             ``"tabfm"`` builds the density from a hierarchy of in-context
             classifiers, ``"tabicl"`` from a quantile regression head,
-            ``"tabpfn"`` from the bucket masses TabPFN-3 predicts natively.
+            ``"tabpfn"`` and ``"limix"`` from the bucket masses TabPFN and
+            LimiX-2 predict natively.
         z_grid: Default output grid for this model: a
-            :class:`lazy.grid.Grid`, an array of bin centres, or
-            ``None`` for :data:`lazy.grid.DC1_GRID`. Every prediction method
-            takes a ``z_grid`` that overrides it per call.
+            :class:`lazy.grid.Grid`, an array of bin centres, or ``None``
+            for the backend's native grid (its ``native_grid_`` after fit).
+            Every prediction method takes a ``z_grid`` that overrides it
+            per call.
         **params: Passed straight to the backend's constructor. See
             :class:`lazy.models.tabfm.TabFMHistogram`,
-            :class:`lazy.models.tabicl.TabICLQuantile` and
-            :class:`lazy.models.tabpfn.TabPFNBarDistribution` for what each
+            :class:`lazy.models.tabicl.TabICLQuantile`,
+            :class:`lazy.models.tabpfn.TabPFNBarDistribution` and
+            :class:`lazy.models.limix.LimiXBarDistribution` for what each
             accepts; a name the backend does not take raises ``TypeError`` at
             :meth:`fit`, naming the class.
 
@@ -120,10 +125,12 @@ class LazyModel(base.BaseDensityRegressor):
         defaults = _backend_defaults(self.model) or {}
         params = {
             k: v
-            for k, v in self._params.items()
-            if k not in defaults or v != defaults[k]
+            for k, v in sorted(self._params.items())
+            if not _is_default(v, defaults, k)
         }
-        inner = ", ".join(f"{k}={v!r}" for k, v in sorted(params.items()))
+        if self.z_grid is not None:
+            params = {"z_grid": self.z_grid, **params}
+        inner = ", ".join(f"{k}={v!r}" for k, v in params.items())
         return f"LazyModel({self.model!r}{', ' + inner if inner else ''})"
 
     # -- delegation --------------------------------------------------------

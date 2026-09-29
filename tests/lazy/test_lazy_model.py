@@ -171,6 +171,12 @@ def test_repr_names_the_backend_and_only_non_default_parameters():
     assert repr(with_dither) == "LazyModel('tabfm', n_dither=3)"
 
 
+def test_repr_shows_a_grid_other_than_the_native_one():
+    grid = lazy.Grid.linear(0.0, 3.0, 37)
+    model = lazy.LazyModel("tabfm", z_grid=grid, n_dither=3)
+    assert repr(model) == f"LazyModel('tabfm', z_grid={grid!r}, n_dither=3)"
+
+
 def test_the_grid_default_is_carried_down_to_the_backend():
     grid = lazy.Grid.linear(0.0, 3.0, 37)
     model = lazy.LazyModel("tabicl", z_grid=grid)
