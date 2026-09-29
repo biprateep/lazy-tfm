@@ -243,6 +243,17 @@ def test_a_fitted_model_survives_pickling(registered):
     assert np.array_equal(copy.predict_proba(X), model.predict_proba(X))
 
 
+def test_a_parameter_set_after_fit_reads_back_as_set(registered):
+    X = np.random.default_rng(0).normal(size=(10, 2))
+    z = np.random.default_rng(1).uniform(0.2, 1.8, 10)
+    model = lazy.LazyModel(registered, width=2.0).fit(X, z)
+    model.set_params(width=3.0)
+    assert model.width == 3.0
+    assert model.get_params()["width"] == 3.0
+    assert model.estimator_.width == 2.0  # until the next fit
+    assert model.n_context_ == 10
+
+
 def test_the_wrapper_forwards_distributions_and_quantiles(registered):
     X = np.random.default_rng(0).normal(size=(12, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 12)

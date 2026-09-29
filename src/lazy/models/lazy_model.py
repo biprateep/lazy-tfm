@@ -185,8 +185,10 @@ class LazyModel(base.BaseDensityRegressor):
             name: The attribute looked up.
 
         Returns:
-            The fitted backend's attribute after ``fit``; before it, the
-            backend parameter as given, or its default.
+            For a backend parameter, its value as last given (by the
+            constructor or :meth:`set_params`), or its default -- even after
+            ``fit``, so a parameter set since reads back as set. For
+            anything else, the fitted backend's attribute.
 
         Raises:
             AttributeError: If neither this object nor its backend has it.
@@ -198,17 +200,16 @@ class LazyModel(base.BaseDensityRegressor):
             or "_params" not in state
         ):
             raise AttributeError(name)
+        if name in state["_params"]:
+            return state["_params"][name]
+        defaults = _backend_defaults(state["model"]) or {}
+        if name in defaults:
+            return defaults[name]
         if "estimator_" in state:
             try:
                 return getattr(state["estimator_"], name)
             except AttributeError:
                 pass
-        elif name in state["_params"]:
-            return state["_params"][name]
-        else:
-            defaults = _backend_defaults(state["model"]) or {}
-            if name in defaults:
-                return defaults[name]
         backend = registry.ESTIMATORS.get(state["model"])
         if backend is None:
             raise AttributeError(f"LazyModel has no attribute {name!r}")
