@@ -22,8 +22,13 @@ needs_checkpoint = pytest.mark.skipif(
     ),
 )
 
-#: Relative tolerance per backend; 0 means bit-identical.
-RTOL = {"tabpfn": 0.0, "tabicl": 0.0, "tabfm": 1e-12}
+#: Relative tolerance per backend; 0 means bit-identical. TabPFN's bucket
+#: borders are now built in float64 where the recorded run had upstream's
+#: float32 ones, which moved the rebinned densities by float32 rounding.
+RTOL = {"tabpfn": 1e-4, "tabicl": 0.0, "tabfm": 1e-12}
+
+#: Absolute tolerance per backend, as a fraction of the peak density.
+ATOL = {"tabpfn": 1e-6}
 
 
 @needs_checkpoint
@@ -38,4 +43,9 @@ def test_the_default_path_reproduces_the_golden_densities(name):
     if RTOL[name] == 0.0:
         np.testing.assert_array_equal(pdfs, reference["pdfs"])
     else:
-        np.testing.assert_allclose(pdfs, reference["pdfs"], rtol=RTOL[name])
+        np.testing.assert_allclose(
+            pdfs,
+            reference["pdfs"],
+            rtol=RTOL[name],
+            atol=ATOL.get(name, 0.0) * reference["pdfs"].max(),
+        )

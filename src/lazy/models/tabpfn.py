@@ -268,8 +268,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.HistogramDistribution:
-        borders, masses = bucket_masses(handle.predict(X, output_type="full"))
-        return distributions.HistogramDistribution(borders, masses)
+        _, masses = bucket_masses(handle.predict(X, output_type="full"))
+        return distributions.HistogramDistribution(
+            _bucket_borders(handle), masses
+        )
 
     def _native_grid(self) -> grid_lib.Grid:
         edges = np.unique(self.borders_)
@@ -289,10 +291,16 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """The fitted regressor's bucket borders in the target's units.
 
-    Upstream keeps them as ``raw_space_bardist_``, except for a constant
-    target: it then skips the model altogether, predicts one bucket around
-    the constant, and keeps that bucket (already in the target's units) as
-    ``znorm_space_bardist_``.
+    Upstream keeps them as ``raw_space_bardist_``, but in float32, which
+    cannot resolve a narrow spread about a large offset (for targets
+    ``1e4 + 0.01 * noise`` most buckets come out zero-width). So they are
+    rebuilt here in float64 exactly as upstream builds them, from the
+    z-normalised borders and the context targets' mean and standard
+    deviation; the buckets, and so the masses in them, are the same ones.
+
+    For a constant target upstream skips the model altogether, predicts one
+    bucket around the constant, and keeps that bucket (already in the
+    target's units) as ``znorm_space_bardist_``.
 
     Args:
         regressor: A fitted ``tabpfn.TabPFNRegressor``.
@@ -300,12 +308,13 @@ def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     Returns:
         The borders, made non-decreasing, shape ``(n_buckets + 1,)``.
     """
-    if getattr(regressor, "is_constant_target_", False):
-        bardist = regressor.znorm_space_bardist_
-    else:
-        bardist = regressor.raw_space_bardist_
-    borders = bardist.borders.detach().cpu().numpy()
-    return np.maximum.accumulate(np.asarray(borders, dtype=np.float64))
+    znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
+    borders = np.asarray(znorm, dtype=np.float64)
+    if not getattr(regressor, "is_constant_target_", False):
+        borders = borders * float(regressor.y_train_std_) + float(
+            regressor.y_train_mean_
+        )
+    return np.maximum.accumulate(borders)
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:

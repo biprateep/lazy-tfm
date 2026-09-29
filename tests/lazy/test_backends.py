@@ -484,6 +484,39 @@ class TestTabPFN:
         )
         assert tabpfn._bucket_borders(regressor).tolist() == [0.25, 0.75]
 
+    def test_borders_are_rebuilt_in_float64(self):
+        """float32 borders cannot resolve 0.01 of spread about 1e4."""
+        torch = pytest.importorskip("torch")
+
+        regressor = types.SimpleNamespace(
+            znorm_space_bardist_=types.SimpleNamespace(
+                borders=torch.linspace(-3.0, 3.0, 5001)
+            ),
+            y_train_mean_=1e4,
+            y_train_std_=0.01,
+        )
+        borders = tabpfn._bucket_borders(regressor)
+        assert borders.dtype == np.float64
+        assert np.all(np.diff(borders) > 0)
+        assert borders[0] == pytest.approx(1e4 - 0.03, abs=1e-9)
+
+    @needs_checkpoint
+    @pytest.mark.parametrize("offset", [0.0, 1e4])
+    def test_the_borders_are_upstream_buckets_uncollapsed(self, offset):
+        """The same buckets as upstream's, but none of them collapsed."""
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(80, 3))
+        y = offset + 0.01 * (X[:, 0] + 0.3 * generator.normal(size=80))
+        est = tabpfn.TabPFNBarDistribution(
+            n_estimators=1, device="cpu", progress=False
+        ).fit(X[:60], y[:60])
+        raw = est.regressor_.raw_space_bardist_.borders.cpu().numpy()
+        assert est.borders_.size == raw.size
+        np.testing.assert_allclose(est.borders_, raw, rtol=1e-6, atol=1e-8)
+        assert np.all(np.diff(est.borders_) > 0)
+        dist = est.predict_distribution(X[60:])
+        np.testing.assert_array_equal(dist.bins, est.borders_)
+
     @needs_checkpoint
     def test_a_constant_target_predicts_one_narrow_bucket(self):
         generator = np.random.default_rng(0)
