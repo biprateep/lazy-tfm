@@ -165,3 +165,11 @@ def test_cdf_column_zero_follows_the_normalisation_convention():
     )
     assert "histogram grid" in lazy.Grid.cdf.__doc__
     assert "histogram grid" in lazy.BaseDensityRegressor.predict_cdf.__doc__
+
+
+def test_equal_grids_hash_alike():
+    grid = lazy.Grid.linear(0.0, 2.0, 20)
+    nudged = lazy.Grid.from_edges(grid.edges + 1e-13)
+    assert nudged == grid
+    assert hash(nudged) == hash(grid)
+    assert len({grid, nudged}) == 1

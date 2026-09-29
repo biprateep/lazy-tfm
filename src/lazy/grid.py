@@ -232,7 +232,9 @@ class Grid:
         )
 
     def __hash__(self) -> int:
-        return hash((self.n_bins, self.z_min, self.z_max))
+        # Only what __eq__ compares exactly: edges within its tolerance of
+        # each other must hash alike, so no edge value can enter the hash.
+        return hash((self.n_bins, self.normalization))
 
     def __repr__(self) -> str:
         extra = (
