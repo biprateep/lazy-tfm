@@ -207,6 +207,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         try:
             import tabpfn  # noqa: PLC0415 - an optional, heavy extra.
         except ImportError as error:
+            # Only the backend itself missing is a missing extra; anything
+            # it fails to import in turn is reported as it is.
+            if (error.name or "").partition(".")[0] != "tabpfn":
+                raise
             raise ImportError(
                 "TabPFNBarDistribution needs the tabpfn backend: "
                 "pip install 'lazy-tfm[tabpfn]'"

@@ -10,6 +10,7 @@ cannot be reasoned about from the outside. It loads a multi-gigabyte checkpoint,
 so it only runs when ``LAZY_RUN_CHECKPOINT_TESTS=1`` is set.
 """
 
+import builtins
 import inspect
 import os
 import sys
@@ -825,6 +826,26 @@ class TestMissingBackend:
         X, z = tiny
         with pytest.raises(ImportError, match=r"lazy-tfm\[tabfm\]"):
             lazy.LazyModel("tabfm").fit(X, z)
+
+    @pytest.mark.parametrize("name", ["tabicl", "tabpfn", "tabfm"])
+    def test_a_backend_missing_a_dependency_says_so(
+        self, name, tiny, monkeypatch
+    ):
+        """Not "pip install lazy-tfm[x]" when x is installed but broken."""
+        real_import = builtins.__import__
+
+        def importing(module, *args, **kwargs):
+            if module == name:
+                raise ModuleNotFoundError(
+                    "No module named 'torch'", name="torch"
+                )
+            return real_import(module, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", importing)
+        X, z = tiny
+        with pytest.raises(ModuleNotFoundError, match="torch") as raised:
+            lazy.LazyModel(name).fit(X, z)
+        assert "lazy-tfm" not in str(raised.value)
 
     def test_the_missing_backend_is_reported_before_parameter_problems(
         self, without, tiny
