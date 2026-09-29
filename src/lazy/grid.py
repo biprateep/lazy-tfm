@@ -309,10 +309,10 @@ class Grid:
         produces in the crowded part of N(z).
 
         Args:
-            probs: Non-negative masses, shape (n_rows, n_input_bins); each row
-                is renormalised to sum to one.
-            edges: The edges the masses are defined on, shape
-                (n_input_bins + 1,).
+            probs: Finite, non-negative masses, shape (n_rows, n_input_bins);
+                each row is renormalised to sum to one.
+            edges: The finite, non-decreasing edges the masses are defined
+                on, shape (n_input_bins + 1,).
 
         Returns:
             Densities on this grid, shape (n_rows, n_bins).
@@ -325,6 +325,12 @@ class Grid:
             raise ValueError(
                 "edges must have one more entry than probs has columns"
             )
+        if not np.isfinite(in_edges).all():
+            raise ValueError("edges must all be finite")
+        if np.any(np.diff(in_edges) < 0):
+            raise ValueError("edges must be non-decreasing")
+        if not np.isfinite(p).all() or np.any(p < 0):
+            raise ValueError("probs must be finite and non-negative")
         p = p / np.maximum(p.sum(axis=1, keepdims=True), 1e-300)
         widths = np.diff(in_edges)
         out_edges = self.edges

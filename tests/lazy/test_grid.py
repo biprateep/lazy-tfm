@@ -127,3 +127,28 @@ def test_from_centers_names_unsorted_centres():
 def test_from_centers_accepts_float_rounded_uniform_centres():
     centers = np.linspace(0.005, 2.995, 300)
     assert np.allclose(lazy.Grid.from_centers(centers).centers, centers)
+
+
+@pytest.mark.parametrize(
+    ("probs", "edges", "match"),
+    [
+        (np.ones((2, 4)), [0.0, 0.5, np.inf, 1.5, 2.0], "finite"),
+        (np.ones((2, 4)), [0.0, 0.5, np.nan, 1.5, 2.0], "finite"),
+        (np.ones((2, 4)), [0.0, 1.0, 0.5, 1.5, 2.0], "non-decreasing"),
+        ([[1.0, -0.5, 1.0, 1.0]], [0.0, 0.5, 1.0, 1.5, 2.0], "non-negative"),
+        ([[1.0, np.nan, 1.0, 1.0]], [0.0, 0.5, 1.0, 1.5, 2.0], "finite"),
+    ],
+)
+def test_rebin_refuses_what_a_histogram_distribution_refuses(
+    probs, edges, match
+):
+    with pytest.raises(ValueError, match=match):
+        lazy.Grid.linear(0.0, 2.0, 10).rebin(probs, edges)
+
+
+def test_rebin_accepts_zero_width_input_bins_without_mass():
+    edges = [0.0, 0.5, 0.5, 1.5, 2.0]
+    density = lazy.Grid.linear(0.0, 2.0, 10).rebin(
+        [[1.0, 0.0, 1.0, 1.0]], edges
+    )
+    assert np.isfinite(density).all()
