@@ -233,9 +233,14 @@ print(
 # Every model has the same interface, so trying another is one line. TabICL
 # is small, BSD-licensed and fast on a CPU; it is the one to use on a laptop.
 # We run it on the same galaxies and compare.
+#
+# We ask for 4 ensemble members instead of the default 8. Caching the context
+# for 8 members briefly needs about 14 GB of GPU memory with this many rows,
+# more than Colab's T4 has to spare; 4 need about 7 GB.
 
 # %%
-tabicl = lazy.LazyModel("tabicl", random_state=SEED).fit(X_train, z_train)
+tabicl = lazy.LazyModel("tabicl", n_estimators=4, random_state=SEED)
+tabicl.fit(X_train, z_train)
 pdfs_tabicl = tabicl.predict_proba(X_test, grid)
 
 pd.concat(
