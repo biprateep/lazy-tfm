@@ -81,9 +81,28 @@ The first release. Everything below is new.
   DataFrames, astropy Tables or any object with `to_pandas()`. Missing values
   are `NaN` and pass through to each model's own handling; infinities and
   non-numeric columns are rejected with the offending columns named.
+- A **Supported models** page in the docs: each model's weights, parameter
+  count, licence, measured cost on GPU and CPU, and hardware needs.
+- `lazy.PerformanceWarning` at `fit` when `device="auto"` finds no GPU for a
+  model that is slow on a CPU (TabPFN, LimiX-2, TabFM), suggesting TabICL.
+- Every `lazy.metrics` function that takes `z_grid` also takes a `Grid`, and
+  then scores it by its own normalisation. New `metrics.per_object_scores`
+  and `metrics.summarize_scores`, for building the summary from pieces.
+- `scale="1+z" | "none"` on `point_metrics`, `summarize` and `evaluate`: the
+  default keeps the photo-z convention (and DC1's numbers); `"none"` uses
+  plain residuals, for other targets. Summary tables gain a `scale` column.
+- `random_state=None` draws a fresh seed at `fit` and records it as
+  `random_state_` and in `provenance_`.
 
 ### Changed
 
+- `LazyModel()` defaults to TabPFN, and TabPFN to v3.5.
+- A cached checkpoint loads without contacting the Hugging Face Hub, so there
+  is no network round trip and no "unauthenticated requests" notice; the
+  TabICL checkpoint is now pinned to a Hub commit like the others.
+- `predict`, `score` and `evaluate` work through the rows a block at a time
+  (about 256 MB of densities per block), so memory stays bounded on large
+  native grids; results are unchanged.
 - The package is for any continuous target, not only redshift, and its
   generic API says so: `RedshiftGrid` is now `Grid` and `BasePhotoZEstimator`
   is `BaseDensityRegressor`; parameters that took redshifts take `values`,
@@ -134,6 +153,27 @@ The first release. Everything below is new.
 
 ### Fixed
 
+- `Grid.from_centers` and `as_grid` refuse unevenly spaced centres, which they
+  used to move silently; use `Grid.from_edges` for those.
+- An unfitted model raises scikit-learn's `NotFittedError` from every method.
+- `score` and `evaluate` check the targets (finite, one per row) and the
+  point-estimate `method` before running the model; NaN targets used to give a
+  plausible, wrong score.
+- Zero-row inputs: `fit` raises scikit-learn's error; predictions return
+  correctly shaped empty results.
+- `LazyModel.set_params(model=...)` keeps the settings the new backend also
+  takes, so a `GridSearchCV` over backends no longer resets them, and
+  attributes read after `set_params` show the new values.
+- `n_estimators`, `bag_size`, `random_state` and `chunk_size` accept NumPy
+  numbers; `device` accepts a `torch.device` and rejects unknown values
+  clearly; an unknown `version` raises `ValueError` listing the pinned ones.
+- `ContextSizeWarning` also fires when bags are larger than a model's limit,
+  and a warning flags bags under 10 rows (as from `bag_size=1` meaning `1.0`).
+- The `power` transform passes constant and all-NaN columns through; indexing
+  a distribution with `ancil` by an integer works; `Grid.rebin` validates its
+  input; `HistogramDistribution.ppf` at 0 and 1 stays inside the support;
+  `Grid`'s hash agrees with its equality; feature-name warnings point at the
+  caller's line.
 - TabFM's `inference="predict_proba"` path (the PyPI `tabfm` release) now
   honours `chunk_size`. It used to pass every query row to upstream
   `predict_proba` at once, so peak memory grew with the query set. The
