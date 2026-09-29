@@ -7,6 +7,8 @@ change the API.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-29
+
 The first release. Everything below is new.
 
 ### Added
@@ -224,4 +226,5 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/commits/main
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/biprateep/lazy-tfm/releases/tag/v0.1.0
