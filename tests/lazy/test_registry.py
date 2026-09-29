@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import json
+import re
 
 import pytest
 
@@ -52,7 +53,9 @@ def test_every_checkpoint_is_pinned():
         )
         assert spec.backend in lazy.ESTIMATORS
         assert spec.repo_id and spec.package and spec.version
-        assert spec.revision is not None or spec.filename is not None
+        assert re.fullmatch("[0-9a-f]{40}", spec.revision or ""), (
+            f"{key} must pin a full commit hash, not {spec.revision!r}"
+        )
         assert spec.license_note
 
 

@@ -59,9 +59,9 @@ class Checkpoint:
         allow_patterns: ``snapshot_download`` patterns, for repositories
             holding several models.
         filename: A single file to fetch instead of a filtered snapshot.
-        revision: Pinned git revision; ``None`` means the repository has no
-            history worth pinning because ``filename`` already names an
-            immutable artifact.
+        revision: The pinned git commit of ``repo_id``. ``None`` would track
+            the repository's default branch; no registered checkpoint does,
+            because even a dated filename can be replaced upstream.
         license_note: Anything a user must know before downloading. Surfaced
             in the docs.
         size_note: The download size, and any limit the model declares.
@@ -213,6 +213,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             repo_id="jingang/TabICL",
             package="tabicl",
             filename="tabicl-regressor-v2-20260212.ckpt",
+            revision="4dcd344ece2c00be9e831fdd35bed57b5ad83e19",
             license_note=(
                 "TabICL is released under BSD-3-Clause; see "
                 "https://huggingface.co/jingang/TabICL."
@@ -221,8 +222,8 @@ CHECKPOINTS: dict[str, Checkpoint] = {
         ),
         # The TabPFN family. Every filename below names "the default" of its
         # release, which is a moving name -- the repository is free to replace
-        # the file a later release calls that -- so unlike TabICL's dated
-        # filename each one needs the revision as well.
+        # the file a later release calls that -- so the revision is what
+        # fixes the weights.
         Checkpoint(
             backend="tabpfn",
             version="v2",
