@@ -778,7 +778,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "max_num_rows": max_rows,
             "softmax_temperature": self._temperature(),
             # Informational only in TabFM; the precision is the weights'.
-            "use_amp": True,
+            "use_amp": self.mixed_precision_,
             "batch_size": self.member_batch_size,
             "random_state": seed,
             **_PINNED_CLASSIFIER_ARGS,
@@ -799,16 +799,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """The loaded TabFM classification model, cached on the instance.
 
         The checkpoint is several gigabytes, so it is loaded once per estimator
-        and reused across calls. The cache is keyed by ``version`` so that
-        changing it can never leave a prediction running on the previous
-        model's weights, and it is dropped on pickling: an unpickled estimator
-        reloads from the local cache on next use.
+        and reused across calls. The weights are stored in float32 and TabFM
+        is designed to compute in bfloat16, which it does here only under
+        ``mixed_precision`` on CUDA; otherwise, the CPU included, the
+        float32 weights are kept. The cache is keyed by ``version``, device
+        and precision so that changing one can never leave a prediction
+        running on the previous model's weights, and it is dropped on
+        pickling: an unpickled estimator reloads from the local cache on next
+        use.
         """
-        cached_version, model = getattr(self, "_backbone_cache", (None, None))
-        if model is None or cached_version != self.version:
+        key = (self.version, str(self.device_), self.mixed_precision_)
+        cached_key, model = getattr(self, "_backbone_cache", (None, None))
+        if model is None or cached_key != key:
             from tabfm import (  # noqa: PLC0415 - optional backend, imported at use.
                 tabfm_v1_0_0_pytorch as tabfm_v1,
             )
+            import torch  # noqa: PLC0415 - optional backend, imported at use.
 
             self.checkpoint_ = _hub.get_checkpoint(
                 "tabfm", self.version
@@ -821,8 +827,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 model_type="classification",
                 device=self.device_,
                 checkpoint_path=str(self.checkpoint_),
+                # None keeps the stored float32 weights.
+                dtype=torch.bfloat16 if self.mixed_precision_ else None,
             )
-            self._backbone_cache = (self.version, model)
+            self._backbone_cache = (key, model)
         return model
 
     def __getstate__(self) -> dict[str, Any]:

@@ -276,6 +276,41 @@ class TestTabFM:
                 other, whole, rtol=rtol, atol=rtol * whole.max()
             )
 
+    def test_mixed_precision_picks_the_weights_dtype(self, monkeypatch):
+        """bfloat16 only under mixed precision on CUDA; float32 otherwise."""
+        upstream = pytest.importorskip("tabfm")
+        torch = pytest.importorskip("torch")
+
+        loads = []
+
+        def load(**kwargs):
+            loads.append(kwargs["dtype"])
+            return object()
+
+        monkeypatch.setattr(upstream.tabfm_v1_0_0_pytorch, "load", load)
+        checkpoint = types.SimpleNamespace(download=lambda: "/nowhere")
+        monkeypatch.setattr(
+            tabfm._hub, "get_checkpoint", lambda *args: checkpoint
+        )
+        # What fit resolves on a CPU, set by hand: the hub is stubbed.
+        est = tabfm.TabFMHistogram()
+        est.device_ = "cpu"
+        est.mixed_precision_ = False
+        first = est._backbone()
+        assert loads == [None]
+        assert est._backbone() is first  # cached
+        est.mixed_precision_ = True  # what fit resolves on CUDA
+        est._backbone()
+        assert loads == [None, torch.bfloat16]
+
+    def test_a_cpu_fit_never_uses_mixed_precision(self, tiny):
+        X, z = tiny
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, device="cpu"
+        ).fit(X, z)
+        assert est.mixed_precision_ is False
+        assert est.provenance_["mixed_precision"] is False
+
     def test_a_constant_target_fits_with_a_valid_native_grid(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(200, 2))
