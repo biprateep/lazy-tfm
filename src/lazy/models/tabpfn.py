@@ -446,6 +446,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             tuning_config=None,
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
+            inference_precision=self._inference_precision(),
             inference_config=self._inference_config(group),
             **_cache_options(self.kv_cache),
         )
@@ -453,6 +454,17 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.borders_ = _bucket_borders(regressor)
         self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
+
+    def _inference_precision(self) -> Any:
+        """Upstream's ``inference_precision``: autocast, or float32.
+
+        Upstream's own default, ``"auto"``, autocasts on a GPU (float16) and
+        on a CPU with fast bfloat16 (AMX, AVX512-BF16, Zen 4); here only
+        ``mixed_precision_`` autocasts, which is never on a CPU.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        return "autocast" if self.mixed_precision_ else torch.float32
 
     def _auto_softmax_temperature(self) -> float:
         return float(_AUTO_RECIPES[self.version]["SOFTMAX_TEMPERATURE"])
@@ -486,7 +498,13 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 None if rows is None else [len(r) for r in rows]
             )
             upstream.append(settings)
-        return {**super()._recipe(), "inference_config": upstream}
+        return {
+            **super()._recipe(),
+            "inference_precision": (
+                "autocast" if self.mixed_precision_ else "float32"
+            ),
+            "inference_config": upstream,
+        }
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray

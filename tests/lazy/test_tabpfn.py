@@ -232,3 +232,29 @@ def test_a_three_valued_column_stays_numeric(small, version):
     assert schema.indices_for(categorical) == []
     numerical = schema.indices_for(modalities.FeatureModality.NUMERICAL)
     assert len(numerical) == X.shape[1]
+
+
+@pytest.mark.parametrize(
+    ("mixed_precision", "expected"), [(True, "autocast"), (False, "float32")]
+)
+def test_only_mixed_precision_autocasts(mixed_precision, expected):
+    torch = pytest.importorskip("torch")
+    est = tabpfn.TabPFNBarDistribution()
+    est.mixed_precision_ = mixed_precision
+    precision = est._inference_precision()
+    assert precision == (
+        "autocast" if expected == "autocast" else torch.float32
+    )
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("mixed_precision", [True, False])
+def test_the_cpu_runs_in_float32(small, mixed_precision):
+    """Upstream would autocast to bfloat16 on a CPU that has it fast."""
+    torch = pytest.importorskip("torch")
+    X, y, _ = small
+    est = _fit(X, y, version="v3", mixed_precision=mixed_precision)
+    assert est.regressor_.use_autocast_ is False
+    assert est.regressor_.forced_inference_dtype_ is torch.float32
+    assert est.provenance_["mixed_precision"] is False
+    assert est.provenance_["inference_precision"] == "float32"
