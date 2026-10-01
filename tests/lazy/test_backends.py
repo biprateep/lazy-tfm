@@ -1388,15 +1388,18 @@ class TestTabPFN:
 
 
 @needs_checkpoint
-def test_chunking_the_query_rows_is_bit_identical(monkeypatch):
+def test_chunking_the_query_rows_changes_only_rounding(monkeypatch):
     """The claim that makes bounded memory free: chunking changes nothing.
 
     TabFM's in-context stage builds its keys and values from the context rows
     alone, so a query row's answer cannot depend on which other query rows
     share its chunk. If that ever stopped holding, `chunk_size` would silently
     change results instead of only peak memory, so it is asserted rather than
-    assumed. The rows each upstream call receives are recorded too, so the
-    comparison cannot pass by never chunking at all.
+    assumed. In float32 on a CPU the kernels round differently for different
+    batch shapes (about 2e-6 of the peak density), so the comparison is to
+    float rounding, not bit for bit (``exact_chunking`` is False). The rows
+    each upstream call receives are recorded too, so the comparison cannot
+    pass by never chunking at all.
     """
     upstream = pytest.importorskip("tabfm")
     predict_proba = upstream.TabFMClassifier.predict_proba
@@ -1439,7 +1442,7 @@ def test_chunking_the_query_rows_is_bit_identical(monkeypatch):
     assert set(whole_sizes) == {40}
     assert max(chunked_sizes) == 7
     assert len(chunked_sizes) == 6 * len(whole_sizes)
-    assert np.array_equal(whole, chunked)
+    np.testing.assert_allclose(chunked, whole, rtol=0, atol=1e-5 * whole.max())
 
 
 class TestMissingBackend:
