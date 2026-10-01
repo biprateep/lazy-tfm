@@ -333,7 +333,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             self._target_scaling = _target_scaling(y)
         offset, scale = self._target_scaling
         handle = self._fit_members(
-            X.astype(np.float32),
+            # The features stay float64: upstream fits its scaling and power
+            # transform in float64, and casts to float32 only for the model.
+            X,
             ((y - offset) / scale).astype(np.float32),
             group,
         )
@@ -362,7 +364,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         members it stands for.
 
         Args:
-            X: The group's prepared context features, float32, shape
+            X: The group's prepared context features, float64, shape
                 ``(n_rows, n_features)``.
             y: Their standardised targets, float32, shape ``(n_rows,)``.
             group: The members to run.
@@ -462,9 +464,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         quantiles = sum(
             (weight / total)
             * np.asarray(
-                regressor.predict(
-                    X.astype(np.float32), output_type="raw_quantiles"
-                ),
+                regressor.predict(X, output_type="raw_quantiles"),
                 dtype=np.float64,
             )
             for regressor, weight in zip(

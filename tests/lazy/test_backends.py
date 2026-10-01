@@ -547,6 +547,11 @@ class TestTabICL:
         with pytest.raises(ValueError, match="softmax_temperature must be"):
             tabicl.TabICLQuantile(softmax_temperature=0.9).fit(X, z)
 
+    def test_features_reach_upstream_in_float64(self, members):
+        members()
+        (regressor,) = _MemberRegressor.created
+        assert regressor.X_dtype == np.float64
+
     def test_members_are_averaged_in_a_fixed_order(self, monkeypatch):
         """Upstream orders them by a set, which PYTHONHASHSEED reorders."""
         preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
@@ -597,11 +602,12 @@ class TestTabICL:
                 n_estimators=2, device="cpu", progress=False, **params
             ).fit(X, z)
             generator = est.regressor_.ensemble_generator_
+            assert generator.X_.dtype == np.float64
             return generator.preprocessors_["none"].X_transformed_[7, 0]
 
         zscore = (40.0 - X[:, 0].mean()) / (X[:, 0].std() + 1e-6)
-        assert seen(transforms="none") == pytest.approx(zscore, rel=1e-6)
-        assert seen(outlier_threshold=None) == pytest.approx(zscore, rel=1e-6)
+        assert seen(transforms="none") == pytest.approx(zscore, rel=1e-12)
+        assert seen(outlier_threshold=None) == pytest.approx(zscore, rel=1e-12)
         assert seen() < 0.5 * zscore  # the auto recipe clips it at 4 sigma
 
     @needs_checkpoint
