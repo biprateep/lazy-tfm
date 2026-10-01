@@ -247,10 +247,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             compute.
         transforms: Per-member feature transforms: ``"auto"`` (TabFM's own
             ``none``/``power`` recipe), a recipe name, a transform name or a
-            sequence of them; see :mod:`lazy.models._transforms`. TabFM's
-            ``norm_methods`` implement ``none``, ``power``, ``quantile``,
-            ``quantile_rtdl`` and ``robust``; the rest are scaffolded, each as
-            a hierarchy of its own.
+            sequence of them; see :mod:`lazy.models._transforms`. ``none``
+            and ``power`` are TabFM's own ``norm_methods``, which equal
+            lazy's (TabFM applies them after its standardisation); the rest
+            are scaffolded, each as a hierarchy of its own, because TabFM's
+            namesakes differ (its ``robust`` scales to unit variance, its
+            ``quantile`` subsamples 10,000 rows, its ``quantile_rtdl`` draws
+            other noise).
         feature_shuffle: Whether members see the columns in different orders
             (TabFM's own feature shuffles).
         bag_size: Context rows per member: an int is a row count (1 means
@@ -331,13 +334,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     display_name = "TabFM"
     extra = "tabfm"
     native_output = "histogram"
-    native_transforms = {
-        "none": "none",
-        "power": "power",
-        "quantile": "quantile",
-        "quantile_rtdl": "quantile_rtdl",
-        "robust": "robust",
-    }
+    # Only TabFM's norm methods that are lazy's transforms: its robust scales
+    # to unit variance, its quantile subsamples 10,000 rows and its
+    # quantile_rtdl adds different noise, so those three are scaffolded.
+    native_transforms = {"none": "none", "power": "power"}
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
     native_outlier_clipping = True

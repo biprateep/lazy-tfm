@@ -434,6 +434,37 @@ class TestTabFM:
         assert not any(np.array_equal(p, np.arange(520)) for p in patterns(500))
         assert all(np.array_equal(p, np.arange(520)) for p in patterns(None))
 
+    @pytest.mark.parametrize("name", ["none", "power"])
+    def test_native_norm_methods_are_lazys_transforms(self, name):
+        """A name maps onto TabFM's own method only if that is the same."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.lognormal(size=(300, 3))
+        assert tabfm.TabFMHistogram.native_transforms[name] == name
+        pipeline = upstream.PreprocessingPipeline(name, np.inf, 0).fit(X)
+        # TabFM standardises first; the method itself sees what follows.
+        scaled = pipeline.standard_scaler_.transform(X)
+        native = (
+            scaled
+            if pipeline.normalizer_ is None
+            else pipeline.normalizer_.transform(scaled)
+        )
+        ours = _transforms.ScaffoldTransform(_transforms.parse(name)[0], 0)
+        np.testing.assert_allclose(
+            native, ours.fit(scaled).transform(scaled), rtol=0, atol=1e-12
+        )
+
+    @pytest.mark.parametrize("name", ["quantile", "quantile_rtdl", "robust"])
+    def test_other_transforms_are_scaffolded(self, tiny, monkeypatch, name):
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, transforms=name
+        ).fit(X, z)
+        assert est.member_groups_[0].scaffold.name == name
+        assert est.transformers_[0] is not None
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["norm_methods"] == ["none"] * est.n_estimators
+
     def test_an_infinite_threshold_is_tabfms_clip_turned_off(self):
         """The off switch is exact: the clip becomes the identity."""
         upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
