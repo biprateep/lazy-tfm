@@ -85,6 +85,13 @@ def test_backend_parameters_are_checked(params, message):
         _model(**params)._check_uniform_params()
 
 
+def test_the_auto_settings_are_upstreams():
+    model = limix.LimiXBarDistribution()
+    assert model._auto_softmax_temperature() == 0.9
+    assert model._auto_outlier_threshold() is None  # LimiX-2 clips nothing
+    assert not model.native_outlier_clipping  # so a float is scaffolded
+
+
 def test_standardisation_is_upstreams():
     y = np.array([1.0, 2.0, 4.0])
     assert limix._standardisation(y) == (y.mean(), y.std(ddof=1))
@@ -112,9 +119,93 @@ def test_upstreams_recipe_is_the_default(data):
     X, z, _ = data
     model = _model(n_estimators=8).fit(X, z)
     tokens = [entry["pipeline"].token for entry in model.handles_[0]["members"]]
-    assert tokens == list(limix._limix_preprocess.AUTO_TOKENS)
+    assert tokens == list(limix._limix_preprocess.RECIPE.block)
     assert model.provenance_["attribution"] == "Built with StableAI LimiX"
     assert model.provenance_["source_commit"] is not None
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("bag_size", [None, 150])
+def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
+    X, z, _ = data
+    model = _model(n_estimators=3, bag_size=bag_size).fit(X, z)
+    tokens = [
+        entry["pipeline"].token
+        for handle in model.handles_
+        for entry in handle["members"]
+    ]
+    assert tokens == ["auto_quantile", "auto_quantile", "auto_power"]
+
+
+@needs_checkpoint
+def test_a_bagged_member_shuffles_every_column_as_upstream(data):
+    """As the paper's bagged runs: upstream's shuffler, on all its output."""
+    X, z, X_test = data
+    model = _model(n_estimators=3, bag_size=150, random_state=5).fit(X, z)
+    tokens = limix._limix_preprocess.auto_tokens(3)
+    for index, (group, handle) in enumerate(
+        zip(model.member_groups_, model.handles_, strict=True)
+    ):
+        assert group.permutation is None and group.feature_shuffle
+        (entry,) = handle["members"]
+        (seeds,) = limix._limix_preprocess.member_seeds(5 + index, 1)
+        upstream = limix._limix_preprocess.MemberPipeline(
+            tokens[index], seeds, shuffle=True
+        ).fit(X[group.rows])
+        shuffled = entry["pipeline"]._shuffler.feature_indices
+        assert shuffled.size == entry["pipeline"].n_features_out_
+        np.testing.assert_array_equal(
+            entry["pipeline"].transform(X_test), upstream.transform(X_test)
+        )
+
+
+@needs_checkpoint
+def test_provenance_records_the_resolved_settings(data):
+    X, z, _ = data
+    default = _model(n_estimators=3).fit(X, z).provenance_
+    assert default["softmax_temperature"] == 0.9
+    assert default["mixed_precision"] is False  # on the CPU
+    assert default["outlier_threshold"] is None
+    assert default["chunk_size"] == 11
+    assert default["limix_pipelines"] == [
+        "auto_quantile",
+        "auto_quantile",
+        "auto_power",
+    ]
+    explicit = _model(
+        softmax_temperature=1.2, outlier_threshold=4, transforms="power"
+    ).fit(X, z)
+    assert explicit.provenance_["softmax_temperature"] == 1.2
+    assert explicit.provenance_["outlier_threshold"] == 4.0
+    assert explicit.provenance_["limix_pipelines"] == ["none", "none"]
+
+
+@needs_checkpoint
+def test_an_outlier_threshold_clips_what_the_network_sees(data):
+    X, z, X_test = data
+    X = X.copy()
+    X[3, 0] = 40.0  # far out: the clip pulls it in
+    default = _model().fit(X, z)
+    off = _model(outlier_threshold=None).fit(X, z)
+    clipped = _model(outlier_threshold=4.0).fit(X, z)
+    assert default.clippers_ == [None]
+    np.testing.assert_array_equal(
+        default.predict_proba(X_test), off.predict_proba(X_test)
+    )
+    (clip,) = clipped.clippers_
+    assert clip.transform(X)[3, 0] < 10.0
+    for seen, unclipped in zip(
+        clipped.handles_[0]["members"], off.handles_[0]["members"], strict=True
+    ):
+        assert not np.array_equal(seen["member"].x, unclipped["member"].x)
+    plain = _model(
+        transforms="none", feature_shuffle=False, outlier_threshold=4.0
+    ).fit(X, z)
+    for entry in plain.handles_[0]["members"]:
+        np.testing.assert_array_equal(entry["member"].x, clip.transform(X))
+    assert not np.array_equal(
+        clipped.predict_proba(X_test), off.predict_proba(X_test)
+    )
 
 
 @needs_checkpoint

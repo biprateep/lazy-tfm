@@ -19,7 +19,8 @@ context and never on the other queries in its chunk:
 
 * each member's feature preprocessing is fitted on the context alone
   (:mod:`lazy.models._limix_preprocess`), with upstream's own classes and
-  seeds;
+  seeds, where upstream's column filter and categorical detection and
+  encoding also see the queries;
 * the feature positional embedding is drawn from a dedicated generator;
 * the key/value cache (``kv_cache``, default on) is a port: the context goes
   through the network once, at fit, and each chunk of queries attends to it
@@ -27,12 +28,14 @@ context and never on the other queries in its chunk:
   to float rounding.
 
 The uniform features: ``transforms`` map onto LimiX's own rebalancing step
-(``quantile_rtdl`` is scaffolded), ``feature_shuffle`` onto its column
-shuffler, and ``bag_size`` is scaffolded as the paper's bagged LimiX-2 was --
-one member per bag, each standardising the target on its own bag, members
-mixed as densities. LimiX-2 was pretrained on contexts of up to about 20,000
-rows, and a :class:`~lazy.models.ContextSizeWarning` says so when a larger
-one arrives unbagged.
+where it is the vocabulary's transform (``none``, ``none+original``,
+``quantile_uniform``) and are scaffolded otherwise, ``feature_shuffle`` onto
+its column shuffler, and ``bag_size`` is scaffolded as the paper's bagged
+LimiX-2 was -- one member per bag, running one of upstream's pipelines with
+its seeds and column shuffle and standardising the target on its own bag,
+members mixed as densities. LimiX-2 was pretrained on contexts of up to
+about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
+when a larger one arrives unbagged.
 
 Built with StableAI LimiX. The code and weights are released under the Stable
 AI Technology Co., Ltd. License 1.0 (Apache-2.0 with attribution terms);
@@ -41,6 +44,7 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import types
 from typing import Any
@@ -60,6 +64,7 @@ from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _transforms
 
 __all__ = ["LimiXBarDistribution"]
 
@@ -72,50 +77,97 @@ _PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     """Target distributions from LimiX-2's bucket probabilities.
 
+    Every feature is numeric. Upstream would treat a column with fewer than
+    four distinct values as categorical (on contexts of 100 rows or more) and
+    encode it; across the package no model infers categoricals, so LimiX does
+    not either.
+
+    Under ``transforms="auto"`` each member runs one of upstream's pipelines,
+    pinned in :data:`lazy.models._limix_preprocess.RECIPE`: its constant and
+    all-missing context columns dropped, then either a uniform quantile
+    transform with the original columns and SVD components appended, or
+    upstream's Yeo-Johnson (missing values imputed to the mean,
+    standardised), then the column shuffle. Under an explicit
+    ``transforms`` a member sees that transform and what LimiX cannot do
+    without: the constant and all-missing columns dropped, and inside the
+    network missing values replaced by the context mean (with an indicator),
+    each column standardised on the context and clipped at 100 standard
+    deviations. Either way the context targets are standardised (mean and
+    sample standard deviation), as the buckets are in those units.
+
     Args:
         version: Which pinned LimiX checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: Ensemble members; upstream's recipe has 8.
+        n_estimators: Ensemble members, exactly this many. Under
+            ``transforms="auto"`` they run whole blocks of upstream's eight
+            pipelines, then any remainder split between its quantile and
+            power pipelines (quantile first, and the odd one), so that any
+            size keeps the recipe's mix: 3 members are two quantile and one
+            power, and 8, 16, 32 are upstream's recipe repeated.
         transforms: Per-member feature transforms: ``"auto"`` (upstream's
             recipe: four quantile members with the original columns and SVD
             components, four power members), a recipe name, a transform name
             or a sequence of them; see :mod:`lazy.models._transforms`.
-        feature_shuffle: Whether members see the columns in different orders
-            (upstream's column shuffler).
+            ``none``, ``none+original`` and ``quantile_uniform`` run as
+            LimiX's own steps, which are exactly those transforms; every
+            other name is scaffolded. ``"limix"`` is not ``"auto"``: it has
+            no SVD components, and its two transforms are the vocabulary's.
+        feature_shuffle: Whether members see the columns in different orders:
+            upstream's column shuffler, seeded per member as upstream seeds
+            it, permuting every column a member's pipeline outputs (the
+            original columns and SVD components among the rest) -- bagged
+            members too, as in the paper's bagged runs.
         bag_size: Context rows per member: an int is a row count (``1``
             means one row), a float a fraction in (0, 1] (``1.0`` means all
             rows), and None all of them. Above about 20,000 context rows
             LimiX-2 needs it: pass ``bag_size=20_000`` with enough members to
-            cover the context.
+            cover the context. Each bagged member is one of upstream's
+            pipelines run alone on its bag, standardising the target there.
         kv_cache: Run the context through the network once, at fit, and let
-            each chunk of queries attend to the result. Exact; costs about
-            2 GB of GPU memory per member at 20,000 context rows. The
-            caches may take 0.6 of the GPU memory free at fit; members whose
-            caches do not fit run uncached, with a warning.
+            each chunk of queries attend to the result. Exact to the
+            rounding of the precision in use; costs about 2 GB of GPU memory
+            per member at 20,000 context rows. The caches may take 0.6 of
+            the GPU memory free at fit; members whose caches do not fit run
+            uncached, with a warning.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a :class:`torch.device`.
-        random_state: Seed for the ensemble (upstream's default is 0). None
-            draws a fresh seed at fit, recorded as ``random_state_`` and in
+        random_state: Seed for the ensemble (upstream's default is 0): it
+            seeds each member's rebalancing and shuffle as upstream's
+            ``seed`` does, and its feature positional embedding. None draws
+            a fresh seed at fit, recorded as ``random_state_`` and in
             ``provenance_``.
-        chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. A query's answer does not depend on
-            the others in its chunk, up to float rounding.
+        chunk_size: Query rows predicted at a time (default 8,192), to bound
+            peak memory; ``0`` does them in one pass. A query's answer does
+            not depend on the others in its chunk, up to float rounding.
+        softmax_temperature: Divides the bucket logits before the softmax.
+            ``"auto"`` is 0.9, upstream's default and the value LimiX-2 was
+            released with; a positive float overrides it. The resolved value
+            is in ``provenance_``.
+        mixed_precision: On CUDA, run the network under ``torch.autocast``
+            (float16), as upstream does, and hold the key/value cache in
+            that precision; False runs float32. On CPU and MPS it is always
+            float32. The resolved value is in ``provenance_``.
+        outlier_threshold: The soft outlier clip at this many standard
+            deviations of the context
+            (:class:`~lazy.models._transforms.SoftClip`), scaffolded ahead of
+            each member's pipeline: LimiX-2 has no clip of its own
+            (upstream's ``outlier_remove_std`` is never used). ``"auto"``
+            and None are off; a float clips. The resolved value is in
+            ``provenance_``.
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
-        softmax_temperature: Temperature on the bucket logits; 0.9 is
-            upstream's default.
-        mixed_precision: Run under autocast on CUDA, as upstream does.
 
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The native grid: the buckets, mapped to the target's
             units with the whole context's mean and standard deviation.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
-        provenance_: Which weights, code and ensemble answered, as a dict.
+        provenance_: Which weights, code and ensemble answered, as a dict;
+            ``limix_pipelines`` lists each member's pipeline token.
         handles_: Every fitted member group.
         borders_: The buckets' borders in standardised units, shape
             (``n_buckets_`` + 1,).
@@ -133,11 +185,16 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     extra = "limix"
     native_output = "histogram"
     native_transforms = _limix_preprocess.NATIVE_TRANSFORMS
-    auto_tokens = _limix_preprocess.AUTO_TOKENS
+    # None: the recipe depends on the ensemble's size (whole blocks of
+    # upstream's eight, then a balanced remainder), so _fit_group picks each
+    # auto member's pipeline by its index.
+    auto_tokens = None
     supports_native_bagging = False
     member_combination = "mixture"
     kv_cache_modes = (True, False)
     kv_cache_rtol = 1e-4  # Float rounding: the cached rows batch differently.
+    # LimiX-2 clips no outliers; outlier_threshold is scaffolded by SoftClip.
+    native_outlier_clipping = False
     recommended_max_context = 20_000
     exact_chunking = False  # Exact up to float rounding, not bit for bit.
 
@@ -197,7 +254,13 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     def _auto_softmax_temperature(self) -> float:
         # LimiXPredictor's default, the value LimiX-2 was released with.
-        return 0.9
+        return _limix_preprocess.RECIPE.softmax_temperature
+
+    def _auto_outlier_threshold(self) -> None:
+        # LimiX-2 clips nothing: LimiXPredictor stores outlier_remove_std
+        # and never reads it, and the checkpoint's encoder has
+        # remove_outliers off.
+        return None
 
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()
@@ -219,7 +282,45 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self._scale = _standardisation(y)
         self._reset_cache_budget()
         super()._fit(X, y)
+        # The groups as they ran: LimiX's shuffler, not the planned
+        # permutation, orders a bagged member's columns (see _prepare).
+        self.member_groups_ = tuple(
+            dataclasses.replace(group, permutation=None, feature_shuffle=True)
+            if group.permutation is not None
+            else group
+            for group in self.member_groups_
+        )
+        tokens = {
+            member.index: entry["pipeline"].token
+            for group, handle in zip(
+                self.member_groups_, self.handles_, strict=True
+            )
+            for member, entry in zip(
+                group.members, handle["members"], strict=True
+            )
+        }
+        pipelines: dict[str, Any] = {
+            "limix_pipelines": [tokens[index] for index in sorted(tokens)]
+        }
+        self.provenance_ = {**self.provenance_, **pipelines}
         self._warn_if_uncached()
+
+    def _prepare(
+        self,
+        features: _typing.FloatArray,
+        group: _members.MemberGroup,
+        transformer: _transforms.ScaffoldTransform | None,
+        clipper: _transforms.SoftClip | None = None,
+    ) -> _typing.FloatArray:
+        # A bagged member is a group of its own, planned with a permutation
+        # of the input columns. LimiX's own shuffler permutes the columns its
+        # pipeline outputs instead -- the original columns and the SVD
+        # components among the rest, as upstream and the paper's bagged runs
+        # do -- so the member keeps its input order here and shuffles
+        # natively (_fit_group).
+        if group.permutation is not None:
+            group = dataclasses.replace(group, permutation=None)
+        return super()._prepare(features, group, transformer, clipper)
 
     def _fit_group(
         self,
@@ -229,15 +330,17 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> Any:
         mean, std = _standardisation(y)
         _bucket_edges(self.borders_, mean, std)  # Fails early if they merge.
+        recipe = _limix_preprocess.auto_tokens(self._n_members())
         tokens = group.native_transforms or tuple(
-            self.auto_tokens[i % len(self.auto_tokens)]
-            for i in range(group.n_members)
+            recipe[member.index] for member in group.members
         )
         seeds = _limix_preprocess.member_seeds(group.seed, group.n_members)
+        # A planned permutation is a bagged member's shuffle; see _prepare.
+        shuffle = group.feature_shuffle or group.permutation is not None
         members = []
         for token, member_seed in zip(tokens, seeds, strict=True):
             pipeline = _limix_preprocess.MemberPipeline(
-                token, member_seed, shuffle=group.feature_shuffle
+                token, member_seed, shuffle=shuffle
             ).fit(X)
             member = _limix_stream.Member(
                 pipeline.transform(X), (y - mean) / std, seed=group.seed
@@ -474,7 +577,8 @@ def _unpickle(
 def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
     """Upstream's target scaling, as a tuple (mean, sample std or 1)."""
     y = np.asarray(y, dtype=np.float64)
-    std = float(y.std(ddof=1)) if y.size > 1 else 0.0
+    ddof = _limix_preprocess.RECIPE.target_ddof
+    std = float(y.std(ddof=ddof)) if y.size > ddof else 0.0
     return float(y.mean()), std if std > 0 else 1.0
 
 
