@@ -11,9 +11,11 @@ so it only runs when ``LAZY_RUN_CHECKPOINT_TESTS=1`` is set.
 """
 
 import builtins
+import collections
 import inspect
 import os
 import pathlib
+import subprocess
 import sys
 import types
 import warnings
@@ -545,6 +547,28 @@ class TestTabICL:
         with pytest.raises(ValueError, match="softmax_temperature must be"):
             tabicl.TabICLQuantile(softmax_temperature=0.9).fit(X, z)
 
+    def test_members_are_averaged_in_a_fixed_order(self, monkeypatch):
+        """Upstream orders them by a set, which PYTHONHASHSEED reorders."""
+        preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+        generator = np.random.default_rng(0)
+        X, y = generator.normal(size=(40, 3)), generator.normal(size=40)
+        regressor = types.SimpleNamespace(
+            ensemble_generator_=preprocessing.EnsembleGenerator(
+                classification=False,
+                n_estimators=4,
+                norm_methods=["none", "power"],
+                random_state=0,
+            ).fit(X, y)
+        )
+        configs = dict(regressor.ensemble_generator_.ensemble_configs_)
+        regressor.ensemble_generator_.ensemble_configs_ = (
+            collections.OrderedDict(reversed(configs.items()))
+        )
+        tabicl._order_members(regressor, ["none", "power"])
+        ordered = regressor.ensemble_generator_.ensemble_configs_
+        assert list(ordered) == ["none", "power"]
+        assert dict(ordered) == configs
+
     @needs_checkpoint
     def test_exactly_n_members_run_on_the_backbone(self):
         generator = np.random.default_rng(0)
@@ -579,6 +603,28 @@ class TestTabICL:
         assert seen(transforms="none") == pytest.approx(zscore, rel=1e-6)
         assert seen(outlier_threshold=None) == pytest.approx(zscore, rel=1e-6)
         assert seen() < 0.5 * zscore  # the auto recipe clips it at 4 sigma
+
+    @needs_checkpoint
+    def test_the_answer_does_not_depend_on_string_hashing(self, tmp_path):
+        """Upstream alone differs between processes in the last digits."""
+        script = (
+            "import sys, numpy as np\n"
+            "from lazy.models import tabicl\n"
+            "g = np.random.default_rng(0)\n"
+            "X = g.normal(size=(120, 5)); z = X[:, 0] + g.normal(size=120)\n"
+            "est = tabicl.TabICLQuantile(device='cpu', progress=False)\n"
+            "locs = est.fit(X, z).predict_distribution(X[:9]).locs\n"
+            "np.save(sys.argv[1], locs)\n"
+        )
+        answers = []
+        for seed in ("0", "1"):
+            path = tmp_path / f"{seed}.npy"
+            env = {**os.environ, "PYTHONHASHSEED": seed}
+            subprocess.run(
+                [sys.executable, "-c", script, str(path)], check=True, env=env
+            )
+            answers.append(np.load(path))
+        np.testing.assert_array_equal(*answers)
 
     def test_negative_chunk_size_is_rejected(self, tiny):
         X, z = tiny

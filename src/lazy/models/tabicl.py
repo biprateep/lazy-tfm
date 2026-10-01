@@ -387,7 +387,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
         def fit(n: int, norm_methods: list[str], seed: int) -> Any:
             regressor = self._regressor(n, norm_methods, shuffle, seed)
-            return regressor.fit(X, y)
+            return _order_members(regressor.fit(X, y), norm_methods)
 
         # Each regressor, with the members it stands for by norm method.
         fitted: list[tuple[Any, collections.Counter[str]]] = []
@@ -598,6 +598,38 @@ def _n_shuffles(regressor: Any) -> int:
             for shuffle, _ in members
         }
     )
+
+
+def _order_members(regressor: Any, norm_methods: list[str]) -> Any:
+    """Puts a fitted regressor's members in ``norm_methods`` order.
+
+    Upstream groups its members by norm method in the order of a Python
+    ``set`` of the method names, which changes with the interpreter's string
+    hashing (``PYTHONHASHSEED``), and averages them in that order: the same
+    fit then differs between processes in the last float32 digits. The
+    members and their caches are keyed by method, so fixing the order
+    changes nothing else.
+
+    Args:
+        regressor: A fitted ``tabicl.TabICLRegressor``.
+        norm_methods: The norm methods it was given.
+
+    Returns:
+        The regressor, modified in place.
+    """
+    generator = regressor.ensemble_generator_
+    configs = generator.ensemble_configs_
+    generator.ensemble_configs_ = collections.OrderedDict(
+        (method, configs[method])
+        for method in norm_methods
+        if method in configs
+    )
+    if set(generator.ensemble_configs_) != set(configs):
+        raise RuntimeError(
+            f"TabICL ran norm methods {sorted(configs)} it was not given: "
+            f"{norm_methods}"
+        )
+    return regressor
 
 
 def _extra_seed(seed: int, index: int) -> int:
