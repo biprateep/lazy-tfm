@@ -50,19 +50,18 @@ __all__ = [
 
 
 def _native_transforms() -> dict[str, tuple[str, bool]]:
-    """Uniform transform names TabPFN implements, as (name, append_original)."""
-    names = {
-        "none": "none",
-        "power": "power",
-        "quantile": "quantile_norm",
-        "quantile_uniform": "quantile_uni",
-        "robust": "robust",
-    }
-    native: dict[str, tuple[str, bool]] = {}
-    for uniform, upstream in names.items():
-        native[uniform] = (upstream, False)
-        native[f"{uniform}+original"] = (upstream, True)
-    return native
+    """Uniform transform names TabPFN implements, as (name, append_original).
+
+    Only ``none``: TabPFN's other transforms are not lazy's, so they are
+    scaffolded. Its ``power`` is the same Yeo-Johnson but fills missing
+    values with the column mean first; its ``quantile_norm`` takes
+    ``n // 5`` quantiles, not ``min(1000, n)``; its ``quantile_uni``
+    agrees below 100,000 rows, but above them caps the quantiles at 20,000
+    and subsamples the rows; and its ``robust`` scales to unit variance,
+    not by the IQR. Natively each would also be fitted on each member's own
+    bag rather than on the whole context.
+    """
+    return {"none": ("none", False), "none+original": ("none", True)}
 
 
 #: Versions whose architecture has no quantised key/value cache; upstream

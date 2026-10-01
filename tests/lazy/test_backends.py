@@ -536,9 +536,10 @@ class TestTabPFN:
     def test_repeated_transforms_keep_their_weights(self):
         """Upstream shares members equally among the configs it is given."""
         ensemble = pytest.importorskip("tabpfn.preprocessing.ensemble")
+        recipe = ("none+original", "none+original", "none")
         (group,) = _members.plan(
             n_estimators=12,
-            transforms=_transforms.parse(("power", "power", "none")),
+            transforms=_transforms.parse(recipe),
             native_transforms=tabpfn.TabPFNBarDistribution.native_transforms,
             feature_shuffle=True,
             bag_rows=10,
@@ -549,21 +550,22 @@ class TestTabPFN:
         )
         est = tabpfn.TabPFNBarDistribution()
         est.outlier_threshold_ = None
-        configs = est._inference_config(group)["PREPROCESS_TRANSFORMS"]
-        assert [c.name for c in configs] == ["power", "power", "none"]
+        settings = est._inference_config(group)
+        configs = settings["PREPROCESS_TRANSFORMS"]
+        assert [c.append_original for c in configs] == [True, True, False]
         members = ensemble.generate_regression_ensemble_configs(
             num_estimators=12,
             add_fingerprint_feature=False,
             polynomial_features="no",
             feature_shift_decoder=None,
             preprocessor_configs=configs,
-            target_transforms=[None, None],
+            target_transforms=settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"],
             random_state=0,
             num_models=1,
             outlier_removal_std=None,
         )
-        names = [m.preprocess_config.name for m in members]
-        assert names.count("power") == 2 * names.count("none") == 8
+        original = [m.preprocess_config.append_original for m in members]
+        assert original.count(True) == 2 * original.count(False) == 8
 
     def test_bucket_masses_reads_the_bar_distribution(self):
         """Softmaxed logits and the borders as redshifts, with no reindexing."""

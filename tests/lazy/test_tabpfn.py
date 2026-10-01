@@ -305,3 +305,63 @@ def test_an_explicit_recipe_reaches_upstream_bare(small, outlier_threshold):
         assert member.polynomial_features == "no"
         assert member.target_transform is None
         assert member.outlier_removal_std == expected
+
+
+def test_only_the_identity_is_left_to_tabpfn():
+    """Its other transforms differ from lazy's, so lazy applies its own."""
+    assert tabpfn.TabPFNBarDistribution.native_transforms == {
+        "none": ("none", False),
+        "none+original": ("none", True),
+    }
+
+
+def _preprocessors(n_rows):
+    steps = pytest.importorskip(
+        "tabpfn.preprocessing.steps.reshape_feature_distribution_step"
+    )
+    return steps.get_all_reshape_feature_distribution_preprocessors(
+        n_rows, random_state=0
+    )
+
+
+def _features(n_rows, *, missing=False):
+    rng = np.random.default_rng(0)
+    X = np.column_stack(
+        [rng.normal(size=n_rows), np.exp(rng.normal(size=n_rows))]
+    )
+    if missing:
+        X[rng.random(n_rows) < 0.1, 0] = np.nan
+    return X
+
+
+def _lazy(name, X):
+    spec = _transforms.TransformSpec(name)
+    return _transforms.ScaffoldTransform(spec, seed=0).fit(X).transform(X)
+
+
+def test_tabpfns_identity_is_lazys():
+    X = _features(300, missing=True)
+    upstream = _preprocessors(300)["none"].fit(X)
+    np.testing.assert_array_equal(upstream.transform(X), _lazy("none", X))
+
+
+@pytest.mark.parametrize(
+    ("name", "upstream_name", "missing"),
+    [
+        ("power", "power", True),
+        ("quantile", "quantile_norm", False),
+        ("robust", "robust", False),
+    ],
+)
+def test_tabpfns_other_transforms_are_not_lazys(name, upstream_name, missing):
+    """Why they are scaffolded: each differs on a small problem already.
+
+    TabPFN's power transform is lazy's (to 1e-15) on complete data, but
+    fills a missing value with the column mean, where lazy leaves it to
+    the model. Its quantile_uni is lazy's quantile_uniform below 100,000
+    rows; above, it caps the quantiles at 20,000.
+    """
+    X = _features(300, missing=missing)
+    theirs = _preprocessors(300)[upstream_name].fit(X).transform(X)
+    ours = _lazy(name, X)
+    assert not np.allclose(theirs, ours, equal_nan=True)
