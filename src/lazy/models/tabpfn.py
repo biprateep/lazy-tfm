@@ -18,11 +18,17 @@ mapped onto any grid by exact, mass-conserving integration
 themselves, in full. The bucket masses rather than quantiles, because upstream
 computes its quantiles by inverting this same piecewise-uniform CDF.
 
-The uniform features all map onto TabPFN's own machinery: ``kv_cache`` onto
-its fit-time key/value cache (at full precision, so exact), the
-``transforms`` it has onto its ``PREPROCESS_TRANSFORMS``, ``feature_shuffle``
-onto its ``FEATURE_SHIFT_METHOD``, and ``bag_size`` onto its per-member row
-subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own bags.
+The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
+fit-time key/value cache (at full precision, so exact on a CPU),
+``feature_shuffle`` onto its ``FEATURE_SHIFT_METHOD``, ``bag_size`` onto its
+per-member row subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own
+bags, ``outlier_threshold`` onto its soft clip, ``OUTLIER_REMOVAL_STD``,
+``softmax_temperature`` onto its own and ``mixed_precision`` onto its
+``inference_precision``. No setting is left to TabPFN: each version's own
+recipe is written out below (:data:`_AUTO_RECIPES`) and handed over in full,
+so neither the checkpoint's stored config nor the installed tabpfn package
+decides what runs, and every column is numeric (upstream would take a column
+with fewer than four distinct values for a category).
 """
 
 from __future__ import annotations
@@ -50,24 +56,218 @@ __all__ = [
 
 
 def _native_transforms() -> dict[str, tuple[str, bool]]:
-    """Uniform transform names TabPFN implements, as (name, append_original)."""
-    names = {
-        "none": "none",
-        "power": "power",
-        "quantile": "quantile_norm",
-        "quantile_uniform": "quantile_uni",
-        "robust": "robust",
-    }
-    native: dict[str, tuple[str, bool]] = {}
-    for uniform, upstream in names.items():
-        native[uniform] = (upstream, False)
-        native[f"{uniform}+original"] = (upstream, True)
-    return native
+    """Uniform transform names TabPFN implements, as (name, append_original).
+
+    Only ``none``: TabPFN's other transforms are not lazy's, so they are
+    scaffolded. Its ``power`` is the same Yeo-Johnson but fills missing
+    values with the column mean first; its ``quantile_norm`` takes
+    ``n // 5`` quantiles, not ``min(1000, n)``; its ``quantile_uni``
+    agrees below 100,000 rows, but above them caps the quantiles at 20,000
+    and subsamples the rows; and its ``robust`` scales to unit variance,
+    not by the IQR. Natively each would also be fitted on each member's own
+    bag rather than on the whole context.
+    """
+    return {"none": ("none", False), "none+original": ("none", True)}
 
 
 #: Versions whose architecture has no quantised key/value cache; upstream
 #: would quietly fall back to full precision.
 _UNQUANTISED_VERSIONS = ("v2", "v2.5", "v2.6")
+
+
+def _preprocessor(
+    name: str,
+    categorical: str,
+    original: bool | str,
+    max_features: int,
+    svd: str | None,
+) -> dict[str, Any]:
+    """One upstream ``PreprocessorConfig``, every field written out."""
+    return {
+        "name": name,
+        "categorical_name": categorical,
+        "append_original": original,
+        "max_features_per_estimator": max_features,
+        "global_transformer_name": svd,
+        "max_onehot_cardinality": None,
+        "differentiable": False,
+    }
+
+
+#: Settings every version's own recipe shares.
+_SHARED_RECIPE: dict[str, Any] = {
+    "FEATURE_SHIFT_METHOD": "shuffle",
+    "FINGERPRINT_FEATURE": True,
+    "FEATURE_SUBSAMPLING_CONSTANT_FEATURE_COUNT": 50,
+    "SAMPLE_SUBSAMPLING_METHOD": "auto",
+    "FIX_NAN_BORDERS_AFTER_TARGET_TRANSFORM": True,
+    "PASSTHROUGH_INF": False,
+}
+
+#: Each version's own recipe (``transforms="auto"``): every
+#: ``InferenceConfig`` field that changes a regression prediction on numeric
+#: features, as the checkpoint stores it (v2.6 and later) or, for v2 and
+#: v2.5, which predate stored configs, as tabpfn 9.0.0's
+#: ``InferenceConfig.get_default`` writes it. Copied here so that a tabpfn
+#: upgrade cannot change what ``"auto"`` runs. ``OUTLIER_REMOVAL_STD`` is the
+#: resolved value (upstream's ``"auto"`` is None for a regressor), and
+#: ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both are what
+#: ``"auto"`` resolves to, and are handed over as such.
+_AUTO_RECIPES: dict[str, dict[str, Any]] = {
+    "v2": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor(
+                "quantile_uni",
+                "ordinal_very_common_categories_shuffled",
+                True,
+                500,
+                "svd",
+            ),
+            _preprocessor("safepower", "onehot", False, 500, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "random",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v2.5": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("quantile_uni_coarse", "numeric", "auto", 500, None),
+            _preprocessor(
+                "squashing_scaler_default",
+                "ordinal_very_common_categories_shuffled",
+                False,
+                500,
+                "svd_quarter_components",
+            ),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "random",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v2.6": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("quantile_uni", "numeric", False, 680, None),
+            _preprocessor(
+                "quantile_uni",
+                "ordinal_very_common_categories_shuffled",
+                "auto",
+                500,
+                "svd_quarter_components",
+            ),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": 10,
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": ("none",),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "balanced",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v3": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor(
+                "squashing_scaler_default",
+                "ordinal_very_common_categories_shuffled",
+                False,
+                500,
+                "svd_quarter_components",
+            ),
+            _preprocessor("quantile_uni", "numeric", "auto", 500, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": True,
+        "FEATURE_SUBSAMPLING_METHOD": "auto",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
+    },
+    "v3.5": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("none", "ordinal_shuffled", False, 768, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 1.0,
+        "OUTLIER_REMOVAL_STD": 12.0,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": True,
+        "FEATURE_SUBSAMPLING_METHOD": "balanced",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
+    },
+}
+# The fast variant is the same recipe on a distilled checkpoint.
+_AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
+
+
+def _upstream_settings(
+    version: str,
+    group: _members.MemberGroup,
+    outlier_threshold: float | None,
+) -> dict[str, Any]:
+    """The ``inference_config`` a member group hands TabPFN, as plain data.
+
+    Every prediction-changing field is set here, so none is left to the
+    checkpoint or the installed tabpfn: the version's own recipe, or for a
+    group of explicit transforms that recipe stripped of its extras.
+
+    Args:
+        version: The TabPFN version.
+        group: The member group.
+        outlier_threshold: The resolved ``outlier_threshold``, or None.
+
+    Returns:
+        ``InferenceConfig`` field names to values, the preprocessors as
+        dicts of ``PreprocessorConfig`` fields and ``SUBSAMPLE_SAMPLES`` as
+        each member's row indices (or None).
+    """
+    settings = {
+        field: value
+        for field, value in _AUTO_RECIPES[version].items()
+        # Handed over as the estimator's own argument instead.
+        if field != "SOFTMAX_TEMPERATURE"
+    }
+    if group.native_transforms is not None:
+        # An explicit recipe: the named transforms and none of the extras,
+        # with the version's own limit on features per member. Upstream
+        # gives each listed config an equal share of the members, repeats
+        # included, so one cycle of the plan keeps its weights.
+        limit = max(
+            config["max_features_per_estimator"]
+            for config in settings["PREPROCESS_TRANSFORMS"]
+        )
+        settings["PREPROCESS_TRANSFORMS"] = tuple(
+            _preprocessor(name, "numeric", original, limit, None)
+            for name, original in _cycle(group.native_transforms)
+        )
+        settings["FINGERPRINT_FEATURE"] = False
+        settings["POLYNOMIAL_FEATURES"] = "no"
+        settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] = (None,)
+    # Every column is numeric: upstream would otherwise take one with fewer
+    # than four distinct values in over 100 rows for a category and encode
+    # it. A column needs one value to count as numeric (none declared
+    # categorical, so no other threshold applies), and one with fewer is
+    # constant, which upstream drops anyway.
+    settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] = 1
+    settings["OUTLIER_REMOVAL_STD"] = outlier_threshold
+    if not group.feature_shuffle:
+        settings["FEATURE_SHIFT_METHOD"] = None
+    settings["SUBSAMPLE_SAMPLES"] = (
+        None if group.member_rows is None else list(group.member_rows)
+    )
+    return settings
 
 
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
@@ -97,13 +297,21 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             declare much smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
         n_estimators: Ensemble members, each a forward pass over a differently
-            preprocessed view of the data; costs scale linearly. ``"auto"``
-            defers to the count the checkpoint names.
-        transforms: Per-member feature transforms: ``"auto"`` (the
-            checkpoint's own tuned recipe), a recipe name, a transform name or
-            a sequence of them; see :mod:`lazy.models._transforms`. TabPFN
-            implements all but ``quantile_rtdl`` itself. Its per-member target
-            transforms always stay the checkpoint's.
+            preprocessed view of the data; costs scale linearly. Exactly this
+            many run.
+        transforms: Per-member feature transforms: ``"auto"`` (the version's
+            own recipe, pinned in :data:`_AUTO_RECIPES`: its preprocessors,
+            including any SVD components and original columns they append,
+            the fingerprint feature, polynomial features on v2.6, the target
+            transforms, and on v3.5 a 12-sigma soft clip), a recipe name, a
+            transform name or a sequence of them; see
+            :mod:`lazy.models._transforms`. An explicit value is all the
+            model sees: no fingerprint or polynomial features, no SVD, the
+            identity target transform, and outlier clipping only if
+            ``outlier_threshold`` asks for it. TabPFN runs only ``none``
+            natively (its other transforms are not the package's) and lazy
+            applies the rest. What runs whatever the recipe: the removal of
+            constant columns and TabPFN's internal standardisation.
         feature_shuffle: Whether members see the columns in different orders
             (TabPFN's own feature shuffling).
         bag_size: Context rows per member: an int is a row count (1 means
@@ -123,18 +331,27 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         random_state: Seed for the ensemble. None draws a fresh seed at fit,
             recorded as ``random_state_`` and in ``provenance_``.
         softmax_temperature: Temperature on the bucket logits, which sets how
-            sharp the densities are. ``"auto"`` takes the checkpoint's own
-            value, which is the one it was evaluated with; lower sharpens,
-            higher broadens.
+            sharp the densities are. ``"auto"`` takes the version's
+            calibrated value (0.9, and 1.0 on v3.5 and v3.5-fast), recorded in
+            ``provenance_``; lower sharpens, higher broadens.
+        mixed_precision: On CUDA, run in TabPFN's autocast (float16) path;
+            otherwise, and always on a CPU, in float32 (upstream would choose
+            bfloat16 on CPUs with fast bfloat16).
+        outlier_threshold: TabPFN's soft clip of each feature at this many
+            standard deviations of the context (``OUTLIER_REMOVAL_STD``).
+            ``"auto"`` is the version's own under ``transforms="auto"``
+            (12.0 on v3.5 and v3.5-fast, none on the others) and none under
+            an explicit recipe; None is none.
         ignore_pretraining_limits: Pass ``True`` to run a context larger than
             the row count the checkpoint declares it was pretrained for, which
             otherwise raises. Predictions beyond that limit are extrapolation,
             so this is opt-in -- though TabPFN-3 declares a million rows.
         chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. Exact: TabPFN's attention builds its
-            keys and values from the context rows alone and its preprocessors
-            are fitted on the context, so a row's answer never depends on the
-            other rows in its chunk.
+            ``0`` does them in one pass. A row's answer never depends on the
+            other rows in its chunk: TabPFN's attention builds its keys and
+            values from the context rows alone and its preprocessors are
+            fitted on the context. Bit for bit on a CPU; under mixed
+            precision on a GPU, to float16 rounding.
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
@@ -168,6 +385,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     native_output = "histogram"
     native_transforms = _native_transforms()
     supports_native_bagging = True
+    native_outlier_clipping = True
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
 
@@ -243,20 +461,23 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # TabPFN's own default (the newest version it knows, which moves with
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
+        # Every other argument that changes a prediction is passed too, at
+        # the value upstream defaults to today, so that a later default
+        # cannot change it.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
             model_path=path_for_tabpfn(self.checkpoint_),
             device=self.device_,
             random_state=group.seed,
-            softmax_temperature=(
-                "auto"
-                if self.softmax_temperature_ is None
-                else self.softmax_temperature_
-            ),
+            categorical_features_indices=None,
+            softmax_temperature=self._temperature(),
+            average_before_softmax=False,
+            tuning_config=None,
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
-            inference_config=self._inference_config(group) or None,
+            inference_precision=self._inference_precision(),
+            inference_config=self._inference_config(group),
             **_cache_options(self.kv_cache),
         )
         regressor.fit(X, y)
@@ -264,31 +485,56 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
 
+    def _inference_precision(self) -> Any:
+        """Upstream's ``inference_precision``: autocast, or float32.
+
+        Upstream's own default, ``"auto"``, autocasts on a GPU (float16) and
+        on a CPU with fast bfloat16 (AMX, AVX512-BF16, Zen 4); here only
+        ``mixed_precision_`` autocasts, which is never on a CPU.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        return "autocast" if self.mixed_precision_ else torch.float32
+
+    def _auto_softmax_temperature(self) -> float:
+        return float(_AUTO_RECIPES[self.version]["SOFTMAX_TEMPERATURE"])
+
+    def _auto_outlier_threshold(self) -> float | None:
+        return _AUTO_RECIPES[self.version]["OUTLIER_REMOVAL_STD"]
+
     def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
-        """The upstream overrides a group needs; empty for the defaults."""
-        overrides: dict[str, Any] = {}
-        if group.native_transforms is not None:
-            import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
+        """The ``inference_config`` a group hands TabPFN, ready to pass."""
+        import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
 
-            configs = tabpfn.preprocessing.configs
+        settings = _upstream_settings(
+            self.version, group, self.outlier_threshold_
+        )
+        settings["PREPROCESS_TRANSFORMS"] = [
+            tabpfn.preprocessing.configs.PreprocessorConfig(**fields)
+            for fields in settings["PREPROCESS_TRANSFORMS"]
+        ]
+        return settings
 
-            # Upstream gives each listed config an equal share of the
-            # members, repeats included, so one cycle of the plan keeps its
-            # weights. The settings are those the paper's recipe runs used.
-            overrides["PREPROCESS_TRANSFORMS"] = [
-                configs.PreprocessorConfig(
-                    name,
-                    append_original=original,
-                    categorical_name="ordinal_shuffled",
-                    max_features_per_estimator=768,
-                )
-                for name, original in _cycle(group.native_transforms)
-            ]
-        if not group.feature_shuffle:
-            overrides["FEATURE_SHIFT_METHOD"] = None
-        if group.member_rows is not None:
-            overrides["SUBSAMPLE_SAMPLES"] = list(group.member_rows)
-        return overrides
+    def _recipe(self) -> dict[str, Any]:
+        # What each group handed upstream, with each member's rows as a
+        # count: the rows themselves follow from random_state.
+        upstream = []
+        for group in self.member_groups_:
+            settings = _upstream_settings(
+                self.version, group, self.outlier_threshold_
+            )
+            rows = settings["SUBSAMPLE_SAMPLES"]
+            settings["SUBSAMPLE_SAMPLES"] = (
+                None if rows is None else [len(r) for r in rows]
+            )
+            upstream.append(settings)
+        return {
+            **super()._recipe(),
+            "inference_precision": (
+                "autocast" if self.mixed_precision_ else "float32"
+            ),
+            "inference_config": upstream,
+        }
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
@@ -316,11 +562,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
     """The shortest prefix of ``tokens`` that repeats to give all of them.
 
-    Upstream shares the members out among its preprocessing configs (and,
-    within each, its target transforms) in equal blocks, so handing it one
-    cycle of the planned transforms, repeats included, keeps their weights:
-    exactly when the member count is a multiple of the cycle's length times
-    the number of target transforms, and to within one block otherwise.
+    Upstream shares the members out among its preprocessing configs in
+    equal blocks (an explicit recipe has one target transform, the
+    identity), so handing it one cycle of the planned transforms, repeats
+    included, keeps their weights: exactly when the member count is a
+    multiple of the cycle's length, and to within one member otherwise.
 
     Args:
         tokens: TabPFN's token for each member's transform, in member order.
