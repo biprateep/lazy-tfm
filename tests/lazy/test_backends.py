@@ -323,6 +323,80 @@ class TestTabFM:
         )
         assert set(classifier.get_params()) <= accepted
 
+    def test_no_classifier_argument_is_left_to_upstream(
+        self, tiny, monkeypatch
+    ):
+        """A default the installed tabfm picks could change an answer."""
+        upstream = pytest.importorskip("tabfm")
+        X, z = tiny
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2).fit(
+            X, z
+        )
+        accepted = set(
+            inspect.signature(upstream.TabFMClassifier.__init__).parameters
+        )
+        assert set(_classifier_kwargs(est, monkeypatch)) == accepted - {"self"}
+
+    def test_the_auto_recipe_is_tabfms_own_written_out(self, tiny, monkeypatch):
+        """Pinned in lazy, and today equal to what upstream defaults to."""
+        upstream = pytest.importorskip("tabfm")
+        X, z = tiny
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2).fit(
+            X, z
+        )
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["norm_methods"] == ["none", "power"]
+        assert seen["feat_shuffle_method"] == "random"
+        assert seen["class_shift"] is True
+        assert seen["average_logits"] is True
+        assert seen["outlier_threshold"] == 4.0
+        assert seen["max_num_features"] == 500
+        assert seen["softmax_temperature"] == 0.9
+        assert seen["binary_calibration_method"] is None
+        assert seen["multiclass_calibration_method"] is None
+        assert seen["enable_nnls"] is False
+        assert seen["n_feature_crosses"] == seen["n_svd_features"] == 0
+        defaults = {
+            name: parameter.default
+            for name, parameter in inspect.signature(
+                upstream.TabFMClassifier.__init__
+            ).parameters.items()
+        }
+        recipe = set(tabfm._PINNED_CLASSIFIER_ARGS) | {
+            "feat_shuffle_method",
+            "outlier_threshold",
+            "max_num_features",
+            "softmax_temperature",
+        }
+        assert {k: seen[k] for k in recipe} == {k: defaults[k] for k in recipe}
+        assert defaults["norm_methods"] is None  # upstream's ["none", "power"]
+
+
+def _classifier_kwargs(est, monkeypatch, group=None, max_rows=None):
+    """The keywords ``est`` hands TabFMClassifier, through a recording fake.
+
+    The fake keeps the real signature, so the build's optional cache
+    keywords are offered exactly as to the real class.
+    """
+    upstream = pytest.importorskip("tabfm")
+    seen = {}
+
+    class Recording:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    Recording.__init__.__signature__ = inspect.signature(
+        upstream.TabFMClassifier.__init__
+    )
+    monkeypatch.setattr(upstream, "TabFMClassifier", Recording)
+    est._classifier(
+        model=None,
+        group=est.member_groups_[0] if group is None else group,
+        seed=0,
+        max_rows=max_rows,
+    )
+    return seen
+
 
 def _stub_classifier(est, monkeypatch):
     """Replaces TabFM's classifier by one returning its context's class mix."""

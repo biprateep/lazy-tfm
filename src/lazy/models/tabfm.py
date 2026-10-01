@@ -92,6 +92,44 @@ class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
 
+# TabFM v1.0's own recipe, ``transforms="auto"``, written out here so that the
+# installed upstream version cannot change it: the values TabFMClassifier
+# defaults to, each passed explicitly.
+
+#: The norm methods members cycle through under ``transforms="auto"``.
+AUTO_NORM_METHODS: tuple[str, ...] = ("none", "power")
+
+#: The soft outlier clip of the recipe, in standard deviations.
+AUTO_OUTLIER_THRESHOLD = 4.0
+
+#: Columns each member sees under the recipe; a wider table is subsampled.
+AUTO_MAX_NUM_FEATURES = 500
+
+#: Every other TabFMClassifier argument, pinned to the recipe's value.
+_PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
+    # Each member sees the class labels cyclically shifted, undone on its
+    # logits, which are then averaged before one softmax.
+    "class_shift": True,
+    "average_logits": True,
+    # No calibration, no NNLS member weights, no appended feature crosses or
+    # SVD features: the default TabFMClassifier, not its "ensemble" preset.
+    "binary_calibration_method": None,
+    "multiclass_calibration_method": None,
+    "enable_nnls": False,
+    "n_feature_crosses": 0,
+    "n_svd_features": 0,
+    # Inert, with every column numeric and the steps above off; pinned so that
+    # nothing is left to upstream.
+    "permute_categorical": False,
+    "cat_encoder_mode": "appearance",
+    "total_svd_pool": None,
+    "num_folds_for_cv": 5,
+    "nnls_beta": 0.75,
+    "calibration_lambda": 1e-2,
+    "min_rows_for_single_val_split": 2000,
+    "verbose": False,
+}
+
 
 _SLOW_PATH_WARNING = (
     "tabfm has no KV-cache API, so TabFMHistogram is falling back to "
@@ -300,7 +338,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         "quantile_rtdl": "quantile_rtdl",
         "robust": "robust",
     }
-    auto_tokens = ("none", "power")
+    auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
     # bfloat16 on CUDA: chunking and the cache change the rounding.
     exact_chunking = False
@@ -695,31 +733,38 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         seed: int,
         max_rows: int | None,
     ) -> Any:
-        """A ``TabFMClassifier``, passing only the knobs this build understands.
+        """A ``TabFMClassifier`` with every argument set here.
 
-        The cache arguments exist on builds with the KV-cache API and not on
-        the PyPI release; sending them unconditionally is a ``TypeError``. The
-        uniform features are passed only when asked for, so the default
-        recipe is upstream's own.
+        Nothing is left to upstream's defaults: the uniform parameters drive
+        what they mean, and the rest of TabFM's recipe is pinned
+        (:data:`AUTO_NORM_METHODS`, :data:`_PINNED_CLASSIFIER_ARGS`). The
+        cache arguments exist on builds with the KV-cache API and not on the
+        PyPI release; sending them unconditionally is a ``TypeError``.
         """
         tabfm = self._import_backend()
         kwargs: dict[str, Any] = {
             "model": model,
             "n_estimators": group.n_members,
-            "batch_size": self.member_batch_size,
-            "random_state": seed,
-            "softmax_temperature": self.softmax_temperature_,
-            "binary_calibration_method": None,
-            "verbose": False,
-        }
-        if group.native_transforms is not None:
             # Upstream cycles its norm methods over the members, so the
             # per-member list runs exactly as planned, repeats and all.
-            kwargs["norm_methods"] = list(group.native_transforms)
-        if not group.feature_shuffle:
-            kwargs["feat_shuffle_method"] = "none"
-        if max_rows is not None:
-            kwargs["max_num_rows"] = max_rows
+            "norm_methods": list(
+                AUTO_NORM_METHODS
+                if group.native_transforms is None
+                else group.native_transforms
+            ),
+            "feat_shuffle_method": (
+                "random" if group.feature_shuffle else "none"
+            ),
+            "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+            "max_num_features": AUTO_MAX_NUM_FEATURES,
+            "max_num_rows": max_rows,
+            "softmax_temperature": self._temperature(),
+            # Informational only in TabFM; the precision is the weights'.
+            "use_amp": True,
+            "batch_size": self.member_batch_size,
+            "random_state": seed,
+            **_PINNED_CLASSIFIER_ARGS,
+        }
         accepted = inspect.signature(tabfm.TabFMClassifier.__init__).parameters
         for name, value in (
             ("cache_context", False),
