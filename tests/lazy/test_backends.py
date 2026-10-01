@@ -371,6 +371,45 @@ class TestTabFM:
         assert {k: seen[k] for k in recipe} == {k: defaults[k] for k in recipe}
         assert defaults["norm_methods"] is None  # upstream's ["none", "power"]
 
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({}, 4.0),
+            ({"outlier_threshold": None}, np.inf),
+            ({"outlier_threshold": 2.5}, 2.5),
+            ({"transforms": "none"}, np.inf),
+            ({"transforms": "none", "outlier_threshold": 3.0}, 3.0),
+        ],
+    )
+    def test_outlier_threshold_drives_tabfms_own_clip(
+        self, tiny, monkeypatch, params, expected
+    ):
+        """Native, never scaffolded on top; None turns TabFM's clip off."""
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, **params
+        ).fit(X, z)
+        assert est.clippers_ == [None] * len(est.member_groups_)
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["outlier_threshold"] == expected
+        assert est.provenance_["outlier_threshold"] == (
+            None if expected == np.inf else expected
+        )
+
+    def test_an_infinite_threshold_is_tabfms_clip_turned_off(self):
+        """The off switch is exact: the clip becomes the identity."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.lognormal(size=(200, 3))
+        X[0, 0] = 1e4
+        clip = upstream.OutlierRemover(threshold=np.inf).fit(X)
+        assert np.array_equal(clip.transform(X), X)
+        # And a finite one is lazy's SoftClip, the uniform definition.
+        np.testing.assert_array_equal(
+            upstream.OutlierRemover(threshold=4.0).fit(X).transform(X),
+            _transforms.SoftClip(4.0).fit(X).transform(X),
+        )
+
 
 def _classifier_kwargs(est, monkeypatch, group=None, max_rows=None):
     """The keywords ``est`` hands TabFMClassifier, through a recording fake.

@@ -340,6 +340,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     }
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
+    native_outlier_clipping = True
     # bfloat16 on CUDA: chunking and the cache change the rounding.
     exact_chunking = False
     kv_cache_rtol = 5e-2
@@ -417,6 +418,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _auto_softmax_temperature(self) -> float:
         # TabFMClassifier's default, the value TabFM v1.0 was released with.
         return 0.9
+
+    def _auto_outlier_threshold(self) -> float:
+        return AUTO_OUTLIER_THRESHOLD
 
     def _check_backend_params(self) -> None:
         if max(self.n_coarse_bins, self.n_fine_bins) > MAX_CLASSES:
@@ -755,7 +759,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "feat_shuffle_method": (
                 "random" if group.feature_shuffle else "none"
             ),
-            "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+            # TabFM always runs its clip; an infinite threshold makes it the
+            # identity, bit for bit, which is how it is turned off.
+            "outlier_threshold": (
+                math.inf
+                if self.outlier_threshold_ is None
+                else self.outlier_threshold_
+            ),
             "max_num_features": AUTO_MAX_NUM_FEATURES,
             "max_num_rows": max_rows,
             "softmax_temperature": self._temperature(),
