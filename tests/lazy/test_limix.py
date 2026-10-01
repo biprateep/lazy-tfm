@@ -131,6 +131,28 @@ def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
 
 
 @needs_checkpoint
+def test_a_bagged_member_shuffles_every_column_as_upstream(data):
+    """As the paper's bagged runs: upstream's shuffler, on all its output."""
+    X, z, X_test = data
+    model = _model(n_estimators=3, bag_size=150, random_state=5).fit(X, z)
+    tokens = limix._limix_preprocess.auto_tokens(3)
+    for index, (group, handle) in enumerate(
+        zip(model.member_groups_, model.handles_, strict=True)
+    ):
+        assert group.permutation is None and group.feature_shuffle
+        (entry,) = handle["members"]
+        (seeds,) = limix._limix_preprocess.member_seeds(5 + index, 1)
+        upstream = limix._limix_preprocess.MemberPipeline(
+            tokens[index], seeds, shuffle=True
+        ).fit(X[group.rows])
+        shuffled = entry["pipeline"]._shuffler.feature_indices
+        assert shuffled.size == entry["pipeline"].n_features_out_
+        np.testing.assert_array_equal(
+            entry["pipeline"].transform(X_test), upstream.transform(X_test)
+        )
+
+
+@needs_checkpoint
 def test_the_native_grid_uses_the_whole_context(data):
     X, z, _ = data
     model = _model(bag_size=0.5).fit(X, z)

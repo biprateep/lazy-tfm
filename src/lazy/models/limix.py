@@ -42,6 +42,7 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import types
 from typing import Any
@@ -61,6 +62,7 @@ from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _transforms
 
 __all__ = ["LimiXBarDistribution"]
 
@@ -90,8 +92,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             LimiX's own steps, which are exactly those transforms; every
             other name is scaffolded. ``"limix"`` is not ``"auto"``: it has
             no SVD components, and its two transforms are the vocabulary's.
-        feature_shuffle: Whether members see the columns in different orders
-            (upstream's column shuffler).
+        feature_shuffle: Whether members see the columns in different orders:
+            upstream's column shuffler, seeded per member as upstream seeds
+            it, permuting every column a member's pipeline outputs (the
+            original columns and SVD components among the rest) -- bagged
+            members too, as in the paper's bagged runs.
         bag_size: Context rows per member: an int is a row count (``1``
             means one row), a float a fraction in (0, 1] (``1.0`` means all
             rows), and None all of them. Above about 20,000 context rows
@@ -232,7 +237,32 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self._scale = _standardisation(y)
         self._reset_cache_budget()
         super()._fit(X, y)
+        # The groups as they ran: LimiX's shuffler, not the planned
+        # permutation, orders a bagged member's columns (see _prepare).
+        self.member_groups_ = tuple(
+            dataclasses.replace(group, permutation=None, feature_shuffle=True)
+            if group.permutation is not None
+            else group
+            for group in self.member_groups_
+        )
         self._warn_if_uncached()
+
+    def _prepare(
+        self,
+        features: _typing.FloatArray,
+        group: _members.MemberGroup,
+        transformer: _transforms.ScaffoldTransform | None,
+        clipper: _transforms.SoftClip | None = None,
+    ) -> _typing.FloatArray:
+        # A bagged member is a group of its own, planned with a permutation
+        # of the input columns. LimiX's own shuffler permutes the columns its
+        # pipeline outputs instead -- the original columns and the SVD
+        # components among the rest, as upstream and the paper's bagged runs
+        # do -- so the member keeps its input order here and shuffles
+        # natively (_fit_group).
+        if group.permutation is not None:
+            group = dataclasses.replace(group, permutation=None)
+        return super()._prepare(features, group, transformer, clipper)
 
     def _fit_group(
         self,
@@ -247,10 +277,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             recipe[member.index] for member in group.members
         )
         seeds = _limix_preprocess.member_seeds(group.seed, group.n_members)
+        # A planned permutation is a bagged member's shuffle; see _prepare.
+        shuffle = group.feature_shuffle or group.permutation is not None
         members = []
         for token, member_seed in zip(tokens, seeds, strict=True):
             pipeline = _limix_preprocess.MemberPipeline(
-                token, member_seed, shuffle=group.feature_shuffle
+                token, member_seed, shuffle=shuffle
             ).fit(X)
             member = _limix_stream.Member(
                 pipeline.transform(X), (y - mean) / std, seed=group.seed
