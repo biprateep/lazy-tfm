@@ -242,6 +242,12 @@ def _upstream_settings(
             _preprocessor(name, "ordinal_shuffled", original, 768, None)
             for name, original in _cycle(group.native_transforms)
         )
+    # Every column is numeric: upstream would otherwise take one with fewer
+    # than four distinct values in over 100 rows for a category and encode
+    # it. A column needs one value to count as numeric (none declared
+    # categorical, so no other threshold applies), and one with fewer is
+    # constant, which upstream drops anyway.
+    settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] = 1
     settings["OUTLIER_REMOVAL_STD"] = outlier_threshold
     if not group.feature_shuffle:
         settings["FEATURE_SHIFT_METHOD"] = None
@@ -434,6 +440,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             model_path=path_for_tabpfn(self.checkpoint_),
             device=self.device_,
             random_state=group.seed,
+            categorical_features_indices=None,
             softmax_temperature=self._temperature(),
             average_before_softmax=False,
             tuning_config=None,

@@ -211,3 +211,24 @@ def test_the_clip_reaches_upstream(small, outlier_threshold, expected):
     assert config.get_resolved_outlier_removal_std("regressor") == expected
     assert est.clippers_ == [None], "native, so lazy does not clip as well"
     assert est.provenance_["outlier_threshold"] == expected
+
+
+def test_no_column_is_taken_for_a_category():
+    settings = tabpfn._upstream_settings("v3.5", _group(), None)
+    assert settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] == 1
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("version", ["v2", "v3.5"])
+def test_a_three_valued_column_stays_numeric(small, version):
+    """Upstream's own rule would encode it: < 4 values in > 100 rows."""
+    modalities = pytest.importorskip("tabpfn.preprocessing.datamodel")
+    X, y, _ = small
+    X = X.copy()
+    X[:, 1] = np.arange(len(X)) % 3
+    est = _fit(X, y, version=version)
+    schema = est.regressor_.inferred_feature_schema_
+    categorical = modalities.FeatureModality.CATEGORICAL
+    assert schema.indices_for(categorical) == []
+    numerical = schema.indices_for(modalities.FeatureModality.NUMERICAL)
+    assert len(numerical) == X.shape[1]
