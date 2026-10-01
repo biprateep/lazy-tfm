@@ -405,6 +405,63 @@ class TestTabICL:
 
         return fit
 
+    def _power_share(self, est, X):
+        offset, scale = est._target_scaling
+        median = est.predict_distribution(X[:2]).locs[:, 1]
+        return (median - offset) / scale
+
+    @pytest.mark.parametrize(
+        ("n_estimators", "n_features", "feature_shuffle", "weights"),
+        [
+            (8, 5, True, (8,)),  # 5 Latin-square shuffles cover 8 members
+            (8, 3, True, (6, 2)),  # 3 shuffles x 2 methods, then 2 more
+            (13, 3, True, (6, 6, 1)),
+            (1, 3, True, (1,)),
+            (8, 3, False, (4, 4)),  # one shuffle: each method once, weighted
+            (3, 3, False, (2, 1)),
+            (2, 3, False, (2,)),  # one of each fits one regressor
+            (5, 1, True, (3, 2)),  # one column: one shuffle
+        ],
+    )
+    def test_exactly_n_estimators_members_run(
+        self, members, n_estimators, n_features, feature_shuffle, weights
+    ):
+        """Upstream alone ran min(n, shuffles x methods) of them."""
+        est, X = members(
+            n_features=n_features,
+            n_estimators=n_estimators,
+            feature_shuffle=feature_shuffle,
+        )
+        (handle,) = est.handles_
+        assert handle.weights == weights
+        n_power = n_estimators // 2
+        assert handle.members_by_method() == {
+            "none": n_estimators - n_power,
+            **({"power": n_power} if n_power else {}),
+        }
+        np.testing.assert_allclose(
+            self._power_share(est, X), n_power / n_estimators
+        )
+        (group,) = est.provenance_["tabicl"]["groups"]
+        ran = [r["members"] for r in group["regressors"]]
+        assert sum(sum(counts.values()) for counts in ran) == n_estimators
+
+    def test_extra_regressors_have_seeds_of_their_own(self, members):
+        est, _ = members(n_estimators=13, n_features=3)
+        seeds = [r.random_state for r in est.handles_[0].regressors]
+        assert seeds[0] == 0 and len(set(seeds)) == 3
+        assert all(0 <= seed < 2**31 for seed in seeds)
+        assert seeds == [
+            r["random_state"]
+            for r in est.provenance_["tabicl"]["groups"][0]["regressors"]
+        ]
+
+    def test_one_regressor_is_exposed_as_regressor_(self, members):
+        est, _ = members(n_estimators=4, n_features=4)
+        assert est.regressor_ is est.handles_[0].regressors[0]
+        est, _ = members(n_estimators=8, n_features=3)
+        assert not hasattr(est, "regressor_")
+
     def test_no_regressor_argument_is_left_to_upstream(self, members):
         """A default the installed tabicl picks could change an answer."""
         upstream = pytest.importorskip("tabicl._sklearn.regressor")
@@ -487,6 +544,22 @@ class TestTabICL:
         X, z = tiny
         with pytest.raises(ValueError, match="softmax_temperature must be"):
             tabicl.TabICLQuantile(softmax_temperature=0.9).fit(X, z)
+
+    @needs_checkpoint
+    def test_exactly_n_members_run_on_the_backbone(self):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(120, 3))
+        z = 1.0 + 0.1 * X[:, 0] + 0.02 * generator.normal(size=120)
+        est = tabicl.TabICLQuantile(device="cpu", progress=False).fit(X, z)
+        (handle,) = est.handles_
+        assert handle.weights == (6, 2)
+        assert [
+            sum(
+                len(c) for c in r.ensemble_generator_.ensemble_configs_.values()
+            )
+            for r in handle.regressors
+        ] == [6, 2]
+        assert np.isfinite(est.predict_distribution(X[:5]).locs).all()
 
     @needs_checkpoint
     def test_an_explicit_recipe_feeds_the_outlier_unclipped(self):
