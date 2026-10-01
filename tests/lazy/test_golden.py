@@ -32,6 +32,14 @@ RTOL = {"tabpfn": 1e-4, "tabicl": 1e-3, "tabfm": 1e-12}
 #: Absolute tolerance per backend, as a fraction of the peak density.
 ATOL = {"tabpfn": 1e-6}
 
+#: Backends recorded in a reduced precision that lazy now uses only on CUDA
+#: (``mixed_precision``; a CPU runs float32). TabFM's recording ran it in
+#: bfloat16, as every GPU run does; the test reruns that path on the CPU, so
+#: the golden still guards the precision the GPU results are computed in.
+#: TabFM chooses its precision at prediction, so setting the resolved flag
+#: after ``fit`` is enough.
+RECORDED_IN_MIXED_PRECISION = {"tabfm"}
+
 
 @needs_checkpoint
 @pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
@@ -40,7 +48,10 @@ def test_the_default_path_reproduces_the_golden_densities(name):
     reference = np.load(golden_data.GOLDEN_DIR / f"{name}.npz")
     X_train, z, X_test = golden_data.problem()
     model = lazy.LazyModel(name, **golden_data.CURRENT_PARAMS[name])
-    pdfs = model.fit(X_train, z).predict_proba(X_test, golden_data.GRID)
+    model.fit(X_train, z)
+    if name in RECORDED_IN_MIXED_PRECISION:
+        model.estimator_.mixed_precision_ = True
+    pdfs = model.predict_proba(X_test, golden_data.GRID)
     np.testing.assert_array_equal(reference["edges"], golden_data.GRID.edges)
     if RTOL[name] == 0.0:
         np.testing.assert_array_equal(pdfs, reference["pdfs"])
