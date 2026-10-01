@@ -180,7 +180,10 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             of queries skips the context forward pass: ``True`` (TabICL's
             ``"kv"`` cache), ``"repr"`` (cached row representations, far
             smaller, re-running the in-context layers) or ``False``. Exact
-            either way, up to floating-point rounding.
+            on a CPU, to float32 rounding; on a GPU with
+            ``mixed_precision=True`` the cache is stored in float16, and the
+            cached and uncached answers agree to float16 rounding (about
+            1e-3 of the quantiles' spread).
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (equal-width bins, 1,000 across the training targets' range,
@@ -196,9 +199,11 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory
             (999 quantiles per row is about 8 kB); ``0`` does them in one
-            pass. Exact: TabICL builds its keys and values from the context
-            rows alone, so a row's answer never depends on the other rows in
-            its chunk.
+            pass. TabICL builds its keys and values from the context rows
+            alone, so a row's answer never depends on the other rows in its
+            chunk: bit for bit on a CPU, and to float16 rounding on a GPU
+            with ``mixed_precision=True``, where the batch shape changes the
+            kernels.
         softmax_temperature: Only ``"auto"``: TabICL's quantile head has no
             softmax for a temperature to divide, so any other value raises
             ValueError. Recorded in ``provenance_`` as None.
@@ -255,7 +260,13 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     # A quantile head: there is no softmax for a temperature to divide.
     has_softmax = False
     native_outlier_clipping = True
-    kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
+    # On a CPU, where the conformance tests run, chunking is bit for bit and
+    # the cache agrees to float32 rounding (about 1e-6 of the quantiles'
+    # spread). On a GPU with mixed_precision=True the cache is stored in
+    # float16 and the batch shapes change the kernels: both then agree to
+    # float16 rounding, about 1e-3 of the spread.
+    kv_cache_rtol = 1e-4
+    exact_chunking = True
     cpu_friendly = True
 
     # The training targets' range, recorded by _fit_group for the grid.
