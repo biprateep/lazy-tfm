@@ -130,6 +130,73 @@ class TestTabFM:
         with pytest.raises(ValueError, match="fewer than the"):
             lazy.get_estimator("tabfm").fit(X.iloc[:10], z[:10])
 
+    @pytest.mark.parametrize("name", ["member_batch_size", "query_block_rows"])
+    @pytest.mark.parametrize("value", [0, -1, 2.0, True, None])
+    def test_memory_knobs_must_be_positive_ints(self, tiny, name, value):
+        X, z = tiny
+        with pytest.raises(ValueError, match=name):
+            lazy.get_estimator(
+                "tabfm", n_coarse_bins=2, n_fine_bins=2, **{name: value}
+            ).fit(X, z)
+
+    def test_chunk_size_is_the_only_query_chunking_knob(self):
+        assert "decode_chunk_rows" not in tabfm.TabFMHistogram().get_params()
+
+    @pytest.mark.parametrize(
+        ("chunk_size", "block_rows", "passes"),
+        [(7, 20, [7, 7, 7, 7, 7, 5]), (7, 3, [7] * 5 + [5]), (0, 20, [40])],
+    )
+    def test_the_cached_path_decodes_chunk_size_rows_a_pass(
+        self, chunk_size, block_rows, passes
+    ):
+        """Blocks of views hold whole chunks; chunk_size=0 is one pass."""
+        chunk, block = _icl_stream._pass_sizes(40, chunk_size, block_rows)
+        sizes = [
+            min(r + chunk, min(b + block, 40) - b) - r
+            for b in range(0, 40, block)
+            for r in range(0, min(b + block, 40) - b, chunk)
+        ]
+        assert sizes == passes
+
+    def test_the_cached_path_is_handed_chunk_size(self, monkeypatch):
+        seen = {}
+
+        class Fitted:
+            classes_ = np.array([0, 1])
+
+            def fit(self, X, y):
+                return self
+
+        def logits(classifier, model, targets, **kwargs):
+            seen.update(kwargs)
+            return {
+                "query": {"mean_logits": np.zeros((len(targets["query"]), 2))}
+            }
+
+        monkeypatch.setattr(_icl_stream, "classification_logits", logits)
+        est = tabfm.TabFMHistogram(
+            chunk_size=7, query_block_rows=21, member_batch_size=3
+        )
+        est.inference_ = "stream"
+        est.softmax_temperature_ = 0.9
+        monkeypatch.setattr(
+            est, "_classifier", lambda model, group, seed, rows: Fitted()
+        )
+        X_query = pd.DataFrame({"a": np.linspace(0.0, 1.0, 10)})
+        handle = {"bag_fraction": None, "group": None}
+        est._class_probabilities(
+            None,
+            handle,
+            X_query.iloc[:4],
+            np.array([0, 1, 0, 1]),
+            2,
+            X_query,
+            0,
+        )
+        assert seen["chunk_size"] == 7
+        assert seen["query_block_rows"] == 21
+        assert seen["member_batch_size"] == 3
+
     def test_the_slow_path_hands_upstream_bounded_chunks(self, monkeypatch):
         """`chunk_size` must reach `predict_proba`, not just the docstring."""
         sizes = []

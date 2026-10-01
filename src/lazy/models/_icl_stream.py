@@ -9,16 +9,17 @@ directly::
 
     for each batch of ensemble members:
         prefill the context once     -> per-layer K/V cache
-        decode all query rows in fixed-size chunks against that cache
+        decode all query rows in chunks of chunk_size against that cache
         free the cache before the next member batch
 
 Peak memory is then ``member_batch x block_rows x n_features`` rather than
 ``n_members x n_query_rows x n_features``. The upstream package is used
-unmodified; only the order of operations differs. The model computes in
-bfloat16, so the results agree with calling ``predict_proba`` on the whole
-query set at once up to float rounding on the CPU, while on CUDA, whose kernels
-round differently for different batch shapes, densities differ by up to a few
-per cent of their peak.
+unmodified; only the order of operations differs. The model computes in the
+dtype its weights were loaded in. In float32 (always on the CPU) the results
+agree with calling ``predict_proba`` on the whole query set at once up to
+float rounding; in bfloat16 on CUDA, whose kernels round differently for
+different batch shapes, densities differ by up to a few per cent of their
+peak.
 
 Raw model outputs (classification logits over ``model.max_classes``) are
 handed to a callback per member batch and query block, leaving the caller to
@@ -179,7 +180,7 @@ def stream_icl(
     *,
     member_batch_size: int = 4,
     query_block_rows: int = 262_144,
-    decode_chunk_rows: int = 16_384,
+    chunk_size: int = 8_192,
     keep_cache_on_device: bool = True,
     log: Callable[[str], None] | None = None,
 ) -> None:
@@ -193,8 +194,10 @@ def stream_icl(
         consumer: Receives the outputs as they are produced; see
             :data:`Consumer`.
         member_batch_size: Ensemble members prefilled together.
-        query_block_rows: Query rows whose member views are built at once.
-        decode_chunk_rows: Query rows decoded per forward pass.
+        query_block_rows: Query rows whose member views are built at once,
+            rounded down to a whole number of chunks (at least one).
+        chunk_size: Query rows decoded per forward pass; ``0`` decodes
+            every row of a target in one pass.
         keep_cache_on_device: If false, the K/V cache is round-tripped
             through host memory so the device can release the prefill's
             scratch space.
@@ -242,11 +245,12 @@ def stream_icl(
 
         for name, X_enc in encoded.items():
             n_rows = len(X_enc)
-            for b0 in range(0, n_rows, query_block_rows):
-                b1 = min(b0 + query_block_rows, n_rows)
+            chunk, block = _pass_sizes(n_rows, chunk_size, query_block_rows)
+            for b0 in range(0, n_rows, block):
+                b1 = min(b0 + block, n_rows)
                 views = QueryViews(generator, X_enc[b0:b1]).members(m0, m1)
-                for r0 in range(0, b1 - b0, decode_chunk_rows):
-                    r1 = min(r0 + decode_chunk_rows, b1 - b0)
+                for r0 in range(0, b1 - b0, chunk):
+                    r1 = min(r0 + chunk, b1 - b0)
                     with torch.no_grad():
                         out = model.decode(
                             to_dev(views[:, r0:r1, :], torch.float32),
@@ -274,6 +278,27 @@ def stream_icl(
                 f"members {m1}/{n_members} | {elapsed / 60:.1f} min"
                 f" | eta {eta / 60:.1f} min"
             )
+
+
+def _pass_sizes(
+    n_rows: int, chunk_size: int, query_block_rows: int
+) -> tuple[int, int]:
+    """Rows per decode pass and per block of views, as a tuple.
+
+    Blocks hold a whole number of passes, so every pass but a target's last
+    has exactly ``chunk_size`` rows, whatever ``query_block_rows`` is; with
+    ``chunk_size=0`` the one pass and the one block are every row.
+
+    Examples:
+        >>> _pass_sizes(100, 8, 20)
+        (8, 16)
+        >>> _pass_sizes(100, 8, 5)
+        (8, 8)
+        >>> _pass_sizes(100, 0, 20)
+        (100, 100)
+    """
+    chunk = chunk_size if chunk_size > 0 else max(n_rows, 1)
+    return chunk, max(chunk, query_block_rows // chunk * chunk)
 
 
 def class_shift_offsets(estimator: Any) -> _typing.IntArray:

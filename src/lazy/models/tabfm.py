@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import numbers
 import os
 import types
 from typing import Any
@@ -287,21 +288,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         softmax_temperature: Temperature applied to the classifier logits. The
             upstream default of 0.9 is deliberately not 1.0 and should rarely
             be changed.
-        chunk_size: Query rows handed to the upstream ``predict_proba`` at a
-            time when ``kv_cache=False``; ``0`` does them in one pass. The
-            in-context stage builds its keys and values from the context rows
-            only, so a row's answer never depends on the other rows in its
-            chunk; it is bit-identical on the CPU, and on CUDA changes by the
-            bfloat16 rounding ``kv_cache`` describes. The cached path is
-            bounded by ``query_block_rows`` and ``decode_chunk_rows``
-            instead.
-        member_batch_size: Ensemble members processed together on the cached
-            path (and TabFM's own ``batch_size``). This and the next three are
-            memory/throughput knobs that change the result only by the
-            rounding ``kv_cache`` describes.
-        decode_chunk_rows: Query rows decoded against the cache at a time.
+        chunk_size: Query rows per forward pass, on both paths: decoded
+            against the cache at a time, or handed to the upstream
+            ``predict_proba`` at a time when ``kv_cache=False``; ``0`` does
+            them in one pass. The in-context stage builds its keys and values
+            from the context rows only, so a row's answer never depends on
+            the other rows in its chunk; it is bit-identical on the CPU, and
+            on CUDA changes by the rounding ``kv_cache`` describes.
+        member_batch_size: Ensemble members processed together (prefilled
+            together on the cached path; TabFM's own ``batch_size``), an int
+            of at least 1. This and the next two are memory/throughput knobs
+            that change the result only by the rounding ``kv_cache``
+            describes.
         query_block_rows: Query rows whose member views are built at a time
-            on the cached path, bounding host memory.
+            on the cached path, bounding host memory; an int of at least 1,
+            rounded down to a whole number of ``chunk_size`` chunks (at least
+            one), so it never changes the rows per forward pass.
         keep_cache_on_device: Whether the prefilled cache stays on the device
             rather than round-tripping through host memory.
         progress: A progress bar over the in-context stages: ``"auto"`` shows
@@ -367,7 +369,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_dither: int = 1,
         prior_shift: str | None = None,
         member_batch_size: int = 1,
-        decode_chunk_rows: int = 16_384,
         query_block_rows: int = 262_144,
         keep_cache_on_device: bool = True,
         progress: _progress.Progress = "auto",
@@ -391,7 +392,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.n_dither = n_dither
         self.prior_shift = prior_shift
         self.member_batch_size = member_batch_size
-        self.decode_chunk_rows = decode_chunk_rows
         self.query_block_rows = query_block_rows
         self.keep_cache_on_device = keep_cache_on_device
         self.progress = progress
@@ -435,6 +435,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             raise ValueError("n_dither must be at least 1")
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
+        for name in ("member_batch_size", "query_block_rows"):
+            value = getattr(self, name)
+            if not _is_count(value):
+                raise ValueError(
+                    f"{name} must be an int of at least 1: {name}={value!r}"
+                )
         self.inference_ = self._resolve_inference()
 
     def _resolve_inference(self) -> str:
@@ -690,7 +696,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 {"query": X_query},
                 member_batch_size=self.member_batch_size,
                 query_block_rows=self.query_block_rows,
-                decode_chunk_rows=self.decode_chunk_rows,
+                chunk_size=self.chunk_size,
                 keep_cache_on_device=self.keep_cache_on_device,
             )
             probs = _icl_stream.softmax(
@@ -837,6 +843,15 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _is_count(value: object) -> bool:
+    """Whether ``value`` is an int (Python or NumPy, not a bool) >= 1."""
+    return (
+        isinstance(value, numbers.Integral)
+        and not isinstance(value, bool | np.bool_)
+        and int(value) >= 1
+    )
 
 
 def _bin_labels(
