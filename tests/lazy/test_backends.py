@@ -548,6 +548,7 @@ class TestTabPFN:
             supports_native_bagging=True,
         )
         est = tabpfn.TabPFNBarDistribution()
+        est.outlier_threshold_ = None
         configs = est._inference_config(group)["PREPROCESS_TRANSFORMS"]
         assert [c.name for c in configs] == ["power", "power", "none"]
         members = ensemble.generate_regression_ensemble_configs(

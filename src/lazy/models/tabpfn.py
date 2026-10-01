@@ -70,6 +70,187 @@ def _native_transforms() -> dict[str, tuple[str, bool]]:
 _UNQUANTISED_VERSIONS = ("v2", "v2.5", "v2.6")
 
 
+def _preprocessor(
+    name: str,
+    categorical: str,
+    original: bool | str,
+    max_features: int,
+    svd: str | None,
+) -> dict[str, Any]:
+    """One upstream ``PreprocessorConfig``, every field written out."""
+    return {
+        "name": name,
+        "categorical_name": categorical,
+        "append_original": original,
+        "max_features_per_estimator": max_features,
+        "global_transformer_name": svd,
+        "max_onehot_cardinality": None,
+        "differentiable": False,
+    }
+
+
+#: Settings every version's own recipe shares.
+_SHARED_RECIPE: dict[str, Any] = {
+    "FEATURE_SHIFT_METHOD": "shuffle",
+    "FINGERPRINT_FEATURE": True,
+    "FEATURE_SUBSAMPLING_CONSTANT_FEATURE_COUNT": 50,
+    "SAMPLE_SUBSAMPLING_METHOD": "auto",
+    "FIX_NAN_BORDERS_AFTER_TARGET_TRANSFORM": True,
+    "PASSTHROUGH_INF": False,
+}
+
+#: Each version's own recipe (``transforms="auto"``): every
+#: ``InferenceConfig`` field that changes a regression prediction on numeric
+#: features, as the checkpoint stores it (v2.6 and later) or, for v2 and
+#: v2.5, which predate stored configs, as tabpfn 9.0.0's
+#: ``InferenceConfig.get_default`` writes it. Copied here so that a tabpfn
+#: upgrade cannot change what ``"auto"`` runs. ``OUTLIER_REMOVAL_STD`` is the
+#: resolved value (upstream's ``"auto"`` is None for a regressor), and
+#: ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both are what
+#: ``"auto"`` resolves to, and are handed over as such.
+_AUTO_RECIPES: dict[str, dict[str, Any]] = {
+    "v2": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor(
+                "quantile_uni",
+                "ordinal_very_common_categories_shuffled",
+                True,
+                500,
+                "svd",
+            ),
+            _preprocessor("safepower", "onehot", False, 500, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "random",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v2.5": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("quantile_uni_coarse", "numeric", "auto", 500, None),
+            _preprocessor(
+                "squashing_scaler_default",
+                "ordinal_very_common_categories_shuffled",
+                False,
+                500,
+                "svd_quarter_components",
+            ),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "random",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v2.6": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("quantile_uni", "numeric", False, 680, None),
+            _preprocessor(
+                "quantile_uni",
+                "ordinal_very_common_categories_shuffled",
+                "auto",
+                500,
+                "svd_quarter_components",
+            ),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": 10,
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": ("none",),
+        "ENABLE_GPU_PREPROCESSING": False,
+        "FEATURE_SUBSAMPLING_METHOD": "balanced",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": "auto",
+    },
+    "v3": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor(
+                "squashing_scaler_default",
+                "ordinal_very_common_categories_shuffled",
+                False,
+                500,
+                "svd_quarter_components",
+            ),
+            _preprocessor("quantile_uni", "numeric", "auto", 500, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 0.9,
+        "OUTLIER_REMOVAL_STD": None,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": True,
+        "FEATURE_SUBSAMPLING_METHOD": "auto",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
+    },
+    "v3.5": {
+        **_SHARED_RECIPE,
+        "PREPROCESS_TRANSFORMS": (
+            _preprocessor("none", "ordinal_shuffled", False, 768, None),
+        ),
+        "SOFTMAX_TEMPERATURE": 1.0,
+        "OUTLIER_REMOVAL_STD": 12.0,
+        "POLYNOMIAL_FEATURES": "no",
+        "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        "ENABLE_GPU_PREPROCESSING": True,
+        "FEATURE_SUBSAMPLING_METHOD": "balanced",
+        "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
+    },
+}
+# The fast variant is the same recipe on a distilled checkpoint.
+_AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
+
+
+def _upstream_settings(
+    version: str,
+    group: _members.MemberGroup,
+    outlier_threshold: float | None,
+) -> dict[str, Any]:
+    """The ``inference_config`` a member group hands TabPFN, as plain data.
+
+    Every prediction-changing field is set here, so none is left to the
+    checkpoint or the installed tabpfn: the version's own recipe, or for a
+    group of explicit transforms that recipe stripped of its extras.
+
+    Args:
+        version: The TabPFN version.
+        group: The member group.
+        outlier_threshold: The resolved ``outlier_threshold``, or None.
+
+    Returns:
+        ``InferenceConfig`` field names to values, the preprocessors as
+        dicts of ``PreprocessorConfig`` fields and ``SUBSAMPLE_SAMPLES`` as
+        each member's row indices (or None).
+    """
+    settings = {
+        field: value
+        for field, value in _AUTO_RECIPES[version].items()
+        # Handed over as the estimator's own argument instead.
+        if field != "SOFTMAX_TEMPERATURE"
+    }
+    if group.native_transforms is not None:
+        # Upstream gives each listed config an equal share of the
+        # members, repeats included, so one cycle of the plan keeps its
+        # weights. The settings are those the paper's recipe runs used.
+        settings["PREPROCESS_TRANSFORMS"] = tuple(
+            _preprocessor(name, "ordinal_shuffled", original, 768, None)
+            for name, original in _cycle(group.native_transforms)
+        )
+    settings["OUTLIER_REMOVAL_STD"] = outlier_threshold
+    if not group.feature_shuffle:
+        settings["FEATURE_SHIFT_METHOD"] = None
+    settings["SUBSAMPLE_SAMPLES"] = (
+        None if group.member_rows is None else list(group.member_rows)
+    )
+    return settings
+
+
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
     """TabPFN's fit mode and cache precision for a ``kv_cache`` value.
 
@@ -168,6 +349,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     native_output = "histogram"
     native_transforms = _native_transforms()
     supports_native_bagging = True
+    native_outlier_clipping = True
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
 
@@ -243,20 +425,21 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # TabPFN's own default (the newest version it knows, which moves with
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
+        # Every other argument that changes a prediction is passed too, at
+        # the value upstream defaults to today, so that a later default
+        # cannot change it.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
             model_path=path_for_tabpfn(self.checkpoint_),
             device=self.device_,
             random_state=group.seed,
-            softmax_temperature=(
-                "auto"
-                if self.softmax_temperature_ is None
-                else self.softmax_temperature_
-            ),
+            softmax_temperature=self._temperature(),
+            average_before_softmax=False,
+            tuning_config=None,
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
-            inference_config=self._inference_config(group) or None,
+            inference_config=self._inference_config(group),
             **_cache_options(self.kv_cache),
         )
         regressor.fit(X, y)
@@ -264,31 +447,39 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
 
+    def _auto_softmax_temperature(self) -> float:
+        return float(_AUTO_RECIPES[self.version]["SOFTMAX_TEMPERATURE"])
+
+    def _auto_outlier_threshold(self) -> float | None:
+        return _AUTO_RECIPES[self.version]["OUTLIER_REMOVAL_STD"]
+
     def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
-        """The upstream overrides a group needs; empty for the defaults."""
-        overrides: dict[str, Any] = {}
-        if group.native_transforms is not None:
-            import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
+        """The ``inference_config`` a group hands TabPFN, ready to pass."""
+        import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
 
-            configs = tabpfn.preprocessing.configs
+        settings = _upstream_settings(
+            self.version, group, self.outlier_threshold_
+        )
+        settings["PREPROCESS_TRANSFORMS"] = [
+            tabpfn.preprocessing.configs.PreprocessorConfig(**fields)
+            for fields in settings["PREPROCESS_TRANSFORMS"]
+        ]
+        return settings
 
-            # Upstream gives each listed config an equal share of the
-            # members, repeats included, so one cycle of the plan keeps its
-            # weights. The settings are those the paper's recipe runs used.
-            overrides["PREPROCESS_TRANSFORMS"] = [
-                configs.PreprocessorConfig(
-                    name,
-                    append_original=original,
-                    categorical_name="ordinal_shuffled",
-                    max_features_per_estimator=768,
-                )
-                for name, original in _cycle(group.native_transforms)
-            ]
-        if not group.feature_shuffle:
-            overrides["FEATURE_SHIFT_METHOD"] = None
-        if group.member_rows is not None:
-            overrides["SUBSAMPLE_SAMPLES"] = list(group.member_rows)
-        return overrides
+    def _recipe(self) -> dict[str, Any]:
+        # What each group handed upstream, with each member's rows as a
+        # count: the rows themselves follow from random_state.
+        upstream = []
+        for group in self.member_groups_:
+            settings = _upstream_settings(
+                self.version, group, self.outlier_threshold_
+            )
+            rows = settings["SUBSAMPLE_SAMPLES"]
+            settings["SUBSAMPLE_SAMPLES"] = (
+                None if rows is None else [len(r) for r in rows]
+            )
+            upstream.append(settings)
+        return {**super()._recipe(), "inference_config": upstream}
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
