@@ -258,3 +258,50 @@ def test_the_cpu_runs_in_float32(small, mixed_precision):
     assert est.regressor_.forced_inference_dtype_ is torch.float32
     assert est.provenance_["mixed_precision"] is False
     assert est.provenance_["inference_precision"] == "float32"
+
+
+@pytest.mark.parametrize(
+    ("version", "limit"),
+    [
+        ("v2", 500),
+        ("v2.5", 500),
+        ("v2.6", 680),
+        ("v3", 500),
+        ("v3.5", 768),
+        ("v3.5-fast", 768),
+    ],
+)
+def test_an_explicit_recipe_runs_without_the_extras(version, limit):
+    """The named transform, the version's feature limit, nothing optional."""
+    settings = tabpfn._upstream_settings(version, _group("none"), None)
+    (config,) = settings["PREPROCESS_TRANSFORMS"]
+    assert config["name"] == "none"
+    assert config["categorical_name"] == "numeric"
+    assert config["global_transformer_name"] is None
+    assert config["append_original"] is False
+    assert config["max_features_per_estimator"] == limit
+    assert settings["FINGERPRINT_FEATURE"] is False
+    assert settings["POLYNOMIAL_FEATURES"] == "no"
+    assert settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] == (None,)
+    assert settings["OUTLIER_REMOVAL_STD"] is None
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("outlier_threshold", ["auto", None, 3.0])
+def test_an_explicit_recipe_reaches_upstream_bare(small, outlier_threshold):
+    X, y, _ = small
+    est = _fit(
+        X,
+        y,
+        version="v3.5",
+        transforms="none",
+        outlier_threshold=outlier_threshold,
+    )
+    expected = 3.0 if outlier_threshold == 3.0 else None
+    for member in est.regressor_.ensemble_configs_:
+        assert member.preprocess_config.name == "none"
+        assert member.preprocess_config.global_transformer_name is None
+        assert member.add_fingerprint_feature is False
+        assert member.polynomial_features == "no"
+        assert member.target_transform is None
+        assert member.outlier_removal_std == expected

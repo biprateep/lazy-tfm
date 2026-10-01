@@ -235,13 +235,21 @@ def _upstream_settings(
         if field != "SOFTMAX_TEMPERATURE"
     }
     if group.native_transforms is not None:
-        # Upstream gives each listed config an equal share of the
-        # members, repeats included, so one cycle of the plan keeps its
-        # weights. The settings are those the paper's recipe runs used.
+        # An explicit recipe: the named transforms and none of the extras,
+        # with the version's own limit on features per member. Upstream
+        # gives each listed config an equal share of the members, repeats
+        # included, so one cycle of the plan keeps its weights.
+        limit = max(
+            config["max_features_per_estimator"]
+            for config in settings["PREPROCESS_TRANSFORMS"]
+        )
         settings["PREPROCESS_TRANSFORMS"] = tuple(
-            _preprocessor(name, "ordinal_shuffled", original, 768, None)
+            _preprocessor(name, "numeric", original, limit, None)
             for name, original in _cycle(group.native_transforms)
         )
+        settings["FINGERPRINT_FEATURE"] = False
+        settings["POLYNOMIAL_FEATURES"] = "no"
+        settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] = (None,)
     # Every column is numeric: upstream would otherwise take one with fewer
     # than four distinct values in over 100 rows for a category and encode
     # it. A column needs one value to count as numeric (none declared
@@ -532,11 +540,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
     """The shortest prefix of ``tokens`` that repeats to give all of them.
 
-    Upstream shares the members out among its preprocessing configs (and,
-    within each, its target transforms) in equal blocks, so handing it one
-    cycle of the planned transforms, repeats included, keeps their weights:
-    exactly when the member count is a multiple of the cycle's length times
-    the number of target transforms, and to within one block otherwise.
+    Upstream shares the members out among its preprocessing configs in
+    equal blocks (an explicit recipe has one target transform, the
+    identity), so handing it one cycle of the planned transforms, repeats
+    included, keeps their weights: exactly when the member count is a
+    multiple of the cycle's length, and to within one member otherwise.
 
     Args:
         tokens: TabPFN's token for each member's transform, in member order.
