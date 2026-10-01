@@ -766,7 +766,15 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 if self.outlier_threshold_ is None
                 else self.outlier_threshold_
             ),
-            "max_num_features": AUTO_MAX_NUM_FEATURES,
+            # Upstream draws a member's column subset in shuffled order, so a
+            # subsampling member always sees permuted columns: only the auto
+            # recipe with shuffles subsamples, and otherwise every member sees
+            # every column (in order, without feature_shuffle).
+            "max_num_features": (
+                AUTO_MAX_NUM_FEATURES
+                if group.native_transforms is None and group.feature_shuffle
+                else None
+            ),
             "max_num_rows": max_rows,
             "softmax_temperature": self._temperature(),
             # Informational only in TabFM; the precision is the weights'.

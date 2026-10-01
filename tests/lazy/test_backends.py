@@ -396,6 +396,44 @@ class TestTabFM:
             None if expected == np.inf else expected
         )
 
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({}, 500),
+            ({"feature_shuffle": False}, None),
+            ({"transforms": "none"}, None),
+        ],
+    )
+    def test_only_the_auto_recipe_subsamples_features(
+        self, tiny, monkeypatch, params, expected
+    ):
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, **params
+        ).fit(X, z)
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["max_num_features"] == expected
+
+    def test_without_feature_shuffle_wide_tables_keep_their_order(self):
+        """Above 500 columns upstream subsamples, and shuffles as it does."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(40, 520))
+        y = generator.integers(0, 3, 40)
+
+        def patterns(max_num_features):
+            ensemble = upstream.EnsembleGenerator(
+                n_estimators=3,
+                norm_methods=["none"],
+                feat_shuffle_method="none",
+                max_num_features=max_num_features,
+                random_state=0,
+            ).fit(X, y)
+            return [c[0] for c in ensemble.ensemble_configs_["none"]]
+
+        assert not any(np.array_equal(p, np.arange(520)) for p in patterns(500))
+        assert all(np.array_equal(p, np.arange(520)) for p in patterns(None))
+
     def test_an_infinite_threshold_is_tabfms_clip_turned_off(self):
         """The off switch is exact: the clip becomes the identity."""
         upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
