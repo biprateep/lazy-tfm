@@ -112,14 +112,16 @@ LSST DESC's qp, and `.to_qp()` for RAIL.
 | `tabicl` | Quantiles of an in-context regression head | `v2` | ~100 MB |
 | `tabfm`  | Hierarchy of in-context classifiers over equal-mass bins of the target | `v1.0` | ~6.6 GB  |
 
-**One set of parameters, on every model.** `kv_cache` (process the context
-once, at fit; exact; on by default), `n_estimators`, `feature_shuffle`,
-`transforms` (a shared vocabulary — `power`, `quantile`, `robust`, … — plus
-recipes such as `"limix"`; `"auto"` keeps each model's own), `bag_size`
-(per-member subsets of the context) and `z_grid` mean the same thing on every
-backend. Each is translated to the model's own machinery where it has it and
-built around the model where it does not, and registering a new backend
-without them fails. LimiX-2 degrades above ~20,000 context rows and warns when
+**One set of parameters, with one set of defaults, on every model.**
+`n_estimators`, `transforms` (a shared vocabulary — `power`, `quantile`,
+`robust`, … — plus recipes such as `"limix"`; `"auto"` is each model's own
+recipe, pinned in `lazy`), `feature_shuffle`, `bag_size` (per-member subsets of
+the context), `kv_cache` (process the context once; on by default),
+`random_state`, `chunk_size`, `softmax_temperature`, `mixed_precision`,
+`outlier_threshold` and `z_grid` mean the same thing on every backend. Each is
+translated to the model's own machinery where it has it and built around the
+model where it does not, every other upstream setting that changes an answer is
+pinned, and registering a new backend without them fails. LimiX-2 degrades above ~20,000 context rows and warns when
 a larger context arrives without `bag_size`.
 
 Memory is bounded by `chunk_size` on every backend, and chunking is exact: a
@@ -307,8 +309,9 @@ grid caches beside the catalogues and `fetch_hsc_grid` takes the same flag. The
 checkpoint a model loads is the one `download_checkpoint` fetches — the pinned revision is handed
 to the backend rather than left to its default.
 
-Memory is bounded by default on every backend via `chunk_size` (8,192 or
-16,384 query rows), and chunking is exact, so the default costs nothing.
+Memory is bounded by default on every backend via `chunk_size` (8,192 query
+rows), and a row's answer does not depend on which rows share its chunk, so the
+default costs nothing.
 
 ## What's in the box
 

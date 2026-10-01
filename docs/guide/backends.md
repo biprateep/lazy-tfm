@@ -20,35 +20,49 @@ and each has a native grid it answers on by default; see {doc}`api`.
 
 ## One set of parameters
 
-Every backend takes the same parameters for the same features, and means the
-same thing by them. Where a model has a feature of its own, the parameter is
-translated to it, so each model's tuned defaults are used unchanged; where it
-does not, `lazy` builds the feature around the model.
+Every backend takes the same parameters, with the same defaults, and means the
+same thing by them. Where a model has a setting of its own, the parameter is
+translated to it; where it does not, `lazy` builds the feature around the model.
+Every upstream setting that changes a prediction is either driven by one of
+these parameters or pinned by `lazy` itself, so no model's own default, and no
+upgrade of its package, decides an answer behind your back. Only `version`
+differs between backends, because the checkpoints do.
 
-| Parameter         | Meaning                                                                | Default    |
-| ----------------- | ---------------------------------------------------------------------- | ---------- |
-| `kv_cache`        | Process the context once, at fit, and reuse it for every query chunk. Exact. | `True` |
-| `n_estimators`    | Ensemble members.                                                      | 8 (TabFM 4) |
-| `feature_shuffle` | Each member sees the feature columns in a different order.            | `True`     |
-| `transforms`      | Per-member feature transforms (below).                                 | `"auto"`   |
-| `bag_size`        | Context rows per member: a count, a fraction, or `None` for all.       | `None`     |
-| `z_grid`          | Default output grid; `None` is the native grid.                        | `None`     |
-| `version`         | Which pinned checkpoint.                                               | per model  |
-| `random_state`    | The ensemble's seed.                                                   | per model  |
-| `device`          | `"auto"`, `"cuda"`, `"cuda:1"`, `"cpu"`.                               | `"auto"`   |
-| `chunk_size`      | Query rows per forward pass, to bound memory; `0` for one pass.       | per model  |
-| `progress`        | A progress bar: `"auto"`, `True` or `False`.                           | `"auto"`   |
-| `verbose`         | Log messages to stdout.                                                | `False`    |
+| Parameter             | Meaning                                                                     | Default   |
+| --------------------- | --------------------------------------------------------------------------- | --------- |
+| `n_estimators`        | Ensemble members; exactly this many run.                                    | `8`       |
+| `transforms`          | Per-member feature transforms (below).                                      | `"auto"`  |
+| `feature_shuffle`     | Each member sees the feature columns in a different order.                 | `True`    |
+| `bag_size`            | Context rows per member: a count, a fraction, or `None` for all.            | `None`    |
+| `kv_cache`            | Process the context once and reuse it for every query chunk (below).        | `True`    |
+| `z_grid`              | Default output grid; `None` is the native grid.                             | `None`    |
+| `random_state`        | The ensemble's seed; `None` draws one and records it.                       | `0`       |
+| `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass.             | `8192`    |
+| `softmax_temperature` | Divides the output logits; `"auto"` is the checkpoint's calibrated value.   | `"auto"`  |
+| `mixed_precision`     | The model's reduced-precision path on a GPU; float32 otherwise.             | `True`    |
+| `outlier_threshold`   | Soft-clip each feature at this many standard deviations (below).            | `"auto"`  |
+| `device`              | `"auto"`, `"cuda"`, `"cuda:1"`, `"cpu"`.                                    | `"auto"`  |
+| `progress`            | A progress bar: `"auto"`, `True` or `False`.                                | `"auto"`  |
+| `verbose`             | Log messages to stdout.                                                     | `False`   |
+| `version`             | Which pinned checkpoint.                                                    | per model |
 
 How each model provides them ("scaffolded" means `lazy` builds it):
 
-| Feature           | TabPFN                  | LimiX-2                  | TabICL                   | TabFM                   |
-| ----------------- | ----------------------- | ------------------------ | ------------------------ | ----------------------- |
-| `kv_cache`        | its fit-time cache, at full precision | ported (below) | its K/V cache       | its streaming decoder   |
-| `feature_shuffle` | `FEATURE_SHIFT_METHOD`  | its column shuffler      | Latin-square shuffles    | `feat_shuffle_method`   |
-| `transforms`      | `PREPROCESS_TRANSFORMS` | its rebalancing step     | `norm_methods`           | `norm_methods`          |
-| `bag_size`        | `SUBSAMPLE_SAMPLES`     | scaffolded: one member per bag | scaffolded: one regressor per bag | `max_num_rows` |
-| members combined  | averaged buckets        | averaged buckets / mixture | averaged quantiles     | mixture of shifted bins |
+| Parameter             | TabPFN                                   | LimiX-2                                   | TabICL                                | TabFM                                     |
+| --------------------- | ---------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------- |
+| `kv_cache`            | its fit-time cache, at full precision    | ported (below)                            | its key/value cache                   | its streaming prefill/decode              |
+| `feature_shuffle`     | `FEATURE_SHIFT_METHOD="shuffle"`         | its column shuffler                       | Latin-square shuffles                 | `feat_shuffle_method="random"`            |
+| `transforms`          | `none` native, the rest scaffolded       | `none`, `quantile_uniform` native         | `none` native, the rest scaffolded    | `none`, `power` native                    |
+| `bag_size`            | `SUBSAMPLE_SAMPLES`, given `lazy`'s bags | scaffolded: one member per bag            | scaffolded: one regressor per bag     | `max_num_rows` (TabFM draws the rows)     |
+| `softmax_temperature` | its own; `"auto"` 0.9, v3.5 1.0          | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     |
+| `mixed_precision`     | float16 autocast                         | float16 autocast                          | `use_amp=True`                        | bfloat16 weights                          |
+| `outlier_threshold`   | `OUTLIER_REMOVAL_STD`                    | scaffolded (`lazy`'s clip)                | its `outlier_threshold`               | its `outlier_threshold`                   |
+| members combined      | averaged buckets                         | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed |
+
+The `softmax_temperature`, `mixed_precision` and `outlier_threshold` actually
+used are recorded in `provenance_`, with the rest of the recipe. Every column is
+treated as numeric on every model: none of them guesses that a column with few
+distinct values is a category.
 
 This contract is enforced: {func}`lazy.models.registry.register` refuses a
 backend that lacks any of these parameters or their shared defaults, and the
@@ -62,38 +76,77 @@ sees them. Members take the names round robin.
 
 | Name               | Transform                                                     |
 | ------------------ | ------------------------------------------------------------- |
-| `none`             | the features as given                                          |
-| `power`            | Yeo-Johnson power transform, standardised                      |
+| `none`             | no transform                                                  |
+| `power`            | Yeo-Johnson power transform, standardised                     |
 | `quantile`         | quantile transform to a normal distribution                   |
 | `quantile_uniform` | quantile transform to a uniform distribution                  |
-| `quantile_rtdl`    | RTDL's quantile transform (normal, with a little noise)        |
+| `quantile_rtdl`    | RTDL's quantile transform (normal, with a little noise)       |
 | `robust`           | median and interquartile-range scaling                        |
 | `…+original`       | the transformed columns *and* the originals                   |
 
-`"auto"` (the default) is each model's own recipe, untouched. `"limix"` is
-LimiX-2's recipe, `("quantile_uniform+original", "power")`, on any model: the
-paper's "with LimiX transforms" runs. Transforms a model lacks are fitted on
-the context rows and applied by `lazy`, so every name works everywhere.
+A name means the same transform on every model. A model runs it natively only
+where its own implementation is this one; otherwise `lazy` applies it, fitted
+on the context rows, before the model sees the features.
+
+`"auto"` (the default) is each model's own tuned recipe, written out in `lazy`
+for every version rather than read from the installed package, so upgrading
+TabPFN or TabICL cannot change what it runs. It includes each model's extras:
+TabPFN's fingerprint feature, SVD components, target transforms, polynomial
+features (v2.6) and 12-sigma clip (v3.5); TabICL's and TabFM's 4-sigma clip;
+LimiX-2's eight pipelines, half quantile-uniform with the originals and SVD
+components, half power.
+
+Any explicit value is all the model sees: those extras are turned off, and
+outlier clipping runs only if `outlier_threshold` asks for it. What remains is
+each model's unavoidable input handling:
+
+| Model   | Runs whatever the recipe                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------- |
+| TabPFN  | drops constant columns; standardises inside the network                                                   |
+| LimiX-2 | drops constant and all-missing columns; fills missing values and standardises inside the network; standardises the target for its buckets |
+| TabICL  | fills missing values with the context mean; drops constant columns; z-scores, clipped at ±100; standardises the target |
+| TabFM   | fills missing values with the context mean; drops constant columns; z-scores, clipped at ±100              |
+
+Because TabICL and TabFM z-score whatever they are given, an affine transform
+such as `robust` changes nothing on them.
+
+`"limix"` is LimiX-2's two pipelines in the shared vocabulary,
+`("quantile_uniform+original", "power")`, on any model: the paper's "with LimiX
+transforms" runs. It lacks the SVD components of LimiX-2's own quantile
+pipeline, so on LimiX-2 it is not `"auto"`.
+
+## Outlier clipping
+
+`outlier_threshold` is one clip, the two-pass soft clip TabPFN, TabICL and TabFM
+share: bounds at the mean plus and minus that many standard deviations of the
+context, recomputed without the values beyond the first bounds; a value past a
+bound is pulled back to it plus the logarithm of its magnitude, so extreme
+values keep their order but lose their leverage. `"auto"` is the model's own
+clip under `transforms="auto"` (4 on TabICL and TabFM, 12 on TabPFN-3.5, none
+on the others) and no clip under an explicit recipe; a number clips at that
+many standard deviations on every model (LimiX-2 has no clip of its own, so
+`lazy` applies it there); `None` turns clipping off everywhere.
 
 ## The key/value cache
 
 An in-context model reads the whole context for every query. With
-`kv_cache=True` it reads it once, at `fit`, and each chunk of queries attends
-to what was stored, so a large query set costs little more than its own rows.
-The cache is exact: queries only ever attend to the context, never to each
-other, so the answer is the one the uncached pass gives, up to float rounding.
+`kv_cache=True` it reads it once and each chunk of queries attends to what was
+stored, so a large query set costs little more than its own rows. The cache is
+exact on a CPU: queries only ever attend to the context, never to each other,
+so the answer is the uncached one up to float rounding. Under mixed precision
+on a GPU the two agree to the rounding of that precision (for TabICL about
+1e-3 of the quantile spread).
 
 - **TabPFN** caches at full precision. Its own default, and what earlier
   `fit_mode="fit_with_cache"` runs used, is an int8 cache that moves densities
   by up to about half a per cent; `kv_cache="int8"` (or `"fp8"`) asks for it.
 - **TabICL** caches keys and values (`kv_cache="repr"` stores the smaller row
   representations and re-runs its in-context layers).
-- **TabFM** uses its streaming prefill/decode path, which needs the
-  repository build (see {doc}`../installation`); it falls back with a
-  {class}`~lazy.models.PerformanceWarning` otherwise. On CPU the two paths
-  agree to 5e-8; on a GPU, where both run in mixed precision, they differ by
-  about 0.02 in the mean CDE loss on DC1, and the paper's TabFM numbers come
-  from the streaming path.
+- **TabFM** uses its streaming prefill/decode path, which needs the repository
+  build (see {doc}`../installation`); it falls back with a
+  {class}`~lazy.models.PerformanceWarning` otherwise. TabFM fits and prefills
+  inside every `predict` call, so the cache serves the chunks of that call.
+  The paper's TabFM numbers come from the streaming path in bfloat16.
 - **LimiX-2** has no cache upstream; `lazy` ports one. It costs about 2 GB of
   GPU memory per member at 20,000 context rows, and falls back, with a
   warning, when the device lacks the room.
@@ -124,8 +177,9 @@ pip install "lazy-tfm[limix]"
 or point `$LAZY_LIMIX_SRC` at a checkout. `lazy` loads two parts of it under
 private module names and runs LimiX-2's network directly, with three changes
 that make a row's answer independent of which other rows share its
-chunk: each member's preprocessing is fitted on the context alone (upstream
-fits one step on context and queries together), the feature positional
+chunk: each member's preprocessing is fitted on the context alone (upstream's
+column filter, categorical detection and category encoding also see the
+queries; `lazy` treats every column as numeric), the feature positional
 embedding has its own random generator (upstream draws it from the global one
 after advancing it by an amount that depends on the chunk's size), and the
 ported cache. The answers are statistically, not bitwise, those of upstream's
@@ -175,11 +229,12 @@ the only one whose weights allow commercial use.
 
 ## Memory and speed
 
-Peak memory is bounded by `chunk_size` on every backend, except on TabFM's
-streaming path, where `query_block_rows` and `decode_chunk_rows` do the same
-job. Chunking is exact: a row's answer never depends on which other
-rows share its chunk, bit for bit on TabPFN and TabICL and to float
-rounding on LimiX-2. Lower `chunk_size` on a small GPU; set it to `0` for a
+Peak memory is bounded by `chunk_size` on every backend (8,192 query rows by
+default); on TabFM's streaming path `query_block_rows` also bounds the host
+memory of a block of queries. A row's answer never depends on which other rows
+share its chunk: on a CPU bit for bit on TabPFN and TabICL and to float
+rounding on LimiX-2 and TabFM; under mixed precision on a GPU, to the rounding
+of that precision. Lower `chunk_size` on a small GPU; set it to `0` for a
 single pass.
 
 Every backend shows a progress bar while it predicts (`progress="auto"`: on a

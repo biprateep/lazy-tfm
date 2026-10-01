@@ -7,6 +7,65 @@ change the API.
 
 ## [Unreleased]
 
+Every backend now takes one set of parameters with one set of defaults, and no
+upstream default decides a prediction unseen. **Default predictions change**
+(below); to reproduce 0.1.x numbers, pin `random_state` (TabPFN and TabICL 42,
+TabFM 1) and, on TabFM, `n_estimators=4`.
+
+### Added
+
+- `softmax_temperature`, `mixed_precision` and `outlier_threshold` on every
+  backend. `softmax_temperature="auto"` is the checkpoint's calibrated value
+  (TabICL, with no softmax, takes only `"auto"`); `mixed_precision=True` uses
+  each model's reduced-precision path on a GPU and float32 everywhere else;
+  `outlier_threshold` is the soft clip TabPFN, TabICL and TabFM share, applied
+  by `lazy` on LimiX-2, with `"auto"` meaning the model's own clip under
+  `transforms="auto"` and none under an explicit recipe. `provenance_` records
+  the values used.
+- The registry enforces every shared parameter's default, not only some.
+
+### Changed
+
+- One default per parameter on every backend: `n_estimators=8` (TabFM had 4),
+  `random_state=0` (TabPFN and TabICL had 42, TabFM 1), `chunk_size=8192`
+  (TabPFN, TabICL and TabFM had 16,384).
+- `transforms="auto"` is each model's recipe written out in `lazy` for every
+  version, so an upgrade of tabpfn, tabicl or tabfm cannot change it; with
+  numeric features TabPFN, TabFM (in bfloat16) and LimiX-2 (8 or 16 members)
+  predict exactly as before.
+- An explicit `transforms` value is all the model sees: TabPFN's fingerprint
+  feature, polynomial features, SVD components and target transforms, and
+  TabICL's and TabFM's 4-sigma clip, are off unless asked for. A transform
+  name runs on a model's own implementation only where that is the shared
+  definition; elsewhere `lazy` applies it. Explicit recipes such as `"limix"`
+  therefore predict differently than in 0.1.x.
+- Every column is numeric on every model: TabPFN no longer takes a column with
+  fewer than four distinct values for a category.
+- TabICL uses mixed precision on a GPU at every context size (upstream only
+  from 1,024 context rows or 60 features), keeps its features in float64
+  through its preprocessing, and averages its members in a fixed order, so a
+  seed gives the same answer in every process.
+- TabFM runs in float32 on a CPU (bfloat16 before) and in bfloat16 on a GPU.
+- LimiX-2 shuffles a bagged member's columns as upstream does, after its
+  pipeline, rather than permuting the inputs.
+
+### Removed
+
+- TabPFN's `n_estimators="auto"`.
+- TabFM's `decode_chunk_rows`: `chunk_size` bounds both of its paths, and `0`
+  means one pass on both.
+
+### Fixed
+
+- `n_estimators` is exactly the number of members on every model: TabICL ran
+  fewer when its column orders ran out (six of eight with three features), and
+  LimiX-2 with four members or fewer ran only its quantile pipeline.
+- TabFM's `bag_size` could give a member one row too many, and its provenance
+  listed bag rows that TabFM, which draws its own, never used.
+- `feature_shuffle=False` held on TabFM only up to 500 features.
+- The docs' exactness claims for chunking and the cache now hold: exact on a
+  CPU, to the rounding of the precision under mixed precision on a GPU.
+
 ## [0.1.1] - 2026-09-29
 
 ### Fixed

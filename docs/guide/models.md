@@ -41,6 +41,11 @@ at this context size, not a ranking.
 | LimiX-2 | 46 s | 17.5 GB | 102 s | −13.71 |
 | TabFM v1.0 | 132 s | 7.8 GB | 8 min 16 s | −13.30 |
 
+TabFM was measured with 4 members, its default at the time; the shared default
+is now 8, which roughly doubles its time. The other rows used 8 members. Since
+then every model runs in float32 on a CPU (TabFM computed in bfloat16 there),
+and TabICL uses mixed precision on a GPU at every context size.
+
 How the cost grows:
 
 - **Time** grows with the number of context rows times the number of query
@@ -52,7 +57,7 @@ How the cost grows:
   memory: for LimiX-2 about 2 GB per member at 20,000 context rows, so its
   eight members want a GPU with 16–24 GB or more at that size.
 - **TabFM** runs a hierarchy of `n_dither × (1 + n_coarse_bins)` in-context
-  classifications (33 by default), which is why it is the slowest; it needs
+  classifications (11 by default), which is why it is the slowest; it needs
   its repository build to be even this fast (see {doc}`../installation`).
 
 ## Which one to use
