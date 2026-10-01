@@ -311,20 +311,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self,
         *,
         version: str = "v1.0",
-        n_coarse_bins: int = 10,
-        n_fine_bins: int = 10,
-        n_estimators: int = 4,
-        n_dither: int = 1,
+        n_estimators: int = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         z_grid: grid_lib.GridLike = None,
-        prior_shift: str | None = None,
         device: str = "auto",
-        random_state: int | None = 1,
-        softmax_temperature: float = 0.9,
-        chunk_size: int = 16_384,
+        random_state: int | None = 0,
+        chunk_size: int = 8_192,
+        softmax_temperature: float | str = "auto",
+        mixed_precision: bool = True,
+        outlier_threshold: float | str | None = "auto",
+        n_coarse_bins: int = 10,
+        n_fine_bins: int = 10,
+        n_dither: int = 1,
+        prior_shift: str | None = None,
         member_batch_size: int = 1,
         decode_chunk_rows: int = 16_384,
         query_block_rows: int = 262_144,
@@ -333,20 +335,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         verbose: bool = False,
     ):
         self.version = version
-        self.n_coarse_bins = n_coarse_bins
-        self.n_fine_bins = n_fine_bins
         self.n_estimators = n_estimators
-        self.n_dither = n_dither
         self.transforms = transforms
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.z_grid = z_grid
-        self.prior_shift = prior_shift
         self.device = device
         self.random_state = random_state
-        self.softmax_temperature = softmax_temperature
         self.chunk_size = chunk_size
+        self.softmax_temperature = softmax_temperature
+        self.mixed_precision = mixed_precision
+        self.outlier_threshold = outlier_threshold
+        self.n_coarse_bins = n_coarse_bins
+        self.n_fine_bins = n_fine_bins
+        self.n_dither = n_dither
+        self.prior_shift = prior_shift
         self.member_batch_size = member_batch_size
         self.decode_chunk_rows = decode_chunk_rows
         self.query_block_rows = query_block_rows
@@ -371,6 +375,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 "pip install 'lazy-tfm[tabfm]'"
             ) from error
         return tabfm
+
+    def _auto_softmax_temperature(self) -> float:
+        # TabFMClassifier's default, the value TabFM v1.0 was released with.
+        return 0.9
 
     def _check_backend_params(self) -> None:
         if max(self.n_coarse_bins, self.n_fine_bins) > MAX_CLASSES:
@@ -644,7 +652,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 keep_cache_on_device=self.keep_cache_on_device,
             )
             probs = _icl_stream.softmax(
-                logits["query"]["mean_logits"], self.softmax_temperature
+                logits["query"]["mean_logits"], self._temperature()
             )
         else:
             probs = self._predict_proba_chunked(classifier, X_query)
@@ -700,7 +708,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "n_estimators": group.n_members,
             "batch_size": self.member_batch_size,
             "random_state": seed,
-            "softmax_temperature": self.softmax_temperature,
+            "softmax_temperature": self.softmax_temperature_,
             "binary_calibration_method": None,
             "verbose": False,
         }

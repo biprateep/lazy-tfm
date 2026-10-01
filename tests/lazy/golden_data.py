@@ -46,8 +46,13 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
 #: The same models in the current API.
 CURRENT_PARAMS: dict[str, dict[str, Any]] = {
     **RECORDED_PARAMS,
-    # The recorded runs had no key/value cache.
-    "tabicl": {**RECORDED_PARAMS["tabicl"], "kv_cache": False},
+    # The recorded runs had no key/value cache, and used the seeds that were
+    # then each backend's default (TabPFN and TabICL 42, TabFM 1).
+    "tabicl": {
+        **RECORDED_PARAMS["tabicl"],
+        "kv_cache": False,
+        "random_state": 42,
+    },
     "tabpfn": {
         **{
             k: v
@@ -55,6 +60,7 @@ CURRENT_PARAMS: dict[str, dict[str, Any]] = {
             if k != "fit_mode"
         },
         "kv_cache": False,
+        "random_state": 42,
     },
     # The recorded run pinned its bins to the DC1 grid it predicted on; the
     # bins now follow the constructor's grid, and inference='stream' is the
@@ -67,6 +73,7 @@ CURRENT_PARAMS: dict[str, dict[str, Any]] = {
         },
         "kv_cache": True,
         "z_grid": GRID,
+        "random_state": 1,
     },
 }
 

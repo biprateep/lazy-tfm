@@ -33,7 +33,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         self,
         *,
         version="v0",
-        n_estimators=4,
+        n_estimators=8,
         transforms="auto",
         feature_shuffle=True,
         bag_size=None,
@@ -41,7 +41,10 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         z_grid=None,
         device="auto",
         random_state=0,
-        chunk_size=16_384,
+        chunk_size=8_192,
+        softmax_temperature="auto",
+        mixed_precision=True,
+        outlier_threshold="auto",
         progress="auto",
         verbose=False,
         n_neighbors=12,
@@ -56,6 +59,9 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
+        self.softmax_temperature = softmax_temperature
+        self.mixed_precision = mixed_precision
+        self.outlier_threshold = outlier_threshold
         self.progress = progress
         self.verbose = verbose
         self.n_neighbors = n_neighbors

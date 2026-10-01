@@ -163,6 +163,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     supports_native_bagging = False
     member_combination = "quantile_average"
     kv_cache_modes = (True, False, "repr")
+    # A quantile head: there is no softmax for a temperature to divide.
+    has_softmax = False
     kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
     cpu_friendly = True
 
@@ -183,8 +185,11 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int | None = 42,
-        chunk_size: int = 16_384,
+        random_state: int | None = 0,
+        chunk_size: int = 8_192,
+        softmax_temperature: float | str = "auto",
+        mixed_precision: bool = True,
+        outlier_threshold: float | str | None = "auto",
         progress: _progress.Progress = "auto",
         verbose: bool = False,
     ):
@@ -198,6 +203,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
+        self.softmax_temperature = softmax_temperature
+        self.mixed_precision = mixed_precision
+        self.outlier_threshold = outlier_threshold
         self.progress = progress
         self.verbose = verbose
 

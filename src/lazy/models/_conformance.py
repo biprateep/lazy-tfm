@@ -109,7 +109,8 @@ def _declaration_problems(
         "supports_native_bagging",
         "exact_chunking",
         "chunks_queries",
-        "accepts_auto_estimators",
+        "has_softmax",
+        "native_outlier_clipping",
         "cpu_friendly",
     ):
         if not isinstance(getattr(cls, flag), bool):

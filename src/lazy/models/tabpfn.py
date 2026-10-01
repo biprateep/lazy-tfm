@@ -170,23 +170,24 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     supports_native_bagging = True
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
-    accepts_auto_estimators = True
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
         version: str = "v3.5",
-        n_estimators: int | str = 8,
+        n_estimators: int = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
         z_grid: grid_lib.GridLike = None,
         device: str = "auto",
-        random_state: int | None = 42,
+        random_state: int | None = 0,
+        chunk_size: int = 8_192,
         softmax_temperature: float | str = "auto",
+        mixed_precision: bool = True,
+        outlier_threshold: float | str | None = "auto",
         ignore_pretraining_limits: bool = False,
-        chunk_size: int = 16_384,
         progress: _progress.Progress = "auto",
         verbose: bool = False,
     ):
@@ -199,9 +200,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.z_grid = z_grid
         self.device = device
         self.random_state = random_state
-        self.softmax_temperature = softmax_temperature
-        self.ignore_pretraining_limits = ignore_pretraining_limits
         self.chunk_size = chunk_size
+        self.softmax_temperature = softmax_temperature
+        self.mixed_precision = mixed_precision
+        self.outlier_threshold = outlier_threshold
+        self.ignore_pretraining_limits = ignore_pretraining_limits
         self.progress = progress
         self.verbose = verbose
 
@@ -242,15 +245,15 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # TabPFN answers, and `version` means something.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
-            n_estimators=(
-                self.n_estimators
-                if self.n_estimators == "auto"
-                else group.n_members
-            ),
+            n_estimators=group.n_members,
             model_path=path_for_tabpfn(self.checkpoint_),
             device=self.device_,
             random_state=group.seed,
-            softmax_temperature=self.softmax_temperature,
+            softmax_temperature=(
+                "auto"
+                if self.softmax_temperature_ is None
+                else self.softmax_temperature_
+            ),
             ignore_pretraining_limits=self.ignore_pretraining_limits,
             show_progress_bar=False,
             inference_config=self._inference_config(group) or None,

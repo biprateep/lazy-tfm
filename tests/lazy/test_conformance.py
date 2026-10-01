@@ -348,7 +348,9 @@ def test_no_seed_draws_one_and_records_it(cls, data):
 
 def test_bagged_bar_members_with_their_own_buckets_form_a_mixture(data):
     X, z, X_test = data
-    model = standins.ScaffoldedHistogramStandIn(bag_size=0.5).fit(X, z)
+    model = standins.ScaffoldedHistogramStandIn(
+        n_estimators=4, bag_size=0.5
+    ).fit(X, z)
     dist = model.predict_distribution(X_test)
     assert isinstance(dist, lazy.distributions.MixtureDistribution)
     assert len(dist.components) == 4
@@ -356,7 +358,7 @@ def test_bagged_bar_members_with_their_own_buckets_form_a_mixture(data):
 
 def test_bagged_quantile_members_average_their_quantiles(data):
     X, z, X_test = data
-    model = standins.QuantileStandIn(bag_size=0.5).fit(X, z)
+    model = standins.QuantileStandIn(n_estimators=4, bag_size=0.5).fit(X, z)
     assert len(model.member_groups_) == 4
     assert isinstance(
         model.predict_distribution(X_test),
@@ -376,6 +378,153 @@ def test_the_recipe_is_recorded_in_provenance(data):
     ]
     assert model.provenance_["bag_rows"] == 30
     assert model.provenance_["kv_cache"] is True
+
+
+def test_provenance_records_every_resolved_setting(data):
+    X, z, _ = data
+    model = standins.HistogramStandIn(device="cpu", outlier_threshold=4).fit(
+        X, z
+    )
+    recorded = model.provenance_
+    assert recorded["n_estimators"] == 8
+    assert recorded["random_state"] == 0
+    assert recorded["chunk_size"] == 8_192
+    assert recorded["softmax_temperature"] is None  # "auto", no softmax here
+    assert recorded["mixed_precision"] is False  # never on a CPU
+    assert recorded["outlier_threshold"] == 4.0
+
+
+# -- softmax_temperature, mixed_precision, outlier_threshold -----------------
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"softmax_temperature": 0}, "softmax_temperature"),
+        ({"softmax_temperature": -1.0}, "softmax_temperature"),
+        ({"softmax_temperature": "hot"}, "softmax_temperature"),
+        ({"softmax_temperature": True}, "softmax_temperature"),
+        ({"mixed_precision": "yes"}, "mixed_precision"),
+        ({"mixed_precision": 1}, "mixed_precision"),
+        ({"outlier_threshold": 0}, "outlier_threshold"),
+        ({"outlier_threshold": "off"}, "outlier_threshold"),
+        ({"outlier_threshold": float("inf")}, "outlier_threshold"),
+    ],
+)
+def test_the_shared_settings_are_validated(params, message, data):
+    X, z, _ = data
+    with pytest.raises(ValueError, match=message):
+        standins.HistogramStandIn(**params).fit(X, z)
+
+
+def test_a_model_without_a_softmax_refuses_a_temperature(data, monkeypatch):
+    X, z, _ = data
+    monkeypatch.setattr(standins.QuantileStandIn, "has_softmax", False)
+    with pytest.raises(ValueError, match="no softmax"):
+        standins.QuantileStandIn(softmax_temperature=0.9).fit(X, z)
+    standins.QuantileStandIn(softmax_temperature="auto").fit(X, z)
+
+
+def test_auto_temperature_is_the_models_own(data, monkeypatch):
+    X, z, _ = data
+    monkeypatch.setattr(
+        standins.HistogramStandIn,
+        "_auto_softmax_temperature",
+        lambda self: 0.9,
+    )
+    model = standins.HistogramStandIn().fit(X, z)
+    assert model.softmax_temperature_ == 0.9
+    assert standins.HistogramStandIn(softmax_temperature=2).fit(
+        X, z
+    ).softmax_temperature_ == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("transforms", "threshold", "expected"),
+    [
+        ("auto", "auto", 7.0),  # the model's own recipe, its own clip
+        ("none", "auto", None),  # an explicit recipe: nothing optional
+        ("power", "auto", None),
+        ("auto", None, None),  # off, even in the model's own recipe
+        ("auto", 3, 3.0),
+        ("none", 2.5, 2.5),
+    ],
+)
+def test_auto_outlier_threshold_follows_the_transforms(
+    transforms, threshold, expected, data, monkeypatch
+):
+    X, z, _ = data
+    monkeypatch.setattr(
+        standins.HistogramStandIn, "_auto_outlier_threshold", lambda self: 7.0
+    )
+    model = standins.HistogramStandIn(
+        transforms=transforms, outlier_threshold=threshold
+    ).fit(X, z)
+    assert model.outlier_threshold_ == expected
+
+
+def test_the_clip_is_scaffolded_for_a_model_without_one(data, monkeypatch):
+    X, z, X_test = data
+    X = X.copy()
+    X[0, 0] = 40.0  # far outside the others
+    seen = []
+    original = standins.HistogramStandIn._fit_group
+
+    def recording(self, features, y, group):
+        seen.append(features[:, :].max())
+        return original(self, features, y, group)
+
+    monkeypatch.setattr(standins.HistogramStandIn, "_fit_group", recording)
+    standins.HistogramStandIn(
+        feature_shuffle=False, outlier_threshold=None
+    ).fit(X, z)
+    model = standins.HistogramStandIn(
+        feature_shuffle=False, outlier_threshold=4
+    ).fit(X, z)
+    assert seen[0] == 40.0
+    assert seen[1] < 10.0
+    # The queries are clipped by the bounds fitted on the context.
+    clipper = model.clippers_[0]
+    query = np.array([[40.0, 0.0, 0.0]])
+    assert clipper.transform(query)[0, 0] == pytest.approx(seen[1])
+
+
+def test_a_native_clip_is_left_to_the_model(data, monkeypatch):
+    X, z, _ = data
+    monkeypatch.setattr(
+        standins.HistogramStandIn, "native_outlier_clipping", True
+    )
+    model = standins.HistogramStandIn(outlier_threshold=4).fit(X, z)
+    assert model.outlier_threshold_ == 4.0
+    assert model.clippers_ == [None]
+
+
+def test_soft_clip_keeps_order_and_ignores_missing_values():
+    rng = np.random.default_rng(0)
+    context = rng.normal(size=(500, 2))
+    context[3, 1] = np.nan
+    clip = _transforms.SoftClip(3.0).fit(context)
+    values = np.array([[-50.0, np.nan], [0.0, 1.0], [5.0, 2.0], [50.0, 3.0]])
+    out = clip.transform(values)
+    assert np.isnan(out[0, 1])
+    assert out[1, 0] == 0.0  # inside the bounds: untouched
+    assert np.all(np.diff(out[:, 0]) > 0)  # order kept
+    assert out[3, 0] < 3.5 + np.log1p(50.0)  # pulled back to the bound
+
+
+def test_soft_clip_is_the_upstream_models_clip():
+    preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+    rng = np.random.default_rng(1)
+    # Upstream imputes before it clips, so its clip never sees a NaN.
+    context = rng.standard_t(2, size=(400, 4))
+    queries = rng.standard_t(1, size=(60, 4)) * 5
+    ours = _transforms.SoftClip(4.0).fit(context).transform(queries)
+    theirs = (
+        preprocessing.OutlierRemover(threshold=4.0)
+        .fit(context)
+        .transform(queries)
+    )
+    np.testing.assert_allclose(ours, theirs, rtol=1e-12)
 
 
 @pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)

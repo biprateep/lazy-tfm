@@ -82,7 +82,7 @@ def test_fitting_without_the_source_says_how_to_install_it(monkeypatch, data):
 )
 def test_backend_parameters_are_checked(params, message):
     with pytest.raises(ValueError, match=message):
-        _model(**params)._check_backend_params()
+        _model(**params)._check_uniform_params()
 
 
 def test_standardisation_is_upstreams():

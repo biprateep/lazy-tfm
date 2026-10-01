@@ -2,27 +2,36 @@
 # Copyright (c) 2025 Biprateep Dey
 """The uniform feature layer every foundation-model backend is built on.
 
-Every backend supports the same features through the same parameters, and
-means the same thing by them:
+Every backend takes the same parameters (:data:`UNIFORM_PARAMS`), with the
+same defaults (:data:`UNIFORM_DEFAULTS`; only ``version`` differs), and means
+the same thing by them:
 
-=====================  =====================================================
-``kv_cache``           cache the context's keys and values (exact); default
-                       True
-``n_estimators``       ensemble members
-``feature_shuffle``    each member sees the feature columns permuted
-``transforms``         per-member feature transforms (:mod:`._transforms`)
-``bag_size``           each member sees a random subset of context rows
-``z_grid``             the default output grid; None means the model's
-                       native grid
-=====================  =====================================================
+=======================  ===================================================
+``n_estimators``         exactly this many ensemble members
+``transforms``           per-member feature transforms (:mod:`._transforms`);
+                         ``"auto"`` is the model's own recipe, written out by
+                         the backend rather than inherited from the installed
+                         upstream package
+``feature_shuffle``      each member sees the feature columns permuted
+``bag_size``             each member sees a random subset of context rows
+``kv_cache``             cache the context's keys and values
+``z_grid``               the default output grid; None is the native grid
+``random_state``         the ensemble's seed
+``chunk_size``           query rows per forward pass
+``softmax_temperature``  divides the output logits; ``"auto"`` is the
+                         checkpoint's calibrated value
+``mixed_precision``      the model's reduced-precision path on a GPU
+``outlier_threshold``    the soft clip at that many standard deviations
+=======================  ===================================================
 
-A backend translates each feature to its model's own machinery where the
-model has it -- so the model's tuned default recipe (``transforms="auto"``)
-and its batched ensembling are used unchanged -- and the missing pieces are
-scaffolded here: rows, transforms and column permutations applied per member
-(:mod:`._members`), members combined, the queries chunked. A new backend
-subclasses :class:`ContextEnsembleEstimator`, declares what its model has
-natively, and implements four small methods.
+A backend translates each parameter to its model's own machinery where the
+model has it, and the missing pieces are scaffolded here: rows, transforms,
+outlier clipping and column permutations applied per member
+(:mod:`._members`), members combined, the queries chunked. Every upstream
+setting that changes a prediction is either driven by one of these parameters
+or pinned by the backend, so no upstream default decides an answer silently.
+A new backend subclasses :class:`ContextEnsembleEstimator`, declares what its
+model has natively, and implements four small methods.
 
 Typical usage example:
 
@@ -58,6 +67,7 @@ from lazy.models import _progress
 from lazy.models import _transforms
 
 __all__ = [
+    "AUTO",
     "UNIFORM_DEFAULTS",
     "UNIFORM_PARAMS",
     "ContextEnsembleEstimator",
@@ -83,21 +93,35 @@ UNIFORM_PARAMS: tuple[str, ...] = (
     "device",
     "random_state",
     "chunk_size",
+    "softmax_temperature",
+    "mixed_precision",
+    "outlier_threshold",
     "progress",
     "verbose",
 )
 
-#: The uniform parameters whose default is the same on every backend.
+#: Every uniform parameter's default, the same on every backend; ``version``
+#: alone is per backend, because the checkpoints are.
 UNIFORM_DEFAULTS: dict[str, Any] = {
+    "n_estimators": 8,
     "transforms": _transforms.AUTO,
     "feature_shuffle": True,
     "bag_size": None,
     "kv_cache": True,
     "z_grid": None,
     "device": "auto",
+    "random_state": 0,
+    "chunk_size": 8_192,
+    "softmax_temperature": "auto",
+    "mixed_precision": True,
+    "outlier_threshold": "auto",
     "progress": "auto",
     "verbose": False,
 }
+
+#: The ``softmax_temperature`` and ``outlier_threshold`` value that defers to
+#: the model's own setting.
+AUTO = "auto"
 
 
 #: What the CPU warning adds for a backend with more to say about the CPU.
@@ -147,7 +171,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             its chunk, but differs from an unchunked one by float rounding.
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
-        accepts_auto_estimators: Whether ``n_estimators="auto"`` is allowed.
+        has_softmax: Whether the model's output passes through a softmax,
+            so that ``softmax_temperature`` means something; a model without
+            one accepts only ``"auto"``.
+        native_outlier_clipping: Whether the model applies the soft outlier
+            clip itself, given a threshold; if not, the base class applies
+            it to the features before the model sees them.
         cpu_friendly: Whether the model runs at a usable speed on a CPU; if
             not, a fit that falls back to the CPU under ``device="auto"``
             warns.
@@ -167,12 +196,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     recommended_max_context: ClassVar[int | None] = None
     exact_chunking: ClassVar[bool] = True
     chunks_queries: ClassVar[bool] = True
-    accepts_auto_estimators: ClassVar[bool] = False
+    has_softmax: ClassVar[bool] = True
+    native_outlier_clipping: ClassVar[bool] = False
     cpu_friendly: ClassVar[bool] = False
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
-    n_estimators: int | str
+    n_estimators: int
     transforms: str | tuple[str, ...]
     feature_shuffle: bool
     bag_size: int | float | None
@@ -180,6 +210,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     device: str
     random_state: int | None
     chunk_size: int
+    softmax_temperature: float | str
+    mixed_precision: bool
+    outlier_threshold: float | str | None
     progress: _progress.Progress
     verbose: bool
 
@@ -236,6 +269,32 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """The context size above which the model wants bagging."""
         return self.recommended_max_context
 
+    def _auto_softmax_temperature(self) -> float | None:
+        """The checkpoint's calibrated temperature, or None without a softmax.
+
+        Called after the checkpoint is loaded, so a backend can read the
+        value from it.
+        """
+        return None
+
+    def _temperature(self) -> float:
+        """The resolved ``softmax_temperature`` of a model with a softmax."""
+        if self.softmax_temperature_ is None:
+            raise RuntimeError(
+                f"{type(self).__name__} has a softmax but no calibrated "
+                "temperature: _auto_softmax_temperature returned None"
+            )
+        return self.softmax_temperature_
+
+    def _auto_outlier_threshold(self) -> float | None:
+        """The clip threshold of the model's own recipe, or None for none.
+
+        What ``outlier_threshold="auto"`` resolves to under
+        ``transforms="auto"``; under any explicit ``transforms`` it resolves
+        to None, so an explicit recipe is all the model sees.
+        """
+        return None
+
     # -- fitting -----------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
@@ -250,8 +309,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
         self.device_ = _device.resolve_device(self.device)
+        # Reduced precision exists only on a GPU; on a CPU every backend runs
+        # in float32.
+        self.mixed_precision_ = bool(self.mixed_precision) and str(
+            self.device_
+        ).startswith("cuda")
         self._warn_if_slow_on_cpu()
         self._load_checkpoint()
+        self.softmax_temperature_: float | None = (
+            self._auto_softmax_temperature()
+            if self.softmax_temperature == AUTO
+            else float(self.softmax_temperature)
+        )
+        self.outlier_threshold_ = self._resolve_outlier_threshold()
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
         self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
@@ -273,7 +343,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         )
         features = X.to_numpy(dtype=np.float64)
         self.transformers_: list[_transforms.ScaffoldTransform | None] = []
+        self.clippers_: list[_transforms.SoftClip | None] = []
         self.handles_: list[Any] = []
+        threshold = self.outlier_threshold_
+        scaffold_clip = (
+            threshold is not None and not self.native_outlier_clipping
+        )
         for group in self.member_groups_:
             rows = slice(None) if group.rows is None else group.rows
             context = features[rows]
@@ -285,7 +360,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 ).fit(context)
             )
             self.transformers_.append(transformer)
-            prepared = self._prepare(context, group, transformer)
+            clipper = None
+            if scaffold_clip and threshold is not None:
+                transformed = (
+                    context
+                    if transformer is None
+                    else transformer.transform(context)
+                )
+                clipper = _transforms.SoftClip(threshold).fit(transformed)
+            self.clippers_.append(clipper)
+            prepared = self._prepare(context, group, transformer, clipper)
             self._log(
                 f"fitting group {group.index} ({group.n_members} members) on "
                 f"{len(prepared)} context rows ({self.device_})"
@@ -329,20 +413,47 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"random_state must be an int or None: {self.random_state=}"
             )
         self._n_members()
+        temperature = self.softmax_temperature
+        if temperature != AUTO:
+            if not _is_positive_real(temperature):
+                raise ValueError(
+                    "softmax_temperature must be 'auto' or a positive number: "
+                    f"{self.softmax_temperature=}"
+                )
+            if not self.has_softmax:
+                raise ValueError(
+                    f"{self.display_name} has no softmax output, so "
+                    "softmax_temperature must be 'auto': "
+                    f"{self.softmax_temperature=}"
+                )
+        if not isinstance(self.mixed_precision, bool):
+            raise ValueError(
+                f"mixed_precision must be a bool: {self.mixed_precision=}"
+            )
+        threshold = self.outlier_threshold
+        if not (
+            threshold is None
+            or threshold == AUTO
+            or _is_positive_real(threshold)
+        ):
+            raise ValueError(
+                "outlier_threshold must be 'auto', None or a positive number "
+                f"of standard deviations: {self.outlier_threshold=}"
+            )
+
+    def _resolve_outlier_threshold(self) -> float | None:
+        """The clip threshold in force: ``"auto"`` follows ``transforms``."""
+        if self.outlier_threshold is None:
+            return None
+        if self.outlier_threshold == AUTO:
+            if _transforms.parse(self.transforms) is None:
+                return self._auto_outlier_threshold()
+            return None
+        return float(self.outlier_threshold)
 
     def _n_members(self) -> int:
-        """The ensemble size, validated; ``"auto"`` stays upstream's choice."""
+        """The ensemble size, validated."""
         n_estimators = self.n_estimators
-        if n_estimators == "auto" and self.accepts_auto_estimators:
-            needs_count = self.bag_size is not None or _transforms.parse(
-                self.transforms
-            )
-            if needs_count:
-                raise ValueError(
-                    "n_estimators='auto' leaves the count to the model, so "
-                    "bag_size and transforms need an explicit n_estimators"
-                )
-            return 1
         if not _is_integer(n_estimators) or n_estimators < 1:
             raise ValueError(
                 f"n_estimators must be a positive int: {self.n_estimators=}"
@@ -417,11 +528,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         for group in self.member_groups_:
             members.extend(group.members)
         return {
-            "n_estimators": (
-                self.n_estimators
-                if isinstance(self.n_estimators, str)
-                else int(self.n_estimators)
-            ),
+            "n_estimators": int(self.n_estimators),
             "transforms": [
                 "auto" if m.transform is None else m.transform.name
                 for m in sorted(members, key=lambda m: m.index)
@@ -430,6 +537,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             "random_state": self.random_state_,
             "bag_rows": self.bag_rows_ if self.bagging_ else None,
             "kv_cache": self.kv_cache_,
+            "chunk_size": int(self.chunk_size),
+            "softmax_temperature": self.softmax_temperature_,
+            "mixed_precision": self.mixed_precision_,
+            "outlier_threshold": self.outlier_threshold_,
             "groups": len(self.member_groups_),
         }
 
@@ -440,10 +551,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         features: _typing.FloatArray,
         group: _members.MemberGroup,
         transformer: _transforms.ScaffoldTransform | None,
+        clipper: _transforms.SoftClip | None = None,
     ) -> _typing.FloatArray:
-        """A group's view of some features: transformed, then permuted."""
+        """A group's view of some features: transformed, clipped, permuted."""
         if transformer is not None:
             features = transformer.transform(features)
+        if clipper is not None:
+            features = clipper.transform(features)
         if group.permutation is not None:
             permutation = group.permutation
             if features.shape[1] != permutation.size:
@@ -459,12 +573,18 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self, features: _typing.FloatArray
     ) -> distributions.Distribution:
         """Every group's prediction for some query features, combined."""
+        clippers = getattr(self, "clippers_", None) or [None] * len(
+            self.handles_
+        )
         parts = [
-            self._predict_group(handle, self._prepare(features, group, fitted))
-            for handle, group, fitted in zip(
+            self._predict_group(
+                handle, self._prepare(features, group, fitted, clipper)
+            )
+            for handle, group, fitted, clipper in zip(
                 self.handles_,
                 self.member_groups_,
                 self.transformers_,
+                clippers,
                 strict=True,
             )
         ]
@@ -559,6 +679,16 @@ def _resolve_seed(random_state: int | None) -> int:
     if random_state is None:
         return int(np.random.SeedSequence().entropy % 2**31)  # type: ignore[operator]  # entropy is an int when drawn
     return int(random_state)
+
+
+def _is_positive_real(value: object) -> bool:
+    """Whether ``value`` is a finite real number above zero, and not a bool."""
+    return (
+        isinstance(value, numbers.Real)
+        and not isinstance(value, bool | np.bool_)
+        and bool(np.isfinite(float(value)))
+        and float(value) > 0
+    )
 
 
 def _is_integer(value: object) -> TypeGuard[int]:

@@ -162,10 +162,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
+        softmax_temperature: float | str = "auto",
+        mixed_precision: bool = True,
+        outlier_threshold: float | str | None = "auto",
         progress: _progress.Progress = "auto",
         verbose: bool = False,
-        softmax_temperature: float = 0.9,
-        mixed_precision: bool = True,
     ):
         self.version = version
         self.n_estimators = n_estimators
@@ -177,10 +178,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
-        self.progress = progress
-        self.verbose = verbose
         self.softmax_temperature = softmax_temperature
         self.mixed_precision = mixed_precision
+        self.outlier_threshold = outlier_threshold
+        self.progress = progress
+        self.verbose = verbose
 
     # -- the per-backend interface -------------------------------------------
 
@@ -193,21 +195,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             raise _limix_source.missing_dependency("torch") from error
         return _limix_source.load().loading
 
-    def _check_backend_params(self) -> None:
-        temperature = self.softmax_temperature
-        if (
-            isinstance(temperature, bool)
-            or not isinstance(temperature, int | float)
-            or temperature <= 0
-        ):
-            raise ValueError(
-                f"softmax_temperature must be a positive number: "
-                f"{self.softmax_temperature=}"
-            )
-        if not isinstance(self.mixed_precision, bool):
-            raise ValueError(
-                f"mixed_precision must be a bool: {self.mixed_precision=}"
-            )
+    def _auto_softmax_temperature(self) -> float:
+        # LimiXPredictor's default, the value LimiX-2 was released with.
+        return 0.9
 
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()
@@ -339,7 +329,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             network,
             len(entry["member"].y),
             entry["member"].x.shape[1],
-            _cache_dtype(network, mixed_precision=self.mixed_precision),
+            _cache_dtype(network, mixed_precision=self.mixed_precision_),
         )
         if self._cache_budget is None:
             self._cache_free = _free_device_memory(network)
@@ -358,7 +348,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             )
             return
         entry["cache"] = _limix_stream.prefill(
-            network, entry["member"], mixed_precision=self.mixed_precision
+            network, entry["member"], mixed_precision=self.mixed_precision_
         )
         entry["use_cache"] = True
         self._cache_bytes += needed
@@ -408,13 +398,13 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
                 member,
                 entry["cache"],
                 queries,
-                mixed_precision=self.mixed_precision,
+                mixed_precision=self.mixed_precision_,
             )
         else:
             logits = _limix_stream.forward(
-                network, member, queries, mixed_precision=self.mixed_precision
+                network, member, queries, mixed_precision=self.mixed_precision_
             )
-        scaled = logits.astype(np.float64) / self.softmax_temperature
+        scaled = logits.astype(np.float64) / self._temperature()
         scaled -= scaled.max(axis=1, keepdims=True)
         probabilities = np.exp(scaled)
         return probabilities / probabilities.sum(axis=1, keepdims=True)

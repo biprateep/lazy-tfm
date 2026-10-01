@@ -3,11 +3,13 @@
 """The uniform vocabulary of per-member feature transforms.
 
 Every backend takes ``transforms``: ``"auto"`` (the model's own tuned
-recipe, untouched), a recipe name, one transform name, or a sequence of them
-that ensemble members cycle through. The names are shared by all models:
+recipe, written out by its backend so that the installed upstream version
+cannot change it), a recipe name, one transform name, or a sequence of them
+that ensemble members cycle through. The names are shared by all models and
+mean the same transform on each:
 
 ========================  ==================================================
-``none``                  the features as given
+``none``                  no transform
 ``power``                 Yeo-Johnson power transform, standardised; a
                           column with at most one distinct value in the
                           context (constant, or all missing) is passed
@@ -22,10 +24,18 @@ Any name takes a ``+original`` suffix, which appends the untransformed
 features to the transformed ones. Recipes name a sequence: ``"limix"`` is
 LimiX-2's own, ``("quantile_uniform+original", "power")``.
 
-A backend translates a name to its model's own implementation when it has
-one; otherwise the transform is applied here, by :class:`ScaffoldTransform`,
-before the model sees the features (the model's internal preprocessing then
-still runs on top). It is fitted on the context rows of the member group it
+Under an explicit ``transforms`` value the model sees that transform and
+nothing else optional: each backend turns off its model's extra steps (extra
+feature columns, target transforms, outlier clipping unless
+``outlier_threshold`` asks for it). What every model still does is its
+unavoidable input handling -- standardising the columns, dropping constant
+ones, filling missing values where it cannot take them -- which each
+backend's documentation lists.
+
+A backend translates a name to its model's own implementation only when that
+implementation is the one defined here; otherwise the transform is applied
+here, by :class:`ScaffoldTransform`, before the model sees the features. It is
+fitted on the context rows of the member group it
 serves, never on query rows: under scaffolded bagging each member is a group
 of its own, so that is the member's own bag; for a model that subsamples
 rows natively, the group's members share the whole context, so the
@@ -40,6 +50,7 @@ Typical usage example:
 
 from collections.abc import Sequence
 import dataclasses
+import warnings
 
 import numpy as np
 from sklearn import preprocessing
@@ -51,6 +62,7 @@ __all__ = [
     "BASE_TRANSFORMS",
     "RECIPES",
     "ScaffoldTransform",
+    "SoftClip",
     "TransformSpec",
     "parse",
 ]
@@ -216,6 +228,69 @@ class ScaffoldTransform:
             )
         if self.spec.original:
             out = np.hstack([out, np.asarray(features, dtype=np.float64)])
+        return out
+
+
+class SoftClip:
+    """The soft outlier clip TabPFN, TabICL and TabFM share, for any model.
+
+    Fitted on context features in two passes: the bounds
+    ``mean +- threshold * std`` of each column, then the same bounds
+    recomputed without the values that fell outside the first ones. A value
+    beyond a bound is pulled back to it plus the logarithm of its magnitude,
+    ``min(x, upper + log1p(|x|))`` (and its mirror below), so extreme values
+    keep their order but lose their leverage. Missing values are ignored when
+    fitting and stay missing.
+
+    This is TabICL's and TabFM's ``OutlierRemover`` and TabPFN's
+    ``TorchSoftClipOutliers`` (the standard deviation with ``ddof=1``, floored
+    at 1e-6); it is what ``outlier_threshold`` means on every backend.
+
+    Attributes:
+        threshold: The bound, in standard deviations.
+    """
+
+    def __init__(self, threshold: float):
+        """Initialises an unfitted clip at ``threshold`` standard deviations."""
+        self.threshold = float(threshold)
+        self._lower: _typing.FloatArray | None = None
+        self._upper: _typing.FloatArray | None = None
+
+    def fit(self, features: _typing.FloatArray) -> "SoftClip":
+        """Fits the bounds on context features, shape (n_rows, n_features).
+
+        Returns:
+            The fitted clip itself.
+        """
+        features = np.asarray(features, dtype=np.float64)
+        ddof = 1 if len(features) > 1 else 0
+        lower, upper = self._bounds(features, ddof)
+        clean = np.where(
+            (features < lower) | (features > upper), np.nan, features
+        )
+        self._lower, self._upper = self._bounds(clean, ddof)
+        return self
+
+    def _bounds(
+        self, features: _typing.FloatArray, ddof: int
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """``mean -+ threshold * std`` of each column, ignoring NaN."""
+        # An all-missing column has no bounds; numpy warns, and the NaN
+        # bounds leave its (missing) values alone.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            mean = np.nanmean(features, axis=0)
+            std = np.maximum(np.nanstd(features, axis=0, ddof=ddof), 1e-6)
+        return mean - self.threshold * std, mean + self.threshold * std
+
+    def transform(self, features: _typing.FloatArray) -> _typing.FloatArray:
+        """Applies the clip, shape (n_rows, n_features)."""
+        if self._lower is None or self._upper is None:
+            raise RuntimeError("SoftClip.transform before fit")
+        out = np.asarray(features, dtype=np.float64)
+        with np.errstate(invalid="ignore"):
+            out = np.maximum(-np.log1p(np.abs(out)) + self._lower, out)
+            out = np.minimum(np.log1p(np.abs(out)) + self._upper, out)
         return out
 
 
