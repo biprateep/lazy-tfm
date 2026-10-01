@@ -6,13 +6,16 @@ Upstream's ``LimiXPredictor`` builds each ensemble member a pipeline --
 drop constant columns, rebalance the feature distributions (a power or
 quantile transform, optionally with the original columns and SVD components
 appended), encode categoricals, shuffle the columns -- and runs it on the
-context and query rows stacked together. Only the column filter actually
-looks at the query rows, so here every step is fitted on the context and then
-applied to any rows: a query's features never depend on which other queries
-share its chunk. The distribution and shuffle steps are upstream's own
-classes, seeded exactly as upstream seeds them; the column filter is
-upstream's rule restricted to the context; categorical encoding is skipped,
-as every feature is treated as numeric.
+context and query rows stacked together. The rebalancing is fitted on the
+context rows only, but the rest sees the queries too: the column filter
+(constant on context and queries together, or missing throughout either),
+the detection of categorical columns (fewer than four distinct values) and
+their ordinal encoding. Here every step is fitted on the context alone and
+then applied to any rows, so a query's features never depend on which other
+queries share its chunk. The distribution and shuffle steps are upstream's
+own classes, seeded exactly as upstream seeds them; the column filter is
+upstream's rule restricted to the context; there is no categorical
+detection or encoding, as every feature is numeric.
 
 Each member is described by a *token* naming its rebalancing step (see
 :data:`PIPELINES`). :data:`RECIPE` pins upstream's recommended regression
@@ -23,7 +26,7 @@ them.
 Typical usage example:
 
   seeds = member_seeds(seed=0, n_members=8)
-  pipeline = MemberPipeline("power", seeds[0], shuffle=True).fit(context)
+  pipeline = MemberPipeline("auto_power", seeds[0], shuffle=True).fit(context)
   prepared = pipeline.transform(queries)
 """
 

@@ -19,7 +19,8 @@ context and never on the other queries in its chunk:
 
 * each member's feature preprocessing is fitted on the context alone
   (:mod:`lazy.models._limix_preprocess`), with upstream's own classes and
-  seeds;
+  seeds, where upstream's column filter and categorical detection and
+  encoding also see the queries;
 * the feature positional embedding is drawn from a dedicated generator;
 * the key/value cache (``kv_cache``, default on) is a port: the context goes
   through the network once, at fit, and each chunk of queries attends to it
@@ -30,8 +31,9 @@ The uniform features: ``transforms`` map onto LimiX's own rebalancing step
 where it is the vocabulary's transform (``none``, ``none+original``,
 ``quantile_uniform``) and are scaffolded otherwise, ``feature_shuffle`` onto
 its column shuffler, and ``bag_size`` is scaffolded as the paper's bagged
-LimiX-2 was -- one member per bag, each standardising the target on its own
-bag, members mixed as densities. LimiX-2 was pretrained on contexts of up to
+LimiX-2 was -- one member per bag, running one of upstream's pipelines with
+its seeds and column shuffle and standardising the target on its own bag,
+members mixed as densities. LimiX-2 was pretrained on contexts of up to
 about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
 when a larger one arrives unbagged.
 
@@ -75,6 +77,24 @@ _PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     """Target distributions from LimiX-2's bucket probabilities.
 
+    Every feature is numeric. Upstream would treat a column with fewer than
+    four distinct values as categorical (on contexts of 100 rows or more) and
+    encode it; across the package no model infers categoricals, so LimiX does
+    not either.
+
+    Under ``transforms="auto"`` each member runs one of upstream's pipelines,
+    pinned in :data:`lazy.models._limix_preprocess.RECIPE`: its constant and
+    all-missing context columns dropped, then either a uniform quantile
+    transform with the original columns and SVD components appended, or
+    upstream's Yeo-Johnson (missing values imputed to the mean,
+    standardised), then the column shuffle. Under an explicit
+    ``transforms`` a member sees that transform and what LimiX cannot do
+    without: the constant and all-missing columns dropped, and inside the
+    network missing values replaced by the context mean (with an indicator),
+    each column standardised on the context and clipped at 100 standard
+    deviations. Either way the context targets are standardised (mean and
+    sample standard deviation), as the buckets are in those units.
+
     Args:
         version: Which pinned LimiX checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
@@ -101,36 +121,53 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             means one row), a float a fraction in (0, 1] (``1.0`` means all
             rows), and None all of them. Above about 20,000 context rows
             LimiX-2 needs it: pass ``bag_size=20_000`` with enough members to
-            cover the context.
+            cover the context. Each bagged member is one of upstream's
+            pipelines run alone on its bag, standardising the target there.
         kv_cache: Run the context through the network once, at fit, and let
-            each chunk of queries attend to the result. Exact; costs about
-            2 GB of GPU memory per member at 20,000 context rows. The
-            caches may take 0.6 of the GPU memory free at fit; members whose
-            caches do not fit run uncached, with a warning.
+            each chunk of queries attend to the result. Exact to the
+            rounding of the precision in use; costs about 2 GB of GPU memory
+            per member at 20,000 context rows. The caches may take 0.6 of
+            the GPU memory free at fit; members whose caches do not fit run
+            uncached, with a warning.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a :class:`torch.device`.
-        random_state: Seed for the ensemble (upstream's default is 0). None
-            draws a fresh seed at fit, recorded as ``random_state_`` and in
+        random_state: Seed for the ensemble (upstream's default is 0): it
+            seeds each member's rebalancing and shuffle as upstream's
+            ``seed`` does, and its feature positional embedding. None draws
+            a fresh seed at fit, recorded as ``random_state_`` and in
             ``provenance_``.
-        chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. A query's answer does not depend on
-            the others in its chunk, up to float rounding.
+        chunk_size: Query rows predicted at a time (default 8,192), to bound
+            peak memory; ``0`` does them in one pass. A query's answer does
+            not depend on the others in its chunk, up to float rounding.
+        softmax_temperature: Divides the bucket logits before the softmax.
+            ``"auto"`` is 0.9, upstream's default and the value LimiX-2 was
+            released with; a positive float overrides it. The resolved value
+            is in ``provenance_``.
+        mixed_precision: On CUDA, run the network under ``torch.autocast``
+            (float16), as upstream does, and hold the key/value cache in
+            that precision; False runs float32. On CPU and MPS it is always
+            float32. The resolved value is in ``provenance_``.
+        outlier_threshold: The soft outlier clip at this many standard
+            deviations of the context
+            (:class:`~lazy.models._transforms.SoftClip`), scaffolded ahead of
+            each member's pipeline: LimiX-2 has no clip of its own
+            (upstream's ``outlier_remove_std`` is never used). ``"auto"``
+            and None are off; a float clips. The resolved value is in
+            ``provenance_``.
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
-        softmax_temperature: Temperature on the bucket logits; 0.9 is
-            upstream's default.
-        mixed_precision: Run under autocast on CUDA, as upstream does.
 
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The native grid: the buckets, mapped to the target's
             units with the whole context's mean and standard deviation.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
-        provenance_: Which weights, code and ensemble answered, as a dict.
+        provenance_: Which weights, code and ensemble answered, as a dict;
+            ``limix_pipelines`` lists each member's pipeline token.
         handles_: Every fitted member group.
         borders_: The buckets' borders in standardised units, shape
             (``n_buckets_`` + 1,).
