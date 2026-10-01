@@ -18,11 +18,17 @@ mapped onto any grid by exact, mass-conserving integration
 themselves, in full. The bucket masses rather than quantiles, because upstream
 computes its quantiles by inverting this same piecewise-uniform CDF.
 
-The uniform features all map onto TabPFN's own machinery: ``kv_cache`` onto
-its fit-time key/value cache (at full precision, so exact), the
-``transforms`` it has onto its ``PREPROCESS_TRANSFORMS``, ``feature_shuffle``
-onto its ``FEATURE_SHIFT_METHOD``, and ``bag_size`` onto its per-member row
-subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own bags.
+The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
+fit-time key/value cache (at full precision, so exact on a CPU),
+``feature_shuffle`` onto its ``FEATURE_SHIFT_METHOD``, ``bag_size`` onto its
+per-member row subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own
+bags, ``outlier_threshold`` onto its soft clip, ``OUTLIER_REMOVAL_STD``,
+``softmax_temperature`` onto its own and ``mixed_precision`` onto its
+``inference_precision``. No setting is left to TabPFN: each version's own
+recipe is written out below (:data:`_AUTO_RECIPES`) and handed over in full,
+so neither the checkpoint's stored config nor the installed tabpfn package
+decides what runs, and every column is numeric (upstream would take a column
+with fewer than four distinct values for a category).
 """
 
 from __future__ import annotations
@@ -291,13 +297,21 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             declare much smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
         n_estimators: Ensemble members, each a forward pass over a differently
-            preprocessed view of the data; costs scale linearly. ``"auto"``
-            defers to the count the checkpoint names.
-        transforms: Per-member feature transforms: ``"auto"`` (the
-            checkpoint's own tuned recipe), a recipe name, a transform name or
-            a sequence of them; see :mod:`lazy.models._transforms`. TabPFN
-            implements all but ``quantile_rtdl`` itself. Its per-member target
-            transforms always stay the checkpoint's.
+            preprocessed view of the data; costs scale linearly. Exactly this
+            many run.
+        transforms: Per-member feature transforms: ``"auto"`` (the version's
+            own recipe, pinned in :data:`_AUTO_RECIPES`: its preprocessors,
+            including any SVD components and original columns they append,
+            the fingerprint feature, polynomial features on v2.6, the target
+            transforms, and on v3.5 a 12-sigma soft clip), a recipe name, a
+            transform name or a sequence of them; see
+            :mod:`lazy.models._transforms`. An explicit value is all the
+            model sees: no fingerprint or polynomial features, no SVD, the
+            identity target transform, and outlier clipping only if
+            ``outlier_threshold`` asks for it. TabPFN runs only ``none``
+            natively (its other transforms are not the package's) and lazy
+            applies the rest. What runs whatever the recipe: the removal of
+            constant columns and TabPFN's internal standardisation.
         feature_shuffle: Whether members see the columns in different orders
             (TabPFN's own feature shuffling).
         bag_size: Context rows per member: an int is a row count (1 means
@@ -317,18 +331,27 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         random_state: Seed for the ensemble. None draws a fresh seed at fit,
             recorded as ``random_state_`` and in ``provenance_``.
         softmax_temperature: Temperature on the bucket logits, which sets how
-            sharp the densities are. ``"auto"`` takes the checkpoint's own
-            value, which is the one it was evaluated with; lower sharpens,
-            higher broadens.
+            sharp the densities are. ``"auto"`` takes the version's
+            calibrated value (0.9, and 1.0 on v3.5 and v3.5-fast), recorded in
+            ``provenance_``; lower sharpens, higher broadens.
+        mixed_precision: On CUDA, run in TabPFN's autocast (float16) path;
+            otherwise, and always on a CPU, in float32 (upstream would choose
+            bfloat16 on CPUs with fast bfloat16).
+        outlier_threshold: TabPFN's soft clip of each feature at this many
+            standard deviations of the context (``OUTLIER_REMOVAL_STD``).
+            ``"auto"`` is the version's own under ``transforms="auto"``
+            (12.0 on v3.5 and v3.5-fast, none on the others) and none under
+            an explicit recipe; None is none.
         ignore_pretraining_limits: Pass ``True`` to run a context larger than
             the row count the checkpoint declares it was pretrained for, which
             otherwise raises. Predictions beyond that limit are extrapolation,
             so this is opt-in -- though TabPFN-3 declares a million rows.
         chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. Exact: TabPFN's attention builds its
-            keys and values from the context rows alone and its preprocessors
-            are fitted on the context, so a row's answer never depends on the
-            other rows in its chunk.
+            ``0`` does them in one pass. A row's answer never depends on the
+            other rows in its chunk: TabPFN's attention builds its keys and
+            values from the context rows alone and its preprocessors are
+            fitted on the context. Bit for bit on a CPU; under mixed
+            precision on a GPU, to float16 rounding.
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
