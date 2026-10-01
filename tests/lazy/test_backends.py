@@ -13,6 +13,7 @@ so it only runs when ``LAZY_RUN_CHECKPOINT_TESTS=1`` is set.
 import builtins
 import inspect
 import os
+import pathlib
 import sys
 import types
 import warnings
@@ -342,10 +343,169 @@ def _stub_classifier(est, monkeypatch):
     )
 
 
+class _MemberRegressor:
+    """TabICLRegressor without a backbone: upstream's real member plan.
+
+    Its "quantiles" are the share of its members that use the power
+    transform, so a weighted average of regressors shows the ensemble's mix.
+    """
+
+    created: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.random_state = kwargs["random_state"]
+        _MemberRegressor.created.append(self)
+
+    def fit(self, X, y):
+        preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+        self.X_dtype = X.dtype
+        self.ensemble_generator_ = preprocessing.EnsembleGenerator(
+            classification=False,
+            n_estimators=self.kwargs["n_estimators"],
+            norm_methods=self.kwargs["norm_methods"],
+            feat_shuffle_method=self.kwargs["feat_shuffle_method"],
+            outlier_threshold=self.kwargs["outlier_threshold"],
+            random_state=self.kwargs["random_state"],
+        ).fit(X, y)
+        return self
+
+    def predict(self, X, output_type):
+        assert output_type == "raw_quantiles"
+        configs = self.ensemble_generator_.ensemble_configs_
+        power = len(configs.get("power", []))
+        share = power / sum(len(c) for c in configs.values())
+        return np.zeros((len(X), 1)) + share + np.array([-1.0, 0.0, 1.0])
+
+
 class TestTabICL:
     @pytest.fixture(autouse=True)
     def _needs_tabicl(self):
         pytest.importorskip("tabicl")
+
+    @pytest.fixture
+    def members(self, monkeypatch):
+        """TabICLQuantile on _MemberRegressor, with no checkpoint to load."""
+        upstream = pytest.importorskip("tabicl")
+        monkeypatch.setattr(upstream, "TabICLRegressor", _MemberRegressor)
+        monkeypatch.setattr(_MemberRegressor, "created", [])
+
+        def load(est):
+            est.checkpoint_ = pathlib.Path("tabicl-regressor.ckpt")
+            est.provenance_ = {}
+
+        monkeypatch.setattr(tabicl.TabICLQuantile, "_load_checkpoint", load)
+
+        def fit(n_features=5, **params):
+            generator = np.random.default_rng(0)
+            X = generator.normal(size=(60, n_features))
+            z = generator.uniform(0.2, 1.8, 60)
+            est = tabicl.TabICLQuantile(device="cpu", progress=False, **params)
+            return est.fit(X, z), X
+
+        return fit
+
+    def test_no_regressor_argument_is_left_to_upstream(self, members):
+        """A default the installed tabicl picks could change an answer."""
+        upstream = pytest.importorskip("tabicl._sklearn.regressor")
+        accepted = set(
+            inspect.signature(upstream.TabICLRegressor.__init__).parameters
+        ) - {"self"}
+        members(n_estimators=8, n_features=3)
+        for regressor in _MemberRegressor.created:
+            assert set(regressor.kwargs) == accepted
+
+    def test_the_auto_recipe_is_passed_explicitly(self, members):
+        members()
+        (regressor,) = _MemberRegressor.created
+        assert regressor.kwargs["norm_methods"] == ["none", "power"]
+        assert regressor.kwargs["feat_shuffle_method"] == "latin"
+        assert regressor.kwargs["outlier_threshold"] == 4.0
+        assert regressor.kwargs["use_fa3"] is False
+        assert regressor.kwargs["allow_auto_download"] is False
+        assert tabicl.TabICLQuantile.auto_tokens == tabicl.AUTO_NORM_METHODS
+
+    @pytest.mark.parametrize(
+        ("params", "threshold"),
+        [
+            ({}, 4.0),
+            ({"outlier_threshold": 2.5}, 2.5),
+            ({"outlier_threshold": None}, np.inf),
+            ({"transforms": "none"}, np.inf),
+            ({"transforms": "power", "outlier_threshold": 3.0}, 3.0),
+        ],
+    )
+    def test_outlier_threshold_is_passed_to_upstream(
+        self, members, params, threshold
+    ):
+        est, _ = members(**params)
+        for regressor in _MemberRegressor.created:
+            assert regressor.kwargs["outlier_threshold"] == threshold
+        assert est.clippers_ == [None] * len(est.handles_)  # never twice
+        expected = None if threshold == np.inf else threshold
+        assert est.provenance_["outlier_threshold"] == expected
+        assert est.provenance_["tabicl"]["outlier_threshold"] == expected
+
+    def test_an_infinite_threshold_leaves_every_value_unclipped(self):
+        """What the model sees is then the z-score and nothing else."""
+        preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(200, 3))
+        X[5, 0] = 1e3
+        queries = np.array([[50.0, -40.0, 0.0]])
+        off = preprocessing.PreprocessingPipeline("none", np.inf, 0).fit(X)
+        on = preprocessing.PreprocessingPipeline("none", 4.0, 0).fit(X)
+        mean, std = X.mean(axis=0), X.std(axis=0) + 1e-6
+        np.testing.assert_array_equal(
+            off.X_transformed_, np.clip((X - mean) / std, -100, 100)
+        )
+        np.testing.assert_array_equal(
+            off.transform(queries), (queries - mean) / std
+        )
+        assert on.X_transformed_[5, 0] < 0.5 * off.X_transformed_[5, 0]
+
+    @pytest.mark.parametrize("mixed_precision", [True, False])
+    def test_a_cpu_runs_in_float32(self, members, mixed_precision):
+        est, _ = members(mixed_precision=mixed_precision)
+        (regressor,) = _MemberRegressor.created
+        assert regressor.kwargs["use_amp"] is False
+        assert est.provenance_["tabicl"]["use_amp"] is False
+
+    def test_mixed_precision_on_cuda_is_always_on(self, monkeypatch):
+        """Upstream's own "auto" waits for 1,024 rows or 60 features."""
+        est = tabicl.TabICLQuantile()
+        est.checkpoint_ = pathlib.Path("tabicl-regressor.ckpt")
+        est.device_ = "cuda"
+        est.outlier_threshold_ = 4.0
+        for flag in (True, False):
+            est.mixed_precision_ = flag
+            regressor = est._regressor(2, ["none", "power"], "latin", 0)
+            assert regressor.use_amp is flag
+            assert regressor.use_fa3 is False
+
+    def test_a_softmax_temperature_is_refused(self, tiny):
+        X, z = tiny
+        with pytest.raises(ValueError, match="softmax_temperature must be"):
+            tabicl.TabICLQuantile(softmax_temperature=0.9).fit(X, z)
+
+    @needs_checkpoint
+    def test_an_explicit_recipe_feeds_the_outlier_unclipped(self):
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(120, 3))
+        X[7, 0] = 40.0
+        z = 1.0 + 0.1 * X[:, 1] + 0.02 * generator.normal(size=120)
+
+        def seen(**params):
+            est = tabicl.TabICLQuantile(
+                n_estimators=2, device="cpu", progress=False, **params
+            ).fit(X, z)
+            generator = est.regressor_.ensemble_generator_
+            return generator.preprocessors_["none"].X_transformed_[7, 0]
+
+        zscore = (40.0 - X[:, 0].mean()) / (X[:, 0].std() + 1e-6)
+        assert seen(transforms="none") == pytest.approx(zscore, rel=1e-6)
+        assert seen(outlier_threshold=None) == pytest.approx(zscore, rel=1e-6)
+        assert seen() < 0.5 * zscore  # the auto recipe clips it at 4 sigma
 
     def test_negative_chunk_size_is_rejected(self, tiny):
         X, z = tiny

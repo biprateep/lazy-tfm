@@ -12,11 +12,23 @@ mass the quantiles place inside it.
 
 The uniform features map onto TabICL's own machinery: ``kv_cache`` onto its
 key/value cache, ``feature_shuffle`` onto its Latin-square column shuffles,
-and the ``transforms`` it has (``none``, ``power``, ``quantile``,
-``quantile_rtdl``, ``robust``) onto its ``norm_methods``. TabICL cannot
-subsample rows, so ``bag_size`` is scaffolded: one single-member regressor
-per bag, their quantile functions averaged, as TabICL averages its own
-members.
+``outlier_threshold`` onto its soft outlier clip and ``mixed_precision`` onto
+its float16 autocast. ``transforms="auto"`` is TabICL's own recipe, pinned
+here (:data:`AUTO_NORM_METHODS`, :data:`AUTO_FEAT_SHUFFLE_METHOD`,
+:data:`AUTO_OUTLIER_THRESHOLD`): members alternate between no transform and
+a Yeo-Johnson power transform, and every column is soft-clipped at four
+standard deviations. The ``transforms`` it has (``none``, ``power``,
+``quantile``, ``quantile_rtdl``, ``robust``) map onto its ``norm_methods``.
+TabICL cannot subsample rows, so ``bag_size`` is scaffolded: one
+single-member regressor per bag, their quantile functions averaged, as
+TabICL averages its own members.
+
+What TabICL always does to the features, under any ``transforms``: missing
+values are filled with the context column's mean; columns with a single
+value in the context are dropped; every column is z-scored on the context
+and clipped to +-100 standard deviations. Under ``transforms="auto"`` each
+member then applies its norm method and the 4-sigma clip; under an explicit
+``transforms`` the clip is off unless ``outlier_threshold`` is a number.
 
 Compared with :class:`lazy.models.tabfm.TabFMHistogram`, this backbone is far
 smaller (a ~100 MB checkpoint rather than ~6.6 GB) and much faster, at the cost
@@ -26,6 +38,7 @@ than by the data.
 
 from __future__ import annotations
 
+import math
 import os
 import types
 from typing import Any
@@ -42,6 +55,9 @@ from lazy.models import _members
 from lazy.models import _progress
 
 __all__ = [
+    "AUTO_FEAT_SHUFFLE_METHOD",
+    "AUTO_NORM_METHODS",
+    "AUTO_OUTLIER_THRESHOLD",
     "NATIVE_PAD",
     "NATIVE_QUANTILE_BINS",
     "TabICLQuantile",
@@ -65,6 +81,45 @@ NATIVE_PAD = 0.25
 #: The probability a row may put outside the native grid before
 #: tabulating it there warns.
 _OUTSIDE_TOLERANCE = 0.01
+
+# TabICLv2's own recipe, ``transforms="auto"``, written out here so that the
+# installed upstream version cannot change it: the values TabICLRegressor
+# 2.2.0 defaults to, each passed explicitly.
+
+#: The norm methods members cycle through under ``transforms="auto"``.
+AUTO_NORM_METHODS: tuple[str, ...] = ("none", "power")
+
+#: How members' columns are permuted when ``feature_shuffle=True``.
+AUTO_FEAT_SHUFFLE_METHOD = "latin"
+
+#: The soft outlier clip of the recipe, in standard deviations.
+AUTO_OUTLIER_THRESHOLD = 4.0
+
+#: The threshold that turns upstream's clip off: its bounds become infinite,
+#: and it then returns every value unchanged.
+_CLIP_OFF = math.inf
+
+#: Every other TabICLRegressor argument, pinned. None of them changes an
+#: answer beyond float rounding, but none is left to upstream either.
+_PINNED_REGRESSOR_ARGS: dict[str, Any] = {
+    # Members per forward pass.
+    "batch_size": 8,
+    # FlashAttention-3 needs its own package on a Hopper GPU, and swaps the
+    # attention kernel where it runs; off, so that the kernel never depends
+    # on what happens to be installed.
+    "use_fa3": False,
+    # Where the column embeddings are kept between layers: memory only.
+    "offload_mode": "auto",
+    "disk_offload_dir": None,
+    # The checkpoint is handed over by path; a missing file is an error,
+    # never a download of upstream's default.
+    "allow_auto_download": False,
+    # PyTorch's own thread count.
+    "n_jobs": None,
+    # Built by upstream from the arguments here.
+    "inference_config": None,
+    "verbose": False,
+}
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -95,14 +150,17 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         n_estimators: Ensemble members. Costs scale linearly; 8 is the value
             the benchmarks use.
         transforms: Per-member feature transforms: ``"auto"`` (TabICL's own
-            ``none``/``power`` recipe), a recipe name, a transform name or a
-            sequence of them; see :mod:`lazy.models._transforms`.
+            recipe, ``none`` and ``power`` alternating, with the 4-sigma
+            clip), a recipe name, a transform name or a sequence of them;
+            see :mod:`lazy.models._transforms`.
         feature_shuffle: Whether members see the columns in different orders
-            (TabICL's Latin-square shuffles).
+            (TabICL's Latin-square shuffles, ``feat_shuffle_method="latin"``;
+            ``"none"`` when False). A regressor running one member keeps the
+            columns in their given order.
         bag_size: Context rows per member: an int is a row count (1 means
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Scaffolded: one regressor per
-            bag.
+            None all of them. Scaffolded: one regressor per bag, with lazy's
+            own column permutation when ``feature_shuffle=True``.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (TabICL's
             ``"kv"`` cache), ``"repr"`` (cached row representations, far
@@ -124,6 +182,20 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             pass. Exact: TabICL builds its keys and values from the context
             rows alone, so a row's answer never depends on the other rows in
             its chunk.
+        softmax_temperature: Only ``"auto"``: TabICL's quantile head has no
+            softmax for a temperature to divide, so any other value raises
+            ValueError. Recorded in ``provenance_`` as None.
+        mixed_precision: On CUDA, TabICL's float16 autocast for every
+            context size (``use_amp=True``; upstream's own ``"auto"`` would
+            turn it on only from 1,024 context rows or 60 features). False,
+            or any device other than CUDA, runs in float32
+            (``use_amp=False``). FlashAttention-3 is pinned off either way.
+        outlier_threshold: TabICL's soft outlier clip, applied to each
+            member's z-scored and transformed columns, at this many standard
+            deviations of the context (``outlier_threshold`` upstream).
+            ``"auto"`` is 4.0 under ``transforms="auto"`` and off under an
+            explicit ``transforms``; None is off (upstream's bounds are made
+            infinite, which leaves every value unchanged).
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
         verbose: Print log messages to stdout.
@@ -159,12 +231,13 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         "quantile_rtdl": "quantile_rtdl",
         "robust": "robust",
     }
-    auto_tokens = ("none", "power")
+    auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = False
     member_combination = "quantile_average"
     kv_cache_modes = (True, False, "repr")
     # A quantile head: there is no softmax for a temperature to divide.
     has_softmax = False
+    native_outlier_clipping = True
     kv_cache_rtol = 1e-3  # The cache is stored in fp16 under autocast.
     cpu_friendly = True
 
@@ -223,29 +296,24 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             ) from error
         return tabicl
 
+    def _auto_outlier_threshold(self) -> float | None:
+        return AUTO_OUTLIER_THRESHOLD
+
     def _fit_group(
         self,
         X: _typing.FloatArray,
         y: _typing.FloatArray,
         group: _members.MemberGroup,
     ) -> Any:
-        # The pinned checkpoint is handed over by path, never left to
-        # TabICL's own default, which upstream is free to bump: this way
-        # `CHECKPOINTS` is the authority on which weights answer.
-        options: dict[str, Any] = {}
-        if group.native_transforms is not None:
-            options["norm_methods"] = _norm_methods(group.native_transforms)
-        if not group.feature_shuffle:
-            options["feat_shuffle_method"] = "none"
-        tabicl = self._import_backend()
-        regressor = tabicl.TabICLRegressor(
-            n_estimators=group.n_members,
-            device=self.device_,
-            kv_cache=self.kv_cache,
-            random_state=group.seed,
-            model_path=str(self.checkpoint_),
-            verbose=False,
-            **options,
+        regressor = self._regressor(
+            group.n_members,
+            _norm_methods(
+                AUTO_NORM_METHODS
+                if group.native_transforms is None
+                else group.native_transforms
+            ),
+            AUTO_FEAT_SHUFFLE_METHOD if group.feature_shuffle else "none",
+            group.seed,
         )
         # TabICL works in float32, which cannot resolve a narrow spread about
         # a large offset; standardising in float64 first keeps it. Every
@@ -261,6 +329,41 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             low, high = min(low, self._support[0]), max(high, self._support[1])
         self._support = (low, high)
         return regressor
+
+    def _regressor(
+        self,
+        n_estimators: int,
+        norm_methods: list[str],
+        shuffle: str,
+        seed: int,
+    ) -> Any:
+        """A ``TabICLRegressor`` with every argument set here.
+
+        Nothing is left to upstream's defaults: the uniform parameters drive
+        what they mean, and the rest of the recipe is pinned
+        (:data:`AUTO_NORM_METHODS`, :data:`AUTO_FEAT_SHUFFLE_METHOD`,
+        :data:`AUTO_OUTLIER_THRESHOLD`, :data:`_PINNED_REGRESSOR_ARGS`).
+        """
+        tabicl = self._import_backend()
+        threshold = self.outlier_threshold_
+        return tabicl.TabICLRegressor(
+            n_estimators=n_estimators,
+            norm_methods=norm_methods,
+            feat_shuffle_method=shuffle,
+            outlier_threshold=_CLIP_OFF if threshold is None else threshold,
+            kv_cache=self.kv_cache,
+            # The pinned checkpoint is handed over by path, never left to
+            # TabICL's own default, which upstream is free to bump: this way
+            # `CHECKPOINTS` is the authority on which weights answer.
+            model_path=str(self.checkpoint_),
+            checkpoint_version=self.checkpoint_.name,
+            device=self.device_,
+            # Upstream's "auto" switches float16 on only for contexts of
+            # 1,024 rows or 60 features; mixed precision means it always.
+            use_amp=self.mixed_precision_,
+            random_state=seed,
+            **_PINNED_REGRESSOR_ARGS,
+        )
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
@@ -280,6 +383,21 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         return distributions.QuantileDistribution(
             quantile_levels(self.n_quantiles_), quantiles
         )
+
+    def _recipe(self) -> dict[str, Any]:
+        threshold = self.outlier_threshold_
+        return {
+            **super()._recipe(),
+            # What upstream was asked for.
+            "tabicl": {
+                "outlier_threshold": threshold,
+                "use_amp": self.mixed_precision_,
+                **{
+                    name: _PINNED_REGRESSOR_ARGS[name]
+                    for name in ("batch_size", "use_fa3")
+                },
+            },
+        }
 
     def _native_grid(self) -> grid_lib.Grid:
         low, high = self._support
