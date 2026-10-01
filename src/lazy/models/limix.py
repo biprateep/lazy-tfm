@@ -156,6 +156,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     member_combination = "mixture"
     kv_cache_modes = (True, False)
     kv_cache_rtol = 1e-4  # Float rounding: the cached rows batch differently.
+    # LimiX-2 clips no outliers; outlier_threshold is scaffolded by SoftClip.
+    native_outlier_clipping = False
     recommended_max_context = 20_000
     exact_chunking = False  # Exact up to float rounding, not bit for bit.
 
@@ -217,6 +219,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         # LimiXPredictor's default, the value LimiX-2 was released with.
         return _limix_preprocess.RECIPE.softmax_temperature
 
+    def _auto_outlier_threshold(self) -> None:
+        # LimiX-2 clips nothing: LimiXPredictor stores outlier_remove_std
+        # and never reads it, and the checkpoint's encoder has
+        # remove_outliers off.
+        return None
+
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()
         source = _limix_source.load().source
@@ -245,6 +253,19 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             else group
             for group in self.member_groups_
         )
+        tokens = {
+            member.index: entry["pipeline"].token
+            for group, handle in zip(
+                self.member_groups_, self.handles_, strict=True
+            )
+            for member, entry in zip(
+                group.members, handle["members"], strict=True
+            )
+        }
+        pipelines: dict[str, Any] = {
+            "limix_pipelines": [tokens[index] for index in sorted(tokens)]
+        }
+        self.provenance_ = {**self.provenance_, **pipelines}
         self._warn_if_uncached()
 
     def _prepare(
