@@ -163,12 +163,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         member_combination: How groups combine: ``"mixture"`` of densities
             or ``"quantile_average"`` of quantile functions.
         kv_cache_modes: The accepted ``kv_cache`` values.
-        kv_cache_rtol: How closely cached and uncached outputs agree.
+        kv_cache_rtol: How closely cached and uncached outputs agree on a
+            CPU; under mixed precision on a GPU they agree to that
+            precision's rounding instead.
         recommended_max_context: The context size above which the model
             degrades without bagging, or None.
-        exact_chunking: Whether chunking the queries is exact bit for bit;
-            if not, a query's answer still does not depend on the others in
-            its chunk, but differs from an unchunked one by float rounding.
+        exact_chunking: Whether chunking the queries is exact bit for bit
+            on a CPU; if not, a query's answer still does not depend on the
+            others in its chunk, but differs from an unchunked one by float
+            rounding. Under mixed precision on a GPU it differs by that
+            precision's rounding on every model.
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
         has_softmax: Whether the model's output passes through a softmax,

@@ -22,8 +22,9 @@ The rules, in order:
 * with bagging, a model with native row subsampling keeps those groups and
   is handed each member's rows; any other model gets one group per member,
   seeded ``random_state + i``, with an explicit column permutation;
-* bags are drawn exactly as the paper's bagged LimiX-2 drew them, so those
-  runs reproduce.
+* bags are drawn exactly as the paper's bagged LimiX-2 drew them, so a bagged
+  run sees the same rows; TabFM alone draws its own rows (``max_num_rows``),
+  and the rows drawn here are not used for it.
 
 Typical usage example:
 
