@@ -45,6 +45,7 @@ than the output bin cannot change a density tabulated on it.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import math
 import numbers
@@ -491,12 +492,25 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "X": _frame(X),
             "z": y,
             "group": group,
-            "bag_fraction": (
-                None
-                if group.member_rows is None
-                else len(group.member_rows[0]) / len(X)
-            ),
+            "bag_rows": self.bag_rows_ if self.bagging_ else None,
+            "n_context": len(X),
         }
+
+    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        super()._fit(X, y)
+        if not self.bagging_:
+            return
+        # TabFM subsamples each classifier's rows itself (max_num_rows), with
+        # its own generator and the classifier's seed; the rows the plan drew
+        # are never used, so nothing is left claiming they were.
+        self.member_groups_ = tuple(
+            _without_rows(group) for group in self.member_groups_
+        )
+        for handle, group in zip(
+            self.handles_, self.member_groups_, strict=True
+        ):
+            handle["group"] = group
+        self.provenance_["bag_rows_drawn_by"] = "tabfm"
 
     def _support(self, z: _typing.FloatArray) -> tuple[float, float]:
         """The range the equal-mass bins span: the constructor grid's or z's."""
@@ -680,10 +694,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             full = np.zeros((len(X_query), n_classes))
             full[:, present.astype(int)] = 1.0
             return full
-        max_rows = (
-            None
-            if handle["bag_fraction"] is None
-            else max(1, math.ceil(handle["bag_fraction"] * len(X_context)))
+        max_rows = _bag_rows(
+            handle["bag_rows"], handle["n_context"], len(X_context)
         )
         classifier = self._classifier(model, handle["group"], seed, max_rows)
         classifier.fit(X_context.reset_index(drop=True), labels)
@@ -843,6 +855,35 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _bag_rows(bag_rows: int | None, n_context: int, n_level: int) -> int | None:
+    """A classifier's ``max_num_rows``: the bag's share of its rows.
+
+    In integers, so that the coarse level, which sees the whole context,
+    gets exactly ``bag_rows``, and a fine level the same fraction of its
+    coarse bin's rows, rounded up.
+
+    Examples:
+        >>> _bag_rows(500, 618, 618), _bag_rows(500, 618, 62)
+        (500, 51)
+        >>> _bag_rows(None, 618, 618) is None
+        True
+    """
+    if bag_rows is None:
+        return None
+    return max(1, -(-bag_rows * n_level // n_context))
+
+
+def _without_rows(group: _members.MemberGroup) -> _members.MemberGroup:
+    """A group without the member rows TabFM draws for itself."""
+    return dataclasses.replace(
+        group,
+        members=tuple(
+            dataclasses.replace(member, rows=None) for member in group.members
+        ),
+        member_rows=None,
+    )
 
 
 def _is_count(value: object) -> bool:

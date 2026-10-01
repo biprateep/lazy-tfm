@@ -183,7 +183,7 @@ class TestTabFM:
             est, "_classifier", lambda model, group, seed, rows: Fitted()
         )
         X_query = pd.DataFrame({"a": np.linspace(0.0, 1.0, 10)})
-        handle = {"bag_fraction": None, "group": None}
+        handle = {"bag_rows": None, "n_context": 4, "group": None}
         est._class_probabilities(
             None,
             handle,
@@ -196,6 +196,44 @@ class TestTabFM:
         assert seen["chunk_size"] == 7
         assert seen["query_block_rows"] == 21
         assert seen["member_batch_size"] == 3
+
+    def test_a_bag_gives_the_coarse_level_exactly_its_rows(self, monkeypatch):
+        """500 of 618 rows once became 501 by float rounding."""
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(618, 2))
+        z = generator.uniform(0.0, 2.0, 618)
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, bag_size=500, n_estimators=2
+        ).fit(X, z)
+        rows = []
+        _stub_classifier(est, monkeypatch)
+        frequencies = est._classifier
+
+        def recording(model, group, seed, max_rows):
+            rows.append(max_rows)
+            return frequencies(model, group, seed, max_rows)
+
+        monkeypatch.setattr(est, "_classifier", recording)
+        est.predict_distribution(X[:3])
+        coarse = est.z_context_ < np.median(est.z_context_)
+        assert rows[0] == 500
+        assert sorted(rows[1:]) == sorted(
+            -(-500 * n // 618) for n in (coarse.sum(), (~coarse).sum())
+        )
+
+    def test_provenance_does_not_claim_rows_tabfm_never_used(self, tiny):
+        """TabFM draws each classifier's bag itself, from its own seed."""
+        X, z = tiny
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, bag_size=30, n_estimators=3
+        ).fit(X, z)
+        assert est.provenance_["bag_rows"] == 30
+        assert est.provenance_["bag_rows_drawn_by"] == "tabfm"
+        for group in est.member_groups_:
+            assert group.member_rows is None
+            assert all(member.rows is None for member in group.members)
+        unbagged = tabfm.TabFMHistogram(n_coarse_bins=2, n_fine_bins=2)
+        assert "bag_rows_drawn_by" not in unbagged.fit(X, z).provenance_
 
     def test_the_slow_path_hands_upstream_bounded_chunks(self, monkeypatch):
         """`chunk_size` must reach `predict_proba`, not just the docstring."""
@@ -220,7 +258,7 @@ class TestTabFM:
             {"a": np.linspace(0.0, 1.0, 40)}, index=np.arange(100, 140)
         )
 
-        handle = {"bag_fraction": None, "group": None}
+        handle = {"bag_rows": None, "n_context": 4, "group": None}
         probs = est._class_probabilities(
             None,
             handle,
@@ -256,7 +294,8 @@ class TestTabFM:
         bins = tabfm._bin_labels(edges, z)
         assert np.all(np.diff(edges)[bins] > 0)
         _stub_classifier(est, monkeypatch)
-        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_fraction": None}
+        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_rows": None}
+        handle["n_context"] = z.size
         handle["group"] = types.SimpleNamespace(seed=0)
         probs, edges, prior = est._hierarchy(
             None, handle, tabfm._frame(z[:7, None]), 0.0
