@@ -25,7 +25,10 @@ union of every dither's edges.
 The uniform features map onto TabFM's own machinery: ``kv_cache`` onto the
 streaming prefill/decode path (:mod:`lazy.models._icl_stream`),
 ``feature_shuffle`` and the transforms it has onto its classifier's own
-shuffles and ``norm_methods``, and ``bag_size`` onto its per-member row cap.
+shuffles and ``norm_methods``, ``bag_size`` onto its per-member row cap,
+``outlier_threshold`` onto its soft clip and ``mixed_precision`` onto its
+bfloat16 weights. The rest of TabFM's recipe is pinned here, so the
+installed tabfm's defaults decide nothing.
 
 Because the bins are equal-mass they are narrow where the targets are crowded,
 so in the busy part of the distribution they are routinely *narrower* than
@@ -45,8 +48,10 @@ than the output bin cannot change a density tabulated on it.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import math
+import numbers
 import os
 import types
 from typing import Any
@@ -92,15 +97,54 @@ class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
 
+# TabFM v1.0's own recipe, ``transforms="auto"``, written out here so that the
+# installed upstream version cannot change it: the values TabFMClassifier
+# defaults to, each passed explicitly.
+
+#: The norm methods members cycle through under ``transforms="auto"``.
+AUTO_NORM_METHODS: tuple[str, ...] = ("none", "power")
+
+#: The soft outlier clip of the recipe, in standard deviations.
+AUTO_OUTLIER_THRESHOLD = 4.0
+
+#: Columns each member sees under the recipe; a wider table is subsampled.
+AUTO_MAX_NUM_FEATURES = 500
+
+#: Every other TabFMClassifier argument, pinned to the recipe's value.
+_PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
+    # Each member sees the class labels cyclically shifted, undone on its
+    # logits, which are then averaged before one softmax.
+    "class_shift": True,
+    "average_logits": True,
+    # No calibration, no NNLS member weights, no appended feature crosses or
+    # SVD features: the default TabFMClassifier, not its "ensemble" preset.
+    "binary_calibration_method": None,
+    "multiclass_calibration_method": None,
+    "enable_nnls": False,
+    "n_feature_crosses": 0,
+    "n_svd_features": 0,
+    # Inert, with every column numeric and the steps above off; pinned so that
+    # nothing is left to upstream.
+    "permute_categorical": False,
+    "cat_encoder_mode": "appearance",
+    "total_svd_pool": None,
+    "num_folds_for_cv": 5,
+    "nnls_beta": 0.75,
+    "calibration_lambda": 1e-2,
+    "min_rows_for_single_val_split": 2000,
+    "verbose": False,
+}
+
 
 _SLOW_PATH_WARNING = (
-    "tabfm has no KV-cache API, so TabFMHistogram is falling back to "
-    "its uncached inference path, which re-encodes the training "
-    "context for every chunk of query rows -- roughly 26x the compute "
-    "per query row (13.7 ms vs 0.53 ms per member-row). The answers "
-    "agree up to rounding; only the runtime differs, so a large prediction "
-    "will simply take far longer than expected. The KV-cache API "
-    "ships in the repository build but not on PyPI:\n"
+    "the installed tabfm has no KV-cache API (TabFM.prefill and "
+    "TabFM.decode; the PyPI releases 1.0.0 and 1.0.1 lack it), so "
+    "TabFMHistogram is falling back to upstream predict_proba, which "
+    "re-encodes the training context for every chunk of query rows -- "
+    "measured at roughly 26x the compute per query row (13.7 ms vs 0.53 ms "
+    "per member-row). The answers agree up to rounding; only the runtime "
+    "differs, so a large prediction will simply take far longer than "
+    "expected. The repository build has the API:\n"
     "    pip install 'tabfm[pytorch] @ "
     "git+https://github.com/google-research/tabfm'\n"
     "Pass kv_cache=False to accept the slow path and silence this."
@@ -193,80 +237,125 @@ def prior_shift_em(
 class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     """Target distributions from TabFM's classifier over a bin hierarchy.
 
+    Each in-context stage -- the coarse level and every coarse bin's fine
+    level -- is one ``TabFMClassifier`` of ``n_estimators`` members. Within a
+    classifier the members' class-shift-corrected logits are averaged and
+    divided by the temperature before one softmax (TabFM's own
+    ``average_logits``); the levels multiply into bin probabilities; a
+    group of members (one per scaffolded transform) and the dithers are then
+    density mixtures, weighted by members and equally respectively. Every
+    dither runs its classifiers with the same seeds -- the coarse level the
+    group's seed, fine level ``j`` that seed plus ``1 + j`` -- so dithers
+    differ only by their bin edges, as in the paper's runs.
+
+    Every ``TabFMClassifier`` argument is set by lazy, none left to the
+    installed tabfm. What TabFM still does to the features under any
+    ``transforms``: mean-impute missing values (dropping an all-missing
+    column), drop constant columns, and standardise each column (clipped
+    to +-100); under ``transforms="auto"`` the recipe adds the Yeo-Johnson
+    members, the 4-sigma soft clip and, above 500 columns, a random
+    500-column subset per member.
+
     Args:
         version: Which pinned TabFM checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_coarse_bins: Classes at the first hierarchy level (at most ten).
-        n_fine_bins: Classes within each coarse bin (at most ten). The
-            density is built on ``n_coarse_bins * n_fine_bins`` equal-mass
-            bins; the default 10 x 10 gives 100.
-        n_estimators: Ensemble members per classifier. More members cost
-            linearly more time and reduce member noise; 4 is enough for a
-            smooth density.
-        n_dither: Repeats of the whole hierarchy with bin edges shifted by
-            ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
-            dithering; 3 is a good default when you can afford three times the
-            compute.
+        n_estimators: Ensemble members per classifier, exactly; each sees
+            its own column order and class shift. More members cost
+            linearly more time and reduce member noise.
         transforms: Per-member feature transforms: ``"auto"`` (TabFM's own
-            ``none``/``power`` recipe), a recipe name, a transform name or a
-            sequence of them; see :mod:`lazy.models._transforms`. TabFM's
-            ``norm_methods`` implement ``none``, ``power``, ``quantile``,
-            ``quantile_rtdl`` and ``robust``; the rest are scaffolded, each as
-            a hierarchy of its own.
+            recipe, pinned in lazy: members alternate ``none`` and ``power``),
+            a recipe name, a transform name or a sequence of them; see
+            :mod:`lazy.models._transforms`. ``none`` and ``power`` are
+            TabFM's own ``norm_methods``, which equal lazy's (TabFM applies
+            them after its standardisation); the rest are scaffolded, each as
+            a hierarchy of its own, because TabFM's namesakes differ (its
+            ``robust`` scales to unit variance, its ``quantile`` subsamples
+            10,000 rows, its ``quantile_rtdl`` draws other noise). Under an
+            explicit value no column subsampling and, unless
+            ``outlier_threshold`` is a number, no soft clip.
         feature_shuffle: Whether members see the columns in different orders
-            (TabFM's own feature shuffles).
+            (TabFM's ``feat_shuffle_method="random"``, else ``"none"``).
+            Without it every member sees every column in the original order,
+            however wide the table.
         bag_size: Context rows per member: an int is a row count (1 means
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Native: each classifier's members
-            subsample the same fraction of the rows it sees (TabFM's
-            ``max_num_rows``).
+            None all of them. Native (TabFM's ``max_num_rows``): the coarse
+            classifier's members each draw exactly that many rows, a fine
+            classifier's the same fraction of its bin's rows, rounded up.
+            TabFM draws them itself, from the classifier's seed.
         kv_cache: Prefill each member's context once and decode the queries
-            against the cache (``True``; needs TabFM's repository build, and
-            falls back with a :class:`TabFMPerformanceWarning` without it),
-            or re-encode the context for every chunk of queries (``False``).
-            TabFM computes in bfloat16, so the two paths agree to float
-            rounding on the CPU but not on CUDA, whose kernels round
-            differently for different batch shapes: there densities differ
-            by up to a few per cent of their peak.
+            against the cache, chunk by chunk (``True``; needs TabFM's
+            repository build, and falls back with a
+            :class:`TabFMPerformanceWarning` without it), or re-encode the
+            context for every chunk of queries (``False``). Each classifier
+            is fitted and its context prefilled inside every prediction
+            call, so the cache serves the chunks of one call, not later
+            calls. In float32 the two paths agree to float rounding; in
+            bfloat16 on CUDA, whose kernels round differently for different
+            batch shapes, densities differ by up to a few per cent of their
+            peak.
         z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
             sets the range the equal-mass bins span; without one they span the
             training values.
+        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
+            ``"mps"``, ``"cpu"``, or a ``torch.device``.
+        random_state: Seed of the ensemble: group ``g``'s classifiers are
+            seeded from ``random_state + 1000 * g`` (see the seeds above).
+            None draws a fresh seed at fit, recorded as ``random_state_`` and
+            in ``provenance_``.
+        chunk_size: Query rows per forward pass, on both paths: decoded
+            against the cache at a time, or handed to the upstream
+            ``predict_proba`` at a time when ``kv_cache=False``; ``0`` does
+            them in one pass. The in-context stage builds its keys and values
+            from the context rows only, so a row's answer never depends on
+            the other rows in its chunk, but the kernels batch differently:
+            on the CPU in float32 it changes by float rounding (measured up
+            to 2e-6 of the peak density; bit-identical in some cases), and
+            in bfloat16 on CUDA by the rounding ``kv_cache`` describes.
+        softmax_temperature: Divides the member-averaged logits before the
+            softmax. ``"auto"`` is TabFM v1.0's calibrated 0.9, deliberately
+            not 1.0; a positive number overrides it. Recorded in
+            ``provenance_``.
+        mixed_precision: On CUDA, run TabFM in bfloat16, the precision it
+            was designed for (its float32 weights cast at load); False keeps
+            float32. A CPU always runs float32, whatever this says.
+            Recorded, resolved, in ``provenance_``.
+        outlier_threshold: TabFM's own two-pass soft clip of each
+            standardised column, at this many standard deviations
+            (:class:`lazy.models._transforms.SoftClip`). ``"auto"`` is 4.0
+            under ``transforms="auto"`` and off under an explicit
+            ``transforms``; None is off (TabFM is passed an infinite
+            threshold, which makes its clip the identity).
+        n_coarse_bins: Classes at the first hierarchy level (at most ten).
+        n_fine_bins: Classes within each coarse bin (at most ten). The
+            density is built on ``n_coarse_bins * n_fine_bins`` equal-mass
+            bins; the default 10 x 10 gives 100.
+        n_dither: Repeats of the whole hierarchy with bin edges shifted by
+            ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
+            dithering; 3 is a good choice when you can afford three times
+            the compute.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
             the training prior, which is worth having when the context is a
             biased spectroscopic sample. ``None`` (default) leaves the
             posteriors alone.
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed for TabFM's ensemble construction. None draws a
-            fresh seed at fit, recorded as ``random_state_`` and in
-            ``provenance_``.
-        softmax_temperature: Temperature applied to the classifier logits. The
-            upstream default of 0.9 is deliberately not 1.0 and should rarely
-            be changed.
-        chunk_size: Query rows handed to the upstream ``predict_proba`` at a
-            time when ``kv_cache=False``; ``0`` does them in one pass. The
-            in-context stage builds its keys and values from the context rows
-            only, so a row's answer never depends on the other rows in its
-            chunk; it is bit-identical on the CPU, and on CUDA changes by the
-            bfloat16 rounding ``kv_cache`` describes. The cached path is
-            bounded by ``query_block_rows`` and ``decode_chunk_rows``
-            instead.
-        member_batch_size: Ensemble members processed together on the cached
-            path (and TabFM's own ``batch_size``). This and the next three are
-            memory/throughput knobs that change the result only by the
-            rounding ``kv_cache`` describes.
-        decode_chunk_rows: Query rows decoded against the cache at a time.
+        member_batch_size: Ensemble members processed together (prefilled
+            together on the cached path; TabFM's own ``batch_size``), an int
+            of at least 1. This and the next two are memory/throughput knobs
+            that change the result only by the rounding ``kv_cache``
+            describes.
         query_block_rows: Query rows whose member views are built at a time
-            on the cached path, bounding host memory.
+            on the cached path, bounding host memory; an int of at least 1,
+            rounded down to a whole number of ``chunk_size`` chunks (at least
+            one), so it never changes the rows per forward pass.
         keep_cache_on_device: Whether the prefilled cache stays on the device
             rather than round-tripping through host memory.
         progress: A progress bar over the in-context stages: ``"auto"`` shows
             it on a terminal or in a notebook, ``True`` always, ``False``
             never. It counts stages, ``n_dither * (1 + n_coarse_bins)`` of
-            them, because each runs over every query row.
+            them per member group, because each runs over every query row.
         verbose: Print per-level log messages to stdout.
 
     Attributes:
@@ -293,16 +382,15 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     display_name = "TabFM"
     extra = "tabfm"
     native_output = "histogram"
-    native_transforms = {
-        "none": "none",
-        "power": "power",
-        "quantile": "quantile",
-        "quantile_rtdl": "quantile_rtdl",
-        "robust": "robust",
-    }
-    auto_tokens = ("none", "power")
+    # Only TabFM's norm methods that are lazy's transforms: its robust scales
+    # to unit variance, its quantile subsamples 10,000 rows and its
+    # quantile_rtdl adds different noise, so those three are scaffolded.
+    native_transforms = {"none": "none", "power": "power"}
+    auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
-    # bfloat16 on CUDA: chunking and the cache change the rounding.
+    native_outlier_clipping = True
+    # bfloat16 on CUDA (mixed_precision): chunking and the cache change the
+    # rounding.
     exact_chunking = False
     kv_cache_rtol = 5e-2
     chunks_queries = False
@@ -328,7 +416,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_dither: int = 1,
         prior_shift: str | None = None,
         member_batch_size: int = 1,
-        decode_chunk_rows: int = 16_384,
         query_block_rows: int = 262_144,
         keep_cache_on_device: bool = True,
         progress: _progress.Progress = "auto",
@@ -352,7 +439,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.n_dither = n_dither
         self.prior_shift = prior_shift
         self.member_batch_size = member_batch_size
-        self.decode_chunk_rows = decode_chunk_rows
         self.query_block_rows = query_block_rows
         self.keep_cache_on_device = keep_cache_on_device
         self.progress = progress
@@ -380,6 +466,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # TabFMClassifier's default, the value TabFM v1.0 was released with.
         return 0.9
 
+    def _auto_outlier_threshold(self) -> float:
+        return AUTO_OUTLIER_THRESHOLD
+
     def _check_backend_params(self) -> None:
         if max(self.n_coarse_bins, self.n_fine_bins) > MAX_CLASSES:
             raise ValueError(
@@ -393,6 +482,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             raise ValueError("n_dither must be at least 1")
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
+        for name in ("member_batch_size", "query_block_rows"):
+            value = getattr(self, name)
+            if not _is_count(value):
+                raise ValueError(
+                    f"{name} must be an int of at least 1: {name}={value!r}"
+                )
         self.inference_ = self._resolve_inference()
 
     def _resolve_inference(self) -> str:
@@ -443,12 +538,25 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             "X": _frame(X),
             "z": y,
             "group": group,
-            "bag_fraction": (
-                None
-                if group.member_rows is None
-                else len(group.member_rows[0]) / len(X)
-            ),
+            "bag_rows": self.bag_rows_ if self.bagging_ else None,
+            "n_context": len(X),
         }
+
+    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        super()._fit(X, y)
+        if not self.bagging_:
+            return
+        # TabFM subsamples each classifier's rows itself (max_num_rows), with
+        # its own generator and the classifier's seed; the rows the plan drew
+        # are never used, so nothing is left claiming they were.
+        self.member_groups_ = tuple(
+            _without_rows(group) for group in self.member_groups_
+        )
+        for handle, group in zip(
+            self.handles_, self.member_groups_, strict=True
+        ):
+            handle["group"] = group
+        self.provenance_["bag_rows_drawn_by"] = "tabfm"
 
     def _support(self, z: _typing.FloatArray) -> tuple[float, float]:
         """The range the equal-mass bins span: the constructor grid's or z's."""
@@ -632,10 +740,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             full = np.zeros((len(X_query), n_classes))
             full[:, present.astype(int)] = 1.0
             return full
-        max_rows = (
-            None
-            if handle["bag_fraction"] is None
-            else max(1, math.ceil(handle["bag_fraction"] * len(X_context)))
+        max_rows = _bag_rows(
+            handle["bag_rows"], handle["n_context"], len(X_context)
         )
         classifier = self._classifier(model, handle["group"], seed, max_rows)
         classifier.fit(X_context.reset_index(drop=True), labels)
@@ -648,7 +754,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 {"query": X_query},
                 member_batch_size=self.member_batch_size,
                 query_block_rows=self.query_block_rows,
-                decode_chunk_rows=self.decode_chunk_rows,
+                chunk_size=self.chunk_size,
                 keep_cache_on_device=self.keep_cache_on_device,
             )
             probs = _icl_stream.softmax(
@@ -672,10 +778,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         one go, which a survey-sized query set cannot afford. Feeding it chunks
         caps that at ``n_members x chunk_size x n_features``. The in-context
         stage builds its keys and values from the context rows alone, so
-        query rows never influence one another: on the CPU the result is
-        bit-identical to a single pass, and on CUDA it differs by bfloat16
-        rounding, the kernels batching differently. The context forward pass
-        is repeated per chunk, which is the price.
+        query rows never influence one another; the result differs from a
+        single pass only by float rounding, the kernels batching
+        differently. The context forward pass is repeated per chunk, which
+        is the price.
         """
         size = self.chunk_size if self.chunk_size > 0 else len(X_query)
         frame = X_query.reset_index(drop=True)
@@ -695,31 +801,52 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         seed: int,
         max_rows: int | None,
     ) -> Any:
-        """A ``TabFMClassifier``, passing only the knobs this build understands.
+        """A ``TabFMClassifier`` with every argument set here.
 
-        The cache arguments exist on builds with the KV-cache API and not on
-        the PyPI release; sending them unconditionally is a ``TypeError``. The
-        uniform features are passed only when asked for, so the default
-        recipe is upstream's own.
+        Nothing is left to upstream's defaults: the uniform parameters drive
+        what they mean, and the rest of TabFM's recipe is pinned
+        (:data:`AUTO_NORM_METHODS`, :data:`_PINNED_CLASSIFIER_ARGS`). The
+        cache arguments exist on builds with the KV-cache API and not on the
+        PyPI release; sending them unconditionally is a ``TypeError``.
         """
         tabfm = self._import_backend()
         kwargs: dict[str, Any] = {
             "model": model,
             "n_estimators": group.n_members,
-            "batch_size": self.member_batch_size,
-            "random_state": seed,
-            "softmax_temperature": self.softmax_temperature_,
-            "binary_calibration_method": None,
-            "verbose": False,
-        }
-        if group.native_transforms is not None:
             # Upstream cycles its norm methods over the members, so the
             # per-member list runs exactly as planned, repeats and all.
-            kwargs["norm_methods"] = list(group.native_transforms)
-        if not group.feature_shuffle:
-            kwargs["feat_shuffle_method"] = "none"
-        if max_rows is not None:
-            kwargs["max_num_rows"] = max_rows
+            "norm_methods": list(
+                AUTO_NORM_METHODS
+                if group.native_transforms is None
+                else group.native_transforms
+            ),
+            "feat_shuffle_method": (
+                "random" if group.feature_shuffle else "none"
+            ),
+            # TabFM always runs its clip; an infinite threshold makes it the
+            # identity, bit for bit, which is how it is turned off.
+            "outlier_threshold": (
+                math.inf
+                if self.outlier_threshold_ is None
+                else self.outlier_threshold_
+            ),
+            # Upstream draws a member's column subset in shuffled order, so a
+            # subsampling member always sees permuted columns: only the auto
+            # recipe with shuffles subsamples, and otherwise every member sees
+            # every column (in order, without feature_shuffle).
+            "max_num_features": (
+                AUTO_MAX_NUM_FEATURES
+                if group.native_transforms is None and group.feature_shuffle
+                else None
+            ),
+            "max_num_rows": max_rows,
+            "softmax_temperature": self._temperature(),
+            # Informational only in TabFM; the precision is the weights'.
+            "use_amp": self.mixed_precision_,
+            "batch_size": self.member_batch_size,
+            "random_state": seed,
+            **_PINNED_CLASSIFIER_ARGS,
+        }
         accepted = inspect.signature(tabfm.TabFMClassifier.__init__).parameters
         for name, value in (
             ("cache_context", False),
@@ -736,16 +863,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """The loaded TabFM classification model, cached on the instance.
 
         The checkpoint is several gigabytes, so it is loaded once per estimator
-        and reused across calls. The cache is keyed by ``version`` so that
-        changing it can never leave a prediction running on the previous
-        model's weights, and it is dropped on pickling: an unpickled estimator
-        reloads from the local cache on next use.
+        and reused across calls. The weights are stored in float32 and TabFM
+        is designed to compute in bfloat16, which it does here only under
+        ``mixed_precision`` on CUDA; otherwise, the CPU included, the
+        float32 weights are kept. The cache is keyed by ``version``, device
+        and precision so that changing one can never leave a prediction
+        running on the previous model's weights, and it is dropped on
+        pickling: an unpickled estimator reloads from the local cache on next
+        use.
         """
-        cached_version, model = getattr(self, "_backbone_cache", (None, None))
-        if model is None or cached_version != self.version:
+        key = (self.version, str(self.device_), self.mixed_precision_)
+        cached_key, model = getattr(self, "_backbone_cache", (None, None))
+        if model is None or cached_key != key:
             from tabfm import (  # noqa: PLC0415 - optional backend, imported at use.
                 tabfm_v1_0_0_pytorch as tabfm_v1,
             )
+            import torch  # noqa: PLC0415 - optional backend, imported at use.
 
             self.checkpoint_ = _hub.get_checkpoint(
                 "tabfm", self.version
@@ -758,14 +891,54 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 model_type="classification",
                 device=self.device_,
                 checkpoint_path=str(self.checkpoint_),
+                # None keeps the stored float32 weights.
+                dtype=torch.bfloat16 if self.mixed_precision_ else None,
             )
-            self._backbone_cache = (self.version, model)
+            self._backbone_cache = (key, model)
         return model
 
     def __getstate__(self) -> dict[str, Any]:
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _bag_rows(bag_rows: int | None, n_context: int, n_level: int) -> int | None:
+    """A classifier's ``max_num_rows``: the bag's share of its rows.
+
+    In integers, so that the coarse level, which sees the whole context,
+    gets exactly ``bag_rows``, and a fine level the same fraction of its
+    coarse bin's rows, rounded up.
+
+    Examples:
+        >>> _bag_rows(500, 618, 618), _bag_rows(500, 618, 62)
+        (500, 51)
+        >>> _bag_rows(None, 618, 618) is None
+        True
+    """
+    if bag_rows is None:
+        return None
+    return max(1, -(-bag_rows * n_level // n_context))
+
+
+def _without_rows(group: _members.MemberGroup) -> _members.MemberGroup:
+    """A group without the member rows TabFM draws for itself."""
+    return dataclasses.replace(
+        group,
+        members=tuple(
+            dataclasses.replace(member, rows=None) for member in group.members
+        ),
+        member_rows=None,
+    )
+
+
+def _is_count(value: object) -> bool:
+    """Whether ``value`` is an int (Python or NumPy, not a bool) >= 1."""
+    return (
+        isinstance(value, numbers.Integral)
+        and not isinstance(value, bool | np.bool_)
+        and int(value) >= 1
+    )
 
 
 def _bin_labels(

@@ -133,6 +133,111 @@ class TestTabFM:
         with pytest.raises(ValueError, match="fewer than the"):
             lazy.get_estimator("tabfm").fit(X.iloc[:10], z[:10])
 
+    @pytest.mark.parametrize("name", ["member_batch_size", "query_block_rows"])
+    @pytest.mark.parametrize("value", [0, -1, 2.0, True, None])
+    def test_memory_knobs_must_be_positive_ints(self, tiny, name, value):
+        X, z = tiny
+        with pytest.raises(ValueError, match=name):
+            lazy.get_estimator(
+                "tabfm", n_coarse_bins=2, n_fine_bins=2, **{name: value}
+            ).fit(X, z)
+
+    def test_chunk_size_is_the_only_query_chunking_knob(self):
+        assert "decode_chunk_rows" not in tabfm.TabFMHistogram().get_params()
+
+    @pytest.mark.parametrize(
+        ("chunk_size", "block_rows", "passes"),
+        [(7, 20, [7, 7, 7, 7, 7, 5]), (7, 3, [7] * 5 + [5]), (0, 20, [40])],
+    )
+    def test_the_cached_path_decodes_chunk_size_rows_a_pass(
+        self, chunk_size, block_rows, passes
+    ):
+        """Blocks of views hold whole chunks; chunk_size=0 is one pass."""
+        chunk, block = _icl_stream._pass_sizes(40, chunk_size, block_rows)
+        sizes = [
+            min(r + chunk, min(b + block, 40) - b) - r
+            for b in range(0, 40, block)
+            for r in range(0, min(b + block, 40) - b, chunk)
+        ]
+        assert sizes == passes
+
+    def test_the_cached_path_is_handed_chunk_size(self, monkeypatch):
+        seen = {}
+
+        class Fitted:
+            classes_ = np.array([0, 1])
+
+            def fit(self, X, y):
+                return self
+
+        def logits(classifier, model, targets, **kwargs):
+            seen.update(kwargs)
+            return {
+                "query": {"mean_logits": np.zeros((len(targets["query"]), 2))}
+            }
+
+        monkeypatch.setattr(_icl_stream, "classification_logits", logits)
+        est = tabfm.TabFMHistogram(
+            chunk_size=7, query_block_rows=21, member_batch_size=3
+        )
+        est.inference_ = "stream"
+        est.softmax_temperature_ = 0.9
+        monkeypatch.setattr(
+            est, "_classifier", lambda model, group, seed, rows: Fitted()
+        )
+        X_query = pd.DataFrame({"a": np.linspace(0.0, 1.0, 10)})
+        handle = {"bag_rows": None, "n_context": 4, "group": None}
+        est._class_probabilities(
+            None,
+            handle,
+            X_query.iloc[:4],
+            np.array([0, 1, 0, 1]),
+            2,
+            X_query,
+            0,
+        )
+        assert seen["chunk_size"] == 7
+        assert seen["query_block_rows"] == 21
+        assert seen["member_batch_size"] == 3
+
+    def test_a_bag_gives_the_coarse_level_exactly_its_rows(self, monkeypatch):
+        """500 of 618 rows once became 501 by float rounding."""
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(618, 2))
+        z = generator.uniform(0.0, 2.0, 618)
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, bag_size=500, n_estimators=2
+        ).fit(X, z)
+        rows = []
+        _stub_classifier(est, monkeypatch)
+        frequencies = est._classifier
+
+        def recording(model, group, seed, max_rows):
+            rows.append(max_rows)
+            return frequencies(model, group, seed, max_rows)
+
+        monkeypatch.setattr(est, "_classifier", recording)
+        est.predict_distribution(X[:3])
+        coarse = est.z_context_ < np.median(est.z_context_)
+        assert rows[0] == 500
+        assert sorted(rows[1:]) == sorted(
+            -(-500 * n // 618) for n in (coarse.sum(), (~coarse).sum())
+        )
+
+    def test_provenance_does_not_claim_rows_tabfm_never_used(self, tiny):
+        """TabFM draws each classifier's bag itself, from its own seed."""
+        X, z = tiny
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, bag_size=30, n_estimators=3
+        ).fit(X, z)
+        assert est.provenance_["bag_rows"] == 30
+        assert est.provenance_["bag_rows_drawn_by"] == "tabfm"
+        for group in est.member_groups_:
+            assert group.member_rows is None
+            assert all(member.rows is None for member in group.members)
+        unbagged = tabfm.TabFMHistogram(n_coarse_bins=2, n_fine_bins=2)
+        assert "bag_rows_drawn_by" not in unbagged.fit(X, z).provenance_
+
     def test_the_slow_path_hands_upstream_bounded_chunks(self, monkeypatch):
         """`chunk_size` must reach `predict_proba`, not just the docstring."""
         sizes = []
@@ -156,7 +261,7 @@ class TestTabFM:
             {"a": np.linspace(0.0, 1.0, 40)}, index=np.arange(100, 140)
         )
 
-        handle = {"bag_fraction": None, "group": None}
+        handle = {"bag_rows": None, "n_context": 4, "group": None}
         probs = est._class_probabilities(
             None,
             handle,
@@ -192,7 +297,8 @@ class TestTabFM:
         bins = tabfm._bin_labels(edges, z)
         assert np.all(np.diff(edges)[bins] > 0)
         _stub_classifier(est, monkeypatch)
-        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_fraction": None}
+        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_rows": None}
+        handle["n_context"] = z.size
         handle["group"] = types.SimpleNamespace(seed=0)
         probs, edges, prior = est._hierarchy(
             None, handle, tabfm._frame(z[:7, None]), 0.0
@@ -279,6 +385,41 @@ class TestTabFM:
                 other, whole, rtol=rtol, atol=rtol * whole.max()
             )
 
+    def test_mixed_precision_picks_the_weights_dtype(self, monkeypatch):
+        """bfloat16 only under mixed precision on CUDA; float32 otherwise."""
+        upstream = pytest.importorskip("tabfm")
+        torch = pytest.importorskip("torch")
+
+        loads = []
+
+        def load(**kwargs):
+            loads.append(kwargs["dtype"])
+            return object()
+
+        monkeypatch.setattr(upstream.tabfm_v1_0_0_pytorch, "load", load)
+        checkpoint = types.SimpleNamespace(download=lambda: "/nowhere")
+        monkeypatch.setattr(
+            tabfm._hub, "get_checkpoint", lambda *args: checkpoint
+        )
+        # What fit resolves on a CPU, set by hand: the hub is stubbed.
+        est = tabfm.TabFMHistogram()
+        est.device_ = "cpu"
+        est.mixed_precision_ = False
+        first = est._backbone()
+        assert loads == [None]
+        assert est._backbone() is first  # cached
+        est.mixed_precision_ = True  # what fit resolves on CUDA
+        est._backbone()
+        assert loads == [None, torch.bfloat16]
+
+    def test_a_cpu_fit_never_uses_mixed_precision(self, tiny):
+        X, z = tiny
+        est = tabfm.TabFMHistogram(
+            n_coarse_bins=2, n_fine_bins=2, device="cpu"
+        ).fit(X, z)
+        assert est.mixed_precision_ is False
+        assert est.provenance_["mixed_precision"] is False
+
     def test_a_constant_target_fits_with_a_valid_native_grid(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(200, 2))
@@ -325,6 +466,188 @@ class TestTabFM:
             model=None, group=est.member_groups_[0], seed=0, max_rows=None
         )
         assert set(classifier.get_params()) <= accepted
+
+    def test_no_classifier_argument_is_left_to_upstream(
+        self, tiny, monkeypatch
+    ):
+        """A default the installed tabfm picks could change an answer."""
+        upstream = pytest.importorskip("tabfm")
+        X, z = tiny
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2).fit(
+            X, z
+        )
+        accepted = set(
+            inspect.signature(upstream.TabFMClassifier.__init__).parameters
+        )
+        assert set(_classifier_kwargs(est, monkeypatch)) == accepted - {"self"}
+
+    def test_the_auto_recipe_is_tabfms_own_written_out(self, tiny, monkeypatch):
+        """Pinned in lazy, and today equal to what upstream defaults to."""
+        upstream = pytest.importorskip("tabfm")
+        X, z = tiny
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2).fit(
+            X, z
+        )
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["norm_methods"] == ["none", "power"]
+        assert seen["feat_shuffle_method"] == "random"
+        assert seen["class_shift"] is True
+        assert seen["average_logits"] is True
+        assert seen["outlier_threshold"] == 4.0
+        assert seen["max_num_features"] == 500
+        assert seen["softmax_temperature"] == 0.9
+        assert seen["binary_calibration_method"] is None
+        assert seen["multiclass_calibration_method"] is None
+        assert seen["enable_nnls"] is False
+        assert seen["n_feature_crosses"] == seen["n_svd_features"] == 0
+        defaults = {
+            name: parameter.default
+            for name, parameter in inspect.signature(
+                upstream.TabFMClassifier.__init__
+            ).parameters.items()
+        }
+        recipe = set(tabfm._PINNED_CLASSIFIER_ARGS) | {
+            "feat_shuffle_method",
+            "outlier_threshold",
+            "max_num_features",
+            "softmax_temperature",
+        }
+        assert {k: seen[k] for k in recipe} == {k: defaults[k] for k in recipe}
+        assert defaults["norm_methods"] is None  # upstream's ["none", "power"]
+
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({}, 4.0),
+            ({"outlier_threshold": None}, np.inf),
+            ({"outlier_threshold": 2.5}, 2.5),
+            ({"transforms": "none"}, np.inf),
+            ({"transforms": "none", "outlier_threshold": 3.0}, 3.0),
+        ],
+    )
+    def test_outlier_threshold_drives_tabfms_own_clip(
+        self, tiny, monkeypatch, params, expected
+    ):
+        """Native, never scaffolded on top; None turns TabFM's clip off."""
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, **params
+        ).fit(X, z)
+        assert est.clippers_ == [None] * len(est.member_groups_)
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["outlier_threshold"] == expected
+        assert est.provenance_["outlier_threshold"] == (
+            None if expected == np.inf else expected
+        )
+
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({}, 500),
+            ({"feature_shuffle": False}, None),
+            ({"transforms": "none"}, None),
+        ],
+    )
+    def test_only_the_auto_recipe_subsamples_features(
+        self, tiny, monkeypatch, params, expected
+    ):
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, **params
+        ).fit(X, z)
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["max_num_features"] == expected
+
+    def test_without_feature_shuffle_wide_tables_keep_their_order(self):
+        """Above 500 columns upstream subsamples, and shuffles as it does."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.normal(size=(40, 520))
+        y = generator.integers(0, 3, 40)
+
+        def patterns(max_num_features):
+            ensemble = upstream.EnsembleGenerator(
+                n_estimators=3,
+                norm_methods=["none"],
+                feat_shuffle_method="none",
+                max_num_features=max_num_features,
+                random_state=0,
+            ).fit(X, y)
+            return [c[0] for c in ensemble.ensemble_configs_["none"]]
+
+        assert not any(np.array_equal(p, np.arange(520)) for p in patterns(500))
+        assert all(np.array_equal(p, np.arange(520)) for p in patterns(None))
+
+    @pytest.mark.parametrize("name", ["none", "power"])
+    def test_native_norm_methods_are_lazys_transforms(self, name):
+        """A name maps onto TabFM's own method only if that is the same."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.lognormal(size=(300, 3))
+        assert tabfm.TabFMHistogram.native_transforms[name] == name
+        pipeline = upstream.PreprocessingPipeline(name, np.inf, 0).fit(X)
+        # TabFM standardises first; the method itself sees what follows.
+        scaled = pipeline.standard_scaler_.transform(X)
+        native = (
+            scaled
+            if pipeline.normalizer_ is None
+            else pipeline.normalizer_.transform(scaled)
+        )
+        ours = _transforms.ScaffoldTransform(_transforms.parse(name)[0], 0)
+        np.testing.assert_allclose(
+            native, ours.fit(scaled).transform(scaled), rtol=0, atol=1e-12
+        )
+
+    @pytest.mark.parametrize("name", ["quantile", "quantile_rtdl", "robust"])
+    def test_other_transforms_are_scaffolded(self, tiny, monkeypatch, name):
+        X, z = tiny
+        est = lazy.get_estimator(
+            "tabfm", n_coarse_bins=2, n_fine_bins=2, transforms=name
+        ).fit(X, z)
+        assert est.member_groups_[0].scaffold.name == name
+        assert est.transformers_[0] is not None
+        seen = _classifier_kwargs(est, monkeypatch)
+        assert seen["norm_methods"] == ["none"] * est.n_estimators
+
+    def test_an_infinite_threshold_is_tabfms_clip_turned_off(self):
+        """The off switch is exact: the clip becomes the identity."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        generator = np.random.default_rng(0)
+        X = generator.lognormal(size=(200, 3))
+        X[0, 0] = 1e4
+        clip = upstream.OutlierRemover(threshold=np.inf).fit(X)
+        assert np.array_equal(clip.transform(X), X)
+        # And a finite one is lazy's SoftClip, the uniform definition.
+        np.testing.assert_array_equal(
+            upstream.OutlierRemover(threshold=4.0).fit(X).transform(X),
+            _transforms.SoftClip(4.0).fit(X).transform(X),
+        )
+
+
+def _classifier_kwargs(est, monkeypatch, group=None, max_rows=None):
+    """The keywords ``est`` hands TabFMClassifier, through a recording fake.
+
+    The fake keeps the real signature, so the build's optional cache
+    keywords are offered exactly as to the real class.
+    """
+    upstream = pytest.importorskip("tabfm")
+    seen = {}
+
+    class Recording:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    Recording.__init__.__signature__ = inspect.signature(
+        upstream.TabFMClassifier.__init__
+    )
+    monkeypatch.setattr(upstream, "TabFMClassifier", Recording)
+    est._classifier(
+        model=None,
+        group=est.member_groups_[0] if group is None else group,
+        seed=0,
+        max_rows=max_rows,
+    )
+    return seen
 
 
 def _stub_classifier(est, monkeypatch):
