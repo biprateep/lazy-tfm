@@ -197,7 +197,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     def _auto_softmax_temperature(self) -> float:
         # LimiXPredictor's default, the value LimiX-2 was released with.
-        return 0.9
+        return _limix_preprocess.RECIPE.softmax_temperature
 
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()
@@ -474,7 +474,8 @@ def _unpickle(
 def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
     """Upstream's target scaling, as a tuple (mean, sample std or 1)."""
     y = np.asarray(y, dtype=np.float64)
-    std = float(y.std(ddof=1)) if y.size > 1 else 0.0
+    ddof = _limix_preprocess.RECIPE.target_ddof
+    std = float(y.std(ddof=ddof)) if y.size > ddof else 0.0
     return float(y.mean()), std if std > 0 else 1.0
 
 

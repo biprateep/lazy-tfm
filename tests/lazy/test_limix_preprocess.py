@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Biprateep Dey
 """LimiX's member preprocessing: upstream's seeds, fitted on context only."""
 
+import ast
+import json
 import random
 
 import numpy as np
@@ -60,6 +62,64 @@ def test_the_recipe_and_the_native_names_are_pipelines():
     vocabulary = set(_transforms.BASE_TRANSFORMS) - {"quantile_rtdl"}
     vocabulary |= {name + "+original" for name in vocabulary}
     assert set(_limix_preprocess.NATIVE_TRANSFORMS) == vocabulary
+
+
+@needs_limix
+def test_the_pinned_recipe_is_upstreams_config():
+    root = _limix_source.locate().root
+    config = root / "config" / "reg_default_noretrieval_v2.json"
+    if not config.exists():
+        pytest.skip("this LimiX install has no config/")
+    pipelines = json.loads(config.read_text())["pipelines"]
+    recipe = _limix_preprocess.RECIPE
+    assert len(pipelines) == len(recipe.block)
+    for token, pipeline in zip(recipe.block, pipelines, strict=True):
+        assert pipeline["RebalanceFeatureDistribution"] == dict(
+            recipe.pipelines[token]
+        )
+        assert pipeline["FeatureShuffler"] == {"mode": "shuffle"}
+        assert set(pipeline) <= {
+            "RebalanceFeatureDistribution",
+            "CategoricalFeatureEncoder",
+            "FeatureShuffler",
+            "retrieval_config",
+        }
+        assert not pipeline["retrieval_config"]["use_retrieval"]
+
+
+def _upstream_predictor_defaults(root):
+    """LimiXPredictor's keyword defaults and ``self.x = constant`` lines."""
+    source = (root / "inference" / "v2_0" / "predictor.py").read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ClassDef) and node.name == "LimiXPredictor":
+            init = next(
+                item
+                for item in node.body
+                if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+            )
+            break
+    arguments = init.args.args[-len(init.args.defaults) :]
+    values = {
+        argument.arg: ast.literal_eval(default)
+        for argument, default in zip(arguments, init.args.defaults, strict=True)
+        if isinstance(default, ast.Constant)
+    }
+    for statement in ast.walk(init):
+        if (
+            isinstance(statement, ast.Assign)
+            and isinstance(statement.targets[0], ast.Attribute)
+            and isinstance(statement.value, ast.Constant)
+        ):
+            values[f"self.{statement.targets[0].attr}"] = statement.value.value
+    return values
+
+
+@needs_limix
+def test_the_pinned_predictor_settings_are_upstreams():
+    defaults = _upstream_predictor_defaults(_limix_source.locate().root)
+    recipe = _limix_preprocess.RECIPE
+    assert defaults["softmax_temperature"] == recipe.softmax_temperature
+    assert defaults["self.preprocess_num"] == recipe.seeds_per_member
 
 
 def test_an_unknown_token_is_refused():
