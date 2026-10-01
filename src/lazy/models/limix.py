@@ -75,7 +75,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     Args:
         version: Which pinned LimiX checkpoint to load; see
             :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: Ensemble members; upstream's recipe has 8.
+        n_estimators: Ensemble members, exactly this many. Under
+            ``transforms="auto"`` they run whole blocks of upstream's eight
+            pipelines, then any remainder split between its quantile and
+            power pipelines (quantile first, and the odd one), so that any
+            size keeps the recipe's mix: 3 members are two quantile and one
+            power, and 8, 16, 32 are upstream's recipe repeated.
         transforms: Per-member feature transforms: ``"auto"`` (upstream's
             recipe: four quantile members with the original columns and SVD
             components, four power members), a recipe name, a transform name
@@ -133,7 +138,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     extra = "limix"
     native_output = "histogram"
     native_transforms = _limix_preprocess.NATIVE_TRANSFORMS
-    auto_tokens = _limix_preprocess.AUTO_TOKENS
+    # None: the recipe depends on the ensemble's size (whole blocks of
+    # upstream's eight, then a balanced remainder), so _fit_group picks each
+    # auto member's pipeline by its index.
+    auto_tokens = None
     supports_native_bagging = False
     member_combination = "mixture"
     kv_cache_modes = (True, False)
@@ -229,9 +237,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> Any:
         mean, std = _standardisation(y)
         _bucket_edges(self.borders_, mean, std)  # Fails early if they merge.
+        recipe = _limix_preprocess.auto_tokens(self._n_members())
         tokens = group.native_transforms or tuple(
-            self.auto_tokens[i % len(self.auto_tokens)]
-            for i in range(group.n_members)
+            recipe[member.index] for member in group.members
         )
         seeds = _limix_preprocess.member_seeds(group.seed, group.n_members)
         members = []

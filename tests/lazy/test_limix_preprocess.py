@@ -56,7 +56,7 @@ def test_member_seeds_leave_the_global_generator_alone():
 
 
 def test_the_recipe_and_the_native_names_are_pipelines():
-    assert set(_limix_preprocess.AUTO_TOKENS) <= set(
+    assert set(_limix_preprocess.RECIPE.block) <= set(
         _limix_preprocess.PIPELINES
     )
     vocabulary = set(_transforms.BASE_TRANSFORMS) - {"quantile_rtdl"}
@@ -120,6 +120,26 @@ def test_the_pinned_predictor_settings_are_upstreams():
     recipe = _limix_preprocess.RECIPE
     assert defaults["softmax_temperature"] == recipe.softmax_temperature
     assert defaults["self.preprocess_num"] == recipe.seeds_per_member
+
+
+def test_whole_blocks_of_the_recipe_are_upstreams():
+    block = _limix_preprocess.RECIPE.block
+    for blocks in (1, 2, 4):
+        assert _limix_preprocess.auto_tokens(8 * blocks) == block * blocks
+
+
+@pytest.mark.parametrize("n_members", [*range(1, 8), 9, 13, 21, 39])
+def test_a_partial_block_keeps_the_recipes_mix(n_members):
+    tokens = _limix_preprocess.auto_tokens(n_members)
+    blocks, rest = divmod(n_members, 8)
+    assert len(tokens) == n_members
+    assert tokens[: 8 * blocks] == _limix_preprocess.RECIPE.block * blocks
+    remainder = tokens[8 * blocks :]
+    n_quantile = remainder.count("auto_quantile")
+    assert n_quantile == (rest + 1) // 2
+    assert remainder == ("auto_quantile",) * n_quantile + ("auto_power",) * (
+        rest - n_quantile
+    )
 
 
 def test_an_unknown_token_is_refused():

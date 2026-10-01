@@ -112,9 +112,22 @@ def test_upstreams_recipe_is_the_default(data):
     X, z, _ = data
     model = _model(n_estimators=8).fit(X, z)
     tokens = [entry["pipeline"].token for entry in model.handles_[0]["members"]]
-    assert tokens == list(limix._limix_preprocess.AUTO_TOKENS)
+    assert tokens == list(limix._limix_preprocess.RECIPE.block)
     assert model.provenance_["attribution"] == "Built with StableAI LimiX"
     assert model.provenance_["source_commit"] is not None
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("bag_size", [None, 150])
+def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
+    X, z, _ = data
+    model = _model(n_estimators=3, bag_size=bag_size).fit(X, z)
+    tokens = [
+        entry["pipeline"].token
+        for handle in model.handles_
+        for entry in handle["members"]
+    ]
+    assert tokens == ["auto_quantile", "auto_quantile", "auto_power"]
 
 
 @needs_checkpoint

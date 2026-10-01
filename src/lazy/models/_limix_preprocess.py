@@ -41,12 +41,12 @@ from lazy import _typing
 from lazy.models import _limix_source
 
 __all__ = [
-    "AUTO_TOKENS",
     "NATIVE_TRANSFORMS",
     "PIPELINES",
     "RECIPE",
     "MemberPipeline",
     "Recipe",
+    "auto_tokens",
     "member_seeds",
 ]
 
@@ -120,10 +120,6 @@ RECIPE = Recipe(
     target_ddof=1,
 )
 
-#: Upstream's recommended recipe, member by member: four quantile members
-#: (with the original columns and SVD components), then four power members.
-AUTO_TOKENS: tuple[str, ...] = RECIPE.block
-
 # Upstream's name for each transform in the shared vocabulary.
 _WORKER_TAGS: dict[str, str | None] = {
     "none": None,
@@ -156,6 +152,36 @@ PIPELINES: dict[str, Mapping[str, Any]] = {
 NATIVE_TRANSFORMS: dict[str, str] = {
     name: name for name in PIPELINES if name not in RECIPE.pipelines
 }
+
+
+def auto_tokens(n_members: int) -> tuple[str, ...]:
+    """The recipe's pipelines for an ensemble of any size, member by member.
+
+    Whole blocks of upstream's eight members, in upstream's order, then any
+    remainder split between the two pipelines, quantile members first and
+    one more of them when the remainder is odd. So 8, 16, 32 members are
+    upstream's recipe repeated, and fewer than eight keep its mix: three
+    members are two quantile and one power.
+
+    Args:
+        n_members: The ensemble's size.
+
+    Returns:
+        One token per member, in member order.
+
+    Examples:
+        >>> auto_tokens(3)
+        ('auto_quantile', 'auto_quantile', 'auto_power')
+    """
+    # The block is the quantile members, then the power ones.
+    quantile, power = RECIPE.block[0], RECIPE.block[-1]
+    blocks, rest = divmod(n_members, len(RECIPE.block))
+    n_quantile = -(-rest // 2)
+    return (
+        RECIPE.block * blocks
+        + (quantile,) * n_quantile
+        + (power,) * (rest - n_quantile)
+    )
 
 
 def member_seeds(seed: int, n_members: int) -> list[tuple[int, int]]:
