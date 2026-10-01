@@ -574,6 +574,49 @@ class TestTabICL:
         assert list(ordered) == ["none", "power"]
         assert dict(ordered) == configs
 
+    def test_only_none_is_tabicls_own_transform(self):
+        assert tabicl.TabICLQuantile.native_transforms == {"none": "none"}
+
+    @pytest.mark.filterwarnings("ignore:n_quantiles")
+    @pytest.mark.parametrize(
+        "name", ["power", "quantile", "quantile_rtdl", "robust"]
+    )
+    def test_tabicls_norm_methods_are_not_the_uniform_transforms(self, name):
+        """Why lazy applies them: the model would see something else."""
+        preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+        generator = np.random.default_rng(1)
+        X = generator.normal(size=(300, 3))
+        X[:, 1] = np.exp(X[:, 1])
+        X[:, 2] = generator.standard_t(3, size=300)
+        spec = _transforms.parse(name)[0]
+        scaffold = _transforms.ScaffoldTransform(spec, 7).fit(X)
+        ours = (
+            preprocessing.PreprocessingPipeline("none", np.inf, 7)
+            .fit(scaffold.transform(X))
+            .X_transformed_
+        )
+        theirs = (
+            preprocessing.PreprocessingPipeline(name, np.inf, 7)
+            .fit(X)
+            .X_transformed_
+        )
+        assert np.abs(ours - theirs).max() > 1e-6
+
+    def test_none_is_tabicls_none(self):
+        preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
+        X = np.random.default_rng(1).lognormal(size=(300, 3))
+        scaffold = _transforms.ScaffoldTransform(
+            _transforms.parse("none")[0], 7
+        ).fit(X)
+        np.testing.assert_array_equal(
+            preprocessing.PreprocessingPipeline("none", np.inf, 7)
+            .fit(scaffold.transform(X))
+            .X_transformed_,
+            preprocessing.PreprocessingPipeline("none", np.inf, 7)
+            .fit(X)
+            .X_transformed_,
+        )
+
     @needs_checkpoint
     def test_exactly_n_members_run_on_the_backbone(self):
         generator = np.random.default_rng(0)

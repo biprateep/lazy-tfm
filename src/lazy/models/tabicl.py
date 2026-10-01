@@ -17,11 +17,11 @@ its float16 autocast. ``transforms="auto"`` is TabICL's own recipe, pinned
 here (:data:`AUTO_NORM_METHODS`, :data:`AUTO_FEAT_SHUFFLE_METHOD`,
 :data:`AUTO_OUTLIER_THRESHOLD`): members alternate between no transform and
 a Yeo-Johnson power transform, and every column is soft-clipped at four
-standard deviations. The ``transforms`` it has (``none``, ``power``,
-``quantile``, ``quantile_rtdl``, ``robust``) map onto its ``norm_methods``.
-TabICL cannot subsample rows, so ``bag_size`` is scaffolded: one
-single-member regressor per bag, their quantile functions averaged, as
-TabICL averages its own members.
+standard deviations. Of the uniform transforms only ``none`` is TabICL's
+own; the others are applied by lazy, since TabICL's methods of the same names
+differ from them (see ``native_transforms``). TabICL cannot subsample rows,
+so ``bag_size`` is scaffolded: one single-member regressor per bag, their
+quantile functions averaged, as TabICL averages its own members.
 
 What TabICL always does to the features, under any ``transforms``: missing
 values are filled with the context column's mean; columns with a single
@@ -162,7 +162,12 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         transforms: Per-member feature transforms: ``"auto"`` (TabICL's own
             recipe, ``none`` and ``power`` alternating, with the 4-sigma
             clip), a recipe name, a transform name or a sequence of them;
-            see :mod:`lazy.models._transforms`.
+            see :mod:`lazy.models._transforms`. Only ``none`` maps onto
+            TabICL's norm methods; every other name is applied by lazy and
+            TabICL is run with no norm method of its own. An explicit
+            recipe therefore differs from ``"auto"`` even when it names the
+            same transforms: TabICL's ``power`` is fitted on z-scored
+            columns.
         feature_shuffle: Whether members see the columns in different orders
             (TabICL's Latin-square shuffles, ``feat_shuffle_method="latin"``;
             ``"none"`` when False). A regressor running one member keeps the
@@ -237,13 +242,12 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     display_name = "TabICL"
     extra = "tabicl"
     native_output = "quantiles"
-    native_transforms = {
-        "none": "none",
-        "power": "power",
-        "quantile": "quantile",
-        "quantile_rtdl": "quantile_rtdl",
-        "robust": "robust",
-    }
+    # TabICL's other norm methods are not the uniform transforms of the same
+    # names: it fits them on z-scored columns (power, robust), with sklearn's
+    # defaults (quantile: 1,000 quantiles of a 10,000-row subsample), with
+    # its own noise and a trailing rescaling (quantile_rtdl), and nothing
+    # rescales their output. lazy applies those names itself.
+    native_transforms = {"none": "none"}
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = False
     member_combination = "quantile_average"
@@ -657,8 +661,10 @@ def _norm_methods(tokens: tuple[str, ...]) -> list[str]:
         The distinct tokens, in order.
 
     Raises:
-        ValueError: If the plan repeats a transform within a cycle, as
-            ``transforms=("power", "power", "none")`` does.
+        ValueError: If the plan repeats a token within a cycle, as
+            ``("power", "power", "none")`` would. No plan the uniform
+            parameters make does: only ``none`` is native, and the auto
+            recipe alternates.
     """
     methods = list(dict.fromkeys(tokens))
     cycled = tuple(methods[i % len(methods)] for i in range(len(tokens)))
