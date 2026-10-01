@@ -120,30 +120,28 @@ RECIPE = Recipe(
     target_ddof=1,
 )
 
-# Upstream's name for each transform in the shared vocabulary.
-_WORKER_TAGS: dict[str, str | None] = {
-    "none": None,
-    "power": "power",
-    "quantile": "quantile_norm_all_data",
-    "quantile_uniform": "quantile_uniform_all_data",
-    "robust": "robust",
-}
-
-#: Upstream ``RebalanceFeatureDistribution`` settings per token: every
-#: vocabulary transform LimiX has, alone and ``+original``, and the members
-#: of upstream's recipe.
+#: Upstream ``RebalanceFeatureDistribution`` settings per token: the members
+#: of upstream's recipe, and the vocabulary transforms LimiX implements
+#: exactly as :mod:`lazy.models._transforms` defines them. Those are only
+#: three. LimiX's ``quantile`` keeps n // 5 quantiles (the vocabulary's,
+#: up to 1,000), its ``robust`` scales to unit variance, its ``power``
+#: imputes missing values to the mean and standardises twice, and its
+#: ``+original`` puts the original columns first (the vocabulary's last),
+#: so every other transform is scaffolded, ahead of the ``"none"`` pipeline.
 PIPELINES: dict[str, Mapping[str, Any]] = {
-    **{
-        name: {"worker_tags": [tag], "original_flag": False, "svd_tag": None}
-        for name, tag in _WORKER_TAGS.items()
+    "none": {"worker_tags": [None], "original_flag": False, "svd_tag": None},
+    # Identical columns twice: their order does not matter.
+    "none+original": {
+        "worker_tags": [None],
+        "original_flag": True,
+        "svd_tag": None,
     },
-    **{
-        f"{name}+original": {
-            "worker_tags": [tag],
-            "original_flag": True,
-            "svd_tag": None,
-        }
-        for name, tag in _WORKER_TAGS.items()
+    # n // 5 quantiles (at least two) of all context rows, as the
+    # vocabulary's quantile_uniform.
+    "quantile_uniform": {
+        "worker_tags": ["quantile_uniform_all_data"],
+        "original_flag": False,
+        "svd_tag": None,
     },
     **RECIPE.pipelines,
 }

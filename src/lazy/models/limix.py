@@ -27,12 +27,13 @@ context and never on the other queries in its chunk:
   to float rounding.
 
 The uniform features: ``transforms`` map onto LimiX's own rebalancing step
-(``quantile_rtdl`` is scaffolded), ``feature_shuffle`` onto its column
-shuffler, and ``bag_size`` is scaffolded as the paper's bagged LimiX-2 was --
-one member per bag, each standardising the target on its own bag, members
-mixed as densities. LimiX-2 was pretrained on contexts of up to about 20,000
-rows, and a :class:`~lazy.models.ContextSizeWarning` says so when a larger
-one arrives unbagged.
+where it is the vocabulary's transform (``none``, ``none+original``,
+``quantile_uniform``) and are scaffolded otherwise, ``feature_shuffle`` onto
+its column shuffler, and ``bag_size`` is scaffolded as the paper's bagged
+LimiX-2 was -- one member per bag, each standardising the target on its own
+bag, members mixed as densities. LimiX-2 was pretrained on contexts of up to
+about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
+when a larger one arrives unbagged.
 
 Built with StableAI LimiX. The code and weights are released under the Stable
 AI Technology Co., Ltd. License 1.0 (Apache-2.0 with attribution terms);
@@ -85,6 +86,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             recipe: four quantile members with the original columns and SVD
             components, four power members), a recipe name, a transform name
             or a sequence of them; see :mod:`lazy.models._transforms`.
+            ``none``, ``none+original`` and ``quantile_uniform`` run as
+            LimiX's own steps, which are exactly those transforms; every
+            other name is scaffolded. ``"limix"`` is not ``"auto"``: it has
+            no SVD components, and its two transforms are the vocabulary's.
         feature_shuffle: Whether members see the columns in different orders
             (upstream's column shuffler).
         bag_size: Context rows per member: an int is a row count (``1``

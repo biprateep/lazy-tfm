@@ -59,9 +59,14 @@ def test_the_recipe_and_the_native_names_are_pipelines():
     assert set(_limix_preprocess.RECIPE.block) <= set(
         _limix_preprocess.PIPELINES
     )
-    vocabulary = set(_transforms.BASE_TRANSFORMS) - {"quantile_rtdl"}
-    vocabulary |= {name + "+original" for name in vocabulary}
-    assert set(_limix_preprocess.NATIVE_TRANSFORMS) == vocabulary
+    assert set(_limix_preprocess.NATIVE_TRANSFORMS) == {
+        "none",
+        "none+original",
+        "quantile_uniform",
+    }
+    assert set(_limix_preprocess.NATIVE_TRANSFORMS) <= set(
+        _limix_preprocess.PIPELINES
+    )
 
 
 @needs_limix
@@ -159,6 +164,30 @@ def test_a_row_is_transformed_alone(token, features):
     )
     np.testing.assert_array_equal(together, apart)
     assert together.shape[1] == pipeline.n_features_out_
+
+
+@needs_limix
+@pytest.mark.parametrize("n_rows", [3, 37, 300])
+@pytest.mark.parametrize("name", sorted(_limix_preprocess.NATIVE_TRANSFORMS))
+def test_a_native_transform_is_the_vocabularys(name, n_rows):
+    """LimiX's own step equals the scaffold followed by the "none" step."""
+    rng = np.random.default_rng(n_rows)
+    values = rng.normal(size=(n_rows + 20, 4))
+    values[:, 1] = np.exp(2 * values[:, 1])
+    values[::3, 0] = np.nan
+    values[:, 3] = 2.0  # constant: dropped either way
+    context, queries = values[:n_rows], values[n_rows:]
+    native = _limix_preprocess.MemberPipeline(
+        _limix_preprocess.NATIVE_TRANSFORMS[name], (1, 2), shuffle=True
+    ).fit(context)
+    (spec,) = _transforms.parse(name)
+    scaffold = _transforms.ScaffoldTransform(spec, 0).fit(context)
+    plain = _limix_preprocess.MemberPipeline("none", (1, 2), shuffle=True).fit(
+        scaffold.transform(context)
+    )
+    np.testing.assert_array_equal(
+        native.transform(queries), plain.transform(scaffold.transform(queries))
+    )
 
 
 @needs_limix
