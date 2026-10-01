@@ -310,8 +310,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ``predict_proba`` at a time when ``kv_cache=False``; ``0`` does
             them in one pass. The in-context stage builds its keys and values
             from the context rows only, so a row's answer never depends on
-            the other rows in its chunk; it is bit-identical on the CPU, and
-            on CUDA changes by the rounding ``kv_cache`` describes.
+            the other rows in its chunk, but the kernels batch differently:
+            on the CPU in float32 it changes by float rounding (measured up
+            to 2e-6 of the peak density; bit-identical in some cases), and
+            in bfloat16 on CUDA by the rounding ``kv_cache`` describes.
         softmax_temperature: Divides the member-averaged logits before the
             softmax. ``"auto"`` is TabFM v1.0's calibrated 0.9, deliberately
             not 1.0; a positive number overrides it. Recorded in
@@ -776,10 +778,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         one go, which a survey-sized query set cannot afford. Feeding it chunks
         caps that at ``n_members x chunk_size x n_features``. The in-context
         stage builds its keys and values from the context rows alone, so
-        query rows never influence one another: on the CPU the result is
-        bit-identical to a single pass, and on CUDA it differs by bfloat16
-        rounding, the kernels batching differently. The context forward pass
-        is repeated per chunk, which is the price.
+        query rows never influence one another; the result differs from a
+        single pass only by float rounding, the kernels batching
+        differently. The context forward pass is repeated per chunk, which
+        is the price.
         """
         size = self.chunk_size if self.chunk_size > 0 else len(X_query)
         frame = X_query.reset_index(drop=True)
