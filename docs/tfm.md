@@ -4,21 +4,21 @@ A tabular dataset is a table in which each row is an object (a galaxy, a
 patient, a transaction) and each column is a measured property of it. The
 usual way to learn from such a table is supervised learning: we choose a model
 (e.g., a gradient-boosted tree ensemble, a neural network, a random forest,
-etc.), fit its parameters to the labelled rows by minimizing a loss, tune its
+etc.), fit its parameters to the labeled rows by minimizing a loss, tune its
 hyperparameters on held-out data, and repeat the whole process for every new
 dataset. A tabular foundation model (TFM) replaces this per-dataset training
 with a single, very expensive pretraining step that happens once, before the
 model ever sees our data. During pretraining, the network is trained to
-predict held-out labels from the labelled rows of many tables, so when we give
-it our labelled rows it can predict the target for new rows directly, without
+predict held-out labels from the labeled rows of many tables, so when we give
+it our labeled rows it can predict the target for new rows directly, without
 updating any of its weights. This page gives a brief overview of how this
 works and what it means for the user, and links to the papers that describe
 each model in detail.
 
 ## Learning in context
 
-A TFM receives the labelled rows and the unlabelled rows as one input. The
-labelled rows, which we call the *context* (they play the role of the training
+A TFM receives the labeled rows and the unlabeled rows as one input. The
+labeled rows, which we call the *context* (they play the role of the training
 set), and the rows we want predictions for (the *queries*) are passed to the
 network together, and it returns a prediction for every query in a forward
 pass (see Figure 1). This is called in-context learning, since everything the

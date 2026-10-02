@@ -1,16 +1,18 @@
 # Clusters and offline use
 
-Nothing about where things are cached is baked into the package, and the device
-is chosen at run time, so a laptop and a cluster node run the same code.
+No cache location is baked into the package, and the device is chosen at run
+time, so a laptop and a cluster node run the same code. The table lists where
+each kind of file is cached by default and the environment variables that
+override it:
 
 | What                 | Default location                                        | Override                             |
 | -------------------- | ------------------------------------------------------- | ------------------------------------ |
 | Pretrained weights   | `~/.cache/huggingface/hub`                              | `HF_HOME`                            |
-| Benchmark catalogues | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
+| Benchmark catalogs   | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
 
-Compute nodes often have no outbound network. Warm both caches on a login node
-first, then run with downloads disabled, so that a missing file is an immediate
-error rather than a hang:
+Compute nodes often have no outbound network access. In that case, warm both
+caches on a login node first and then run with downloads disabled, so that a
+missing file raises an immediate error rather than causing a hang:
 
 ```python
 from lazy import download_checkpoint, is_cached
@@ -25,7 +27,7 @@ fetch_dc1(download_if_missing=False)
 ```
 
 Setting `HF_HUB_OFFLINE=1` on the compute node has the same effect for the
-weights. The checkpoint a model loads is exactly the one
-{func}`~lazy.models.download_checkpoint` fetches: the pinned revision is passed to the
-backend rather than left to its own default, so warming the cache cannot
-prefetch the wrong file.
+weights. The checkpoint that a model loads is exactly the one
+{func}`~lazy.models.download_checkpoint` fetches, because the pinned revision
+is passed to the backend rather than left to its own default. Therefore,
+warming the cache cannot prefetch the wrong file.

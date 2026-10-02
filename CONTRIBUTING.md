@@ -16,17 +16,18 @@ uv sync --extra all         # ...and all four foundation-model backends' depende
 uv run pre-commit install   # lint and format on every commit
 ```
 
-`uv sync` also removes packages that are not in the lockfile. If you keep extra
-packages in the environment, use `uv sync --inexact`.
+`uv sync` also removes packages that are not in the lockfile. If you keep
+extra packages in the environment, use `uv sync --inexact`.
 
 ## Code style
 
 Code follows the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
-checked by ruff (formatting and lint, configured in `pyproject.toml`) and mypy.
-In short: 80-column lines; import modules, not their members; Google
-docstrings (`Args:`, `Returns:`, `Raises:`) that give shapes and units; every
-signature annotated. The one deliberate exception is scikit-learn's vocabulary:
-the feature matrix is `X` and the target `y`, as scikit-learn requires.
+checked by ruff (formatting and lint, configured in `pyproject.toml`) and
+mypy. In practice, this means 80-column lines, imports of modules rather than
+of their members, Google docstrings (`Args:`, `Returns:`, `Raises:`) that give
+shapes and units, and an annotation on every signature. The one deliberate
+exception is scikit-learn's vocabulary, in which the feature matrix is `X` and
+the target `y`, as scikit-learn requires.
 
 ## Checks
 
@@ -35,8 +36,8 @@ uv run pytest               # unit tests and doctests; no GPU or checkpoint need
 uv run pre-commit run --all-files   # ruff format, ruff check, mypy
 ```
 
-Tests that need a GPU and a downloaded checkpoint are marked `gpu` and skipped
-by default. To run them:
+Tests that need a GPU and a downloaded checkpoint are marked `gpu` and are
+skipped by default. To run them:
 
 ```bash
 LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
@@ -51,14 +52,14 @@ with warnings treated as errors, and a build of the package itself.
 Edit `pyproject.toml`, then run `uv lock` and commit both files. CI runs
 `uv sync --locked`, which fails if the lockfile is out of date.
 
-The published metadata cannot contain direct URLs, since PyPI rejects them. To
-use a development build of a dependency, add it under `[tool.uv.sources]`;
-see how `tabfm` is done.
+The published metadata cannot contain direct URLs, since PyPI rejects them.
+To use a development build of a dependency, add it under `[tool.uv.sources]`,
+following the example of `tabfm`.
 
 ## Documentation
 
-The docs are Sphinx with MyST Markdown, published on Read the Docs. To build
-them locally:
+The docs are written in MyST Markdown, built with Sphinx and published on Read
+the Docs. To build them locally:
 
 ```bash
 uv sync --group docs
@@ -71,8 +72,8 @@ style (rendered by napoleon).
 ### The logo
 
 `docs/logo/make_logo.py` draws the logo, its white version, the square icon
-and the favicon, and writes them into `docs/_static/`; the docs and the README
-use those files. To change the logo, edit the script and rerun it:
+and the favicon, and writes them into `docs/_static/`, where the docs and the
+README pick them up. To change the logo, edit the script and rerun it:
 
 ```bash
 uv run python docs/logo/make_logo.py
@@ -84,12 +85,12 @@ untouched.
 ### Tutorials
 
 Tutorials are py:percent scripts in `docs/tutorials/`, and main tracks only
-those. They need a GPU, so neither CI nor Read the Docs runs them: the executed
-notebooks, with their outputs and figures, live on the orphan branch
-`tutorials`, where the docs build fetches them and the Colab and GitHub buttons
-open them. That keeps megabytes of images out of main's history. After
-changing a tutorial, re-execute it on a GPU machine and commit the notebook to
-that branch:
+those. Since they need a GPU, neither CI nor Read the Docs runs them. The
+executed notebooks, with their outputs and figures, live on the orphan branch
+`tutorials`, from which the docs build fetches them and the Colab and GitHub
+buttons open them. This keeps megabytes of images out of main's history.
+After changing a tutorial, re-execute it on a GPU machine and commit the
+notebook to that branch:
 
 ```bash
 docs/tutorials/execute.sh introduction   # writes docs/tutorials/introduction.ipynb (git-ignored)
@@ -99,36 +100,32 @@ git -C ../lazy-tutorials commit -am "Re-execute the introduction"
 git push origin tutorials
 ```
 
-A local docs build uses the notebook in `docs/tutorials/` if there is one, and
-fetches it from the branch otherwise. Add a line to `CHANGELOG.md`, under `[Unreleased]`, for every
-user-visible change.
+A local docs build uses the notebook in `docs/tutorials/` if there is one,
+and fetches it from the branch otherwise. Every user-visible change also gets
+a line in `CHANGELOG.md`, under `[Unreleased]`.
 
 ## Making a release
 
-Releases go to PyPI from GitHub, by trusted publishing; nobody uploads from a
-laptop.
+Releases go to PyPI from GitHub, by trusted publishing, and nobody uploads
+from a laptop.
 
-One-time setup, before the first release:
+Before the first release, there is a one-time setup. On
+[PyPI](https://pypi.org/manage/account/publishing/) and
+[TestPyPI](https://test.pypi.org/manage/account/publishing/), add a trusted
+publisher with owner `biprateep`, repository `lazy-tfm`, workflow
+`publish-to-pypi.yml`, and environment `pypi` or `testpypi` respectively.
+Then, in the GitHub repository settings, create the environments `pypi` and
+`testpypi`. We recommend requiring a reviewer on `pypi`.
 
-1. On [PyPI](https://pypi.org/manage/account/publishing/) and
-   [TestPyPI](https://test.pypi.org/manage/account/publishing/), add a trusted
-   publisher: owner `biprateep`, repository `lazy-tfm`, workflow
-   `publish-to-pypi.yml`, and environment `pypi` or `testpypi` respectively.
-2. In the GitHub repository settings, create the environments `pypi` and
-   `testpypi`. Requiring a reviewer on `pypi` is recommended.
-
-Each release:
-
-1. Make sure CI is green on `main`.
-2. Set the version, for example `uv version 0.1.0`, which updates
-   `pyproject.toml` and `uv.lock`.
-3. In `CHANGELOG.md`, rename `[Unreleased]` to the version and date, and add a
-   fresh empty `[Unreleased]` section. Commit both changes.
-4. Optional dry run: in the Actions tab, run the **Publish** workflow by hand.
-   It uploads to TestPyPI. Check that the result installs with
-   `pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ lazy-tfm`.
-5. Create a GitHub release with the tag `v<version>`, for example `v0.1.0`.
-   Publishing it runs the workflow, which checks that the tag matches the
-   version, builds and checks the package, and uploads it to PyPI.
-6. Move to the next development version, for example
-   `uv version 0.2.0.dev0`, and commit.
+Each release starts by making sure CI is green on `main`. Next, set the
+version, for example with `uv version 0.1.0`, which updates `pyproject.toml`
+and `uv.lock`. In `CHANGELOG.md`, rename `[Unreleased]` to the version and
+date, add a fresh empty `[Unreleased]` section, and commit both changes. As an
+optional dry run, run the **Publish** workflow by hand from the Actions tab,
+which uploads to TestPyPI, and check that the result installs with
+`pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ lazy-tfm`.
+Then create a GitHub release with the tag `v<version>`, for example `v0.1.0`.
+Publishing it runs the workflow, which checks that the tag matches the
+version, builds and checks the package, and uploads it to PyPI. Finally, move
+to the next development version, for example `uv version 0.2.0.dev0`, and
+commit.
