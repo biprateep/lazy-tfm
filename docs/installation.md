@@ -97,7 +97,7 @@ repositories is gated, so no Hugging Face account or token is needed.
 
 | Backend  | Versions        | Size           | Licence of the weights                          |
 | -------- | --------------- | -------------- | ----------------------------------------------- |
-| `limix`  | `v2`            | ~1.6 GB        | Stable AI License 1.0 (Apache-2.0 with attribution: "Built with StableAI LimiX") |
+| `limix`  | `v2`            | ~1.6 GB        | StableAI LimiX, **non-commercial** (with the attribution "Built with StableAI LimiX") |
 | `tabfm`  | `v1.0`          | ~6.6 GB        | Google, **non-commercial**                      |
 | `tabicl` | `v2`            | ~100 MB        | BSD-3-Clause                                    |
 | `tabpfn` | `v2` to `v3.5`  | 41 MB – 880 MB | Prior Labs, **non-commercial**, except `v2` (Apache-2.0 with attribution) |

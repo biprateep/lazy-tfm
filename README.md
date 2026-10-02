@@ -50,8 +50,8 @@ at the first `fit` and cached thereafter. TabFM's classification checkpoint is
 ~6.6 GB and carries a **non-commercial** licence from Google; TabICLv2's is
 ~100 MB (BSD-3-Clause); the TabPFN checkpoints run from ~41 MB to ~880 MB and
 are **non-commercial** from Prior Labs, except `v2`, which is Apache-2.0 with an
-attribution clause; LimiX-2's is ~1.6 GB under Stable AI's Apache-2.0-based
-licence, which requires the attribution "Built with StableAI LimiX". Every licence is quoted in `lazy.CHECKPOINTS`. Warm the
+attribution clause; LimiX-2's is ~1.6 GB and **non-commercial** from Stable AI,
+with the attribution "Built with StableAI LimiX". Every licence is quoted in `lazy.CHECKPOINTS`. Warm the
 cache ahead of time with `lazy.download_checkpoint("tabfm")`.
 
 ## Use
@@ -364,8 +364,8 @@ Built from the
 ## License
 
 MIT, for this code. The pretrained checkpoints carry their own licences; TabFM's
-is non-commercial, and LimiX-2's requires the attribution "Built with StableAI
-LimiX". The HSC selection grid is redistributed by DESC's
+and LimiX-2's are non-commercial, and LimiX-2's requires the attribution
+"Built with StableAI LimiX". The HSC selection grid is redistributed by DESC's
 [rail_astro_tools](https://github.com/LSSTDESC/rail_astro_tools) (MIT) and
 derives from HSC PDR2 (Aihara et al. 2019); `lazy.selection` downloads it from
 there, at a pinned commit, rather than bundling it.

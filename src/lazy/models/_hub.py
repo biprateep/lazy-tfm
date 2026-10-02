@@ -214,10 +214,11 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             filename="LimiX-2.ckpt",
             revision="de07b679e74a41b50b9de18251a8fa245e537440",
             license_note=(
-                "LimiX-2 code and weights are released by Stable AI under the "
-                "Stable AI Technology Co., Ltd. License 1.0 (Apache-2.0 with "
-                "attribution terms): anything built with it and made "
-                'available must display "Built with StableAI LimiX". See '
+                "LimiX-2 weights are released by Stable AI under the StableAI "
+                "LimiX Non-Commercial License 1.0, which also requires "
+                'distributions, derivatives and publications to display "Built '
+                'with StableAI LimiX"; LimiX\'s code is under the Apache-2.0-'
+                "based Stable AI Technology Co., Ltd. License 1.0. See "
                 "https://huggingface.co/stable-ai/LimiX-2."
             ),
             size_note="~1.6 GB. Pretrained for at most about 20,000 rows.",

@@ -13,7 +13,7 @@ They differ a great deal in size, speed and what hardware they need.
 | TabPFN-2.5 | `"tabpfn", version="v2.5"` | 0.04 GB | 10 M | Prior Labs, non-commercial | optional | ≤1,000 rows |
 | TabPFN-2 | `"tabpfn", version="v2"` | 0.04 GB | 11 M | Apache-2.0 + attribution | optional | ≤1,000 rows |
 | TabICLv2 | `"tabicl"` | 0.11 GB | 29 M | BSD-3-Clause | optional | **yes** |
-| LimiX-2 | `"limix"` | 1.6 GB | 406 M | Stable AI 1.0 (Apache-2.0 + attribution) | yes | no (and Linux only) |
+| LimiX-2 | `"limix"` | 1.6 GB | 406 M | StableAI LimiX, non-commercial | yes | no (and Linux only) |
 | TabFM v1.0 | `"tabfm"` | 6.6 GB | 1.64 B | Google, non-commercial | yes | no |
 
 The weights are downloaded once, at the first `fit`, and cached; see
@@ -83,8 +83,8 @@ How the cost grows:
   million rows. LimiX-2 degrades above about 20,000 rows unless bagged
   (`bag_size=20_000` with enough members), and TabPFN-2 and 2.5 were
   pretrained on at most 10,000 and 50,000 rows.
-- **Commercial use:** TabICLv2, TabPFN-2 and LimiX-2 have weights that allow
-  it, under their licences' terms; the others are non-commercial.
+- **Commercial use:** only TabICLv2 and TabPFN-2 have weights that allow it,
+  under their licences' terms; the others are non-commercial.
 
 All of them take the same parameters and give the same outputs; see
 {doc}`backends` for how each implements them.

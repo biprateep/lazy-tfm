@@ -185,10 +185,11 @@ after advancing it by an amount that depends on the chunk's size), and the
 ported cache. The answers are statistically, not bitwise, those of upstream's
 `LimiXPredictor`.
 
-Built with StableAI LimiX. LimiX-2's code and weights are released under the
-Stable AI Technology Co., Ltd. License 1.0, Apache-2.0 with attribution terms:
-anything built with it and made available must display "Built with StableAI
-LimiX".
+Built with StableAI LimiX. LimiX-2's weights are released under the StableAI
+LimiX Non-Commercial License 1.0, which also requires distributions,
+derivatives and publications to display "Built with StableAI LimiX"; LimiX's
+code is under the Apache-2.0-based Stable AI Technology Co., Ltd. License
+1.0.
 
 ## Which model, exactly
 
