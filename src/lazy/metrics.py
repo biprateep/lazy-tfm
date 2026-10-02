@@ -38,6 +38,19 @@ PDF metrics on a grid of bin centres (:class:`lazy.grid.Grid`)::
                 ``U(vmin, vmax)``. DC1 reports two cuts; :data:`AD_CUTS`
                 holds them.
 
+Proper scoring rules (Gneiting & Raftery 2007), on the same grids::
+
+    CRPS      = mean_i integral (F_i(y) - 1{y >= y_true_i})^2 dy, with F_i
+                the CDF of the gridded p_i (piecewise linear between grid
+                points, or between bin edges on a histogram grid)
+    NLL       = mean_i -log max(p_i(y_true_i), NLL_DENSITY_FLOOR), with
+                p_i(y_true_i) the density the CDE loss reads
+
+Quantile predictions (Koenker & Bassett 1978)::
+
+    pinball   = mean_{i,k} rho_{tau_k}(y_true_i - q_ik), with
+                rho_tau(u) = max(tau * u, (tau - 1) * u)
+
 The nearest-grid-point likelihood (rather than linear interpolation) is also
 what the Cal-PIT reference implementation uses, and is exact for the
 piecewise-constant densities this package produces.
@@ -78,6 +91,10 @@ SCALES: tuple[str, ...] = ("1+y", "none")
 OUTLIER_FLOOR = 0.06
 DC1_OUTLIER_THRESHOLD = 0.15
 PIT_EXTREME = 1e-4
+#: The density below which :func:`nll` clips, in the target's inverse units:
+#: a zero density at the truth (a truth off the grid, an empty bin) then
+#: scores ``-log(1e-12) ~ 27.6`` rather than infinity.
+NLL_DENSITY_FLOOR = 1e-12
 # The two Anderson-Darling cut ranges DC1 tabulates (AD1, AD2); the script
 # also computed (0.1, 0.9), which the paper does not quote.
 AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
@@ -137,6 +154,10 @@ class PDFMetrics:
         pit_kl: KL divergence of the binned PIT histogram from uniform.
         pit_outlier_rate: Fraction of PIT values within :data:`PIT_EXTREME`
             of 0 or 1.
+        crps: Continuous ranked probability score (see :func:`crps`), in
+            the target's units; NaN when not computed.
+        nll: Negative log predictive density at the truth (see
+            :func:`nll`); NaN when not computed.
     """
 
     n: int
@@ -149,6 +170,8 @@ class PDFMetrics:
     pit_rmse: float
     pit_kl: float
     pit_outlier_rate: float
+    crps: float
+    nll: float
 
     def as_dict(self) -> dict[str, float | int]:
         """Returns the metrics as a plain dict, for building a table row."""
@@ -643,6 +666,340 @@ def per_object_scores(
     return squared - 2.0 * pdf_at_truth, pit
 
 
+def crps(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+) -> float:
+    """The continuous ranked probability score; lower is better.
+
+    ``CRPS = integral (F(y) - 1{y >= y_true})^2 dy`` is a strictly proper
+    scoring rule (Gneiting & Raftery 2007): the squared distance between
+    the predicted CDF and the step function at the truth. It is in the
+    target's units, and for a point mass it reduces to the absolute error.
+    The integral is exact for the CDF each convention implies (see
+    :func:`per_object_crps`).
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``y_grid`` supplies them; given with a Grid, they must be its
+            edges.
+
+    Returns:
+        The score, averaged over objects, in the target's units.
+    """
+    return float(
+        np.mean(per_object_crps(y_true, y_grid, pdfs, bin_edges=bin_edges))
+    )
+
+
+def per_object_crps(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+) -> _typing.FloatArray:
+    """Each object's continuous ranked probability score.
+
+    The densities are normalised on the grid first (see
+    :func:`normalize_grid_pdfs`), so no mass lies outside it: the CDF is 0
+    below the first node and 1 above the last. Between nodes it is linear:
+    on a trapezoid grid the nodes are the centres and the CDF takes the
+    values of :func:`grid_cdf` there (the CDF the PIT interpolates); on a
+    histogram grid the nodes are the bin edges, where the CDF of the
+    piecewise-constant density is exactly linear. The squared difference
+    from the step at the truth is then integrated exactly, piece by piece.
+    A truth outside the grid adds its distance to the nearest end, over
+    which the integrand is 1.
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``y_grid`` supplies them; given with a Grid, they must be its
+            edges.
+
+    Returns:
+        The score of each object, shape (n,), in the target's units.
+    """
+    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
+    truth = np.asarray(y_true, dtype=float)
+    grid, density, _, _ = evaluate_grid_at_truth(
+        truth, y_grid, pdfs, bin_edges=bin_edges
+    )
+    return _crps_terms(truth, grid, density, bin_edges)
+
+
+def nll(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+    floor: float = NLL_DENSITY_FLOOR,
+) -> float:
+    """The mean negative log predictive density at the truth; lower is better.
+
+    The logarithmic score, ``-log p(y_true)``, is strictly proper and local
+    (Gneiting & Raftery 2007). Unlike the CDE loss and the CRPS it is
+    unbounded, so one object with no density at its truth dominates the
+    mean; the density is therefore clipped below at ``floor`` (see
+    :func:`per_object_nll`). Its value depends on the target's units: a
+    rescaling of ``y`` by ``a`` shifts it by ``log a``.
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``y_grid`` supplies them; given with a Grid, they must be its
+            edges.
+        floor: Positive density, in the target's inverse units, below which
+            the density at the truth is clipped.
+
+    Returns:
+        The score, averaged over objects.
+    """
+    return float(
+        np.mean(
+            per_object_nll(
+                y_true, y_grid, pdfs, bin_edges=bin_edges, floor=floor
+            )
+        )
+    )
+
+
+def per_object_nll(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+    floor: float = NLL_DENSITY_FLOOR,
+) -> _typing.FloatArray:
+    """Each object's negative log predictive density at its truth.
+
+    The density at the truth is the one the CDE loss reads (see
+    :func:`evaluate_grid_at_truth`): the nearest grid point's on a
+    trapezoid grid, the bin's on a histogram grid, and zero off the grid.
+    It is clipped below at ``floor``, so a zero density scores
+    ``-log(floor)`` (about 27.6 for :data:`NLL_DENSITY_FLOOR`), a large
+    but finite value.
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
+            density as constant across its bin (a ``"histogram"`` grid)
+            instead of using the trapezoid rule over the centres.
+            A histogram-normalised :class:`~lazy.grid.Grid` passed as
+            ``y_grid`` supplies them; given with a Grid, they must be its
+            edges.
+        floor: Positive density, in the target's inverse units, below which
+            the density at the truth is clipped.
+
+    Returns:
+        ``-log max(p_i(y_true_i), floor)`` for each object, shape (n,).
+    """
+    _check_floor(floor)
+    _, _, pdf_at_truth, _ = evaluate_grid_at_truth(
+        y_true, y_grid, pdfs, bin_edges=bin_edges
+    )
+    return _nll_terms(pdf_at_truth, floor)
+
+
+def _per_object_all(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    bin_edges: npt.ArrayLike | None,
+) -> tuple[
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
+]:
+    """Returns a tuple (cde_terms, pit, crps_terms, nll_terms), shape (n,).
+
+    The four per-object scores from one normalisation of ``pdfs``; each
+    equals what its own function returns.
+    """
+    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
+    truth = np.asarray(y_true, dtype=float)
+    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
+        truth, y_grid, pdfs, bin_edges=bin_edges
+    )
+    squared = _integral_of_square(grid, density, bin_edges)
+    return (
+        squared - 2.0 * pdf_at_truth,
+        pit,
+        _crps_terms(truth, grid, density, bin_edges),
+        _nll_terms(pdf_at_truth, NLL_DENSITY_FLOOR),
+    )
+
+
+def _check_floor(floor: float) -> None:
+    """Refuses an NLL floor that is not a positive finite number."""
+    if not (np.isfinite(floor) and floor > 0):
+        raise ValueError(f"floor must be positive and finite: {floor=}")
+
+
+def _nll_terms(
+    pdf_at_truth: _typing.FloatArray, floor: float
+) -> _typing.FloatArray:
+    """``-log max(p, floor)`` elementwise."""
+    return -np.log(np.maximum(pdf_at_truth, floor))
+
+
+def _crps_terms(
+    truth: _typing.FloatArray,
+    grid: _typing.FloatArray,
+    density: _typing.FloatArray,
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray:
+    """The CRPS of each normalised row, by its grid's convention."""
+    if bin_edges is None:
+        return _crps_piecewise_linear(truth, grid, grid_cdf(grid, density))
+    edges = np.asarray(bin_edges, dtype=float)
+    mass = density * _bin_widths(edges, grid.size)
+    cdf = np.column_stack((np.zeros(len(density)), np.cumsum(mass, axis=1)))
+    return _crps_piecewise_linear(truth, edges, cdf)
+
+
+def _crps_piecewise_linear(
+    truth: _typing.FloatArray,
+    nodes: _typing.FloatArray,
+    cdf: _typing.FloatArray,
+) -> _typing.FloatArray:
+    """Exact CRPS of a CDF linear between nodes, 0 before and 1 after them.
+
+    On a piece of width ``w`` where ``F - c`` runs linearly from ``u`` to
+    ``v``, ``integral (F - c)^2 = w (u^2 + u v + v^2) / 3``; ``c`` is 0
+    below the truth and 1 above it, and the piece holding the truth is split
+    there.
+
+    Args:
+        truth: True values, shape (n,).
+        nodes: Strictly increasing nodes, shape (m,), m >= 2.
+        cdf: The CDF at the nodes, shape (n, m).
+
+    Returns:
+        The CRPS of each row, shape (n,).
+    """
+    widths = np.diff(nodes)
+    lower, upper = cdf[:, :-1], cdf[:, 1:]
+    below = widths * (lower**2 + lower * upper + upper**2) / 3.0
+    lower, upper = lower - 1.0, upper - 1.0
+    above = widths * (lower**2 + lower * upper + upper**2) / 3.0
+    zeros = np.zeros((len(cdf), 1))
+    below_before = np.hstack((zeros, np.cumsum(below, axis=1)))
+    above_before = np.hstack((zeros, np.cumsum(above, axis=1)))
+    rows = np.arange(truth.size)
+    index = np.clip(
+        np.searchsorted(nodes, truth, side="right") - 1, 0, widths.size - 1
+    )
+    start, stop = nodes[index], nodes[index + 1]
+    split = np.clip(truth, start, stop)
+    cdf_start, cdf_stop = cdf[rows, index], cdf[rows, index + 1]
+    cdf_split = cdf_start + (cdf_stop - cdf_start) * (split - start) / (
+        stop - start
+    )
+    left = (
+        (split - start)
+        * (cdf_start**2 + cdf_start * cdf_split + cdf_split**2)
+        / 3.0
+    )
+    right = (
+        (stop - split)
+        * (
+            (cdf_split - 1.0) ** 2
+            + (cdf_split - 1.0) * (cdf_stop - 1.0)
+            + (cdf_stop - 1.0) ** 2
+        )
+        / 3.0
+    )
+    after = above_before[:, -1] - above_before[rows, index + 1]
+    outside = np.maximum(nodes[0] - truth, 0.0) + np.maximum(
+        truth - nodes[-1], 0.0
+    )
+    return below_before[rows, index] + left + right + after + outside
+
+
+# --------------------------------------------------------------------------
+# Quantile predictions
+# --------------------------------------------------------------------------
+
+
+def pinball_loss(
+    y_true: npt.ArrayLike,
+    quantiles: npt.ArrayLike,
+    levels: npt.ArrayLike,
+) -> float:
+    """The mean pinball (quantile) loss of predicted quantiles; lower is better.
+
+    ``rho_tau(u) = max(tau * u, (tau - 1) * u)`` with ``u = y_true - q``
+    is the loss whose expectation the ``tau`` quantile minimises (Koenker &
+    Bassett 1978); it is averaged over objects and levels. At
+    ``tau = 0.5`` it is half the absolute error, and twice its average over
+    all levels in (0, 1) is the CRPS. Takes the output of
+    ``model.predict_quantiles(X, levels)`` as it is.
+
+    Args:
+        y_true: Finite true values, shape (n,).
+        quantiles: Finite predicted quantiles, shape (n, k), column ``j``
+            at ``levels[j]``; or shape (n,) for a single level.
+        levels: Cumulative probabilities within [0, 1], shape (k,); a
+            scalar (or shape (1,)) with one-dimensional ``quantiles``.
+
+    Returns:
+        The loss, averaged over objects and levels, in the target's units.
+    """
+    truth = np.asarray(y_true, dtype=float)
+    predicted = np.asarray(quantiles, dtype=float)
+    tau = np.atleast_1d(np.asarray(levels, dtype=float))
+    if truth.ndim != 1:
+        raise ValueError(f"y_true must be 1D: {truth.shape=}")
+    if predicted.ndim == 1:
+        predicted = predicted[:, None]
+    if tau.ndim != 1 or predicted.ndim != 2:
+        raise ValueError(
+            "expected quantiles shape (n, k) or (n,) and levels shape (k,): "
+            f"{predicted.shape=}, {tau.shape=}"
+        )
+    if predicted.shape != (truth.size, tau.size):
+        raise ValueError(
+            "quantiles must have one row per truth and one column per "
+            f"level: {predicted.shape=}, {truth.shape=}, {tau.shape=}"
+        )
+    if not (np.isfinite(truth).all() and np.isfinite(predicted).all()):
+        raise ValueError("non-finite values supplied")
+    if not np.all((tau >= 0.0) & (tau <= 1.0)):
+        raise ValueError(f"levels must lie within [0, 1]: {tau=}")
+    residual = truth[:, None] - predicted
+    return float(np.mean(np.maximum(tau * residual, (tau - 1.0) * residual)))
+
+
 # --------------------------------------------------------------------------
 # PIT statistics
 # --------------------------------------------------------------------------
@@ -729,7 +1086,7 @@ def pdf_metrics(
     *,
     bin_edges: npt.ArrayLike | None = None,
 ) -> tuple[PDFMetrics, _typing.FloatArray]:
-    """Scores grid PDFs with the CDE loss and the PIT statistics.
+    """Scores grid PDFs with the CDE loss, the PIT statistics, CRPS and NLL.
 
     Args:
         y_true: True values, one per PDF, shape (n,).
@@ -747,19 +1104,38 @@ def pdf_metrics(
         A tuple (metrics, pit): the metric bundle and the per-object PIT
         values, shape (n,).
     """
-    terms, pit = per_object_scores(y_true, y_grid, pdfs, bin_edges=bin_edges)
-    return _pdf_metrics_from(terms, pit), pit
+    terms, pit, crps_terms, nll_terms = _per_object_all(
+        y_true, y_grid, pdfs, bin_edges
+    )
+    return _pdf_metrics_from(terms, pit, crps_terms, nll_terms), pit
 
 
 def _pdf_metrics_from(
-    cde_terms: _typing.FloatArray, pit: _typing.FloatArray
+    cde_terms: _typing.FloatArray,
+    pit: _typing.FloatArray,
+    crps_terms: _typing.FloatArray | None,
+    nll_terms: _typing.FloatArray | None,
 ) -> PDFMetrics:
-    """The PDF metric bundle from the per-object scores."""
+    """The PDF metric bundle from the per-object scores; NaN for a None."""
     return PDFMetrics(
         n=int(pit.size),
         cde_loss=float(np.mean(cde_terms)),
         **pit_statistics(pit),
+        crps=_mean_or_nan(crps_terms, pit.size, "crps_terms"),
+        nll=_mean_or_nan(nll_terms, pit.size, "nll_terms"),
     )
+
+
+def _mean_or_nan(terms: npt.ArrayLike | None, n: int, name: str) -> float:
+    """The mean of ``n`` per-object terms, or NaN when there are none."""
+    if terms is None:
+        return float("nan")
+    values = np.asarray(terms, dtype=float)
+    if values.shape != (n,):
+        raise ValueError(
+            f"{name} must have one value per object: {values.shape=}, {n=}"
+        )
+    return float(np.mean(values))
 
 
 def evaluate_grid_pdfs(
@@ -844,7 +1220,8 @@ def summarize(
     Returns:
         A one-row table: ``model`` (if labelled), ``point_estimate``,
         ``scale``, the other :class:`PointMetrics` fields and the
-        :class:`PDFMetrics` fields other than ``n``.
+        :class:`PDFMetrics` fields other than ``n`` (``crps`` and ``nll``
+        last).
 
     Examples:
         >>> y = np.array([0.5, 1.0])
@@ -859,8 +1236,8 @@ def summarize(
     estimates = grid_point_estimates(y_grid, pdfs, bin_edges=bin_edges)
     if point not in estimates:
         raise ValueError(f"point must be one of {sorted(estimates)}")
-    cde_terms, pit = per_object_scores(
-        y_true, y_grid, pdfs, bin_edges=bin_edges
+    cde_terms, pit, crps_terms, nll_terms = _per_object_all(
+        y_true, y_grid, pdfs, bin_edges
     )
     return summarize_scores(
         y_true,
@@ -870,6 +1247,8 @@ def summarize(
         point=point,
         label=label,
         scale=scale,
+        crps_terms=crps_terms,
+        nll_terms=nll_terms,
     )
 
 
@@ -882,13 +1261,16 @@ def summarize_scores(
     label: str | None = None,
     *,
     scale: Scale = "none",
+    crps_terms: npt.ArrayLike | None = None,
+    nll_terms: npt.ArrayLike | None = None,
 ) -> pd.DataFrame:
     """The :func:`summarize` table from per-object pieces.
 
     For data too large to hold as one ``(n, g)`` array: compute the point
-    estimates and :func:`per_object_scores` a block of rows at a time,
-    join them, and pass them here. The table is the one :func:`summarize`
-    gives on the whole array.
+    estimates, :func:`per_object_scores`, :func:`per_object_crps` and
+    :func:`per_object_nll` a block of rows at a time, join them, and pass
+    them here. The table is the one :func:`summarize` gives on the whole
+    array; a score left out gives a NaN column.
 
     Args:
         y_true: Finite true values, shape (n,).
@@ -900,13 +1282,20 @@ def summarize_scores(
             when ``None``.
         scale: How the point metrics scale residuals; see
             :func:`point_metrics`.
+        crps_terms: Each object's CRPS, shape (n,); ``None`` for a NaN
+            ``crps`` column.
+        nll_terms: Each object's negative log density at the truth, shape
+            (n,); ``None`` for a NaN ``nll`` column.
 
     Returns:
         The one-row table :func:`summarize` describes.
     """
     point_metrics_ = point_metrics(y_true, y_pred, scale=scale)
     pdf_metrics_ = _pdf_metrics_from(
-        np.asarray(cde_terms, dtype=float), np.asarray(pit, dtype=float)
+        np.asarray(cde_terms, dtype=float),
+        np.asarray(pit, dtype=float),
+        None if crps_terms is None else np.asarray(crps_terms, dtype=float),
+        None if nll_terms is None else np.asarray(nll_terms, dtype=float),
     )
     row: dict[str, object] = {}
     if label is not None:

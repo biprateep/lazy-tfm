@@ -488,12 +488,14 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
-        y_pred, cde_terms, pit = [], [], []
+        y_pred, cde_terms, pit, crps_terms, nll_terms = [], [], [], [], []
         for rows, density in self._density_blocks(X, grid):
             y_pred.append(metrics.grid_point_estimates(grid, density)[method])
             terms, values = metrics.per_object_scores(y[rows], grid, density)
             cde_terms.append(terms)
             pit.append(values)
+            crps_terms.append(metrics.per_object_crps(y[rows], grid, density))
+            nll_terms.append(metrics.per_object_nll(y[rows], grid, density))
         return metrics.summarize_scores(
             y,
             np.concatenate(y_pred),
@@ -502,6 +504,8 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             point=method,
             label=self.name_,
             scale=scale,
+            crps_terms=np.concatenate(crps_terms),
+            nll_terms=np.concatenate(nll_terms),
         )
 
     # -- helpers -----------------------------------------------------------

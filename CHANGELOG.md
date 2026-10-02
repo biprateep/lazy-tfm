@@ -35,6 +35,12 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   computed exactly from the native distribution.
 - `lazy.datasets.make_chirp`, a one-feature toy problem (a noisy chirp with
   chunks cut out as the test set), for demonstrations.
+- Three proper scores in `lazy.metrics`: `crps` (the continuous ranked
+  probability score), `nll` (the negative log predictive density, floored at
+  `NLL_DENSITY_FLOOR`) and `pinball_loss` (for `predict_quantiles`), with
+  per-object `per_object_crps` and `per_object_nll`. `summarize`, `evaluate`
+  and `PDFMetrics` gain `crps` and `nll`, appended after the existing columns,
+  which are unchanged.
 - New documentation pages: the landing page's demo, "What are Tabular
   Foundation Models?", and a page for each supported model under "Supported
   models". The quickstart is gone; its advice for machines without a GPU is
