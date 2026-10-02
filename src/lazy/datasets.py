@@ -1229,7 +1229,7 @@ def make_chirp(
     *,
     noise: float = 0.2,
     n_gaps: int = 3,
-    gap_width: float = 0.06,
+    gap_width: float = 0.04,
     random_state: int | np.random.Generator | None = None,
 ) -> tuple[
     _typing.FloatArray,
