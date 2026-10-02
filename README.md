@@ -30,7 +30,7 @@ and the Data Challenge metrics) come from photo-z, while the estimators work
 on any tabular regression problem.
 
 **Documentation:** [lazy-tfm.readthedocs.io](https://lazy-tfm.readthedocs.io) ·
-**Tutorial:** [open in Colab](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/introduction.ipynb) ·
+**Tutorials:** [gallery](https://lazy-tfm.readthedocs.io/en/latest/tutorials/index.html), or [open the first in Colab](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/basic_usage.ipynb) ·
 **Changelog:** [CHANGELOG.md](https://github.com/biprateep/lazy-tfm/blob/main/CHANGELOG.md) · **Contributing:** [CONTRIBUTING.md](https://github.com/biprateep/lazy-tfm/blob/main/CONTRIBUTING.md)
 
 ## Install

@@ -125,7 +125,18 @@ _fetch_tutorials()
 # thumbnail thumbnails/<name>.png (execute.sh documents the syntax). A
 # missing thumbnail gives a placeholder, and a missing description none.
 # Tutorials are shown in TUTORIAL_ORDER, then any others alphabetically.
-TUTORIAL_ORDER = ["introduction"]
+TUTORIAL_ORDER = [
+    "basic_usage",
+    "multimodal",
+    "skewed_targets",
+    "discrete_targets",
+    "messy_inputs",
+    "choosing_a_model",
+    "tuning",
+    "large_data",
+    "distribution_shift",
+    "photo_z",
+]
 GALLERY = TUTORIALS / "_gallery.md"
 PLACEHOLDER = "/_static/tutorial-placeholder.svg"
 

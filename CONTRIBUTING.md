@@ -94,13 +94,13 @@ notebook, with the gallery thumbnail that `execute.sh` cuts from its figure
 cell tagged `thumbnail`, to that branch:
 
 ```bash
-docs/tutorials/execute.sh introduction   # writes the notebook and thumbnails/introduction.png (git-ignored)
+docs/tutorials/execute.sh basic_usage   # writes the notebook and thumbnails/basic_usage.png (git-ignored)
 git worktree add ../lazy-tutorials tutorials
-cp docs/tutorials/introduction.ipynb ../lazy-tutorials/
+cp docs/tutorials/basic_usage.ipynb ../lazy-tutorials/
 mkdir -p ../lazy-tutorials/thumbnails
-cp docs/tutorials/thumbnails/introduction.png ../lazy-tutorials/thumbnails/
-git -C ../lazy-tutorials add introduction.ipynb thumbnails/introduction.png
-git -C ../lazy-tutorials commit -m "Re-execute the introduction"
+cp docs/tutorials/thumbnails/basic_usage.png ../lazy-tutorials/thumbnails/
+git -C ../lazy-tutorials add basic_usage.ipynb thumbnails/basic_usage.png
+git -C ../lazy-tutorials commit -m "Re-execute basic_usage"
 git push origin tutorials
 ```
 
