@@ -101,12 +101,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
             context, query = _power(context), _power(query)
         context = np.nan_to_num(context)
         query = np.nan_to_num(query)
-        # Columns summed one after another, as the members are below: a
-        # reduction over an axis may pair its sums by the array's shape.
-        distance = sum(
-            (query[:, None, j] - context[None, :, j]) ** 2
-            for j in range(query.shape[1])
-        )
+        distance = ((query[:, None, :] - context[None, :, :]) ** 2).sum(-1)
         k = min(self.n_neighbors, len(redshifts))
         return redshifts[np.argsort(distance, axis=1)[:, :k]]
 
