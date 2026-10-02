@@ -134,6 +134,7 @@ def test_a_gpu_model_falling_back_to_the_cpu_warns(data, no_gpu):
         _SlowOnCPU().fit(X, z)
     message = str(info[0].message)
     assert "LazyModel('tabicl')" in message
+    assert "LazyModel('tabpfn', version='v3.5-fast')" in message
     assert "device='cpu'" in message
     assert "Supported models" in message
 
@@ -147,9 +148,35 @@ def test_an_explicit_cpu_or_a_cpu_friendly_model_does_not_warn(data, no_gpu):
         standins.HistogramStandIn().fit(X, z)
 
 
-def test_only_tabicl_is_cpu_friendly():
+def test_only_tabicl_and_tabpfns_fast_checkpoint_are_cpu_friendly():
     friendly = [n for n, c in lazy.ESTIMATORS.items() if c.cpu_friendly]
     assert friendly == ["tabicl"]
+    versions = {
+        n: c.cpu_friendly_versions
+        for n, c in lazy.ESTIMATORS.items()
+        if c.cpu_friendly_versions
+    }
+    assert versions == {"tabpfn": ("v3.5-fast",)}
+
+
+def test_a_cpu_friendly_version_does_not_warn():
+    model = lazy.TabPFNBarDistribution(version="v3.5-fast")
+    model.device_ = "cpu"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.PerformanceWarning)
+        model._warn_if_slow_on_cpu()
+    model = lazy.TabPFNBarDistribution(version="v3.5")
+    model.device_ = "cpu"
+    with pytest.warns(lazy.PerformanceWarning, match="v3.5-fast"):
+        model._warn_if_slow_on_cpu()
+
+
+def test_cpu_friendly_versions_must_be_pinned(monkeypatch):
+    monkeypatch.setattr(
+        lazy.TabPFNBarDistribution, "cpu_friendly_versions", ("v9",)
+    )
+    problems = _conformance.problems(lazy.TabPFNBarDistribution, "tabpfn")
+    assert any("cpu_friendly_versions" in p for p in problems)
 
 
 def test_the_tabpfn_cpu_warning_names_its_context_limit():

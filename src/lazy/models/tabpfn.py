@@ -386,6 +386,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     native_transforms = _native_transforms()
     supports_native_bagging = True
     native_outlier_clipping = True
+    # The distilled fast checkpoint runs DC1's 1,000 + 1,000 rows on a CPU in
+    # about 11 s with eight members (TabPFN-3.5 26 s, TabICL 7 s), within the
+    # 5,000 context rows upstream allows on a CPU.
+    cpu_friendly_versions = ("v3.5-fast",)
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
 

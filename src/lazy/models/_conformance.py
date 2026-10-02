@@ -115,6 +115,12 @@ def _declaration_problems(
     ):
         if not isinstance(getattr(cls, flag), bool):
             found.append(f"{flag} must be a bool")
+    unknown_versions = sorted(
+        set(cls.cpu_friendly_versions)
+        - set(_hub.list_versions(cls.backend or ""))
+    )
+    if unknown_versions:
+        found.append(f"cpu_friendly_versions names unknown {unknown_versions}")
     if True not in cls.kv_cache_modes or False not in cls.kv_cache_modes:
         found.append("kv_cache_modes must include True and False")
     vocabulary = set(_transforms.BASE_TRANSFORMS)

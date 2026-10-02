@@ -10,6 +10,7 @@ marked ``needs_checkpoint`` load one, on the CPU, and run only with
 import dataclasses
 import json
 import os
+import warnings
 
 import numpy as np
 import pytest
@@ -189,6 +190,33 @@ def test_the_fitted_regressor_ran_the_pinned_recipe(small):
     (recorded,) = est.provenance_["inference_config"]
     assert recorded["PREPROCESS_TRANSFORMS"] == recipe["PREPROCESS_TRANSFORMS"]
     json.dumps(est.provenance_)
+
+
+@needs_checkpoint
+def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
+    small, monkeypatch
+):
+    """TabPFN-3.5-fast is the TabPFN to use without a GPU."""
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    X, y, X_test = small
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.PerformanceWarning)
+        model = lazy.LazyModel(
+            "tabpfn", version="v3.5-fast", progress=False
+        ).fit(X, y)
+    est = model.estimator_
+    assert est.device_ == "cpu"
+    assert (
+        est.provenance_["filename"] == "tabpfn-v3.5-fast-20260909.safetensors"
+    )
+    # The shared defaults, not the checkpoint's own four members.
+    assert est.regressor_.n_estimators_ == 8
+    assert est.provenance_["softmax_temperature"] == 1.0
+    assert est.provenance_["outlier_threshold"] == 12.0
+    pdfs = model.predict_proba(X_test, lazy.DC1_GRID)
+    assert pdfs.shape == (len(X_test), lazy.DC1_GRID.n_bins)
+    assert np.all(np.isfinite(pdfs))
 
 
 @needs_checkpoint

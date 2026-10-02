@@ -184,6 +184,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         cpu_friendly: Whether the model runs at a usable speed on a CPU; if
             not, a fit that falls back to the CPU under ``device="auto"``
             warns.
+        cpu_friendly_versions: Versions that run at a usable speed on a CPU
+            although the model as a whole does not (a distilled checkpoint,
+            say); they fit on a CPU without the warning, which suggests them.
     """
 
     display_name: ClassVar[str] = ""
@@ -203,6 +206,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     has_softmax: ClassVar[bool] = True
     native_outlier_clipping: ClassVar[bool] = False
     cpu_friendly: ClassVar[bool] = False
+    cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
@@ -470,14 +474,20 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         from lazy.models import registry  # noqa: PLC0415
 
         auto = str(self.device).strip().lower() == "auto"
-        if self.cpu_friendly or not auto or self.device_ != "cpu":
-            return
-        friendly = sorted(
-            name
-            for name, cls in registry.ESTIMATORS.items()
-            if getattr(cls, "cpu_friendly", False)
+        friendly_here = (
+            self.cpu_friendly or self.version in self.cpu_friendly_versions
         )
-        models = " or ".join(f"LazyModel({name!r})" for name in friendly)
+        if friendly_here or not auto or self.device_ != "cpu":
+            return
+        friendly = []
+        for name, cls in sorted(registry.ESTIMATORS.items()):
+            if getattr(cls, "cpu_friendly", False):
+                friendly.append(f"LazyModel({name!r})")
+            friendly.extend(
+                f"LazyModel({name!r}, version={version!r})"
+                for version in getattr(cls, "cpu_friendly_versions", ())
+            )
+        models = " or ".join(friendly)
         suggestion = (
             f"For CPU work prefer a CPU-friendly model: {models}. "
             if friendly
