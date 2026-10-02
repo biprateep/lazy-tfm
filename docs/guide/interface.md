@@ -15,11 +15,11 @@ page describes that shared interface and how each model implements it.
 ({class}`~lazy.models.tabpfn.TabPFNBarDistribution`,
 {class}`~lazy.models.limix.LimiXBarDistribution`,
 {class}`~lazy.models.tabicl.TabICLQuantile`,
-{class}`~lazy.models.tabfm.TabFMHistogram`) are the same models, and the
-class pages document every parameter. We recommend `LazyModel` when the
-backend is a configuration value, as in a benchmark loop. All of the backends
-write onto whatever {class}`~lazy.grid.Grid` the user asks for, and each has
-a native grid on which it answers by default (see {doc}`distributions`).
+{class}`~lazy.models.tabfm.TabFMHistogram`) are the same models, and the class
+pages document every parameter. We recommend `LazyModel` when the backend is a
+configuration value, as in a benchmark loop. All of the backends write onto
+whatever {class}`~lazy.grid.Grid` the user asks for, and each has a native
+grid on which it answers by default (see {doc}`distributions`).
 
 ## Shared parameters and defaults
 
@@ -53,8 +53,8 @@ The `softmax_temperature`, `mixed_precision` and `outlier_threshold` actually
 used are recorded in `provenance_`, together with the rest of the recipe (see
 {doc}`reproducibility`). Every column is treated as numeric on every model, so
 none of them guesses that a column with few distinct values is a category.
-{doc}`scaling` describes `kv_cache`, `chunk_size` and `bag_size`, which
-affect the cost of a prediction.
+{doc}`scaling` describes `kv_cache`, `chunk_size` and `bag_size`, which affect
+the cost of a prediction.
 
 ## How LAZY scaffolds what a model lacks
 
@@ -92,9 +92,9 @@ also sees its own random subset of the context (below, and {doc}`scaling`).
 With `bag_size` set, each member sees its own random subset of the context
 rows, and LAZY draws these subsets for every model. The rows are drawn without
 replacement within a member and independently across members, from one
-generator seeded with `random_state`, exactly as the paper's bagged LimiX-2
-runs drew them. Therefore, member `i` sees the same rows whichever model runs
-it, TabFM included, which would otherwise draw rows of its own. On TabFM the
+generator seeded with `random_state`, exactly as our own bagged LimiX-2 tests
+drew them. Therefore, member `i` sees the same rows whichever model runs it,
+TabFM included, which would otherwise draw rows of its own. On TabFM the
 member's coarse classifier sees its bag, and its classifier for coarse bin `j`
 sees the rows of its bag that fall in that bin.
 
@@ -103,23 +103,23 @@ transform, the outlier clip and the standardization of the target, along with
 each model's own preprocessing. TabICL and LimiX-2 run each bagged member as a
 model of its own, and so does TabPFN, because its own row subsampling would
 standardize the target and place the buckets using the whole context. TabFM
-keeps the members of its own transforms (`none` and `power`) in one classifier,
-where they keep their column orders, class shifts and averaged logits, and
-refits each member's standardization, norm method and clip on that member's
-rows. A member with a scaffolded transform is a model of its own on every
-backend. Since each member of TabPFN and LimiX-2 places its buckets from its
-own targets, their native grid under bagging is the union of every member's
-buckets, with up to `n_estimators` times as many bins as an unbagged one, so we
-recommend passing `y_grid` for a large query set. Two things are taken from the
-whole context rather than from a bag: TabFM's equal-mass bins, so that its
-members answer over the same classes, and the range of TabICL's native grid,
-which spans every context target. Each member is also seeded on its own (see
-{doc}`reproducibility`).
+keeps the members of its own transforms (`none` and `power`) in one
+classifier, where they keep their column orders, class shifts and averaged
+logits, and refits each member's standardization, norm method and clip on that
+member's rows. A member with a scaffolded transform is a model of its own on
+every backend. Since each member of TabPFN and LimiX-2 places its buckets from
+its own targets, their native grid under bagging is the union of every
+member's buckets, with up to `n_estimators` times as many bins as an unbagged
+one, so we recommend passing `y_grid` for a large query set. Two things are
+taken from the whole context rather than from a bag: TabFM's equal-mass bins,
+so that its members answer over the same classes, and the range of TabICL's
+native grid, which spans every context target. Each member is also seeded on
+its own (see {doc}`reproducibility`).
 
 ## Transforms
 
-`transforms` names what each member does to the features before the model
-sees them, and the members take the names in round-robin order.
+`transforms` names what each member does to the features before the model sees
+them, and the members take the names in round-robin order.
 
 | Name               | Transform                                                     |
 | ------------------ | ------------------------------------------------------------- |
@@ -158,9 +158,9 @@ TabICL and TabFM z-score whatever they are given, an affine transform such as
 
 `"limix"` is LimiX-2's two pipelines written in the shared vocabulary,
 `("quantile_uniform+original", "power")`, and it can be used on any model; it
-is what the paper's "with LimiX transforms" runs use. It lacks the SVD
-components of LimiX-2's own quantile pipeline, so on LimiX-2 it is not the
-same as `"auto"`.
+is what our own "with LimiX transforms" tests use. It lacks the SVD components
+of LimiX-2's own quantile pipeline, so on LimiX-2 it is not the same as
+`"auto"`.
 
 ## Outlier clipping
 

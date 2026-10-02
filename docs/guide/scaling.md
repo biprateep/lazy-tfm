@@ -54,19 +54,19 @@ Peak memory is bounded by `chunk_size` on every backend (8,192 query rows by
 default), and on TabFM's streaming path `query_block_rows` also bounds the
 host memory of a block of queries. We recommend lowering `chunk_size` on a
 small GPU, and setting it to `0` gives a single pass. A row's answer does not
-depend on which other rows share its chunk (see {doc}`reproducibility`).
-Every backend shows a progress bar while it predicts (with `progress="auto"`,
-on a terminal or in a notebook but not when output goes to a file).
+depend on which other rows share its chunk (see {doc}`reproducibility`). Every
+backend shows a progress bar while it predicts (with `progress="auto"`, on a
+terminal or in a notebook but not when output goes to a file).
 
 ## The key/value cache
 
 An in-context model reads the whole context for every query. With
-`kv_cache=True` it reads the context once and each chunk of queries attends
-to what was stored, so a large query set costs little more than its own rows.
-The cache keeps the processed context in memory, which for LimiX-2 takes
-about 2 GB per member at 20,000 context rows, so its eight members want a GPU
-with 16–24 GB or more at that size. LimiX-2 has no cache upstream, so LAZY
-ports one, which falls back, with a warning, when the device lacks the room.
+`kv_cache=True` it reads the context once and each chunk of queries attends to
+what was stored, so a large query set costs little more than its own rows. The
+cache keeps the processed context in memory, which for LimiX-2 takes about 2
+GB per member at 20,000 context rows, so its eight members want a GPU with
+16–24 GB or more at that size. LimiX-2 has no cache upstream, so LAZY ports
+one, which falls back, with a warning, when the device lacks the room.
 
 TabPFN caches at full precision. Its own default, which is also what earlier
 `fit_mode="fit_with_cache"` runs used, is an int8 cache that moves densities
@@ -84,9 +84,9 @@ every `predict` call, the cache serves the chunks of that call.
 without replacement within a member and independently across members. This
 matters when the context outgrows what a model was pretrained on. LimiX-2
 degrades above about 20,000 context rows, and a
-{class}`~lazy.models.ContextSizeWarning` says so whenever a member's context is
-larger, whether that is the whole context without bagging or a bag of more
-than 20,000 rows. The remedy it suggests is the one used in the paper:
+{class}`~lazy.models.ContextSizeWarning` says so whenever a member's context
+is larger, whether that is the whole context without bagging or a bag of more
+than 20,000 rows. The remedy it suggests is the one we used in our own tests:
 
 ```python
 model = lazy.LazyModel("limix", bag_size=20_000, n_estimators=32)
@@ -104,8 +104,8 @@ context.
 Bagging also bounds the cost, since each member then attends to `bag_size`
 context rows rather than to all of them. The members' contexts differ in
 length, so TabFM runs its bagged members one at a time whatever
-`member_batch_size` says, and the native grid of TabPFN and LimiX-2 holds every
-member's buckets (see {doc}`interface`).
+`member_batch_size` says, and the native grid of TabPFN and LimiX-2 holds
+every member's buckets (see {doc}`interface`).
 
 ## GPU and CPU
 
@@ -114,7 +114,6 @@ CUDA if it is available and the CPU otherwise (see {doc}`../installation`).
 Most of the models need a GPU to be practical. TabPFN refuses CPU contexts
 above 1,000 rows (v2 to v2.6) or 5,000 rows (v3 and later) unless
 `ignore_pretraining_limits=True` or a `bag_size` keeps every bag below that
-size, and `lazy` warns at `fit` when it finds no
-GPU for TabPFN-3.5. TabICLv2 is nearly as fast on a CPU as on a GPU, and
-LimiX-2 and TabFM need a GPU. {doc}`choosing` describes which model to use on
-each.
+size, and `lazy` warns at `fit` when it finds no GPU for TabPFN-3.5. TabICLv2
+is nearly as fast on a CPU as on a GPU, and LimiX-2 and TabFM need a GPU.
+{doc}`choosing` describes which model to use on each.
