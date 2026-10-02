@@ -645,7 +645,7 @@ def test_make_chirp_cuts_its_gaps_into_the_test_rows():
     assert np.count_nonzero(np.diff(in_gap.astype(int)) == 1) == 3
     assert 3 * 55 <= len(X_test) <= 3 * 62
     # The test targets are the noise-free curve; the training ones are not.
-    truth = (1 + 0.2 * x) * np.sin(2 * np.pi * (0.2 * x + 0.03 * x**2))
+    truth = (1 + 0.2 * x) * np.sin(2 * np.pi * (0.2 * x + 0.015 * x**2))
     np.testing.assert_array_equal(y_test, truth[in_gap])
     assert 0.15 < np.std(y_train - truth[~in_gap]) < 0.25
 

@@ -314,10 +314,8 @@ plt.close(fig)
 
 # %%
 x_full, _, y_full, _ = datasets.make_chirp(n_gaps=0, random_state=0)
-x_grid = np.linspace(0.0, 10.0, 400)[:, None]
-truth = (1 + 0.2 * x_grid[:, 0]) * np.sin(
-    2 * np.pi * (0.2 * x_grid[:, 0] + 0.03 * x_grid[:, 0] ** 2)
-)
+# The noise-free curve on a 400-point grid, from make_chirp itself.
+x_grid, _, truth, _ = datasets.make_chirp(400, noise=0.0, n_gaps=0)
 sizes = (20, 100, 400)
 fig, axes = plt.subplots(
     1,

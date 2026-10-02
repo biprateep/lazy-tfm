@@ -1241,7 +1241,7 @@ def make_chirp(
 
     A toy regression problem with one feature: ``y = A(x) sin(phi(x))`` on
     ``0 <= x <= 10``, where the amplitude ``A(x) = 1 + 0.2 x`` grows from 1
-    to 3 and the frequency ``phi'(x) / 2 pi = 0.2 + 0.06 x`` from 0.2 to 0.8
+    to 3 and the frequency ``phi'(x) / 2 pi = 0.2 + 0.03 x`` from 0.2 to 0.5
     cycles per unit of ``x``. Gaussian noise is added to the training rows,
     and ``n_gaps`` chunks of ``x`` are cut out of them and returned, without
     noise, as the test rows, so the true curve is known where a model has to
@@ -1278,7 +1278,7 @@ def make_chirp(
         )
     rng = np.random.default_rng(random_state)
     x = np.linspace(0.0, 10.0, n_samples)
-    y = (1.0 + 0.2 * x) * np.sin(2.0 * np.pi * (0.2 * x + 0.03 * x**2))
+    y = (1.0 + 0.2 * x) * np.sin(2.0 * np.pi * (0.2 * x + 0.015 * x**2))
     width = 10.0 * gap_width
     segment = 10.0 / max(n_gaps, 1)
     starts = segment * np.arange(n_gaps) + rng.uniform(
