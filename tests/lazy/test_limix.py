@@ -16,6 +16,7 @@ import pytest
 import lazy
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
+from lazy.models import _members
 from lazy.models import limix
 
 
@@ -148,7 +149,9 @@ def test_a_bagged_member_shuffles_every_column_as_upstream(data):
     ):
         assert group.permutation is None and group.feature_shuffle
         (entry,) = handle["members"]
-        (seeds,) = limix._limix_preprocess.member_seeds(5 + index, 1)
+        (seeds,) = limix._limix_preprocess.member_seeds(
+            _members.member_seed(5, index), 1
+        )
         upstream = limix._limix_preprocess.MemberPipeline(
             tokens[index], seeds, shuffle=True
         ).fit(X[group.rows])
@@ -209,15 +212,27 @@ def test_an_outlier_threshold_clips_what_the_network_sees(data):
 
 
 @needs_checkpoint
-def test_the_native_grid_uses_the_whole_context(data):
+def test_the_native_grid_holds_every_members_buckets(data):
+    """Unbagged, the whole context's; bagged, each bag's, merged."""
     X, z, _ = data
-    model = _model(bag_size=0.5).fit(X, z)
+    model = _model().fit(X, z)
     mean, std = z.mean(), z.std(ddof=1)
-    edges = model.native_grid_.edges
     np.testing.assert_allclose(
-        edges, np.unique(model.borders_ * std + mean), rtol=1e-12
+        model.native_grid_.edges,
+        np.unique(model.borders_ * std + mean),
+        rtol=1e-12,
     )
     assert model.n_buckets_ == 5000
+    bagged = _model(bag_size=0.5).fit(X, z)
+    expected = np.unique(
+        np.concatenate(
+            [
+                bagged.borders_ * z[g.rows].std(ddof=1) + z[g.rows].mean()
+                for g in bagged.member_groups_
+            ]
+        )
+    )
+    np.testing.assert_allclose(bagged.native_grid_.edges, expected, rtol=1e-12)
 
 
 @needs_checkpoint

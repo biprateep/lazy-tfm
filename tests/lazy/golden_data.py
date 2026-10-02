@@ -3,13 +3,13 @@
 """A fixed small problem and the backend settings the golden outputs use.
 
 The golden files in ``tests/lazy/golden/`` hold what each backend predicted
-on this problem before the uniform feature layer was introduced. Refactors
-must reproduce them: they are the guard on the paper's numbers. Regenerate
-them only on purpose, with ``python tests/lazy/record_golden.py``.
+on this problem with the settings below. Refactors must reproduce them: they
+are the guard on the paper's numbers. Regenerate them only on purpose, with
+``python tests/lazy/record_golden.py``, as was done when member seeds moved
+to ``SeedSequence([random_state, i])``.
 
-``RECORDED_PARAMS`` is what produced each file, in the API of the day.
-``CURRENT_PARAMS`` is the same model in today's API, and is what the golden
-test constructs; update it, never the files, when the API changes.
+``RECORDED_PARAMS`` is what produced each file, in today's API; when the API
+changes, update it to the same model in the new API, never the files.
 """
 
 import pathlib
@@ -18,64 +18,65 @@ from typing import Any
 import numpy as np
 
 import lazy
+from lazy import datasets
 
 GOLDEN_DIR = pathlib.Path(__file__).with_name("golden")
 
 #: The grid every golden density is tabulated on.
-GRID = lazy.datasets.DC1_GRID
+GRID = datasets.DC1_GRID
 
-#: Settings when the files were recorded (commit 5144b23), per backend.
+#: Settings the files were recorded with, per backend. They keep the seeds
+#: and paths of the first recording (no key/value cache on TabPFN and
+#: TabICL, seed 42 there and 1 on TabFM, whose bins span the DC1 grid).
 RECORDED_PARAMS: dict[str, dict[str, Any]] = {
     "tabpfn": {
         "version": "v3",
         "n_estimators": 2,
-        "fit_mode": "fit_preprocessors",
+        "kv_cache": False,
+        "random_state": 42,
         "device": "cpu",
         "progress": False,
     },
-    "tabicl": {"n_estimators": 2, "device": "cpu", "progress": False},
+    "tabicl": {
+        "n_estimators": 2,
+        "kv_cache": False,
+        "random_state": 42,
+        "device": "cpu",
+        "progress": False,
+    },
     "tabfm": {
         "n_estimators": 1,
         "n_dither": 2,
-        "inference": "stream",
+        "kv_cache": True,
+        "y_grid": GRID,
+        "random_state": 1,
         "device": "cpu",
         "progress": False,
     },
 }
 
-#: The same models in the current API.
-CURRENT_PARAMS: dict[str, dict[str, Any]] = {
-    **RECORDED_PARAMS,
-    # The recorded runs had no key/value cache, and used the seeds that were
-    # then each backend's default (TabPFN and TabICL 42, TabFM 1).
-    "tabicl": {
-        **RECORDED_PARAMS["tabicl"],
-        "kv_cache": False,
-        "random_state": 42,
-    },
-    "tabpfn": {
-        **{
-            k: v
-            for k, v in RECORDED_PARAMS["tabpfn"].items()
-            if k != "fit_mode"
-        },
-        "kv_cache": False,
-        "random_state": 42,
-    },
-    # The recorded run pinned its bins to the DC1 grid it predicted on; the
-    # bins now follow the constructor's grid, and inference='stream' is the
-    # cache.
-    "tabfm": {
-        **{
-            k: v
-            for k, v in RECORDED_PARAMS["tabfm"].items()
-            if k != "inference"
-        },
-        "kv_cache": True,
-        "y_grid": GRID,
-        "random_state": 1,
-    },
-}
+#: Backends recorded in a reduced precision that lazy now uses only on CUDA
+#: (``mixed_precision``; a CPU runs float32). TabFM's recording ran it in
+#: bfloat16, as every GPU run does, so the golden still guards the precision
+#: the GPU results are computed in. TabFM chooses its precision at
+#: prediction, so setting the resolved flag after ``fit`` is enough.
+RECORDED_IN_MIXED_PRECISION = {"tabfm"}
+
+
+def fit(name: str) -> Any:
+    """The backend ``name``, fitted as its golden file was recorded.
+
+    Args:
+        name: A key of :data:`RECORDED_PARAMS`.
+
+    Returns:
+        The fitted :class:`lazy.LazyModel`, ready to predict on the problem.
+    """
+    X_train, z, _ = problem()
+    model = lazy.LazyModel(name, **RECORDED_PARAMS[name]).fit(X_train, z)
+    if name in RECORDED_IN_MIXED_PRECISION:
+        model.estimator_.mixed_precision_ = True
+    return model
 
 
 def problem() -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -158,8 +158,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             mapped to its own tokens.
         auto_tokens: The model's own default recipe as tokens, cycled by
             single-member groups under ``transforms="auto"``.
-        supports_native_bagging: Whether the model subsamples rows per
-            member itself.
+        supports_native_bagging: Whether the model can run several
+            members on different rows in one call, given each member's bag
+            (``MemberGroup.member_rows``); the rows are always lazy's, and
+            a member with a scaffolded transform is a group of its own.
         member_combination: How groups combine: ``"mixture"`` of densities
             or ``"quantile_average"`` of quantile functions.
         kv_cache_modes: The accepted ``kv_cache`` values.
@@ -687,8 +689,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 def _resolve_seed(random_state: int | None) -> int:
     """The ensemble's seed: ``random_state``, or fresh entropy for None.
 
-    A drawn seed is kept below 2**31, so that every group's offset from it
-    (:mod:`._members`) stays a valid 32-bit seed for the models.
+    Every member's seed is derived from it (:func:`._members.member_seed`);
+    a drawn one is kept below 2**31, as an explicit one usually is.
     """
     if random_state is None:
         return int(np.random.SeedSequence().entropy % 2**31)  # type: ignore[operator]  # entropy is an int when drawn

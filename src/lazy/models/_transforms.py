@@ -35,12 +35,10 @@ backend's documentation lists.
 A backend translates a name to its model's own implementation only when that
 implementation is the one defined here; otherwise the transform is applied
 here, by :class:`ScaffoldTransform`, before the model sees the features. It is
-fitted on the context rows of the member group it
-serves, never on query rows: under scaffolded bagging each member is a group
-of its own, so that is the member's own bag; for a model that subsamples
-rows natively, the group's members share the whole context, so the
-transform is fitted on all of it and the model then draws each member's
-rows from the transformed features.
+fitted on the context rows of the member group it serves, never on query
+rows. Under bagging a member with a scaffolded transform is a group of its
+own on every model, so the transform, and the :class:`SoftClip` after it,
+are fitted on that member's own bag.
 
 Typical usage example:
 

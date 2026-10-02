@@ -175,7 +175,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         bag_size: Context rows per member: an int is a row count (1 means
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
             None all of them. Scaffolded: one regressor per bag, with lazy's
-            own column permutation when ``feature_shuffle=True``.
+            own column permutation when ``feature_shuffle=True``, its
+            transforms, clip and target standardisation fitted on the bag.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (TabICL's
             ``"kv"`` cache), ``"repr"`` (cached row representations, far
@@ -193,9 +194,10 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed for the ensemble: TabICL's ``random_state`` for
-            a group's first regressor, from which every other seed is
-            derived. None draws a fresh seed at fit, recorded as
+        random_state: Seed for the ensemble. A group's first regressor is
+            seeded by the group's first member,
+            ``SeedSequence([random_state, i])``, and every other seed is
+            derived from that one. None draws a fresh seed at fit, recorded as
             ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time, to bound peak memory
             (999 quantiles per row is about 8 kB); ``0`` does them in one
@@ -225,9 +227,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The native grid, histogram-normalised: 1,500 bins over
-            the training targets' range padded by a quarter of it on each
-            side (a constant target is padded by 1% of its value, and at
-            least by 0.01).
+            the training targets' range (all of them, bagged or not) padded
+            by a quarter of it on each side (a constant target is padded by
+            1% of its value, and at least by 0.01).
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
@@ -269,11 +271,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     exact_chunking = True
     cpu_friendly = True
 
-    # The training targets' range, recorded by _fit_group for the grid.
+    # The whole context's target range, recorded at fit for the grid.
     _support: tuple[float, float]
-    # The (offset, scale) the targets are standardised by before TabICL's
-    # float32 sees them, recorded by _fit_group.
-    _target_scaling: tuple[float, float]
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -328,6 +327,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         return AUTO_OUTLIER_THRESHOLD
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        # The native grid spans every context target, not only those some
+        # bag happened to draw.
+        self._support = (float(np.min(y)), float(np.max(y)))
         super()._fit(X, y)
         # The base class keeps the one group's handle; regressor_ is the
         # TabICLRegressor itself, when one serves the whole ensemble.
@@ -342,11 +344,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         group: _members.MemberGroup,
     ) -> _RegressorGroup:
         # TabICL works in float32, which cannot resolve a narrow spread about
-        # a large offset; standardising in float64 first keeps it. Every
-        # group shares the first group's scaling, as any one will do.
-        if group.index == 0:
-            self._target_scaling = _target_scaling(y)
-        offset, scale = self._target_scaling
+        # a large offset; standardising in float64 first keeps it. Each
+        # group is standardised on its own rows, a bagged member on its bag.
+        offset, scale = _target_scaling(y)
         handle = self._fit_members(
             # The features stay float64: upstream fits its scaling and power
             # transform in float64, and casts to float32 only for the model.
@@ -354,11 +354,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             ((y - offset) / scale).astype(np.float32),
             group,
         )
-        low, high = float(y.min()), float(y.max())
-        if group.index > 0:
-            low, high = min(low, self._support[0]), max(high, self._support[1])
-        self._support = (low, high)
-        return handle
+        return dataclasses.replace(handle, offset=offset, scale=scale)
 
     def _fit_members(
         self,
@@ -472,7 +468,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
-        offset, scale = getattr(self, "_target_scaling", (0.0, 1.0))
+        offset, scale = handle.offset, handle.scale
         total = sum(handle.weights)
         # Upstream averages its members' quantiles; across regressors, each
         # average counts for the members it stands for.
@@ -564,11 +560,15 @@ class _RegressorGroup:
         members: For each regressor, the members it stands for, as counts by
             norm method.
         feat_shuffle_method: How upstream permuted the members' columns.
+        offset: The mean the group's targets were standardised by.
+        scale: Their standard deviation, or 1 for a constant target.
     """
 
     regressors: tuple[Any, ...]
     members: tuple[dict[str, int], ...]
     feat_shuffle_method: str
+    offset: float = 0.0
+    scale: float = 1.0
 
     @property
     def weights(self) -> tuple[int, ...]:

@@ -14,17 +14,20 @@ The rules, in order:
 
 * member ``i`` gets transform ``transforms[i % k]`` (round robin, as every
   upstream model assigns its own), or the model's own recipe for ``"auto"``;
+* the bags are drawn here, for every model, exactly as the paper's bagged
+  LimiX-2 drew them (:func:`draw_bags`), so member ``i`` sees the same rows
+  whichever model runs it;
 * without bagging, members whose transform the model has natively form one
-  group, and each other transform forms a group of its own; groups follow
-  the order transforms first appear in, and group ``g`` is seeded
-  ``random_state + 1000 * g``, so the default single group uses
-  ``random_state`` itself and upstream defaults reproduce;
-* with bagging, a model with native row subsampling keeps those groups and
-  is handed each member's rows; any other model gets one group per member,
-  seeded ``random_state + i``, with an explicit column permutation;
-* bags are drawn exactly as the paper's bagged LimiX-2 drew them, so a bagged
-  run sees the same rows; TabFM alone draws its own rows (``max_num_rows``),
-  and the rows drawn here are not used for it.
+  group, and each other transform forms a group of its own, in the order
+  transforms first appear;
+* with bagging, a model with native row subsampling keeps its native
+  members in one group and is handed each member's bag; every scaffolded
+  member, and every member of a model without row subsampling, is a group
+  of its own, restricted to its bag and given an explicit column
+  permutation, so that its transform is fitted on its own rows;
+* a group is seeded by its first member, and member ``i``'s seed is drawn
+  from ``SeedSequence([random_state, i])`` (:func:`member_seed`), so that no
+  member of one ``random_state`` shares a seed with any member of another.
 
 Typical usage example:
 
@@ -51,12 +54,10 @@ __all__ = [
     "MemberSpec",
     "draw_bags",
     "feature_permutations",
+    "member_seed",
     "plan",
     "resolve_bag_size",
 ]
-
-#: Seed offset between groups; the paper's two-group TabFM runs used it.
-GROUP_SEED_STRIDE = 1000
 
 #: Fewer context rows per bag than this draws a warning at fit.
 MIN_BAG_ROWS = 10
@@ -146,6 +147,32 @@ def resolve_bag_size(bag_size: float | None, n_rows: int) -> int:
     return min(int(bag_size), n_rows)
 
 
+def member_seed(random_state: int, index: int) -> int:
+    """The seed of member ``index`` of an ensemble seeded ``random_state``.
+
+    Drawn from ``SeedSequence([random_state, index])``, which hashes the pair,
+    so seeds of neighbouring ensembles do not overlap: an offset scheme such
+    as ``random_state + index`` would give member ``i`` at ``random_state=r``
+    the seed of member ``i - 1`` at ``r + 1``. Kept below 2**31, so that it is
+    a valid seed for every upstream model.
+
+    Args:
+        random_state: The ensemble's seed.
+        index: The member's position in the ensemble.
+
+    Returns:
+        The seed, in ``[0, 2**31)``.
+
+    Examples:
+        >>> member_seed(0, 1) == member_seed(1, 0)
+        False
+        >>> 0 <= member_seed(0, 0) < 2**31
+        True
+    """
+    sequence = np.random.SeedSequence([int(random_state) % 2**64, int(index)])
+    return int(sequence.generate_state(1)[0] % 2**31)
+
+
 def draw_bags(
     n_members: int, bag_rows: int, n_rows: int, seed: int
 ) -> list[_typing.IntArray]:
@@ -225,7 +252,8 @@ def plan(
         n_rows: The context size.
         n_features: The number of feature columns.
         random_state: The ensemble's seed.
-        supports_native_bagging: Whether the model subsamples rows itself.
+        supports_native_bagging: Whether the model subsamples rows itself,
+            given each member's bag.
         auto_tokens: The model's own default recipe as its tokens, which
             single-member groups cycle through under ``"auto"`` so that
             scaffolded bagging keeps the model's mix of transforms.
@@ -247,16 +275,39 @@ def plan(
         MemberSpec(i, spec, None if bags is None else bags[i])
         for i, spec in enumerate(specs)
     ]
-    if bagging and not supports_native_bagging:
-        return _one_group_per_member(
-            members,
-            native_transforms,
-            feature_shuffle,
-            n_features,
-            random_state,
-            auto_tokens,
+    if not bagging:
+        return _grouped(
+            members, native_transforms, feature_shuffle, random_state
         )
-    return _grouped(members, native_transforms, feature_shuffle, random_state)
+    alone = [
+        member
+        for member in members
+        if not (
+            supports_native_bagging
+            and _is_native(member.transform, native_transforms)
+        )
+    ]
+    permutations = (
+        feature_permutations(n_estimators, n_features, random_state)
+        if feature_shuffle and alone
+        else None
+    )
+    groups = list(
+        _one_group_per_member(
+            alone, native_transforms, permutations, random_state, auto_tokens
+        )
+    )
+    alone_indices = {member.index for member in alone}
+    shared = [m for m in members if m.index not in alone_indices]
+    if shared:
+        groups.extend(
+            _grouped(shared, native_transforms, feature_shuffle, random_state)
+        )
+    groups.sort(key=lambda group: group.members[0].index)
+    return tuple(
+        dataclasses.replace(group, index=index)
+        for index, group in enumerate(groups)
+    )
 
 
 def _is_native(
@@ -314,7 +365,7 @@ def _grouped(
         groups.append(
             MemberGroup(
                 index=index,
-                seed=random_state + GROUP_SEED_STRIDE * index,
+                seed=member_seed(random_state, chosen[0].index),
                 members=chosen,
                 native_transforms=tokens,
                 scaffold=scaffold,
@@ -329,19 +380,26 @@ def _grouped(
 def _one_group_per_member(
     members: list[MemberSpec],
     native: Mapping[str, Any],
-    feature_shuffle: bool,
-    n_features: int,
+    permutations: list[_typing.IntArray] | None,
     random_state: int,
     auto_tokens: Sequence[Any] | None,
 ) -> tuple[MemberGroup, ...]:
-    """One group per bagged member, for a model without row subsampling."""
-    permutations = (
-        feature_permutations(len(members), n_features, random_state)
-        if feature_shuffle
-        else [None] * len(members)
-    )
+    """One group per bagged member, restricted to its rows.
+
+    Args:
+        members: The members, each with its bag.
+        native: Uniform transform name to the model's own token.
+        permutations: Every member's column permutation, indexed by member,
+            or None to leave the columns in order.
+        random_state: The ensemble's seed.
+        auto_tokens: The model's own recipe as tokens, cycled under
+            ``"auto"``.
+
+    Returns:
+        The groups, in member order.
+    """
     groups = []
-    for member, permutation in zip(members, permutations, strict=True):
+    for member in members:
         if member.transform is None:
             tokens = (
                 None
@@ -358,11 +416,13 @@ def _one_group_per_member(
         groups.append(
             MemberGroup(
                 index=member.index,
-                seed=random_state + member.index,
+                seed=member_seed(random_state, member.index),
                 members=(member,),
                 native_transforms=tokens,
                 scaffold=scaffold,
-                permutation=permutation,
+                permutation=(
+                    None if permutations is None else permutations[member.index]
+                ),
                 feature_shuffle=False,
                 rows=member.rows,
             )

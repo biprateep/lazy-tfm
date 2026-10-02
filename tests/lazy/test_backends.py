@@ -183,13 +183,12 @@ class TestTabFM:
         est.inference_ = "stream"
         est.softmax_temperature_ = 0.9
         monkeypatch.setattr(
-            est, "_classifier", lambda model, group, seed, rows: Fitted()
+            est, "_classifier", lambda model, group, seed: Fitted()
         )
         X_query = pd.DataFrame({"a": np.linspace(0.0, 1.0, 10)})
-        handle = {"bag_rows": None, "n_context": 4, "group": None}
         est._class_probabilities(
             None,
-            handle,
+            None,
             X_query.iloc[:4],
             np.array([0, 1, 0, 1]),
             2,
@@ -200,43 +199,18 @@ class TestTabFM:
         assert seen["query_block_rows"] == 21
         assert seen["member_batch_size"] == 3
 
-    def test_a_bag_gives_the_coarse_level_exactly_its_rows(self, monkeypatch):
-        """500 of 618 rows once became 501 by float rounding."""
-        generator = np.random.default_rng(0)
-        X = generator.normal(size=(618, 2))
-        z = generator.uniform(0.0, 2.0, 618)
-        est = tabfm.TabFMHistogram(
-            n_coarse_bins=2, n_fine_bins=2, bag_size=500, n_estimators=2
-        ).fit(X, z)
-        rows = []
-        _stub_classifier(est, monkeypatch)
-        frequencies = est._classifier
-
-        def recording(model, group, seed, max_rows):
-            rows.append(max_rows)
-            return frequencies(model, group, seed, max_rows)
-
-        monkeypatch.setattr(est, "_classifier", recording)
-        est.predict_distribution(X[:3])
-        coarse = est.y_context_ < np.median(est.y_context_)
-        assert rows[0] == 500
-        assert sorted(rows[1:]) == sorted(
-            -(-500 * n // 618) for n in (coarse.sum(), (~coarse).sum())
-        )
-
-    def test_provenance_does_not_claim_rows_tabfm_never_used(self, tiny):
-        """TabFM draws each classifier's bag itself, from its own seed."""
+    def test_bagged_members_keep_lazys_bags_and_their_rows(self, tiny):
+        """The plan's rows are the rows TabFM's members are given."""
         X, z = tiny
         est = tabfm.TabFMHistogram(
             n_coarse_bins=2, n_fine_bins=2, bag_size=30, n_estimators=3
         ).fit(X, z)
         assert est.provenance_["bag_rows"] == 30
-        assert est.provenance_["bag_rows_drawn_by"] == "tabfm"
-        for group in est.member_groups_:
-            assert group.member_rows is None
-            assert all(member.rows is None for member in group.members)
-        unbagged = tabfm.TabFMHistogram(n_coarse_bins=2, n_fine_bins=2)
-        assert "bag_rows_drawn_by" not in unbagged.fit(X, z).provenance_
+        assert "bag_rows_drawn_by" not in est.provenance_
+        (group,) = est.member_groups_
+        bags = _members.draw_bags(3, 30, len(z), 0)
+        for rows, bag in zip(group.member_rows, bags, strict=True):
+            np.testing.assert_array_equal(rows, bag)
 
     def test_the_slow_path_hands_upstream_bounded_chunks(self, monkeypatch):
         """`chunk_size` must reach `predict_proba`, not just the docstring."""
@@ -255,16 +229,15 @@ class TestTabFM:
         est = tabfm.TabFMHistogram(chunk_size=7)
         est.inference_ = "predict_proba"
         monkeypatch.setattr(
-            est, "_classifier", lambda model, group, seed, rows: Recording()
+            est, "_classifier", lambda model, group, seed: Recording()
         )
         X_query = pd.DataFrame(
             {"a": np.linspace(0.0, 1.0, 40)}, index=np.arange(100, 140)
         )
 
-        handle = {"bag_rows": None, "n_context": 4, "group": None}
         probs = est._class_probabilities(
             None,
-            handle,
+            None,
             X_query.iloc[:4],
             np.array([0, 1, 0, 1]),
             2,
@@ -289,6 +262,7 @@ class TestTabFM:
         """Ties collapse quantiles into empty bins, which must stay valid."""
         est = tabfm.TabFMHistogram()
         est.support_ = (float(z.min()), float(z.max()))
+        est.y_context_ = z
         edges, coarse, fine = est._edges(z, 0.0)
         assert edges.size == 101
         assert np.all(np.diff(edges) >= 0)
@@ -297,9 +271,8 @@ class TestTabFM:
         bins = tabfm._bin_labels(edges, z)
         assert np.all(np.diff(edges)[bins] > 0)
         _stub_classifier(est, monkeypatch)
-        handle = {"X": tabfm._frame(z[:, None]), "y": z, "bag_rows": None}
-        handle["n_context"] = z.size
-        handle["group"] = types.SimpleNamespace(seed=0)
+        handle = {"X": tabfm._frame(z[:, None]), "y": z}
+        handle["group"] = types.SimpleNamespace(seed=0, member_rows=None)
         probs, edges, prior = est._hierarchy(
             None, handle, tabfm._frame(z[:7, None]), 0.0
         )
@@ -438,7 +411,7 @@ class TestTabFM:
             transforms=("power", "power", "none"),
         ).fit(X, z)
         classifier = est._classifier(
-            model=None, group=est.member_groups_[0], seed=0, max_rows=None
+            model=None, group=est.member_groups_[0], seed=0
         )
         assert (
             classifier.get_params()["norm_methods"]
@@ -463,7 +436,7 @@ class TestTabFM:
         # _classifier needs a model object only to hand on; None is never
         # touched.
         classifier = est._classifier(
-            model=None, group=est.member_groups_[0], seed=0, max_rows=None
+            model=None, group=est.member_groups_[0], seed=0
         )
         assert set(classifier.get_params()) <= accepted
 
@@ -624,7 +597,7 @@ class TestTabFM:
         )
 
 
-def _classifier_kwargs(est, monkeypatch, group=None, max_rows=None):
+def _classifier_kwargs(est, monkeypatch, group=None):
     """The keywords ``est`` hands TabFMClassifier, through a recording fake.
 
     The fake keeps the real signature, so the build's optional cache
@@ -645,7 +618,6 @@ def _classifier_kwargs(est, monkeypatch, group=None, max_rows=None):
         model=None,
         group=est.member_groups_[0] if group is None else group,
         seed=0,
-        max_rows=max_rows,
     )
     return seen
 
@@ -664,7 +636,7 @@ def _stub_classifier(est, monkeypatch):
 
     est.inference_ = "predict_proba"
     monkeypatch.setattr(
-        est, "_classifier", lambda model, group, seed, rows: Frequencies()
+        est, "_classifier", lambda model, group, seed: Frequencies()
     )
 
 
@@ -731,7 +703,7 @@ class TestTabICL:
         return fit
 
     def _power_share(self, est, X):
-        offset, scale = est._target_scaling
+        offset, scale = est.handles_[0].offset, est.handles_[0].scale
         median = est.predict_distribution(X[:2]).locs[:, 1]
         return (median - offset) / scale
 
@@ -774,7 +746,7 @@ class TestTabICL:
     def test_extra_regressors_have_seeds_of_their_own(self, members):
         est, _ = members(n_estimators=13, n_features=3)
         seeds = [r.random_state for r in est.handles_[0].regressors]
-        assert seeds[0] == 0 and len(set(seeds)) == 3
+        assert seeds[0] == _members.member_seed(0, 0) and len(set(seeds)) == 3
         assert all(0 <= seed < 2**31 for seed in seeds)
         assert seeds == [
             r["random_state"]

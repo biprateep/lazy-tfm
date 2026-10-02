@@ -84,15 +84,28 @@ every `predict` call, the cache serves the chunks of that call.
 without replacement within a member and independently across members. This
 matters when the context outgrows what a model was pretrained on. LimiX-2
 degrades above about 20,000 context rows, and a
-{class}`~lazy.models.ContextSizeWarning` says so when a larger context arrives
-without bagging. The remedy it suggests is the one used in the paper:
+{class}`~lazy.models.ContextSizeWarning` says so whenever a member's context is
+larger, whether that is the whole context without bagging or a bag of more
+than 20,000 rows. The remedy it suggests is the one used in the paper:
 
 ```python
 model = lazy.LazyModel("limix", bag_size=20_000, n_estimators=32)
 ```
 
+TabPFN checks its limits against what each member sees. A bagged member is a
+regressor of its own, fitted on its bag alone, so only the bag has to lie
+within the context size the checkpoint declares and within the CPU cap, and a
+`bag_size` below them runs a context of any size without
+`ignore_pretraining_limits`. A bag (or an unbagged context) above them raises
+TabPFN's own error, to which LAZY adds the `bag_size` and `n_estimators` that
+would keep each member within the limit while the members together cover the
+context.
+
 Bagging also bounds the cost, since each member then attends to `bag_size`
-context rows rather than to all of them.
+context rows rather than to all of them. The members' contexts differ in
+length, so TabFM runs its bagged members one at a time whatever
+`member_batch_size` says, and the native grid of TabPFN and LimiX-2 holds every
+member's buckets (see {doc}`interface`).
 
 ## GPU and CPU
 
@@ -100,7 +113,8 @@ Every model chooses its device when it is fitted, and `device="auto"` selects
 CUDA if it is available and the CPU otherwise (see {doc}`../installation`).
 Most of the models need a GPU to be practical. TabPFN refuses CPU contexts
 above 1,000 rows (v2 to v2.6) or 5,000 rows (v3 and later) unless
-`ignore_pretraining_limits=True`, and `lazy` warns at `fit` when it finds no
+`ignore_pretraining_limits=True` or a `bag_size` keeps every bag below that
+size, and `lazy` warns at `fit` when it finds no
 GPU for TabPFN-3.5. TabICLv2 is nearly as fast on a CPU as on a GPU, and
 LimiX-2 and TabFM need a GPU. {doc}`choosing` describes which model to use on
 each.

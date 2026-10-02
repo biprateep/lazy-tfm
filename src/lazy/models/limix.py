@@ -35,7 +35,8 @@ LimiX-2 was -- one member per bag, running one of upstream's pipelines with
 its seeds and column shuffle and standardising the target on its own bag,
 members mixed as densities. LimiX-2 was pretrained on contexts of up to
 about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
-when a larger one arrives unbagged.
+when a member's context is larger: the whole context unbagged, or each bag
+when ``bag_size`` itself exceeds 20,000 rows.
 
 Built with StableAI LimiX. The code and weights are released under the Stable
 AI Technology Co., Ltd. License 1.0 (Apache-2.0 with attribution terms);
@@ -121,8 +122,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             means one row), a float a fraction in (0, 1] (``1.0`` means all
             rows), and None all of them. Above about 20,000 context rows
             LimiX-2 needs it: pass ``bag_size=20_000`` with enough members to
-            cover the context. Each bagged member is one of upstream's
-            pipelines run alone on its bag, standardising the target there.
+            cover the context (a larger bag warns, as a larger context
+            does). Each bagged member is one of upstream's pipelines run
+            alone on its bag, its transforms, clip and target
+            standardisation fitted there.
         kv_cache: Run the context through the network once, at fit, and let
             each chunk of queries attend to the result. Exact to the
             rounding of the precision in use; costs about 2 GB of GPU memory
@@ -134,11 +137,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a :class:`torch.device`.
-        random_state: Seed for the ensemble (upstream's default is 0): it
-            seeds each member's rebalancing and shuffle as upstream's
-            ``seed`` does, and its feature positional embedding. None draws
-            a fresh seed at fit, recorded as ``random_state_`` and in
-            ``provenance_``.
+        random_state: Seed for the ensemble. A group of members is run
+            with the seed of its first member, ``i``, drawn from
+            ``SeedSequence([random_state, i])``, which seeds each member's
+            rebalancing and shuffle as upstream's ``seed`` does, and its
+            feature positional embedding. None draws a fresh seed at fit,
+            recorded as ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows predicted at a time (default 8,192), to bound
             peak memory; ``0`` does them in one pass. A query's answer does
             not depend on the others in its chunk, up to float rounding.
@@ -164,7 +168,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The native grid: the buckets, mapped to the target's
-            units with the whole context's mean and standard deviation.
+            units with each member group's target mean and standard
+            deviation, and merged; under bagging, the union of every
+            member's buckets.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict;
             ``limix_pipelines`` lists each member's pipeline token.
@@ -198,8 +204,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     recommended_max_context = 20_000
     exact_chunking = False  # Exact up to float rounding, not bit for bit.
 
-    # The whole context's target mean and standard deviation, for the grid.
-    _scale: tuple[float, float]
     # The key/value caches' memory budget and use of it, in bytes, and why
     # some member runs without one.
     _cache_budget: float | None
@@ -279,7 +283,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.n_buckets_ = int(self.borders_.size - 1)
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        self._scale = _standardisation(y)
         self._reset_cache_budget()
         super()._fit(X, y)
         # The groups as they ran: LimiX's shuffler, not the planned
@@ -369,10 +372,14 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        mean, std = self._scale
+        # Every group's buckets: a bagged member standardises its target on
+        # its own bag, so places its buckets there.
+        edges = [
+            _bucket_edges(self.borders_, handle["mean"], handle["std"])
+            for handle in self.handles_
+        ]
         return grid_lib.Grid.from_edges(
-            np.unique(_bucket_edges(self.borders_, mean, std)),
-            normalization="histogram",
+            np.unique(np.concatenate(edges)), normalization="histogram"
         )
 
     def _progress_postfix(

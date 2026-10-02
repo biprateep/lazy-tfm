@@ -47,8 +47,15 @@ def _group(transforms=None, *, feature_shuffle=True, bag_rows=10, n=10):
         n_rows=n,
         n_features=2,
         random_state=0,
-        supports_native_bagging=True,
+        supports_native_bagging=(
+            tabpfn.TabPFNBarDistribution.supports_native_bagging
+        ),
     )[0]
+
+
+def _settings(version, group, outlier_threshold):
+    """What a group of the four-member ensemble of _group hands TabPFN."""
+    return tabpfn._upstream_settings(version, group, outlier_threshold, 4)
 
 
 def _without_softmax(recipe):
@@ -63,9 +70,7 @@ def test_every_version_has_a_pinned_recipe():
 def test_auto_hands_over_the_pinned_recipe(version):
     """Every field is lazy's, none left to the checkpoint or the package."""
     recipe = tabpfn._AUTO_RECIPES[version]
-    settings = tabpfn._upstream_settings(
-        version, _group(), recipe["OUTLIER_REMOVAL_STD"]
-    )
+    settings = _settings(version, _group(), recipe["OUTLIER_REMOVAL_STD"])
     pinned = {k: v for k, v in settings.items() if k in recipe}
     assert pinned == _without_softmax(recipe)
     assert settings["SUBSAMPLE_SAMPLES"] is None
@@ -73,7 +78,7 @@ def test_auto_hands_over_the_pinned_recipe(version):
 
 def test_the_temperature_is_an_argument_not_a_config_field():
     """Upstream rejects a temperature named both ways."""
-    settings = tabpfn._upstream_settings("v3", _group(), None)
+    settings = _settings("v3", _group(), None)
     assert "SOFTMAX_TEMPERATURE" not in settings
     assert "N_ESTIMATORS" not in settings
 
@@ -99,25 +104,72 @@ def test_auto_temperature_and_clip_are_each_versions_own(
 
 @pytest.mark.parametrize("threshold", [None, 3.0])
 def test_the_clip_is_the_resolved_outlier_threshold(threshold):
-    settings = tabpfn._upstream_settings("v3.5", _group(), threshold)
+    settings = _settings("v3.5", _group(), threshold)
     assert settings["OUTLIER_REMOVAL_STD"] == threshold
 
 
 def test_no_feature_shuffle_turns_upstreams_shift_off():
-    settings = tabpfn._upstream_settings(
-        "v3.5", _group(feature_shuffle=False), None
-    )
+    settings = _settings("v3.5", _group(feature_shuffle=False), None)
     assert settings["FEATURE_SHIFT_METHOD"] is None
-    shuffled = tabpfn._upstream_settings("v3.5", _group(), None)
+    shuffled = _settings("v3.5", _group(), None)
     assert shuffled["FEATURE_SHIFT_METHOD"] == "shuffle"
 
 
-def test_bags_are_handed_over_as_each_members_rows():
+def test_a_bagged_member_is_a_regressor_of_its_own_on_its_bag():
+    """Upstream's own subsampling would standardise y on the whole context."""
     group = _group(bag_rows=6, n=10)
-    settings = tabpfn._upstream_settings("v3", group, None)
-    rows = settings["SUBSAMPLE_SAMPLES"]
-    assert len(rows) == group.n_members
-    assert all(len(r) == 6 for r in rows)
+    assert group.n_members == 1 and len(group.rows) == 6
+    settings = _settings("v3", group, None)
+    assert settings["SUBSAMPLE_SAMPLES"] is None
+    assert not tabpfn.TabPFNBarDistribution.supports_native_bagging
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_bagged_members_keep_the_recipes_mix(version):
+    """Member i runs the preprocessor and target transform upstream gives i."""
+    recipe = tabpfn._AUTO_RECIPES[version]
+    groups = _members.plan(
+        n_estimators=4,
+        transforms=None,
+        native_transforms=tabpfn.TabPFNBarDistribution.native_transforms,
+        feature_shuffle=True,
+        bag_rows=6,
+        n_rows=10,
+        n_features=2,
+        random_state=0,
+        supports_native_bagging=False,
+    )
+    slots = [
+        (
+            _settings(version, group, None)["PREPROCESS_TRANSFORMS"],
+            _settings(version, group, None)[
+                "REGRESSION_Y_PREPROCESS_TRANSFORMS"
+            ],
+        )
+        for group in groups
+    ]
+    # Upstream's own assignment, on placeholders for its configs.
+    ensemble = pytest.importorskip("tabpfn.preprocessing.ensemble")
+    n_preprocessors = len(recipe["PREPROCESS_TRANSFORMS"])
+    upstream = ensemble.generate_regression_ensemble_configs(
+        num_estimators=4,
+        add_fingerprint_feature=False,
+        polynomial_features="no",
+        feature_shift_decoder=None,
+        preprocessor_configs=list(range(n_preprocessors)),
+        target_transforms=list(recipe["REGRESSION_Y_PREPROCESS_TRANSFORMS"]),
+        random_state=0,
+        num_models=1,
+        outlier_removal_std=None,
+    )
+    expected = [
+        (
+            recipe["PREPROCESS_TRANSFORMS"][config.preprocess_config],
+            config.target_transform,
+        )
+        for config in upstream
+    ]
+    assert slots == [((p,), (t,)) for p, t in expected]
 
 
 def _upstream_fields(config):
@@ -242,7 +294,7 @@ def test_the_clip_reaches_upstream(small, outlier_threshold, expected):
 
 
 def test_no_column_is_taken_for_a_category():
-    settings = tabpfn._upstream_settings("v3.5", _group(), None)
+    settings = _settings("v3.5", _group(), None)
     assert settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] == 1
 
 
@@ -301,7 +353,7 @@ def test_the_cpu_runs_in_float32(small, mixed_precision):
 )
 def test_an_explicit_recipe_runs_without_the_extras(version, limit):
     """The named transform, the version's feature limit, nothing optional."""
-    settings = tabpfn._upstream_settings(version, _group("none"), None)
+    settings = _settings(version, _group("none"), None)
     (config,) = settings["PREPROCESS_TRANSFORMS"]
     assert config["name"] == "none"
     assert config["categorical_name"] == "numeric"

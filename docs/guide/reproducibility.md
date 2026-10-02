@@ -12,6 +12,17 @@ every model, including TabICL and TabFM, whose creators use 42. With
 `random_state=None`, a fresh seed is drawn at `fit` and recorded as
 `random_state_` and in `provenance_`, so that the run can be repeated.
 
+Each member has a seed of its own, derived from `random_state` and its
+position `i` in the ensemble by NumPy's `SeedSequence([random_state, i])`, and
+kept below 2^31 so that every model accepts it. A group of members that one
+call of a model serves (e.g., every member of TabPFN without bagging) is run
+with the seed of its first member. Hashing the pair keeps the seeds of
+neighboring ensembles apart, whereas an offset such as `random_state + i`
+would give member `i` at `random_state=r` the seed of member `i - 1` at
+`r + 1`, so that two runs differing only in their seed would share most of
+their members. The bags are drawn from a generator seeded with `random_state`
+itself, and the same bags are drawn on every model (see {doc}`interface`).
+
 ## Pinned checkpoints
 
 A backbone is a family rather than a model, so every backend takes a

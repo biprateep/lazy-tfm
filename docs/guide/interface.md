@@ -66,11 +66,11 @@ The table below shows how each model provides these parameters, where
 | `kv_cache`            | its fit-time cache, at full precision    | ported                                    | its key/value cache                   | its streaming prefill/decode              |
 | `feature_shuffle`     | `FEATURE_SHIFT_METHOD="shuffle"`         | its column shuffler                       | Latin-square shuffles                 | `feat_shuffle_method="random"`            |
 | `transforms`          | `none` native, the rest scaffolded       | `none`, `quantile_uniform` native         | `none` native, the rest scaffolded    | `none`, `power` native                    |
-| `bag_size`            | `SUBSAMPLE_SAMPLES`, given `lazy`'s bags | scaffolded: one member per bag            | scaffolded: one regressor per bag     | `max_num_rows` (TabFM draws the rows)     |
+| `bag_size`            | scaffolded: one regressor per bag        | scaffolded: one member per bag            | scaffolded: one regressor per bag     | its members, given `lazy`'s bags          |
 | `softmax_temperature` | its own; `"auto"` 0.9, v3.5 and fast 1.0 | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     |
 | `mixed_precision`     | float16 autocast                         | float16 autocast                          | `use_amp=True`                        | bfloat16 weights                          |
 | `outlier_threshold`   | `OUTLIER_REMOVAL_STD`                    | scaffolded (`lazy`'s clip)                | its `outlier_threshold`               | its `outlier_threshold`                   |
-| members combined      | averaged buckets                         | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed |
+| members combined      | averaged buckets / mixture               | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed |
 
 This contract is enforced: {func}`lazy.models.registry.register` refuses a
 backend that lacks any of these parameters or their shared defaults, and the
@@ -85,7 +85,36 @@ different count. The members differ in their feature transform, taken from
 `transforms` in round-robin order, and with `feature_shuffle=True` each member
 also sees the feature columns in a different order. Their answers are combined
 as the last row of the table above shows. With `bag_size` set, each member
-also sees its own random subset of the context (see {doc}`scaling`).
+also sees its own random subset of the context (below, and {doc}`scaling`).
+
+## Bagging
+
+With `bag_size` set, each member sees its own random subset of the context
+rows, and LAZY draws these subsets for every model. The rows are drawn without
+replacement within a member and independently across members, from one
+generator seeded with `random_state`, exactly as the paper's bagged LimiX-2
+runs drew them. Therefore, member `i` sees the same rows whichever model runs
+it, TabFM included, which would otherwise draw rows of its own. On TabFM the
+member's coarse classifier sees its bag, and its classifier for coarse bin `j`
+sees the rows of its bag that fall in that bin.
+
+Everything a member fits on the context is fitted on its own bag: a scaffolded
+transform, the outlier clip and the standardization of the target, along with
+each model's own preprocessing. TabICL and LimiX-2 run each bagged member as a
+model of its own, and so does TabPFN, because its own row subsampling would
+standardize the target and place the buckets using the whole context. TabFM
+keeps the members of its own transforms (`none` and `power`) in one classifier,
+where they keep their column orders, class shifts and averaged logits, and
+refits each member's standardization, norm method and clip on that member's
+rows. A member with a scaffolded transform is a model of its own on every
+backend. Since each member of TabPFN and LimiX-2 places its buckets from its
+own targets, their native grid under bagging is the union of every member's
+buckets, with up to `n_estimators` times as many bins as an unbagged one, so we
+recommend passing `y_grid` for a large query set. Two things are taken from the
+whole context rather than from a bag: TabFM's equal-mass bins, so that its
+members answer over the same classes, and the range of TabICL's native grid,
+which spans every context target. Each member is also seeded on its own (see
+{doc}`reproducibility`).
 
 ## Transforms
 

@@ -19,8 +19,6 @@ import sys
 import golden_data
 import numpy as np
 
-import lazy
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Records the requested backends (all, by default) and returns 0."""
@@ -29,11 +27,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "backends", nargs="*", default=sorted(golden_data.RECORDED_PARAMS)
     )
     args = parser.parse_args(argv)
-    X_train, z, X_test = golden_data.problem()
+    _, _, X_test = golden_data.problem()
     golden_data.GOLDEN_DIR.mkdir(exist_ok=True)
     for name in args.backends:
-        model = lazy.LazyModel(name, **golden_data.RECORDED_PARAMS[name])
-        model.fit(X_train, z)
+        model = golden_data.fit(name)
         pdfs = model.predict_proba(X_test, golden_data.GRID)
         path = golden_data.GOLDEN_DIR / f"{name}.npz"
         np.savez_compressed(path, pdfs=pdfs, edges=golden_data.GRID.edges)

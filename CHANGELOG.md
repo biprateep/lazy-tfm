@@ -64,6 +64,21 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Changed
 
+- Bagging is the same on every backend. `lazy` draws every member's bag (the
+  paper's draw), and each member fits its transform, outlier clip and target
+  standardization on its own bag. TabPFN runs one regressor per bag, sharing
+  one loaded network, instead of its own row subsampling, which standardized
+  the target and placed its buckets on the whole context. TabFM's members are
+  handed `lazy`'s bags (coarse level: the bag; fine level `j`: the bag's rows
+  in coarse bin `j`) instead of drawing their own through `max_num_rows`, with
+  their preprocessing refitted per member; bagged TabFM members run one at a
+  time. Under bagging the native grid of TabPFN and LimiX-2 is the union of
+  every member's buckets, and TabICL's spans every context target.
+- Member seeds come from `SeedSequence([random_state, i])`, and a group is
+  seeded by its first member, replacing `random_state + i` and
+  `random_state + 1000 * g`, which gave neighboring seeds overlapping members.
+  **Default predictions change** by about the scatter between seeds; the
+  golden files are re-recorded.
 - The point metrics and plots measure plain residuals, `y_pred - y_true`, by
   default: `scale` defaults to `"none"` in `evaluate`, `summarize`,
   `summarize_scores`, `point_metrics`, `evaluate_grid_pdfs`, `plot_residuals`
@@ -124,9 +139,18 @@ which load astronomical data, keep it. There are no aliases: replace
 - TabPFN's `n_estimators="auto"`.
 - TabFM's `decode_chunk_rows`: `chunk_size` bounds both of its paths, and `0`
   means one pass on both.
+- TabFM's `provenance_["bag_rows_drawn_by"]` and `_members.GROUP_SEED_STRIDE`.
 
 ### Fixed
 
+- TabPFN checks its size limits on each member's bag, so a `bag_size` within
+  the limit runs a larger context (above the CPU cap included) without
+  `ignore_pretraining_limits`, and the error names the `bag_size` and
+  `n_estimators` that fix it. Bagged TabPFN no longer loads one network per
+  member (peak memory 8.05 GB against 4.34 GB unbagged on a 43,730-row
+  context; 1.90 GB now).
+- LimiX-2's `ContextSizeWarning` is documented as firing for bags larger than
+  20,000 rows too.
 - `n_estimators` is exactly the number of members on every model: TabICL ran
   fewer when its column orders ran out (six of eight with three features), and
   LimiX-2 with four members or fewer ran only its quantile pipeline.

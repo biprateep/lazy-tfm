@@ -22,7 +22,8 @@ predicted.
 
 Each model was pretrained on contexts and tables up to a maximum size, beyond
 which its performance is not guaranteed. TabPFN enforces the limits stored in
-each checkpoint unless `ignore_pretraining_limits=True`:
+each checkpoint unless `ignore_pretraining_limits=True`, on the context each
+member sees, which under bagging is its bag (see {doc}`scaling`):
 
 | TabPFN `version` | Max. context rows | Max. features |
 | ---------------- | ----------------: | ------------: |
@@ -34,15 +35,18 @@ each checkpoint unless `ignore_pretraining_limits=True`:
 | `"v3.5-fast"`    | 1,000,000         | 20,000        |
 
 LimiX states no maximum context size, but in our tests on DC1 photometry its
-accuracy degrades above about 20,000 context rows, so LAZY warns above that
-size and bagging keeps every member within it (see {doc}`scaling`). Under
+accuracy degrades above about 20,000 context rows, so LAZY warns when a
+member's context is larger, whether the whole context without bagging or a bag
+of more than 20,000 rows, and bagging with a smaller `bag_size` keeps every
+member within it (see {doc}`scaling`). Under
 `transforms="auto"`, TabFM gives each member a random subset of 500 columns
 when a table has more, and an explicit `transforms` turns that cap off. The model pages under {doc}`../models/index`
 give each model's limits in full.
 
 On a CPU, TabPFN also refuses contexts above 1,000 rows (v2 to v2.6) or 5,000
-rows (v3 and later). We recommend a GPU, TabICLv2, or a context of at most
-5,000 rows drawn at random in that case (see {doc}`choosing`).
+rows (v3 and later). We recommend a GPU, TabICLv2, or bags of at most 5,000
+rows (`bag_size=5_000`, with enough members to cover the context) in that case
+(see {doc}`choosing`).
 
 ## Probability outside the grid
 

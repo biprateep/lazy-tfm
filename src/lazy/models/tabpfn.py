@@ -20,20 +20,29 @@ computes its quantiles by inverting this same piecewise-uniform CDF.
 
 The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
 fit-time key/value cache (at full precision, so exact on a CPU),
-``feature_shuffle`` onto its ``FEATURE_SHIFT_METHOD``, ``bag_size`` onto its
-per-member row subsampling, ``SUBSAMPLE_SAMPLES``, handed the package's own
-bags, ``outlier_threshold`` onto its soft clip, ``OUTLIER_REMOVAL_STD``,
+``feature_shuffle`` onto its ``FEATURE_SHIFT_METHOD``, ``outlier_threshold``
+onto its soft clip, ``OUTLIER_REMOVAL_STD``,
 ``softmax_temperature`` onto its own and ``mixed_precision`` onto its
 ``inference_precision``. No setting is left to TabPFN: each version's own
 recipe is written out below (:data:`_AUTO_RECIPES`) and handed over in full,
 so neither the checkpoint's stored config nor the installed tabpfn package
 decides what runs, and every column is numeric (upstream would take a column
 with fewer than four distinct values for a category).
+
+``bag_size`` runs one regressor per member, fitted on that member's bag
+alone. TabPFN's own row subsampling (``SUBSAMPLE_SAMPLES``) would fit each
+member's preprocessing on its rows but standardise the target, and place the
+buckets, with the whole context's mean and standard deviation, and it checks
+the whole context against the size limits; a regressor per bag fits all of
+it on the bag, as every other model does, and only the bag meets the limits.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+import contextlib
+import copy
+import itertools
 import os
 import pathlib
 import types
@@ -64,8 +73,7 @@ def _native_transforms() -> dict[str, tuple[str, bool]]:
     ``n // 5`` quantiles, not ``min(1000, n)``; its ``quantile_uni``
     agrees below 100,000 rows, but above them caps the quantiles at 20,000
     and subsamples the rows; and its ``robust`` scales to unit variance,
-    not by the IQR. Natively each would also be fitted on each member's own
-    bag rather than on the whole context.
+    not by the IQR.
     """
     return {"none": ("none", False), "none+original": ("none", True)}
 
@@ -216,22 +224,27 @@ def _upstream_settings(
     version: str,
     group: _members.MemberGroup,
     outlier_threshold: float | None,
+    n_estimators: int,
 ) -> dict[str, Any]:
     """The ``inference_config`` a member group hands TabPFN, as plain data.
 
     Every prediction-changing field is set here, so none is left to the
     checkpoint or the installed tabpfn: the version's own recipe, or for a
-    group of explicit transforms that recipe stripped of its extras.
+    group of explicit transforms that recipe stripped of its extras. A
+    bagged member under the recipe runs the one preprocessor and target
+    transform upstream gives that member of the whole ensemble
+    (:func:`_recipe_slot`), so the bagged ensemble keeps the recipe's mix.
 
     Args:
         version: The TabPFN version.
         group: The member group.
         outlier_threshold: The resolved ``outlier_threshold``, or None.
+        n_estimators: The size of the whole ensemble.
 
     Returns:
         ``InferenceConfig`` field names to values, the preprocessors as
-        dicts of ``PreprocessorConfig`` fields and ``SUBSAMPLE_SAMPLES`` as
-        each member's row indices (or None).
+        dicts of ``PreprocessorConfig`` fields. ``SUBSAMPLE_SAMPLES`` is
+        always None: a bagged member's regressor is given its rows alone.
     """
     settings = {
         field: value
@@ -255,6 +268,12 @@ def _upstream_settings(
         settings["FINGERPRINT_FEATURE"] = False
         settings["POLYNOMIAL_FEATURES"] = "no"
         settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] = (None,)
+    elif group.rows is not None:
+        preprocessor, target = _recipe_slot(
+            settings, group.members[0].index, n_estimators
+        )
+        settings["PREPROCESS_TRANSFORMS"] = (preprocessor,)
+        settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] = (target,)
     # Every column is numeric: upstream would otherwise take one with fewer
     # than four distinct values in over 100 rows for a category and encode
     # it. A column needs one value to count as numeric (none declared
@@ -264,10 +283,48 @@ def _upstream_settings(
     settings["OUTLIER_REMOVAL_STD"] = outlier_threshold
     if not group.feature_shuffle:
         settings["FEATURE_SHIFT_METHOD"] = None
-    settings["SUBSAMPLE_SAMPLES"] = (
-        None if group.member_rows is None else list(group.member_rows)
-    )
+    settings["SUBSAMPLE_SAMPLES"] = None
     return settings
+
+
+def _recipe_slot(
+    settings: Mapping[str, Any], index: int, n_estimators: int
+) -> tuple[dict[str, Any], str | None]:
+    """The preprocessor and target transform upstream gives one member.
+
+    Upstream pairs every preprocessor with every target transform and hands
+    the pairs out in equal blocks, in order, with any remainder going to the
+    first pairs (``generate_regression_ensemble_configs``).
+
+    Args:
+        settings: The recipe, with ``PREPROCESS_TRANSFORMS`` and
+            ``REGRESSION_Y_PREPROCESS_TRANSFORMS``.
+        index: The member's position in the ensemble.
+        n_estimators: The size of the whole ensemble.
+
+    Returns:
+        A tuple ``(preprocessor, target_transform)``.
+
+    Examples:
+        >>> recipe = {
+        ...     "PREPROCESS_TRANSFORMS": ("a", "b"),
+        ...     "REGRESSION_Y_PREPROCESS_TRANSFORMS": (None, "safepower"),
+        ... }
+        >>> [_recipe_slot(recipe, i, 5)[0] for i in range(5)]
+        ['a', 'a', 'b', 'b', 'a']
+        >>> [_recipe_slot(recipe, i, 5)[1] for i in range(5)]
+        [None, 'safepower', None, 'safepower', None]
+    """
+    pairs = list(
+        itertools.product(
+            settings["PREPROCESS_TRANSFORMS"],
+            settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"],
+        )
+    )
+    per_pair = n_estimators // len(pairs)
+    if index < per_pair * len(pairs):
+        return pairs[index // per_pair]
+    return pairs[index - per_pair * len(pairs)]
 
 
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
@@ -316,8 +373,12 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             (TabPFN's own feature shuffling).
         bag_size: Context rows per member: an int is a row count (1 means
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Native: TabPFN's own per-member
-            row subsampling, handed the package's bags.
+            None all of them. Each member is then a regressor of its own,
+            fitted on its bag: its preprocessing, outlier clip, target
+            standardisation and buckets all come from those rows, and only
+            the bag must lie within the limits ``ignore_pretraining_limits``
+            describes, so bagging is how TabPFN takes a context larger than
+            them.
         kv_cache: Cache the context's keys and values at fit, so each chunk
             of queries skips the context forward pass: ``True`` (exact, full
             precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
@@ -343,9 +404,12 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             (12.0 on v3.5 and v3.5-fast, none on the others) and none under
             an explicit recipe; None is none.
         ignore_pretraining_limits: Pass ``True`` to run a context larger than
-            the row count the checkpoint declares it was pretrained for, which
-            otherwise raises. Predictions beyond that limit are extrapolation,
-            so this is opt-in -- though TabPFN-3 declares a million rows.
+            the row count the checkpoint declares it was pretrained for, or
+            more than upstream allows on a CPU, which otherwise raises.
+            Predictions beyond that limit are extrapolation, so this is
+            opt-in -- though TabPFN-3 declares a million rows. Under
+            bagging only each member's bag is checked, so a ``bag_size``
+            within the limit runs any context without it.
         chunk_size: Query rows predicted at a time, to bound peak memory;
             ``0`` does them in one pass. A row's answer never depends on the
             other rows in its chunk: TabPFN's attention builds its keys and
@@ -359,15 +423,16 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The bar distribution's buckets in the target's units, a
-            histogram-normalised grid, set at fit.
+            histogram-normalised grid, set at fit; under bagging, the union
+            of every member's buckets.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabpfn.TabPFNRegressor``, when one serves
             the whole ensemble.
         handles_: Every fitted regressor, one per member group.
-        borders_: The bucket borders in the target's units, shape
-            (``n_buckets_`` + 1,);
-            fixed at fit by the context targets' mean and spread.
+        borders_: The first member group's bucket borders in the target's
+            units, shape (``n_buckets_`` + 1,); fixed at fit by its context
+            targets' mean and spread, which under bagging is its bag's.
         n_buckets_: How many buckets the bar distribution has.
         n_context_: Context rows ``fit`` was given.
 
@@ -384,7 +449,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     extra = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()
-    supports_native_bagging = True
+    # A regressor per bag: upstream's own subsampling standardises the
+    # target on the whole context (see the module docstring).
+    supports_native_bagging = False
     native_outlier_clipping = True
     # The fast checkpoint runs DC1's 1,000 + 1,000 rows on a CPU in
     # about 11 s with eight members (TabPFN-3.5 26 s, TabICL 7 s), within the
@@ -484,10 +551,63 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             inference_config=self._inference_config(group),
             **_cache_options(self.kv_cache),
         )
-        regressor.fit(X, y)
-        self.borders_ = _bucket_borders(regressor)
-        self.n_buckets_ = int(self.borders_.size - 1)
+        try:
+            with self._shared_network(tabpfn):
+                regressor.fit(X, y)
+        except (ValueError, RuntimeError) as error:
+            remedied = _with_bagging_remedy(error, regressor, len(X), self)
+            if remedied is error:
+                raise
+            raise remedied from error
+        if group.index == 0:
+            self.borders_ = _bucket_borders(regressor)
+            self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
+
+    def _fit(self, X: Any, y: _typing.FloatArray) -> None:
+        # The loaded networks of this fit, shared by its regressors.
+        self._networks: dict[tuple[Any, ...], Any] = {}
+        try:
+            super()._fit(X, y)
+        finally:
+            self.__dict__.pop("_networks", None)
+
+    @contextlib.contextmanager
+    def _shared_network(self, tabpfn: types.ModuleType) -> Iterator[None]:
+        """Loads the network once per fit, for every group's regressor.
+
+        Each ``TabPFNRegressor`` loads its own copy of the network at fit,
+        so the regressors of a bagged ensemble (one per member) would hold
+        ``n_estimators`` copies on the device. Upstream's networks hold no
+        state between calls (the key/value cache lives in the inference
+        engine, and the architectures ignore
+        ``cache_trainset_representation``), so the regressors share one:
+        upstream's loader is wrapped, for the duration of a fit, to hand
+        back the network it loaded first for the same arguments. The bar
+        distribution, which a fit moves and rescales, is copied.
+
+        Args:
+            tabpfn: The imported ``tabpfn`` package.
+
+        Yields:
+            Nothing; the loader is restored on exit.
+        """
+        base = tabpfn.base
+        load = base.initialize_tabpfn_model
+        networks = self.__dict__.setdefault("_networks", {})
+
+        def shared(**kwargs: Any) -> Any:
+            key = tuple(sorted((k, str(v)) for k, v in kwargs.items()))
+            if key not in networks:
+                networks[key] = load(**kwargs)
+            models, configs, bardist, config = networks[key]
+            return list(models), configs, copy.deepcopy(bardist), config
+
+        base.initialize_tabpfn_model = shared
+        try:
+            yield
+        finally:
+            base.initialize_tabpfn_model = load
 
     def _inference_precision(self) -> Any:
         """Upstream's ``inference_precision``: autocast, or float32.
@@ -511,7 +631,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.
 
         settings = _upstream_settings(
-            self.version, group, self.outlier_threshold_
+            self.version, group, self.outlier_threshold_, self._n_members()
         )
         settings["PREPROCESS_TRANSFORMS"] = [
             tabpfn.preprocessing.configs.PreprocessorConfig(**fields)
@@ -520,18 +640,14 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return settings
 
     def _recipe(self) -> dict[str, Any]:
-        # What each group handed upstream, with each member's rows as a
-        # count: the rows themselves follow from random_state.
-        upstream = []
-        for group in self.member_groups_:
-            settings = _upstream_settings(
-                self.version, group, self.outlier_threshold_
+        # What each group handed upstream; a bagged member's rows follow
+        # from random_state.
+        upstream = [
+            _upstream_settings(
+                self.version, group, self.outlier_threshold_, self._n_members()
             )
-            rows = settings["SUBSAMPLE_SAMPLES"]
-            settings["SUBSAMPLE_SAMPLES"] = (
-                None if rows is None else [len(r) for r in rows]
-            )
-            upstream.append(settings)
+            for group in self.member_groups_
+        ]
         return {
             **super()._recipe(),
             "inference_precision": (
@@ -549,7 +665,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         )
 
     def _native_grid(self) -> grid_lib.Grid:
-        edges = np.unique(self.borders_)
+        # Every member group's buckets: under bagging each member places
+        # its own, from its bag's targets.
+        edges = np.unique(
+            np.concatenate([_bucket_borders(h) for h in self.handles_])
+        )
         if edges.size < 3:
             # A constant target has one bucket; a grid needs two, and
             # halving it changes no density.
@@ -561,6 +681,54 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+def _with_bagging_remedy(
+    error: Exception,
+    regressor: Any,
+    n_rows: int,
+    estimator: TabPFNBarDistribution,
+) -> Exception:
+    """Upstream's size-limit error, saying that bagging is the remedy.
+
+    Upstream checks the context it is given against the rows the checkpoint
+    was pretrained for and against its CPU cap, and names only
+    ``ignore_pretraining_limits``; a member's context is its bag, so a
+    smaller ``bag_size`` is the other way out.
+
+    Args:
+        error: What ``TabPFNRegressor.fit`` raised.
+        regressor: The regressor that raised it.
+        n_rows: The context rows it was given.
+        estimator: The estimator fitting it.
+
+    Returns:
+        ``error`` itself when it is not a limit on rows, else an error of
+        the same type that says how to bag below the limit.
+    """
+    message = str(error)
+    config = getattr(regressor, "inference_config_", None)
+    if "Number of samples" in message:
+        limit = getattr(config, "MAX_NUMBER_OF_SAMPLES", None)
+    elif "Running on CPU with more than" in message:
+        limit = getattr(config, "MAX_CPU_SAMPLES", None)
+    else:
+        return error
+    if not isinstance(limit, int):
+        return error
+    needed = -(-estimator.n_context_ // limit)
+    seen = (
+        f"each member's bag has {n_rows:,} rows"
+        if estimator.bagging_
+        else f"the context has {n_rows:,} rows"
+    )
+    return type(error)(
+        f"{message}\nTabPFN {estimator.version} takes at most {limit:,} "
+        f"context rows here, and {seen}. Bag the context below the limit "
+        f"instead: pass bag_size={limit} (or fewer) with n_estimators >= "
+        f"{needed}, so that each member's bag fits and the members together "
+        "cover the context."
+    )
 
 
 def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:

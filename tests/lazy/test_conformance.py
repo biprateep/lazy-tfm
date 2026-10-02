@@ -205,11 +205,49 @@ def test_transforms_are_assigned_round_robin():
     native, scaffolded = groups
     assert [m.index for m in native.members] == [0, 2, 3]
     assert native.native_transforms == ("none", "power", "none")
-    assert native.seed == 7 and native.scaffold is None
+    assert native.seed == _members.member_seed(7, 0)
+    assert native.scaffold is None
     assert [m.index for m in scaffolded.members] == [1, 4]
     assert scaffolded.scaffold.name == "quantile"
     assert scaffolded.native_transforms == ("none", "none")
-    assert scaffolded.seed == 7 + _members.GROUP_SEED_STRIDE
+    # A group is seeded by its first member.
+    assert scaffolded.seed == _members.member_seed(7, 1)
+
+
+def test_native_bagging_gives_scaffolded_members_groups_of_their_own():
+    """So that a scaffold is fitted on its member's bag, as everywhere."""
+    groups = _members.plan(
+        n_estimators=5,
+        transforms=_transforms.parse(("none", "quantile", "power")),
+        native_transforms={"none": "none", "power": "power"},
+        feature_shuffle=True,
+        bag_rows=6,
+        n_rows=10,
+        n_features=3,
+        random_state=7,
+        supports_native_bagging=True,
+    )
+    bags = _members.draw_bags(5, 6, 10, 7)
+    permutations = _members.feature_permutations(5, 3, 7)
+    assert [[m.index for m in g.members] for g in groups] == [
+        [0, 2, 3],
+        [1],
+        [4],
+    ]
+    assert [g.index for g in groups] == [0, 1, 2]
+    native, *alone = groups
+    assert native.rows is None and native.feature_shuffle
+    for member, rows in zip(native.members, native.member_rows, strict=True):
+        np.testing.assert_array_equal(rows, bags[member.index])
+    for group in alone:
+        (member,) = group.members
+        assert group.scaffold.name == "quantile"
+        assert group.native_transforms == ("none",)
+        np.testing.assert_array_equal(group.rows, bags[member.index])
+        np.testing.assert_array_equal(
+            group.permutation, permutations[member.index]
+        )
+        assert group.seed == _members.member_seed(7, member.index)
 
 
 def test_scaffolded_bagging_gives_each_member_its_own_group():
@@ -226,7 +264,9 @@ def test_scaffolded_bagging_gives_each_member_its_own_group():
         auto_tokens=("none", "power"),
     )
     assert len(groups) == 6
-    assert [g.seed for g in groups] == [3, 4, 5, 6, 7, 8]
+    assert [g.seed for g in groups] == [
+        _members.member_seed(3, i) for i in range(6)
+    ]
     assert [g.native_transforms for g in groups] == [("none",), ("power",)] * 3
     pairs = {(tuple(g.permutation), g.native_transforms) for g in groups}
     assert len(pairs) == 6  # no two members share (permutation, transform)
@@ -605,21 +645,22 @@ def test_a_refit_into_several_groups_drops_the_single_regressor(data):
     assert not hasattr(model, "regressor_")
 
 
-def test_a_scaffold_is_fitted_on_its_groups_context_rows(data):
-    """As the _transforms docstring says: a bag, or all rows if native."""
+@pytest.mark.parametrize("cls", standins.STANDINS)
+def test_a_scaffold_is_fitted_on_its_members_bag(cls, data):
+    """As the _transforms docstring says, with native bagging or without."""
     X, z, _ = data
     params = {"n_estimators": 2, "transforms": "robust", "bag_size": 40}
-    native = standins.HistogramStandIn(**params).fit(X, z)
-    (fitted,) = native.transformers_
-    np.testing.assert_allclose(
-        fitted._transformer.center_, np.median(X, axis=0)
-    )
-    scaffolded = standins.ScaffoldedHistogramStandIn(**params).fit(X, z)
+    model = cls(**params).fit(X, z)
+    bags = _members.draw_bags(2, 40, len(X), 0)
+    assert len(model.transformers_) == 2
     for group, fitted in zip(
-        scaffolded.member_groups_, scaffolded.transformers_, strict=True
+        model.member_groups_, model.transformers_, strict=True
     ):
+        (member,) = group.members
+        np.testing.assert_array_equal(group.rows, bags[member.index])
         np.testing.assert_allclose(
-            fitted._transformer.center_, np.median(X[group.rows], axis=0)
+            fitted._transformer.center_,
+            np.nanmedian(X[group.rows], axis=0),
         )
 
 

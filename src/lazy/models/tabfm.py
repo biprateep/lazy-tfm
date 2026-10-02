@@ -25,10 +25,10 @@ union of every dither's edges.
 The uniform features map onto TabFM's own machinery: ``kv_cache`` onto the
 streaming prefill/decode path (:mod:`lazy.models._icl_stream`),
 ``feature_shuffle`` and the transforms it has onto its classifier's own
-shuffles and ``norm_methods``, ``bag_size`` onto its per-member row cap,
-``outlier_threshold`` onto its soft clip and ``mixed_precision`` onto its
-bfloat16 weights. The rest of TabFM's recipe is pinned here, so the
-installed tabfm's defaults decide nothing.
+shuffles and ``norm_methods``, ``bag_size`` onto its members' own rows (lazy's
+bags, handed to each classifier's members), ``outlier_threshold`` onto its soft
+clip and ``mixed_precision`` onto its bfloat16 weights. The rest of TabFM's
+recipe is pinned here, so the installed tabfm's defaults decide nothing.
 
 Because the bins are equal-mass they are narrow where the targets are crowded,
 so in the busy part of the distribution they are routinely *narrower* than
@@ -48,7 +48,8 @@ than the output bin cannot change a density tabulated on it.
 
 from __future__ import annotations
 
-import dataclasses
+import collections
+import copy
 import inspect
 import math
 import numbers
@@ -246,7 +247,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     density mixtures, weighted by members and equally respectively. Every
     dither runs its classifiers with the same seeds -- the coarse level the
     group's seed, fine level ``j`` that seed plus ``1 + j`` -- so dithers
-    differ only by their bin edges, as in the paper's runs.
+    differ only by their bin edges, as in the paper's runs. The bin edges
+    are the whole context's, for every group and every bag.
 
     Every ``TabFMClassifier`` argument is set by lazy, none left to the
     installed tabfm. What TabFM still does to the features under any
@@ -279,10 +281,16 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             however wide the table.
         bag_size: Context rows per member: an int is a row count (1 means
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Native (TabFM's ``max_num_rows``): the coarse
-            classifier's members each draw exactly that many rows, a fine
-            classifier's the same fraction of its bin's rows, rounded up.
-            TabFM draws them itself, from the classifier's seed.
+            None all of them. Member ``i`` sees lazy's bag ``i``, as on every
+            model: its coarse-level member that bag, its member of fine
+            level ``j`` the rows of the bag in coarse bin ``j``. A member of
+            TabFM's own transforms keeps its place in the classifier (its
+            column order, class shift and the logit average), with its
+            standardisation, norm method and clip fitted on those rows; a
+            member with a scaffolded transform is a hierarchy of its own on
+            its bag. Members are run one at a time, whatever
+            ``member_batch_size`` says, because their contexts differ in
+            length.
         kv_cache: Prefill each member's context once and decode the queries
             against the cache, chunk by chunk (``True``; needs TabFM's
             repository build, and falls back with a
@@ -301,10 +309,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             training values.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed of the ensemble: group ``g``'s classifiers are
-            seeded from ``random_state + 1000 * g`` (see the seeds above).
-            None draws a fresh seed at fit, recorded as ``random_state_`` and
-            in ``provenance_``.
+        random_state: Seed of the ensemble: a group's classifiers are seeded
+            from its first member ``i``, ``SeedSequence([random_state, i])``
+            (see the seeds above). None draws a fresh seed at fit, recorded
+            as ``random_state_`` and in ``provenance_``.
         chunk_size: Query rows per forward pass, on both paths: decoded
             against the cache at a time, or handed to the upstream
             ``predict_proba`` at a time when ``kv_cache=False``; ``0`` does
@@ -523,40 +531,25 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         y: _typing.FloatArray,
         group: _members.MemberGroup,
     ) -> Any:
-        if len(X) < self.n_coarse_bins * self.n_fine_bins:
+        del y  # The clipped targets of the same rows are y_context_'s.
+        if self.n_context_ < self.n_coarse_bins * self.n_fine_bins:
             raise ValueError(
-                f"context has {len(X)} rows, fewer than the "
+                f"context has {self.n_context_} rows, fewer than the "
                 f"{self.n_coarse_bins * self.n_fine_bins} bins asked for"
             )
         if self.inference_ == "predict_proba":
             self.kv_cache_ = False
-        self.support_ = self._support(y)
-        y = _clip_to_support(y, self.support_)
-        self.X_context_ = _frame(X)
-        self.y_context_ = y
-        return {
-            "X": _frame(X),
-            "y": y,
-            "group": group,
-            "bag_rows": self.bag_rows_ if self.bagging_ else None,
-            "n_context": len(X),
-        }
+        rows = slice(None) if group.rows is None else group.rows
+        return {"X": _frame(X), "y": self.y_context_[rows], "group": group}
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        self._import_backend()
+        # One set of equal-mass bins for the whole ensemble, from the whole
+        # context: natively bagged members share a classifier, so they must
+        # share its classes, and every group then predicts on the same bins.
+        self.support_ = self._support(y)
+        self.y_context_ = _clip_to_support(y, self.support_)
         super()._fit(X, y)
-        if not self.bagging_:
-            return
-        # TabFM subsamples each classifier's rows itself (max_num_rows), with
-        # its own generator and the classifier's seed; the rows the plan drew
-        # are never used, so nothing is left claiming they were.
-        self.member_groups_ = tuple(
-            _without_rows(group) for group in self.member_groups_
-        )
-        for handle, group in zip(
-            self.handles_, self.member_groups_, strict=True
-        ):
-            handle["group"] = group
-        self.provenance_["bag_rows_drawn_by"] = "tabfm"
 
     def _support(self, y: _typing.FloatArray) -> tuple[float, float]:
         """The range the equal-mass bins span: the constructor grid's or z's."""
@@ -662,7 +655,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         Args:
             model: The loaded TabFM backbone.
-            handle: The fitted group: its context and members.
+            handle: The fitted group: its context, targets and members.
             X_query: The query rows.
             shift: Edge shift in quantile space, in bins.
             progress: The bar :meth:`_predict_group` opened, advanced once per
@@ -674,18 +667,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ``(n_query, n_bins)``; bin edges, shape ``(n_bins + 1,)``; and
             the context's bin fractions, shape ``(n_bins,)``.
         """
-        y, X_context = handle["y"], handle["X"]
-        edges, coarse_edges, fine_edges = self._edges(y, shift)
+        y, X_context, group = handle["y"], handle["X"], handle["group"]
+        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
         coarse = _bin_labels(coarse_edges, y)
+        # Each member's rows of this group's context, for natively bagged
+        # members; None when every member sees all of them.
+        member_rows = getattr(group, "member_rows", None)
         _stage(progress, dither, "coarse", y.size)
         p_coarse = self._class_probabilities(
             model,
-            handle,
+            group,
             X_context,
             coarse,
             self.n_coarse_bins,
             X_query,
-            handle["group"].seed,
+            group.seed,
+            member_rows,
         )
         _done(progress)
         prior: list[_typing.FloatArray] = []
@@ -693,6 +690,11 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         for j in range(self.n_coarse_bins):
             rows = coarse == j
             fine = _bin_labels(fine_edges[j], y[rows])
+            level_rows = (
+                None
+                if member_rows is None
+                else _level_rows(member_rows, np.flatnonzero(rows))
+            )
             _stage(
                 progress,
                 dither,
@@ -701,12 +703,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             )
             p_fine = self._class_probabilities(
                 model,
-                handle,
+                group,
                 X_context.iloc[rows],
                 fine,
                 self.n_fine_bins,
                 X_query,
-                handle["group"].seed + 1 + j,
+                group.seed + 1 + j,
+                level_rows,
             )
             _done(progress)
             prior.append(
@@ -722,32 +725,60 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _class_probabilities(
         self,
         model: Any,
-        handle: Any,
+        group: _members.MemberGroup,
         X_context: pd.DataFrame,
         labels: _typing.IntArray,
         n_classes: int,
         X_query: pd.DataFrame,
         seed: int,
+        member_rows: tuple[_typing.IntArray, ...] | None = None,
     ) -> _typing.FloatArray:
         """Member-averaged class posteriors, ``(n_query, n_classes)``.
 
         A level with no context rows gives every class zero probability, and
         one whose rows all share a class gives that class all of it; neither
         has anything for a classifier to learn, so none is run.
+
+        Args:
+            model: The loaded TabFM backbone.
+            group: The members to run.
+            X_context: The level's context rows.
+            labels: Their classes, shape ``(n_rows,)``.
+            n_classes: The level's class count.
+            X_query: The query rows.
+            seed: The classifier's seed.
+            member_rows: Each member's rows of ``X_context``, as positions,
+                or None for all of them. A member with none sits the level
+                out, and the logits are averaged over the others.
+
+        Returns:
+            The posteriors.
         """
         present = np.unique(labels)
         if present.size < 2:
             full = np.zeros((len(X_query), n_classes))
             full[:, present.astype(int)] = 1.0
             return full
-        max_rows = _bag_rows(
-            handle["bag_rows"], handle["n_context"], len(X_context)
-        )
-        classifier = self._classifier(model, handle["group"], seed, max_rows)
+        classifier = self._classifier(model, group, seed)
         classifier.fit(X_context.reset_index(drop=True), labels)
         classes = np.asarray(classifier.classes_)
 
-        if self.inference_ == "stream":
+        if member_rows is not None:
+            # TabFM stacks its members' contexts into one tensor, so members
+            # of different lengths are run one by one, each in its place in
+            # the classifier, and their logits averaged as TabFM would.
+            members = [
+                self._member_logits(model, view, X_query)
+                for view in _member_views(classifier, member_rows)
+            ]
+            probs = (
+                _icl_stream.softmax(
+                    np.mean(members, axis=0), self._temperature()
+                )
+                if members
+                else np.zeros((len(X_query), classes.size))
+            )
+        elif self.inference_ == "stream":
             logits = _icl_stream.classification_logits(
                 classifier,
                 model,
@@ -768,6 +799,43 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         full = np.zeros((probs.shape[0], n_classes))
         full[:, classes.astype(int)] = probs
         return full
+
+    def _member_logits(
+        self, model: Any, view: Any, X_query: pd.DataFrame
+    ) -> _typing.FloatArray:
+        """One member's class-shift-corrected logits, ``(n_query, n_classes)``.
+
+        Args:
+            model: The loaded TabFM backbone.
+            view: A one-member classifier from :func:`_member_views`.
+            X_query: The query rows.
+
+        Returns:
+            The logits, before the temperature.
+        """
+        if self.inference_ == "stream":
+            logits = _icl_stream.classification_logits(
+                view,
+                model,
+                {"query": X_query},
+                member_batch_size=1,
+                query_block_rows=self.query_block_rows,
+                chunk_size=self.chunk_size,
+                keep_cache_on_device=self.keep_cache_on_device,
+            )
+            return logits["query"]["mean_logits"]
+        size = self.chunk_size if self.chunk_size > 0 else len(X_query)
+        frame = X_query.reset_index(drop=True)
+        blocks = [
+            np.asarray(
+                view._predict_proba_internal(  # noqa: SLF001 - the raw logits.
+                    frame.iloc[start : start + size]
+                )[0],
+                dtype=float,
+            )
+            for start in range(0, len(frame), size)
+        ]
+        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _predict_proba_chunked(
         self, classifier: Any, X_query: pd.DataFrame
@@ -799,7 +867,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         model: Any,
         group: _members.MemberGroup,
         seed: int,
-        max_rows: int | None,
     ) -> Any:
         """A ``TabFMClassifier`` with every argument set here.
 
@@ -839,7 +906,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 if group.native_transforms is None and group.feature_shuffle
                 else None
             ),
-            "max_num_rows": max_rows,
+            # Never TabFM's own row draws: bagged members get lazy's bags
+            # (_member_views).
+            "max_num_rows": None,
             "softmax_temperature": self._temperature(),
             # Informational only in TabFM; the precision is the weights'.
             "use_amp": self.mixed_precision_,
@@ -903,33 +972,92 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         }
 
 
-def _bag_rows(bag_rows: int | None, n_context: int, n_level: int) -> int | None:
-    """A classifier's ``max_num_rows``: the bag's share of its rows.
+def _level_rows(
+    member_rows: tuple[_typing.IntArray, ...], level: _typing.IntArray
+) -> tuple[_typing.IntArray, ...]:
+    """Each member's rows of a fine level, as positions in that level.
 
-    In integers, so that the coarse level, which sees the whole context,
-    gets exactly ``bag_rows``, and a fine level the same fraction of its
-    coarse bin's rows, rounded up.
+    Args:
+        member_rows: Each member's sorted rows of the group's context.
+        level: The sorted rows of the group's context in the coarse bin.
+
+    Returns:
+        For each member, the positions in ``level`` of its rows there.
 
     Examples:
-        >>> _bag_rows(500, 618, 618), _bag_rows(500, 618, 62)
-        (500, 51)
-        >>> _bag_rows(None, 618, 618) is None
-        True
+        >>> bag, level = np.array([0, 2, 5]), np.array([2, 3, 5])
+        >>> _level_rows((bag,), level)[0].tolist()
+        [0, 2]
     """
-    if bag_rows is None:
-        return None
-    return max(1, -(-bag_rows * n_level // n_context))
+    return tuple(np.flatnonzero(np.isin(level, rows)) for rows in member_rows)
 
 
-def _without_rows(group: _members.MemberGroup) -> _members.MemberGroup:
-    """A group without the member rows TabFM draws for itself."""
-    return dataclasses.replace(
-        group,
-        members=tuple(
-            dataclasses.replace(member, rows=None) for member in group.members
-        ),
-        member_rows=None,
+def _member_views(
+    classifier: Any, member_rows: tuple[_typing.IntArray, ...]
+) -> list[Any]:
+    """One-member copies of a fitted classifier, each on its member's rows.
+
+    Member ``i`` of the classifier keeps what TabFM drew for it -- its norm
+    method, column order and class shift, in the place TabFM's shuffle of its
+    configurations put them -- and sees only ``member_rows[i]``, on which its
+    standardisation, norm method and soft clip are refitted, exactly as
+    ``EnsembleGenerator.fit`` fits them on a whole context. The labels keep
+    the classifier's encoding, so every member answers over the same classes.
+
+    Args:
+        classifier: A fitted ``TabFMClassifier`` of ``len(member_rows)``
+            members.
+        member_rows: Each member's rows of the classifier's context, as
+            positions, in member order.
+
+    Returns:
+        A classifier per member with any rows, in member order.
+    """
+    from tabfm.src import (  # noqa: PLC0415 - optional backend, imported at use.
+        classifier_and_regressor as upstream,
     )
+
+    generator = classifier.ensemble_generator_
+    methods = list(generator.norm_methods_)
+    n_members = len(member_rows)
+    # Upstream deals the norm methods out to members cyclically, then groups
+    # the members by method, in member order within each.
+    cycle = (methods * -(-n_members // len(methods)))[:n_members]
+    taken: collections.Counter[str] = collections.Counter()
+    views = []
+    for method, rows in zip(cycle, member_rows, strict=True):
+        shuffle, shift, permutation, _ = generator.ensemble_configs_[method][
+            taken[method]
+        ]
+        taken[method] += 1
+        if not len(rows):
+            continue
+        member = copy.copy(generator)
+        member.X_ = generator.X_[rows]
+        member.y_ = generator.y_[rows]
+        member.preprocessors_ = {
+            method: upstream.PreprocessingPipeline(
+                normalization_method=method,
+                outlier_threshold=generator.outlier_threshold,
+                random_state=generator.random_state,
+            ).fit(member.X_)
+        }
+
+        def alone(value: Any, method: str = method) -> Any:
+            return collections.OrderedDict([(method, [value])])
+
+        member.ensemble_configs_ = alone((shuffle, shift, permutation, None))
+        member.feature_shuffle_patterns_ = alone(shuffle)
+        member.class_shift_offsets_ = alone(shift)
+        member.cat_permutations_ = alone(permutation)
+        member.row_subsample_patterns_ = alone(None)
+        member.norm_methods_ = [method]
+        member.n_estimators = 1
+        view = copy.copy(classifier)
+        view.ensemble_generator_ = member
+        view.n_estimators = 1
+        views.append(view)
+    return views
 
 
 def _is_count(value: object) -> bool:
