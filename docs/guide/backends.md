@@ -54,7 +54,7 @@ The table below shows how each model provides these parameters, where
 | `feature_shuffle`     | `FEATURE_SHIFT_METHOD="shuffle"`         | its column shuffler                       | Latin-square shuffles                 | `feat_shuffle_method="random"`            |
 | `transforms`          | `none` native, the rest scaffolded       | `none`, `quantile_uniform` native         | `none` native, the rest scaffolded    | `none`, `power` native                    |
 | `bag_size`            | `SUBSAMPLE_SAMPLES`, given `lazy`'s bags | scaffolded: one member per bag            | scaffolded: one regressor per bag     | `max_num_rows` (TabFM draws the rows)     |
-| `softmax_temperature` | its own; `"auto"` 0.9, v3.5 1.0          | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     |
+| `softmax_temperature` | its own; `"auto"` 0.9, v3.5 and fast 1.0 | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     |
 | `mixed_precision`     | float16 autocast                         | float16 autocast                          | `use_amp=True`                        | bfloat16 weights                          |
 | `outlier_threshold`   | `OUTLIER_REMOVAL_STD`                    | scaffolded (`lazy`'s clip)                | its `outlier_threshold`               | its `outlier_threshold`                   |
 | members combined      | averaged buckets                         | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed |

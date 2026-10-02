@@ -286,7 +286,7 @@ actually answered is recorded on the fitted model, ready to be written out
 beside the numbers:
 
 ```python
-model.fit(X_train, z_train).provenance_
+model.fit(X_train, train.redshift).provenance_
 # {'backend': 'tabpfn', 'version': 'v2.5',
 #  'repo_id': 'Prior-Labs/tabpfn_2_5',
 #  'filename': 'tabpfn-v2.5-regressor-v2.5_default.ckpt',
