@@ -35,6 +35,11 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   computed exactly from the native distribution.
 - `lazy.datasets.make_chirp`, a one-feature toy problem (a noisy chirp with
   chunks cut out as the test set), for demonstrations.
+- `lazy.datasets.load_dataset(name)` and `list_datasets()`: one loader for
+  the demonstration datasets (California housing, insurance, diamonds, King
+  County, bike sharing, wine quality, Ames, concrete, energy, kin8nm,
+  protein, yacht, Year Prediction MSD, all pinned to an OpenML data id, and
+  DC1), downloaded once and cached under `data_home()`.
 - Three proper scores in `lazy.metrics`: `crps` (the continuous ranked
   probability score), `nll` (the negative log predictive density, floored at
   `NLL_DENSITY_FLOOR`) and `pinball_loss` (for `predict_quantiles`), with

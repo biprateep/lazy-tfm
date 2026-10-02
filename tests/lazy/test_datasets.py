@@ -10,12 +10,16 @@ is hardcoded.
 import concurrent.futures
 import hashlib
 import io
+import os
 import time
 import warnings
 
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn import datasets as sklearn_datasets
+from sklearn import utils as sklearn_utils
+from sklearn.datasets import _openml as sklearn_openml
 
 from lazy import datasets
 
@@ -659,3 +663,178 @@ def test_make_chirp_is_reproducible_and_validates():
     assert len(X_test) == 0
     with pytest.raises(ValueError, match="do not fit"):
         datasets.make_chirp(n_gaps=10, gap_width=0.2)
+
+
+# -- the demo dataset registry ------------------------------------------------
+
+LIST_COLUMNS = [
+    "n_rows",
+    "n_features",
+    "target",
+    "description",
+    "source",
+    "license",
+    "url",
+]
+OPENML_NAMES = [
+    name
+    for name, row in datasets.list_datasets().iterrows()
+    if row["source"].startswith("OpenML")
+]
+
+
+@pytest.fixture
+def fake_openml(monkeypatch):
+    """Replaces fetch_openml with a stand-in; returns the calls it saw.
+
+    The stand-in answers with a frame of the registered width, its first
+    column categorical, and a target named as registered, so nothing is
+    downloaded.
+    """
+    table = datasets.list_datasets()
+    by_id = {
+        int(row["source"].split()[1]): row
+        for _, row in table.iterrows()
+        if row["source"].startswith("OpenML")
+    }
+    calls = []
+
+    def fetch_openml(*, data_id, data_home, target_column, as_frame):
+        calls.append(
+            {
+                "data_id": data_id,
+                "data_home": data_home,
+                "target_column": target_column,
+                "as_frame": as_frame,
+            }
+        )
+        row = by_id[data_id]
+        n = 5
+        frame = pd.DataFrame(
+            {f"f{i}": np.arange(n, dtype=np.int64) for i in range(1, 99)}
+        ).iloc[:, : row["n_features"] - 1]
+        frame.insert(0, "kind", pd.Categorical(["a", "b", "a", "c", "b"]))
+        target = pd.Series(np.arange(n), name=target_column)
+        return sklearn_utils.Bunch(data=frame, target=target)
+
+    monkeypatch.setattr(sklearn_datasets, "fetch_openml", fetch_openml)
+    return calls
+
+
+@pytest.fixture
+def fake_dc1(monkeypatch, photometry):
+    """Replaces fetch_dc1 with the small photometry fixture."""
+    catalog = datasets.Catalog.from_frame(
+        photometry, redshift=np.linspace(0.1, 1.9, len(photometry))
+    )
+    monkeypatch.setattr(datasets, "fetch_dc1", lambda **_: catalog)
+    return catalog
+
+
+def test_list_datasets_has_one_complete_row_per_dataset():
+    table = datasets.list_datasets()
+    assert list(table.columns) == LIST_COLUMNS
+    assert table.index.name == "name"
+    assert table.index.is_unique
+    assert "dc1" in table.index and "yacht" in table.index
+    assert (table["n_rows"] > 0).all() and (table["n_features"] > 0).all()
+    for column in ("target", "description", "license", "url"):
+        assert table[column].str.len().gt(0).all(), column
+    assert table.loc["dc1", "source"] == "Zenodo 10975874"
+    for name in OPENML_NAMES:
+        data_id = table.loc[name, "source"].removeprefix("OpenML ")
+        assert table.loc[name, "url"] == f"https://www.openml.org/d/{data_id}"
+
+
+@pytest.mark.parametrize("name", OPENML_NAMES)
+def test_every_openml_dataset_loads_by_its_pinned_id(fake_openml, name):
+    row = datasets.list_datasets().loc[name]
+    dataset = datasets.load_dataset(name)
+    (call,) = fake_openml
+    assert f"OpenML {call['data_id']}" == row["source"]
+    assert call["target_column"] == row["target"]
+    assert call["as_frame"] is True
+    assert dataset.name == name
+    assert dataset.target == row["target"]
+    assert dataset.X.shape[1] == row["n_features"]
+    assert (dataset.source, dataset.license, dataset.url) == (
+        row["source"],
+        row["license"],
+        row["url"],
+    )
+    assert dataset.description == row["description"]
+    assert isinstance(dataset.citation, str)
+
+
+def test_dataset_fields_and_dtypes(fake_openml):
+    dataset = datasets.load_dataset("diamonds")
+    assert isinstance(dataset.X, pd.DataFrame)
+    assert isinstance(dataset.X["kind"].dtype, pd.CategoricalDtype)
+    assert isinstance(dataset.y, np.ndarray)
+    assert dataset.y.dtype == np.float64 and dataset.y.ndim == 1
+    assert len(dataset) == len(dataset.X) == len(dataset.y)
+    assert repr(dataset) == (
+        "Dataset(name='diamonds', n_rows=5, n_features=9, target='price')"
+    )
+    with pytest.raises(AttributeError):
+        dataset.name = "other"
+
+
+def test_return_x_y_gives_the_features_and_target(fake_openml):
+    X, y = datasets.load_dataset("yacht", return_X_y=True)
+    dataset = datasets.load_dataset("yacht")
+    pd.testing.assert_frame_equal(X, dataset.X)
+    np.testing.assert_array_equal(y, dataset.y)
+    assert y.dtype == np.float64
+
+
+def test_openml_downloads_are_cached_under_data_home(
+    isolated_home, monkeypatch, fake_openml
+):
+    datasets.load_dataset("yacht")
+    datasets.load_dataset("yacht", data_home=isolated_home / "explicit")
+    monkeypatch.setenv("LAZY_DATA_HOME", str(isolated_home / "scratch"))
+    datasets.load_dataset("yacht")
+    # scikit-learn adds the "openml" subfolder itself.
+    assert [call["data_home"] for call in fake_openml] == [
+        str(isolated_home / "home" / ".cache" / "lazy-tfm"),
+        str(isolated_home / "explicit"),
+        str(isolated_home / "scratch"),
+    ]
+
+
+def test_dc1_is_the_mag_color_view_of_fetch_dc1(fake_dc1, fake_openml):
+    dataset = datasets.load_dataset("dc1")
+    assert not fake_openml
+    pd.testing.assert_frame_equal(dataset.X, fake_dc1.features("mag-color"))
+    np.testing.assert_array_equal(dataset.y, fake_dc1.redshift)
+    assert dataset.target == "redshift"
+    assert dataset.source == "Zenodo 10975874"
+    expected = datasets.list_datasets().loc["dc1", "n_features"]
+    assert dataset.X.shape[1] == expected
+
+
+def test_an_unknown_dataset_lists_the_valid_names(fake_openml):
+    with pytest.raises(ValueError, match="unknown dataset 'nope'") as error:
+        datasets.load_dataset("nope")
+    for name in datasets.list_datasets().index:
+        assert repr(name) in str(error.value)
+    assert not fake_openml
+
+
+def _no_network(*args, **kwargs):
+    raise AssertionError("the cached copy should have been read")
+
+
+@pytest.mark.skipif(
+    os.environ.get("LAZY_RUN_NETWORK_TESTS") != "1",
+    reason="set LAZY_RUN_NETWORK_TESTS=1 to run tests that download data",
+)
+def test_yacht_downloads_once_then_loads_offline(isolated_home, monkeypatch):
+    dataset = datasets.load_dataset("yacht", data_home=isolated_home)
+    row = datasets.list_datasets().loc["yacht"]
+    assert dataset.X.shape == (row["n_rows"], row["n_features"])
+    assert (isolated_home / "openml").is_dir()
+    monkeypatch.setattr(sklearn_openml, "urlopen", _no_network)
+    again = datasets.load_dataset("yacht", data_home=isolated_home)
+    pd.testing.assert_frame_equal(again.X, dataset.X)

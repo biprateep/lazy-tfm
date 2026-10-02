@@ -55,6 +55,14 @@ through the same code, either via :meth:`Catalog.from_frame` or by calling
 noisy curve with chunks cut out, generated on the spot for demonstrations::
 
     X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
+
+For trying a model on something other than photometry, :func:`load_dataset`
+loads a regression benchmark by name -- DC1, or one of a dozen OpenML datasets
+pinned to their ids -- downloading it once and caching it under
+:func:`data_home`, and :func:`list_datasets` lists them without downloading
+anything::
+
+    X, y = datasets.load_dataset("california_housing", return_X_y=True)
 """
 
 from __future__ import annotations
@@ -75,6 +83,7 @@ import warnings
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from sklearn import datasets as sklearn_datasets
 
 from lazy import _typing
 from lazy import grid as grid_lib
@@ -85,12 +94,15 @@ __all__ = [
     "DC1_GRID",
     "FEATURE_MODES",
     "Catalog",
+    "Dataset",
     "SelectionSplit",
     "build_features",
     "data_home",
     "fetch_dc1",
     "fetch_dc1_biased",
     "fetch_hsc_grid",
+    "list_datasets",
+    "load_dataset",
     "load_trainz",
     "make_chirp",
     "make_selection_split",
@@ -1289,3 +1301,327 @@ def make_chirp(
         in_gap |= (x >= start) & (x <= start + width)
     y_train = y[~in_gap] + rng.normal(0.0, noise, int((~in_gap).sum()))
     return x[~in_gap, None], x[in_gap, None], y_train, y[in_gap]
+
+
+@dataclasses.dataclass(frozen=True)
+class Dataset:
+    """A regression dataset, loaded by :func:`load_dataset`.
+
+    Attributes:
+        name: The name it was loaded by, a key of :func:`list_datasets`.
+        X: The features exactly as the source gives them, one row per sample;
+            categorical columns keep the pandas ``category`` dtype.
+        y: The target, shape (n_rows,), as float64.
+        target: The name of the target column at the source.
+        description: What the dataset is, in one line.
+        source: Where it comes from: ``"OpenML <data_id>"``, or a Zenodo
+            record.
+        license: The license the source states.
+        url: The source's page for the dataset.
+        citation: The reference to cite when using it, or ``""`` for none.
+    """
+
+    name: str
+    X: pd.DataFrame
+    y: _typing.FloatArray
+    target: str
+    description: str
+    source: str
+    license: str
+    url: str
+    citation: str = ""
+
+    def __len__(self) -> int:
+        return len(self.y)
+
+    def __repr__(self) -> str:
+        return (
+            f"Dataset(name={self.name!r}, n_rows={len(self)}, "
+            f"n_features={self.X.shape[1]}, target={self.target!r})"
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _Entry:
+    """One row of the dataset registry, checked against its source.
+
+    Attributes:
+        data_id: The OpenML dataset id, or None for DC1.
+        target: The target column, OpenML's default target.
+        n_rows: The number of rows.
+        n_features: The number of feature columns, the target excluded.
+        description: What the dataset is, in one line.
+        license: The license the source states.
+        citation: The reference to cite, or ``""``.
+    """
+
+    data_id: int | None
+    target: str
+    n_rows: int
+    n_features: int
+    description: str
+    license: str
+    citation: str = ""
+
+    @property
+    def source(self) -> str:
+        """Where the data comes from."""
+        if self.data_id is None:
+            return "Zenodo 10975874"
+        return f"OpenML {self.data_id}"
+
+    @property
+    def url(self) -> str:
+        """The source's page for the data."""
+        if self.data_id is None:
+            return "https://zenodo.org/records/10975874"
+        return f"https://www.openml.org/d/{self.data_id}"
+
+
+# Every OpenML entry is pinned to a data_id, not a name, so a new upload under
+# the same name never changes what is loaded. Sizes, targets and licenses were
+# read from each dataset's OpenML record and checked against the fetched data.
+_REGISTRY: dict[str, _Entry] = {
+    "california_housing": _Entry(
+        data_id=44977,
+        target="medianHouseValue",
+        n_rows=20_640,
+        n_features=8,
+        description="Median house values of California census block groups",
+        license="Public",
+        citation="Pace & Barry 1997, Statistics & Probability Letters 33, 291",
+    ),
+    "insurance": _Entry(
+        data_id=46931,
+        target="charges",
+        n_rows=1_338,
+        n_features=6,
+        description="Medical insurance charges of US individuals",
+        license="DbCL v1.0",
+    ),
+    "diamonds": _Entry(
+        data_id=46923,
+        target="price",
+        n_rows=53_940,
+        n_features=9,
+        description="Prices of round-cut diamonds, from ggplot2",
+        license="MIT",
+        citation="Wickham 2016, ggplot2: Elegant Graphics for Data Analysis",
+    ),
+    "kings_county": _Entry(
+        data_id=44989,
+        target="price",
+        n_rows=21_613,
+        n_features=21,
+        description="House sale prices in King County, WA, 2014-2015",
+        license="CC0",
+    ),
+    "bike_sharing": _Entry(
+        data_id=44063,
+        target="count",
+        n_rows=17_379,
+        n_features=11,
+        description="Hourly bike rental counts in Washington, DC",
+        license="Public",
+        citation=(
+            "Fanaee-T & Gama 2013, Progress in Artificial Intelligence, 1-15"
+        ),
+    ),
+    "wine_quality": _Entry(
+        data_id=46964,
+        target="median_wine_quality",
+        n_rows=6_497,
+        n_features=12,
+        description="Quality scores of red and white Portuguese wines",
+        license="CC BY 4.0",
+        citation="Cortez et al. 2009, Decision Support Systems 47, 547",
+    ),
+    "ames_housing": _Entry(
+        data_id=43926,
+        target="Sale_Price",
+        n_rows=2_930,
+        n_features=80,
+        description="House sale prices in Ames, Iowa, 2006-2010",
+        license="Public",
+        citation="De Cock 2011, Journal of Statistics Education 19, 3",
+    ),
+    "concrete": _Entry(
+        data_id=44959,
+        target="strength",
+        n_rows=1_030,
+        n_features=8,
+        description="Compressive strength of concrete from its mixture and age",
+        license="CC BY 4.0",
+        citation="Yeh 1998, Cement and Concrete Research 28, 1797",
+    ),
+    "energy": _Entry(
+        data_id=44960,
+        target="heating_load",
+        n_rows=768,
+        n_features=8,
+        description="Heating load of simulated residential buildings",
+        license="CC BY 4.0",
+        citation="Tsanas & Xifara 2012, Energy and Buildings 49, 560",
+    ),
+    "kin8nm": _Entry(
+        data_id=44980,
+        target="y",
+        n_rows=8_192,
+        n_features=8,
+        description="Simulated forward kinematics of an 8-link robot arm",
+        license="Public",
+    ),
+    "protein": _Entry(
+        data_id=44963,
+        target="RMSD",
+        n_rows=45_730,
+        n_features=9,
+        description="Deviation of protein tertiary structures, from CASP 5-9",
+        license="CC BY 4.0",
+    ),
+    "yacht": _Entry(
+        data_id=42370,
+        target="Residuary.resistance",
+        n_rows=308,
+        n_features=6,
+        description="Residuary resistance of sailing yacht hulls",
+        license="CC0",
+    ),
+    "year": _Entry(
+        data_id=44027,
+        target="year",
+        n_rows=515_345,
+        n_features=90,
+        description="Release years of songs from their audio timbre",
+        # OpenML defers to the source; UCI states CC BY 4.0.
+        license="CC BY 4.0",
+        citation="Bertin-Mahieux et al. 2011, ISMIR, 591",
+    ),
+    "dc1": _Entry(
+        data_id=None,
+        target="redshift",
+        n_rows=434_476,
+        n_features=12,
+        description="LSST DESC photo-z Data Challenge 1 galaxy photometry",
+        license="CC BY 4.0",
+        citation="Schmidt et al. 2020, MNRAS 499, 1587",
+    ),
+}
+
+
+def list_datasets() -> pd.DataFrame:
+    """Lists the datasets :func:`load_dataset` knows, without downloading any.
+
+    Returns:
+        One row per dataset, indexed by name, with columns ``n_rows``,
+        ``n_features``, ``target``, ``description``, ``source``, ``license``
+        and ``url``.
+    """
+    rows = {
+        name: {
+            "n_rows": entry.n_rows,
+            "n_features": entry.n_features,
+            "target": entry.target,
+            "description": entry.description,
+            "source": entry.source,
+            "license": entry.license,
+            "url": entry.url,
+        }
+        for name, entry in _REGISTRY.items()
+    }
+    table = pd.DataFrame.from_dict(rows, orient="index")
+    table.index.name = "name"
+    return table
+
+
+@typing.overload
+def load_dataset(
+    name: str,
+    *,
+    data_home: str | pathlib.Path | None = ...,
+    return_X_y: Literal[False] = ...,
+) -> Dataset: ...
+
+
+@typing.overload
+def load_dataset(
+    name: str,
+    *,
+    data_home: str | pathlib.Path | None = ...,
+    return_X_y: Literal[True],
+) -> tuple[pd.DataFrame, _typing.FloatArray]: ...
+
+
+@typing.overload
+def load_dataset(
+    name: str,
+    *,
+    data_home: str | pathlib.Path | None = ...,
+    return_X_y: bool,
+) -> Dataset | tuple[pd.DataFrame, _typing.FloatArray]: ...
+
+
+def load_dataset(
+    name: str,
+    *,
+    data_home: str | pathlib.Path | None = None,
+    return_X_y: bool = False,
+) -> Dataset | tuple[pd.DataFrame, _typing.FloatArray]:
+    """Loads a demo regression dataset, downloading and caching it on first use.
+
+    Every dataset but DC1 is an OpenML dataset pinned to its id, fetched with
+    :func:`sklearn.datasets.fetch_openml` and cached under
+    ``data_home()/"openml"``; later calls read the cache and need no network.
+    DC1 is :func:`fetch_dc1`, both files, as the ``"mag-color"`` features.
+
+    Args:
+        name: A dataset's name, one of the index of :func:`list_datasets`.
+        data_home: Cache directory; see :func:`data_home`.
+        return_X_y: When ``True``, return only the features and the target.
+
+    Returns:
+        A :class:`Dataset`, or with ``return_X_y`` a tuple (X, y) of its
+        features and its target, shape (n_rows,), as float64.
+
+    Raises:
+        ValueError: If ``name`` is not a known dataset.
+        OSError: If a download fails.
+    """
+    entry = _REGISTRY.get(name)
+    if entry is None:
+        raise ValueError(
+            f"unknown dataset {name!r}; choose one of {sorted(_REGISTRY)}"
+        )
+    if entry.data_id is None:
+        catalog = fetch_dc1(data_home=data_home)
+        features = catalog.features("mag-color")
+        target = catalog.redshift
+    else:
+        bunch = sklearn_datasets.fetch_openml(
+            data_id=entry.data_id,
+            # scikit-learn caches under <data_home>/openml itself.
+            data_home=str(_resolve_home(data_home)),
+            target_column=entry.target,
+            as_frame=True,
+        )
+        features = bunch.data
+        target = bunch.target
+    y = np.asarray(target, dtype=np.float64)
+    if return_X_y:
+        return features, y
+    return Dataset(
+        name=name,
+        X=features,
+        y=y,
+        target=entry.target,
+        description=entry.description,
+        source=entry.source,
+        license=entry.license,
+        url=entry.url,
+        citation=entry.citation,
+    )
+
+
+def _resolve_home(root: str | pathlib.Path | None) -> pathlib.Path:
+    """:func:`data_home`, under a name the ``data_home`` argument hides."""
+    return data_home(root)
