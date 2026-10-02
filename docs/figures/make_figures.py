@@ -11,9 +11,9 @@
 # # The documentation's figures
 #
 # Every figure in the documentation that shows a model's output is made here,
-# so each one can be remade from the code that the page shows. The models are
-# small enough at these sizes to run on a CPU. Running the script rewrites
-# every PNG in `docs/figures/figs/`:
+# so each one can be remade from the code that the page shows. The models run
+# at LAZY's defaults (TabPFN-3.5), which wants a GPU. Running the script
+# rewrites every PNG in `docs/figures/figs/`:
 #
 #     python docs/figures/make_figures.py
 
@@ -32,12 +32,18 @@ from lazy import datasets
 
 FIGS = pathlib.Path(__file__).resolve().parent / "figs"
 
-# Figure defaults for AASTeX (AJ).
-COLUMN_WIDTH = 242.26653 / 72.27  # in inches
-TEXT_WIDTH = 513.11743 / 72.27
-SMALL_SIZE = 9  # in pts
-NORMAL_SIZE = 10
-BIG_SIZE = 12
+# Figure defaults for the documentation site, not a journal. The Read the
+# Docs theme sets body text at 16 px in a content column about 696 px wide
+# (800 px less two 3.236 em gutters), and the figures fill that column, so a
+# 7.25 in figure is shown at 96 px per inch and 12 pt type lands at 16 px,
+# the size of the text around it.
+TEXT_WIDTH = 7.25  # in inches
+SMALL_SIZE = 10.5  # in pts; 14 px on the page
+NORMAL_SIZE = 12  # 16 px, the body text
+BIG_SIZE = 13.5  # 18 px
+# The theme's text color; the background is left transparent so the
+# figures sit on the page's own (#fcfcfc).
+INK = "#404040"
 SERIF_FALLBACKS = ["CMU Serif", "Latin Modern Roman", "cmr10"]
 
 RC_PARAMS = {
@@ -53,7 +59,14 @@ RC_PARAMS = {
     "xtick.direction": "in",
     "ytick.direction": "in",
     "legend.fontsize": NORMAL_SIZE,
-    "figure.facecolor": "w",
+    "figure.facecolor": "none",
+    "axes.facecolor": "none",
+    "savefig.transparent": True,
+    "text.color": INK,
+    "axes.labelcolor": INK,
+    "axes.edgecolor": INK,
+    "xtick.color": INK,
+    "ytick.color": INK,
     "figure.dpi": 300,
     "mathtext.fontset": "cm",
     "axes.formatter.use_mathtext": True,
@@ -64,14 +77,14 @@ plt.rcParams.update(RC_PARAMS)
 # ## Filling in a curve
 #
 # The landing page's demo, as it appears there: a noisy chirp with three
-# chunks cut out, and TabPFN-3.5-fast's mean and 68% interval in the gaps.
+# chunks cut out, and TabPFN-3.5's mean and 68% interval in the gaps.
 
 # %%
 X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
 
 model = lazy.LazyModel(
     "tabpfn",
-    version="v3.5-fast",
+    version="v3.5",
     n_estimators=8,
     transforms="auto",
     feature_shuffle=True,
@@ -202,7 +215,7 @@ ax.text(
     ha="right",
     va="center",
 )
-arrow = dict(arrowstyle="-|>", color="k", lw=1)
+arrow = dict(arrowstyle="-|>", color=INK, lw=1)
 ax.annotate("", xy=(4.0, 1.9), xytext=(2.75, 1.9), arrowprops=arrow)
 ax.add_patch(
     mpl.patches.FancyBboxPatch(
@@ -211,7 +224,7 @@ ax.add_patch(
         1.4,
         boxstyle="round,pad=0.05",
         facecolor="0.92",
-        edgecolor="k",
+        edgecolor=INK,
         lw=1,
     )
 )
@@ -239,7 +252,7 @@ for i, (loc, scale) in enumerate([(-0.8, 0.5), (0.4, 0.9), (1.0, 0.35)]):
         lw=0,
     )
     ax.plot(xs, y_base + 0.55 * pdf / pdf.max(), c="C1", lw=1)
-    ax.plot([7.5, 9.7], [y_base, y_base], c="k", lw=0.5)
+    ax.plot([7.5, 9.7], [y_base, y_base], c=INK, lw=0.5)
 ax.text(8.6, 3.35, r"$p(y \mid x, \mathrm{context})$", ha="center", va="bottom")
 fig.savefig(FIGS / "tfm_schematic.png", bbox_inches="tight", dpi=300)
 plt.close(fig)
@@ -315,9 +328,9 @@ fig, axes = plt.subplots(
 )
 for ax, size in zip(axes, sizes, strict=True):
     rows = np.sort(rng.choice(len(x_full), size, replace=False))
-    model = lazy.LazyModel("tabpfn", version="v3.5-fast")
+    model = lazy.LazyModel("tabpfn")
     model.fit(x_full[rows], y_full[rows])
-    low, high = model.predict_interval(x_grid, coverage=0.95).T
+    low, high = model.predict_interval(x_grid, coverage=0.68).T
     ax.fill_between(
         x_grid[:, 0],
         low,
@@ -325,7 +338,7 @@ for ax, size in zip(axes, sizes, strict=True):
         color="C1",
         alpha=0.3,
         lw=0,
-        label="95% interval",
+        label="68% interval",
     )
     ax.plot(
         x_grid[:, 0],
@@ -346,6 +359,7 @@ for ax, size in zip(axes, sizes, strict=True):
         rasterized=True,
     )
     ax.set_title(f"{size:,} context rows")
+    ax.set_xticks([0, 5, 10])
     ax.set_xlabel(r"$x$")
     ax.set_xlim(0, 10)
 axes[0].set_ylabel(r"$y$")
