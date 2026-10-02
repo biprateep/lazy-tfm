@@ -159,13 +159,14 @@ class QuantileStandIn(_KNNStandIn):
         return {"members": self._members(X, y, group)}
 
     def _predict_group(self, handle, X):
-        locs = np.mean(
-            [
-                np.quantile(self._neighbours(m, X), self.levels, axis=1).T
-                for m in handle["members"]
-            ],
-            axis=0,
-        )
+        # Members summed one after another, so every row's average is the
+        # same arithmetic whatever the chunk: np.mean over an axis may pair
+        # its sums differently for arrays of different shapes.
+        members = [
+            np.quantile(self._neighbours(m, X), self.levels, axis=1).T
+            for m in handle["members"]
+        ]
+        locs = sum(members[1:], members[0]) / len(members)
         return distributions.QuantileDistribution(self.levels, locs)
 
     def _native_grid(self):
