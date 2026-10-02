@@ -68,6 +68,19 @@ uv run sphinx-build -W -b html docs docs/_build/html
 The API reference is generated from the docstrings, which follow the Google
 style (rendered by napoleon).
 
+### The logo
+
+`docs/logo/make_logo.py` draws the logo, its white version, the square icon
+and the favicon, and writes them into `docs/_static/`; the docs and the README
+use those files. To change the logo, edit the script and rerun it:
+
+```bash
+uv run python docs/logo/make_logo.py
+```
+
+The output is deterministic, so a rerun with no change leaves the files
+untouched.
+
 ### Tutorials
 
 Tutorials are py:percent scripts in `docs/tutorials/`, and main tracks only

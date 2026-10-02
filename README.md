@@ -1,4 +1,9 @@
-# LAZY
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/biprateep/lazy-tfm/main/docs/_static/lazy-logo-white.svg">
+    <img src="https://raw.githubusercontent.com/biprateep/lazy-tfm/main/docs/_static/lazy-logo.svg" alt="LAZY" width="440">
+  </picture>
+</h1>
 
 **L**azy but **A**ccurate ***z***\* for **Y**inz — full conditional distributions
 of a continuous target from pretrained tabular foundation models.

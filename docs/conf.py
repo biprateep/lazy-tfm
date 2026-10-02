@@ -128,12 +128,18 @@ copybutton_prompt_is_regexp = True
 # -- HTML ---------------------------------------------------------------------
 html_theme = "sphinx_rtd_theme"
 html_title = "lazy-tfm"
+# The logo and favicon are drawn by docs/logo/make_logo.py; the white logo
+# sits on the theme's blue sidebar header.
+html_static_path = ["_static"]
+html_logo = "_static/lazy-logo-white.svg"
+html_favicon = "_static/favicon.png"
 html_show_sourcelink = False
 html_theme_options = {
     "navigation_depth": 3,
     "collapse_navigation": False,
     "style_external_links": True,
     "prev_next_buttons_location": "both",
+    "logo_only": True,
 }
 # The "Edit on GitHub" link at the top of each page.
 html_context = {

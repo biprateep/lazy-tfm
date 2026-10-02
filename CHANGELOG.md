@@ -14,6 +14,9 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Added
 
+- A logo: "LAZY" with the L, A and Y drawn as data and the Z as predictions
+  with error bars, in the docs, the README and the favicon. It is drawn by
+  `docs/logo/make_logo.py`.
 - `softmax_temperature`, `mixed_precision` and `outlier_threshold` on every
   backend. `softmax_temperature="auto"` is the checkpoint's calibrated value
   (TabICL, with no softmax, takes only `"auto"`); `mixed_precision=True` uses
