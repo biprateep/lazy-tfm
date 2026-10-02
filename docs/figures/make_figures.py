@@ -11,9 +11,9 @@
 # # The documentation's figures
 #
 # Every figure in the documentation that shows a model's output is made here,
-# so each one can be remade from the code that the page shows. The models run
-# at LAZY's defaults (TabPFN-3.5), which wants a GPU. Running the script
-# rewrites every PNG in `docs/figures/figs/`:
+# so each one can be remade from the code that the page shows. The model is
+# TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU in seconds at these
+# sizes. Running the script rewrites every PNG in `docs/figures/figs/`:
 #
 #     python docs/figures/make_figures.py
 
@@ -77,14 +77,14 @@ plt.rcParams.update(RC_PARAMS)
 # ## Filling in a curve
 #
 # The landing page's demo, as it appears there: a noisy chirp with three
-# chunks cut out, and TabPFN-3.5's mean and 68% interval in the gaps.
+# chunks cut out, and TabPFN-3.5-fast's mean and 68% interval in the gaps.
 
 # %%
 X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
 
 model = lazy.LazyModel(
     "tabpfn",
-    version="v3.5",
+    version="v3.5-fast",
     n_estimators=8,
     transforms="auto",
     feature_shuffle=True,
@@ -326,7 +326,7 @@ fig, axes = plt.subplots(
 )
 for ax, size in zip(axes, sizes, strict=True):
     rows = np.sort(rng.choice(len(x_full), size, replace=False))
-    model = lazy.LazyModel("tabpfn")
+    model = lazy.LazyModel("tabpfn", version="v3.5-fast")
     model.fit(x_full[rows], y_full[rows])
     low, high = model.predict_interval(x_grid, coverage=0.68).T
     ax.fill_between(

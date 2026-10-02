@@ -90,16 +90,16 @@ This view also tells us what to expect from a TFM in practice. Since the
 output approximates a posterior predictive distribution, it should be broad
 when the context holds little information about a query and narrow when it
 holds a lot. Figure 3 shows this for the noisy curve from the landing page:
-with 20 context rows TabPFN-3.5 cannot follow the oscillations and its 68%
-interval is broad, while with 100 and 400 context rows it follows the true
+with 20 context rows TabPFN-3.5-fast cannot follow the oscillations and its
+68% interval is broad, while with 100 and 400 context rows it follows the true
 curve closely and its interval narrows to roughly the spread of the noise. The
 model and its weights are the same in all three panels.
 
 ```{figure} figures/figs/context_size.png
-:alt: Three panels showing TabPFN-3.5's mean and 68% interval for a noisy curve given 20, 100 and 400 context points.
+:alt: Three panels showing TabPFN-3.5-fast's mean and 68% interval for a noisy curve given 20, 100 and 400 context points.
 :width: 100%
 
-**Figure 3.** TabPFN-3.5's predictions for the noisy chirp of
+**Figure 3.** TabPFN-3.5-fast's predictions for the noisy chirp of
 {func}`~lazy.datasets.make_chirp` given 20, 100 and 400 context rows drawn at
 random. The blue points show the context, the gray dashed line the true curve,
 the orange line the mean of each predicted distribution and the orange band
