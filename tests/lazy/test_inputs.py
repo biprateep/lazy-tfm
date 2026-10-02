@@ -14,8 +14,8 @@ from lazy import base
 class _Echo(base.BaseDensityRegressor):
     """Densities that depend on the features, so column mix-ups show."""
 
-    def __init__(self, *, z_grid=None):
-        self.z_grid = z_grid
+    def __init__(self, *, y_grid=None):
+        self.y_grid = y_grid
 
     def _fit(self, X, y):
         self.columns_seen_ = list(X.columns)
@@ -100,7 +100,10 @@ def test_missing_values_pass_through_as_nan(table):
     frame.iloc[::5, 0] = np.nan
     frame["empty"] = np.nan
     model = _Echo().fit(frame, z)
-    assert model.predict_proba(frame).shape == (40, lazy.DC1_GRID.n_bins)
+    assert model.predict_proba(frame).shape == (
+        40,
+        lazy.datasets.DC1_GRID.n_bins,
+    )
     converted, _ = _inputs.as_feature_frame(frame)
     assert converted["empty"].isna().all()
 

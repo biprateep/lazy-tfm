@@ -214,8 +214,8 @@ def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
     assert est.regressor_.n_estimators_ == 8
     assert est.provenance_["softmax_temperature"] == 1.0
     assert est.provenance_["outlier_threshold"] == 12.0
-    pdfs = model.predict_proba(X_test, lazy.DC1_GRID)
-    assert pdfs.shape == (len(X_test), lazy.DC1_GRID.n_bins)
+    pdfs = model.predict_proba(X_test, lazy.datasets.DC1_GRID)
+    assert pdfs.shape == (len(X_test), lazy.datasets.DC1_GRID.n_bins)
     assert np.all(np.isfinite(pdfs))
 
 

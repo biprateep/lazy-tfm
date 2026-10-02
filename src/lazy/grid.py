@@ -8,12 +8,12 @@ bin centre. :class:`Grid` owns the bin edges, so the same object gives
 you the centres the metrics integrate over, the edges that mass-conserving
 rebinning needs, and the normalisation convention.
 
-The grid is an input, not a constant. Nothing in the library requires the
-LSST DESC DC1 grid, or a uniform grid, or a particular number of bins -- in
-particular the "at most ten classes" limit of TabFM's classifier constrains
-the *hierarchy* it builds internally, never the grid you ask for output on
-(:mod:`lazy.models.tabfm`). :data:`DC1_GRID` is provided because reproducing
-the Data Challenge numbers requires exactly that grid.
+The grid is an input, not a constant. Nothing in the library requires a
+uniform grid or a particular number of bins -- in particular the "at most ten
+classes" limit of TabFM's classifier constrains the *hierarchy* it builds
+internally, never the grid you ask for output on (:mod:`lazy.models.tabfm`).
+The LSST DESC Data Challenge's own grid, which its published numbers need,
+is :data:`lazy.datasets.DC1_GRID`.
 
 Normalisation is trapezoidal over the bin centres by default. That is the
 ``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
@@ -40,7 +40,6 @@ from lazy import _typing
 from lazy import metrics
 
 __all__ = [
-    "DC1_GRID",
     "NATIVE",
     "NORMALIZATIONS",
     "GridLike",
@@ -100,24 +99,24 @@ class Grid:
     @classmethod
     def linear(
         cls,
-        z_min: float,
-        z_max: float,
+        y_min: float,
+        y_max: float,
         n_bins: int,
         *,
         normalization: Normalization = "trapezoid",
     ) -> Grid:
-        """``n_bins`` equal-width bins spanning ``[z_min, z_max]``.
+        """``n_bins`` equal-width bins spanning ``[y_min, y_max]``.
 
         Args:
-            z_min: Left edge of the first bin.
-            z_max: Right edge of the last bin.
+            y_min: Left edge of the first bin.
+            y_max: Right edge of the last bin.
             n_bins: Number of bins.
             normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
 
         Returns:
             The grid.
         """
-        edges = np.linspace(float(z_min), float(z_max), int(n_bins) + 1)
+        edges = np.linspace(float(y_min), float(y_max), int(n_bins) + 1)
         return cls(edges, normalization)
 
     @classmethod
@@ -210,12 +209,12 @@ class Grid:
         return int(self.edges.size - 1)
 
     @property
-    def z_min(self) -> float:
+    def y_min(self) -> float:
         """The left edge of the first bin."""
         return float(self.edges[0])
 
     @property
-    def z_max(self) -> float:
+    def y_max(self) -> float:
         """The right edge of the last bin."""
         return float(self.edges[-1])
 
@@ -243,8 +242,8 @@ class Grid:
             else f", normalization={self.normalization!r}"
         )
         return (
-            f"Grid(n_bins={self.n_bins}, z_min={self.z_min:g},"
-            f" z_max={self.z_max:g}{extra})"
+            f"Grid(n_bins={self.n_bins}, y_min={self.y_min:g},"
+            f" y_max={self.y_max:g}{extra})"
         )
 
     @property
@@ -311,7 +310,7 @@ class Grid:
         is exact. Point-sampling the input density at the output centres
         instead would silently drop input bins narrower than an output bin --
         which is the normal case for the equal-mass quantile bins a classifier
-        produces in the crowded part of N(z).
+        produces where the targets crowd together.
 
         Args:
             probs: Finite, non-negative masses, shape (n_rows, n_input_bins);
@@ -407,46 +406,46 @@ class Grid:
         )
 
 
-#: The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
-#: ``0 < z < 2``. Reproducing the published DC1 numbers requires this grid;
-#: nothing else in the library does.
-DC1_GRID = Grid.linear(0.0, 2.0, 200)
-
-
-#: What every ``z_grid`` argument accepts: a grid, an array of bin centres,
-#: ``"native"`` for the model's own grid, or ``None`` for the default.
+#: What every ``y_grid`` argument accepts: a grid, an array of bin centres,
+#: ``"native"`` for the model's own grid, or ``None`` for the model's
+#: default.
 GridLike: TypeAlias = Grid | npt.ArrayLike | Literal["native"] | None
 
-#: The ``z_grid`` value that asks an estimator for its native grid.
+#: The ``y_grid`` value that asks an estimator for its native grid.
 NATIVE = "native"
 
 
 def as_grid(grid: GridLike) -> Grid:
-    """Coerce a user-supplied ``z_grid`` argument to a :class:`Grid`.
+    """Coerce a user-supplied ``y_grid`` argument to a :class:`Grid`.
 
-    This is what every estimator calls on its ``z_grid`` parameter, so
-    ``z_grid=np.linspace(0, 3, 300)`` works anywhere.
+    This is what every estimator calls on its ``y_grid`` parameter, so
+    ``y_grid=np.linspace(0, 3, 300)`` works anywhere.
 
     Args:
-        grid: A :class:`Grid`, an array of evenly spaced bin centres (see
-            :meth:`Grid.from_centers`), or ``None`` for :data:`DC1_GRID`.
+        grid: A :class:`Grid`, or an array of evenly spaced bin centres
+            (see :meth:`Grid.from_centers`).
 
     Returns:
         The grid.
 
+    Raises:
+        ValueError: If ``grid`` is None or ``"native"``, which only an
+            estimator can resolve.
+
     Examples:
-        >>> as_grid(None) is DC1_GRID
-        True
         >>> as_grid(np.linspace(0.005, 2.995, 300)).n_bins
         300
     """
     if grid is None:
-        return DC1_GRID
+        raise ValueError(
+            "y_grid=None means a model's default grid, which only the model "
+            "knows; pass a Grid or bin centres to as_grid"
+        )
     if isinstance(grid, Grid):
         return grid
     if isinstance(grid, str):
         raise ValueError(
-            f"z_grid={grid!r} is not a grid; only a fitted estimator knows its "
+            f"y_grid={grid!r} is not a grid; only a fitted estimator knows its "
             "native grid, so pass it to the estimator, not to as_grid"
         )
     return Grid.from_centers(grid)

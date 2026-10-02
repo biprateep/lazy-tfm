@@ -129,7 +129,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             per member at 20,000 context rows. The caches may take 0.6 of
             the GPU memory free at fit; members whose caches do not fit run
             uncached, with a warning.
-        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
+        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the 5,000 buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
@@ -215,7 +215,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool = True,
-        z_grid: grid_lib.GridLike = None,
+        y_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -231,7 +231,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

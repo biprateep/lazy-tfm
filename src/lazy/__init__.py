@@ -16,7 +16,7 @@ and no per-dataset retraining -- hence lazy::
 
     pdfs = model.predict_proba(X_test)                 # densities, native grid
     lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
-    z = model.predict(X_test, method="z_peak")         # point estimates
+    z = model.predict(X_test, method="mode")         # point estimates
     model.score(X_test, z_test)                        # negative CDE loss
 
 The API is scikit-learn's, with ``predict_proba`` returning a density on a
@@ -67,7 +67,6 @@ from lazy import _namespace
 from lazy.base import BaseDensityRegressor
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
-from lazy.grid import DC1_GRID
 from lazy.grid import Grid
 from lazy.models import CHECKPOINTS
 from lazy.models import ContextSizeWarning
@@ -95,7 +94,6 @@ _namespace.warn_if_shared()  # noqa: GS026 - the check must run at import.
 
 __all__ = [
     "CHECKPOINTS",
-    "DC1_GRID",
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
     "POINT_ESTIMATORS",

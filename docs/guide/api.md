@@ -9,12 +9,12 @@ reduction of it:
 | Method                              | Returns                                                     |
 | ----------------------------------- | ----------------------------------------------------------- |
 | `fit(X, y)`                         | The model. Stores the labelled context; no weights change.  |
-| `predict_proba(X, z_grid)`          | `(n_samples, n_bins)` densities on `z_grid`.                |
-| `predict_pdf(X, z_grid)`            | The same; an alias for when "pdf" reads better.             |
-| `predict_cdf(X, z_grid)`            | The cumulative distributions.                               |
+| `predict_proba(X, y_grid)`          | `(n_samples, n_bins)` densities on `y_grid`.                |
+| `predict_pdf(X, y_grid)`            | The same; an alias for when "pdf" reads better.             |
+| `predict_cdf(X, y_grid)`            | The cumulative distributions.                               |
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
 | `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                |
-| `predict(X, method="z_peak")`       | One value per row: `z_peak`, `z_weight`, `z_mean` or `z_median`. |
+| `predict(X, method="mode")`       | One value per row: `mode`, `peak_mean`, `mean` or `median`. |
 | `score(X, y)`                       | Negative CDE loss, so higher is better.                     |
 | `evaluate(X, y)`                    | A one-row table of every diagnostic metric.                 |
 
@@ -79,15 +79,16 @@ one fitted model answers on as many grids as you like, without refitting:
 
 ```python
 import numpy as np
-from lazy import DC1_GRID, Grid
+from lazy import Grid
+from lazy.datasets import DC1_GRID
 
 model.predict_proba(X_test)                     # the model's native grid
-model.predict_proba(X_test, DC1_GRID)           # the Data Challenge grid
 model.predict_proba(X_test, Grid.linear(0.0, 3.0, 300))
+model.predict_proba(X_test, DC1_GRID)           # the Data Challenge's grid
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))   # bin centres
 ```
 
-A grid given at call time wins; the constructor's `z_grid` is the default for
+A grid given at call time wins; the constructor's `y_grid` is the default for
 when every call would pass the same thing; and when both are `None` a
 foundation model answers on its **native grid**, `model.native_grid_`, which
 loses nothing:
@@ -103,7 +104,7 @@ Native bucket grids reach far into both tails, below zero included, because
 that is where the buckets are. Pass a grid to restrict the range; `"native"`
 asks for the native grid explicitly. A plain
 {class}`~lazy.base.BaseDensityRegressor` subclass defaults to
-{data}`~lazy.grid.DC1_GRID`, 200 bins over 0 < z < 2.
+{data}`~lazy.datasets.DC1_GRID`, 200 bins over 0 < z < 2.
 
 ## Two normalisations
 
@@ -113,7 +114,7 @@ A density on a grid can be normalised two ways, and a
 - **`"trapezoid"`**, the default and the DC1 convention: unit trapezoid mass
   over the bin centres, `np.trapezoid(pdf, grid.centers) == 1`. Every grid you
   build with `Grid.linear`, `from_edges` or `from_centers` uses it,
-  and so does {data}`~lazy.grid.DC1_GRID`, so numbers on those grids are
+  and so does {data}`~lazy.datasets.DC1_GRID`, so numbers on those grids are
   directly comparable with the Data Challenge.
 - **`"histogram"`**: the density is constant across each bin,
   `(pdf * grid.widths).sum() == 1`. Native grids use it, because their bins are
@@ -130,10 +131,10 @@ targets reach beyond a grid, pass one that covers them.
 
 ## Point estimates
 
-The four definitions disagree exactly when a density is multimodal: `z_mean`
-lands between two peaks, where there is no probability, while `z_peak` and
-`z_weight` pick one. To get several, call `predict_proba` once and reduce it
+The four definitions disagree exactly when a density is multimodal: `mean`
+lands between two peaks, where there is no probability, while `mode` and
+`peak_mean` pick one. To get several, call `predict_proba` once and reduce it
 with {meth}`~lazy.base.BaseDensityRegressor.point_estimates` or
 {func}`lazy.metrics.grid_point_estimates`, rather than re-running the model for
-each definition. `z_median` is also `predict_quantiles(X, [0.5])`, computed
+each definition. `median` is also `predict_quantiles(X, [0.5])`, computed
 without a grid.

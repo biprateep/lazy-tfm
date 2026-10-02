@@ -10,8 +10,8 @@ import pandas as pd
 from lazy.metrics import summarize
 
 table = pd.concat([
-    summarize(z_true, grid, pdfs_a, label="TabPFN"),
-    summarize(z_true, grid, pdfs_b, label="TabICL"),
+    summarize(y_true, grid, pdfs_a, label="TabPFN"),
+    summarize(y_true, grid, pdfs_b, label="TabICL"),
 ])
 ```
 
@@ -20,21 +20,24 @@ table = pd.concat([
 Pass the {class}`~lazy.grid.Grid` the densities are on, and each metric scores
 them by the grid's own normalisation: exactly, bin by bin, on a model's
 histogram-normalised native grid, and by the Data Challenge's trapezoid rule
-on grids such as {data}`~lazy.grid.DC1_GRID`, where the numbers are then the
+on grids such as {data}`~lazy.datasets.DC1_GRID`, where the numbers are then the
 challenge's, byte for byte. (Bin centres alone also work, and are read as a
 trapezoid grid.)
 
 The PDF metrics -- CDE loss, PIT and its goodness-of-fit statistics -- apply
-to any target. The point metrics (bias, scatter, outlier rates) follow the
-photo-z convention of dividing each residual by `1 + z_true`; for any other
-target pass `scale="none"` to `summarize` or `evaluate`, which uses plain
-residuals `z_pred - z_true`.
+to any target. The point metrics (bias, scatter, outlier rates) measure plain
+residuals, `y_pred - y_true`, in the target's units. For photometric redshifts,
+whose errors grow with `1 + z`, pass `scale="1+y"` to `summarize` or `evaluate`
+to divide each residual by `1 + y_true`, as the Data Challenge did; its
+published numbers need that.
 
 {mod}`lazy.plotting` draws the standard diagnostics (accuracy, calibration and
-N(z)) identically for every method, so comparisons hold up by eye:
+the sample distribution) identically for every method, so comparisons hold up
+by eye:
 
 ```python
 from lazy.plotting import diagnostic_panel
 
-fig = diagnostic_panel(z_true, grid, pdfs, label="TabPFN")   # a Grid, or bin centres
+fig = diagnostic_panel(y_true, grid, pdfs, label="TabPFN")   # a Grid, or bin centres
+fig = diagnostic_panel(y_true, grid, pdfs, scale="1+y")      # photo-z residuals
 ```

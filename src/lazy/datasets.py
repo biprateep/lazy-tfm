@@ -72,10 +72,12 @@ import numpy.typing as npt
 import pandas as pd
 
 from lazy import _typing
+from lazy import grid as grid_lib
 from lazy import selection
 
 __all__ = [
     "BANDS",
+    "DC1_GRID",
     "FEATURE_MODES",
     "Catalog",
     "SelectionSplit",
@@ -87,6 +89,11 @@ __all__ = [
     "load_trainz",
     "make_selection_split",
 ]
+
+#: The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
+#: ``0 < z < 2``. The published DC1 numbers are on this grid; pass it as
+#: ``y_grid`` to reproduce them.
+DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200)
 
 BANDS = ("U", "G", "R", "I", "Z", "Y")
 MAG_COLUMNS = BANDS

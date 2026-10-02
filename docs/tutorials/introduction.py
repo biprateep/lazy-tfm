@@ -144,7 +144,7 @@ model.fit(X_train, z_train)
 # ## Redshift PDFs
 #
 # `predict_proba` returns one density per galaxy on a grid of the target. We
-# ask for the Data Challenge's grid, `lazy.DC1_GRID` (200 bins over
+# ask for the Data Challenge's grid, `lazy.datasets.DC1_GRID` (200 bins over
 # $0 \le z \le 2$), so that the numbers below are comparable with the
 # challenge's. Without a grid, each model answers on its own native grid
 # (5,000 bins for TabPFN).
@@ -153,7 +153,7 @@ model.fit(X_train, z_train)
 # context for all 10,000 galaxies.
 
 # %%
-grid = lazy.DC1_GRID
+grid = lazy.datasets.DC1_GRID
 pdfs = model.predict_proba(X_test, grid)
 pdfs.shape
 
@@ -164,26 +164,27 @@ pdfs.shape
 
 # %%
 axes = plotting.plot_pdfs(
-    grid, pdfs, z_true=z_test, n_objects=12, random_state=SEED
+    grid, pdfs, y_true=z_test, n_objects=12, random_state=SEED
 )
 
 # %% [markdown]
 # ## Point estimates
 #
 # Many analyses need a single number per galaxy. `predict` reduces each
-# density to a point estimate (by default its peak, `z_peak`), and
+# density to a point estimate (by default its mode, `"mode"`), and
 # `metrics.grid_point_estimates` computes the same from densities you already
 # have, without running the model again.
 
 # %%
-z_peak = metrics.grid_point_estimates(grid, pdfs)["z_peak"]
+z_mode = metrics.grid_point_estimates(grid, pdfs)["mode"]
 
-ax = plotting.plot_zphot_ztrue(z_test, z_peak)
+ax = plotting.plot_actual_vs_predicted(z_test, z_mode, outlier_lines=True)
 
 # %% [markdown]
 # Each point is a galaxy, coloured by how many share its place (on a log
-# scale). The dotted lines mark the Data Challenge's outlier cut,
-# $|z_\mathrm{phot} - z_\mathrm{true}| > 0.06\,(1+z_\mathrm{true})$: most
+# scale). The dotted lines, which `outlier_lines=True` adds, mark the Data
+# Challenge's outlier cut,
+# $|z_\mathrm{pred} - z_\mathrm{true}| > 0.06\,(1+z_\mathrm{true})$: most
 # galaxies sit well inside it, and the outliers come from colour degeneracies,
 # where a galaxy at one redshift looks like one at another.
 
@@ -195,10 +196,15 @@ ax = plotting.plot_zphot_ztrue(z_test, z_peak)
 # - the **CDE loss**, which scores whole PDFs (lower is better);
 # - the **PIT** (probability integral transform) statistics, which test
 #   calibration, whether the PDFs are as wide as they should be;
-# - the **point** metrics of `z_peak`: bias, scatter and outlier fraction.
+# - the **point** metrics of the mode: bias, scatter and outlier fraction.
+#
+# The point metrics measure plain residuals, $z_\mathrm{pred} -
+# z_\mathrm{true}$, by default. Photometric-redshift errors grow with
+# $1 + z$, so the Data Challenge divided each residual by $1 + z_\mathrm{true}$;
+# `scale="1+y"` asks for that convention.
 
 # %%
-table = metrics.summarize(z_test, grid, pdfs, label="TabPFN-3.5")
+table = metrics.summarize(z_test, grid, pdfs, label="TabPFN-3.5", scale="1+y")
 table.T
 
 # %% [markdown]
@@ -206,10 +212,13 @@ table.T
 # estimates against the truth; their residuals, as a running median with its
 # 68% band; the PIT quantiles against those of a uniform distribution (on the
 # diagonal if the PDFs are calibrated); and the stacked PDFs against the true
-# redshift distribution $n(z)$.
+# redshift distribution $n(z)$. `scale="1+y"` again uses the photo-$z$
+# convention, for the residuals and the outlier lines.
 
 # %%
-fig = plotting.diagnostic_panel(z_test, grid, pdfs, label="TabPFN-3.5")
+fig = plotting.diagnostic_panel(
+    z_test, grid, pdfs, label="TabPFN-3.5", scale="1+y"
+)
 
 # %% [markdown]
 # ## Credible intervals
@@ -246,7 +255,9 @@ pdfs_tabicl = tabicl.predict_proba(X_test, grid)
 pd.concat(
     [
         table,
-        metrics.summarize(z_test, grid, pdfs_tabicl, label="TabICL"),
+        metrics.summarize(
+            z_test, grid, pdfs_tabicl, label="TabICL", scale="1+y"
+        ),
     ]
 ).set_index("model").T
 
@@ -279,9 +290,10 @@ axes[0, 0].legend()
 # Nothing above depends on the target being a redshift. For any other
 # continuous target, pass your own features and values to `fit`, and your own
 # grid to `predict_proba`, for example `lazy.Grid.from_edges(np.linspace(0, 10,
-# 201))` or no grid at all. The point metrics divide residuals by $1+z$, the
-# photo-$z$ convention; pass `scale="none"` to `summarize` or `evaluate` to use
-# plain residuals instead.
+# 201))` or no grid at all. The point metrics and plots then measure plain
+# residuals, $y_\mathrm{pred} - y_\mathrm{true}$, in the target's units:
+# `scale="1+y"` and `outlier_lines=True` were only for the photo-$z$
+# convention.
 #
 # Next steps:
 #

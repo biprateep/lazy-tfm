@@ -37,7 +37,7 @@ Mapping them onto the output grid is therefore done by exact, mass-conserving
 integration (:meth:`lazy.grid.Grid.rebin`), not by sampling the density
 at the output bin centres, which would drop whole bins and lose probability.
 
-The ten-class limit constrains the hierarchy, never the output: ``z_grid`` can
+The ten-class limit constrains the hierarchy, never the output: ``y_grid`` can
 have any number of bins, at any spacing, over any range.
 
 There is deliberately no post-processing stage. Probability sharpening and
@@ -294,7 +294,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             bfloat16 on CUDA, whose kernels round differently for different
             batch shapes, densities differ by up to a few per cent of their
             peak.
-        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
+        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
             sets the range the equal-mass bins span; without one they span the
@@ -404,7 +404,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool = True,
-        z_grid: grid_lib.GridLike = None,
+        y_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -427,7 +427,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
@@ -533,10 +533,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.support_ = self._support(y)
         y = _clip_to_support(y, self.support_)
         self.X_context_ = _frame(X)
-        self.z_context_ = y
+        self.y_context_ = y
         return {
             "X": _frame(X),
-            "z": y,
+            "y": y,
             "group": group,
             "bag_rows": self.bag_rows_ if self.bagging_ else None,
             "n_context": len(X),
@@ -558,12 +558,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             handle["group"] = group
         self.provenance_["bag_rows_drawn_by"] = "tabfm"
 
-    def _support(self, z: _typing.FloatArray) -> tuple[float, float]:
+    def _support(self, y: _typing.FloatArray) -> tuple[float, float]:
         """The range the equal-mass bins span: the constructor grid's or z's."""
-        if self.z_grid is not None and not isinstance(self.z_grid, str):
-            fixed = grid_lib.as_grid(self.z_grid)
-            return fixed.z_min, fixed.z_max
-        return float(z.min()), float(z.max())
+        if self.y_grid is not None and not isinstance(self.y_grid, str):
+            fixed = grid_lib.as_grid(self.y_grid)
+            return fixed.y_min, fixed.y_max
+        return float(y.min()), float(y.max())
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
@@ -603,7 +603,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         shifts = [d / self.n_dither for d in range(self.n_dither)]
         edges = np.unique(
             np.concatenate(
-                [self._edges(self.z_context_, shift)[0] for shift in shifts]
+                [self._edges(self.y_context_, shift)[0] for shift in shifts]
             )
         )
         if edges.size < 3:
@@ -615,7 +615,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # -- the hierarchy ------------------------------------------------------
 
     def _edges(
-        self, z: _typing.FloatArray, shift: float
+        self, y: _typing.FloatArray, shift: float
     ) -> tuple[
         _typing.FloatArray, _typing.FloatArray, list[_typing.FloatArray]
     ]:
@@ -632,12 +632,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # A constant target still gets a bin of non-zero width, on its scale.
         span = high - low if high > low else max(abs(high), 1.0)
         coarse = quantile_edges(
-            z, self.n_coarse_bins, low, high + 1e-6 * span, shift
+            y, self.n_coarse_bins, low, high + 1e-6 * span, shift
         )
-        labels = _bin_labels(coarse, z)
+        labels = _bin_labels(coarse, y)
         fine = [
             quantile_edges(
-                z[labels == j],
+                y[labels == j],
                 self.n_fine_bins,
                 coarse[j],
                 coarse[j + 1],
@@ -674,10 +674,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ``(n_query, n_bins)``; bin edges, shape ``(n_bins + 1,)``; and
             the context's bin fractions, shape ``(n_bins,)``.
         """
-        z, X_context = handle["z"], handle["X"]
-        edges, coarse_edges, fine_edges = self._edges(z, shift)
-        coarse = _bin_labels(coarse_edges, z)
-        _stage(progress, dither, "coarse", z.size)
+        y, X_context = handle["y"], handle["X"]
+        edges, coarse_edges, fine_edges = self._edges(y, shift)
+        coarse = _bin_labels(coarse_edges, y)
+        _stage(progress, dither, "coarse", y.size)
         p_coarse = self._class_probabilities(
             model,
             handle,
@@ -692,7 +692,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         blocks: list[_typing.FloatArray] = []
         for j in range(self.n_coarse_bins):
             rows = coarse == j
-            fine = _bin_labels(fine_edges[j], z[rows])
+            fine = _bin_labels(fine_edges[j], y[rows])
             _stage(
                 progress,
                 dither,
@@ -710,7 +710,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             )
             _done(progress)
             prior.append(
-                np.bincount(fine, minlength=self.n_fine_bins) / max(z.size, 1)
+                np.bincount(fine, minlength=self.n_fine_bins) / max(y.size, 1)
             )
             blocks.append(p_fine * p_coarse[:, [j]])
             self._log(
@@ -957,29 +957,29 @@ def _bin_labels(
 
 
 def _clip_to_support(
-    z: _typing.FloatArray, support: tuple[float, float]
+    y: _typing.FloatArray, support: tuple[float, float]
 ) -> _typing.FloatArray:
     """The targets clipped to the bins' range, warning if any lay outside it.
 
     Args:
-        z: The context targets, shape ``(n,)``.
+        y: The context targets, shape ``(n,)``.
         support: The range the equal-mass bins span, (low, high).
 
     Returns:
-        ``z`` clipped to ``support``, shape ``(n,)``.
+        ``y`` clipped to ``support``, shape ``(n,)``.
     """
     low, high = support
-    outside = int(np.count_nonzero((z < low) | (z > high)))
+    outside = int(np.count_nonzero((y < low) | (y > high)))
     if outside:
         warnings.warn(
-            f"{outside} of {z.size} training targets lie outside the z_grid "
+            f"{outside} of {y.size} training targets lie outside the y_grid "
             f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
             "ends, so their probability piles into the end bins. Pass a "
-            "z_grid that covers the targets.",
+            "y_grid that covers the targets.",
             UserWarning,
             skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
-    return np.clip(z, low, high)
+    return np.clip(y, low, high)
 
 
 def _frame(features: _typing.FloatArray) -> pd.DataFrame:

@@ -15,7 +15,7 @@ the same thing by them:
 ``feature_shuffle``      each member sees the feature columns permuted
 ``bag_size``             each member sees a random subset of context rows
 ``kv_cache``             cache the context's keys and values
-``z_grid``               the default output grid; None is the native grid
+``y_grid``               the default output grid; None is the native grid
 ``random_state``         the ensemble's seed
 ``chunk_size``           query rows per forward pass
 ``softmax_temperature``  divides the output logits; ``"auto"`` is the
@@ -89,7 +89,7 @@ UNIFORM_PARAMS: tuple[str, ...] = (
     "feature_shuffle",
     "bag_size",
     "kv_cache",
-    "z_grid",
+    "y_grid",
     "device",
     "random_state",
     "chunk_size",
@@ -108,7 +108,7 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
     "feature_shuffle": True,
     "bag_size": None,
     "kv_cache": True,
-    "z_grid": None,
+    "y_grid": None,
     "device": "auto",
     "random_state": 0,
     "chunk_size": 8_192,
@@ -674,7 +674,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _default_grid(self) -> grid_lib.Grid:
         """The constructor's grid, else this model's native grid."""
-        if self.z_grid is None:
+        if self.y_grid is None:
             return self.native_grid
         return super()._default_grid()
 

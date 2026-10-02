@@ -35,7 +35,7 @@ differs between backends, because the checkpoints do.
 | `feature_shuffle`     | Each member sees the feature columns in a different order.                 | `True`    |
 | `bag_size`            | Context rows per member: a count, a fraction, or `None` for all.            | `None`    |
 | `kv_cache`            | Process the context once and reuse it for every query chunk (below).        | `True`    |
-| `z_grid`              | Default output grid; `None` is the native grid.                             | `None`    |
+| `y_grid`              | Default output grid; `None` is the native grid.                             | `None`    |
 | `random_state`        | The ensemble's seed; `None` draws one and records it.                       | `0`       |
 | `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass.             | `8192`    |
 | `softmax_temperature` | Divides the output logits; `"auto"` is the checkpoint's calibrated value.   | `"auto"`  |

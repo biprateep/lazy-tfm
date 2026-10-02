@@ -73,9 +73,9 @@ model = LazyModel()                          # TabPFN-3.5, the default; wants a 
 model.fit(X_train, train.redshift)
 
 pdfs = model.predict_proba(X_test, Grid.linear(0, 2, 200))
-z = model.predict(X_test, method="z_peak")  # or z_mean, z_weight, z_median
+z = model.predict(X_test, method="mode")  # or mean, peak_mean, median
 lo, med, hi = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
-print(model.evaluate(X_test, z_test, z_grid=lazy.DC1_GRID))
+print(model.evaluate(X_test, z_test, y_grid=lazy.datasets.DC1_GRID, scale="1+y"))  # DC1's photo-z convention
 ```
 
 No GPU? TabPFN is slow on a CPU and refuses contexts above 5,000 rows there;
@@ -92,7 +92,7 @@ density on a grid of the target rather than class probabilities — the natural
 output of a model that knows its own uncertainty. `get_params`/`set_params`/`clone` work, so models drop
 into scikit-learn pipelines and search objects unmodified.
 
-**`z_grid` belongs to the prediction, not the fit.** Nothing about fitting
+**`y_grid` belongs to the prediction, not the fit.** Nothing about fitting
 depends on the output binning — these models place their internal bins by the
 distribution of the context targets, and the grid only enters at the final exact
 rebinning step — so one fitted model answers on as many grids as you like
@@ -125,7 +125,7 @@ LSST DESC's qp, and `.to_qp()` for RAIL.
 recipe, pinned in `lazy`), `feature_shuffle`, `bag_size` (per-member subsets of
 the context), `kv_cache` (process the context once; on by default),
 `random_state`, `chunk_size`, `softmax_temperature`, `mixed_precision`,
-`outlier_threshold` and `z_grid` mean the same thing on every backend. Each is
+`outlier_threshold` and `y_grid` mean the same thing on every backend. Each is
 translated to the model's own machinery where it has it and built around the
 model where it does not, every other upstream setting that changes an answer is
 pinned, and registering a new backend without them fails. LimiX-2 degrades above ~20,000 context rows and warns when

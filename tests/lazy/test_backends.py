@@ -218,7 +218,7 @@ class TestTabFM:
 
         monkeypatch.setattr(est, "_classifier", recording)
         est.predict_distribution(X[:3])
-        coarse = est.z_context_ < np.median(est.z_context_)
+        coarse = est.y_context_ < np.median(est.y_context_)
         assert rows[0] == 500
         assert sorted(rows[1:]) == sorted(
             -(-500 * n // 618) for n in (coarse.sum(), (~coarse).sum())
@@ -297,7 +297,7 @@ class TestTabFM:
         bins = tabfm._bin_labels(edges, z)
         assert np.all(np.diff(edges)[bins] > 0)
         _stub_classifier(est, monkeypatch)
-        handle = {"X": tabfm._frame(z[:, None]), "z": z, "bag_rows": None}
+        handle = {"X": tabfm._frame(z[:, None]), "y": z, "bag_rows": None}
         handle["n_context"] = z.size
         handle["group"] = types.SimpleNamespace(seed=0)
         probs, edges, prior = est._hierarchy(
@@ -314,12 +314,12 @@ class TestTabFM:
         X = generator.normal(size=(300, 2))
         z = -1.0 + 0.3 * X[:, 0]
         est = tabfm.TabFMHistogram(
-            n_estimators=1, z_grid=np.linspace(0.0, 3.0, 301)
+            n_estimators=1, y_grid=np.linspace(0.0, 3.0, 301)
         )
-        with pytest.warns(UserWarning, match="outside the z_grid range"):
+        with pytest.warns(UserWarning, match="outside the y_grid range"):
             est.fit(X, z)
-        assert est.z_context_.min() == est.support_[0] == -0.005
-        edges, _, _ = est._edges(est.z_context_, 0.0)
+        assert est.y_context_.min() == est.support_[0] == -0.005
+        edges, _, _ = est._edges(est.y_context_, 0.0)
         assert edges[0] == -0.005 and np.all(np.diff(edges) >= 0)
 
     @needs_checkpoint
@@ -334,7 +334,7 @@ class TestTabFM:
             z = np.clip(np.round(X[:, 0] + 2.0), 0.0, 4.0)
         else:
             z = -1.0 + 0.3 * X[:, 0]
-            options["z_grid"] = np.linspace(0.0, 3.0, 31)
+            options["y_grid"] = np.linspace(0.0, 3.0, 31)
         est = tabfm.TabFMHistogram(
             n_coarse_bins=4,
             n_fine_bins=4,
@@ -424,8 +424,8 @@ class TestTabFM:
         generator = np.random.default_rng(0)
         X = generator.normal(size=(200, 2))
         est = tabfm.TabFMHistogram(n_estimators=1).fit(X, np.full(200, 0.5))
-        assert est.native_grid_.z_min == 0.5
-        assert 0.5 < est.native_grid_.z_max < 0.5 + 1e-5
+        assert est.native_grid_.y_min == 0.5
+        assert 0.5 < est.native_grid_.y_max < 0.5 + 1e-5
 
     def test_repeated_transforms_keep_their_weights(self, tiny):
         """Upstream cycles norm_methods, so repeats in it are members."""
@@ -1030,8 +1030,8 @@ class TestTabICL:
         est = tabicl.TabICLQuantile()
         est._support = (0.05, 1.65)
         grid = est._native_grid()
-        assert grid.z_min == pytest.approx(-0.35)
-        assert grid.z_max == pytest.approx(2.05)
+        assert grid.y_min == pytest.approx(-0.35)
+        assert grid.y_max == pytest.approx(2.05)
         assert grid.n_bins == 1500
         np.testing.assert_allclose(grid.widths, 1.6 / 1000)
 
@@ -1041,8 +1041,8 @@ class TestTabICL:
         est._support = (value, value)
         grid = est._native_grid()
         pad = 0.01 * max(abs(value), 1.0)
-        assert grid.z_min == pytest.approx(value - pad)
-        assert grid.z_max == pytest.approx(value + pad)
+        assert grid.y_min == pytest.approx(value - pad)
+        assert grid.y_max == pytest.approx(value + pad)
 
     def test_mass_outside_the_native_grid_warns(self, monkeypatch):
         levels = tabicl.quantile_levels(99)
@@ -1288,7 +1288,7 @@ class TestTabPFN:
             n_estimators=1, device="cpu", progress=False
         ).fit(X[:50], np.full(50, 1e4))
         assert est.n_buckets_ == 1
-        assert est.native_grid_.z_min < 1e4 < est.native_grid_.z_max
+        assert est.native_grid_.y_min < 1e4 < est.native_grid_.y_max
         dist = est.predict_distribution(X[50:])
         np.testing.assert_allclose(dist.masses.sum(axis=1), 1.0)
         np.testing.assert_allclose(dist.ppf([0.5])[:, 0], 1e4)
@@ -1379,7 +1379,7 @@ class TestTabPFN:
         model = lazy.get_estimator("tabpfn", n_estimators=2, device="cpu").fit(
             X_ctx, z[:200]
         )
-        ours = model.predict(X_q, method="z_median", z_grid=grid)
+        ours = model.predict(X_q, method="median", y_grid=grid)
         theirs = model.regressor_.predict(
             X_q.to_numpy(dtype=np.float64), output_type="median"
         )

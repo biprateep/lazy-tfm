@@ -89,9 +89,9 @@ def test_a_parameter_the_backend_does_not_take_is_rejected_at_fit():
 
 
 def test_init_stores_its_arguments_and_nothing_else():
-    model = lazy.LazyModel("tabfm", z_grid=None, n_dither=3)
+    model = lazy.LazyModel("tabfm", y_grid=None, n_dither=3)
     public = {name for name in vars(model) if not name.startswith("_")}
-    assert public == {"model", "z_grid"}
+    assert public == {"model", "y_grid"}
     assert not hasattr(model, "estimator_")
 
 
@@ -108,7 +108,7 @@ def test_get_params_flattens_the_backend_parameters():
     params = lazy.LazyModel("tabfm", n_dither=3).get_params()
     assert params["model"] == "tabfm"
     assert params["n_dither"] == 3
-    assert "z_grid" in params
+    assert "y_grid" in params
 
 
 def test_clone_reproduces_the_model():
@@ -183,16 +183,16 @@ def test_repr_names_the_backend_and_only_non_default_parameters():
 
 def test_repr_shows_a_grid_other_than_the_native_one():
     grid = lazy.Grid.linear(0.0, 3.0, 37)
-    model = lazy.LazyModel("tabfm", z_grid=grid, n_dither=3)
-    assert repr(model) == f"LazyModel('tabfm', z_grid={grid!r}, n_dither=3)"
+    model = lazy.LazyModel("tabfm", y_grid=grid, n_dither=3)
+    assert repr(model) == f"LazyModel('tabfm', y_grid={grid!r}, n_dither=3)"
 
 
 def test_the_grid_default_is_carried_down_to_the_backend():
     grid = lazy.Grid.linear(0.0, 3.0, 37)
-    model = lazy.LazyModel("tabicl", z_grid=grid)
-    assert model.z_grid is grid
-    assert model._build().z_grid is grid
-    assert model.get_params()["z_grid"] is grid
+    model = lazy.LazyModel("tabicl", y_grid=grid)
+    assert model.y_grid is grid
+    assert model._build().y_grid is grid
+    assert model.get_params()["y_grid"] is grid
 
 
 # -- the full protocol, through a stand-in backend --------------------------
@@ -201,9 +201,9 @@ def test_the_grid_default_is_carried_down_to_the_backend():
 class _Uniform(lazy.BaseDensityRegressor):
     """A backend that answers with a flat density, for wiring tests only."""
 
-    def __init__(self, *, width=1.0, z_grid=None):
+    def __init__(self, *, width=1.0, y_grid=None):
         self.width = width
-        self.z_grid = z_grid
+        self.y_grid = y_grid
 
     def _fit(self, X, y):
         self.n_context_ = len(X)
@@ -225,16 +225,17 @@ def test_fit_predict_round_trip_through_the_wrapper(registered):
 
     assert model.n_context_ == 20  # a fitted backend attribute, via delegation
     pdfs = model.predict_proba(X)
-    assert pdfs.shape == (20, lazy.DC1_GRID.n_bins)
-    assert np.allclose(np.trapezoid(pdfs, lazy.DC1_GRID.centers, axis=1), 1.0)
-    assert model.predict(X, method="z_median").shape == (20,)
+    grid = model.grid
+    assert pdfs.shape == (20, grid.n_bins)
+    assert np.allclose(grid.normalize(pdfs).sum() / pdfs.sum(), 1.0)
+    assert model.predict(X, method="median").shape == (20,)
 
 
 def test_a_call_time_grid_overrides_the_default(registered):
     X = np.random.default_rng(0).normal(size=(5, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 5)
     model = lazy.LazyModel(
-        registered, z_grid=lazy.Grid.linear(0.0, 2.0, 50)
+        registered, y_grid=lazy.Grid.linear(0.0, 2.0, 50)
     ).fit(X, z)
     assert model.predict_proba(X).shape == (5, 50)
     assert model.predict_proba(X, lazy.Grid.linear(0.0, 3.0, 11)).shape == (

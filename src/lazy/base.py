@@ -10,19 +10,19 @@ documented reduction of it::
     model = LazyModel("tabfm", n_estimators=4)
     model.fit(X_train, z_train)
 
-    pdfs = model.predict_proba(X_test, z_grid)  # (n_test, n_bins) densities
-    z = model.predict(X_test, method="z_peak")  # (n_test,)
+    pdfs = model.predict_proba(X_test, y_grid)  # (n_test, n_bins) densities
+    z = model.predict(X_test, method="mode")  # (n_test,)
     model.score(X_test, z_test)  # negative CDE loss
 
-``z_grid`` is an argument to the *prediction*, not to the constructor.
+``y_grid`` is an argument to the *prediction*, not to the constructor.
 Nothing about fitting depends on the output binning -- these models place
 their internal bins by the distribution of the context targets, and the grid
 only enters at the final, exact rebinning step -- so one fitted model can
 answer on as many grids as you like without refitting. The constructor still
-accepts ``z_grid`` as a per-model default for when every call would pass the
+accepts ``y_grid`` as a per-model default for when every call would pass the
 same thing; a grid given at call time wins, and ``None`` at both levels means
-the model's native grid (:data:`lazy.grid.DC1_GRID` for an estimator that
-has none).
+the model's native grid (for an estimator that has none, a uniform grid over
+the training targets' range).
 
 Everything scikit-learn expects of an estimator holds: parameters are stored
 verbatim by ``__init__`` and never validated there, all validation and all
@@ -63,13 +63,25 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
 
-__all__ = ["POINT_ESTIMATORS", "BaseDensityRegressor"]
+__all__ = [
+    "DEFAULT_N_BINS",
+    "DEFAULT_PADDING",
+    "POINT_ESTIMATORS",
+    "BaseDensityRegressor",
+]
+
+#: Bins of the default grid of a model without a native grid.
+DEFAULT_N_BINS = 200
+
+#: How far that grid extends past the training targets, as a fraction of
+#: their range on each side.
+DEFAULT_PADDING = 0.05
 
 #: Reductions of a density to a single value, accepted by the ``method``
-#: argument of :meth:`BaseDensityRegressor.predict`. ``z_peak`` and
-#: ``z_weight`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see
+#: argument of :meth:`BaseDensityRegressor.predict`. ``mode`` and
+#: ``peak_mean`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see
 #: :mod:`lazy.metrics`).
-POINT_ESTIMATORS = ("z_peak", "z_weight", "z_mean", "z_median")
+POINT_ESTIMATORS = ("mode", "peak_mean", "mean", "median")
 
 # What the public methods accept as features: any table lazy._inputs reads
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
@@ -90,14 +102,14 @@ _BLOCK_BYTES = 256 * 2**20
 class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     """A regressor that predicts conditional densities, with a scikit-learn API.
 
-    Subclasses must accept a ``z_grid`` parameter and pass it through
+    Subclasses must accept a ``y_grid`` parameter and pass it through
     unchanged; see the module docstring.
 
     Attributes:
         backend: The registered backend name (a key of
             :data:`lazy.ESTIMATORS`), set as a class attribute by each
             backend; ``None`` on a subclass that is not one.
-        z_grid: The default output grid as passed to the constructor: a
+        y_grid: The default output grid as passed to the constructor: a
             :class:`~lazy.grid.Grid`, bin centres, or ``None``.
         grid_: The resolved default output grid, set by :meth:`fit`.
         is_fitted_: ``True`` once :meth:`fit` has run.
@@ -113,7 +125,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
     # Set by each subclass's __init__, which scikit-learn requires to store
     # its parameters verbatim; declared here for the type checker only.
-    z_grid: grid_lib.GridLike
+    y_grid: grid_lib.GridLike
 
     # -- to be provided by subclasses --------------------------------------
 
@@ -163,13 +175,18 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     def _default_grid(self) -> grid_lib.Grid:
         """The grid to answer on when none is given; called after ``_fit``.
 
-        The constructor's ``z_grid`` (``"native"`` meaning the model's own),
-        else :data:`lazy.grid.DC1_GRID`. Models with a native grid override
-        this to make it their default.
+        The constructor's ``y_grid`` (``"native"`` meaning the model's own),
+        else :data:`DEFAULT_N_BINS` bins over the training targets' range,
+        widened by :data:`DEFAULT_PADDING` of it on each side. Models with a
+        native grid override this to make it their default.
         """
-        if isinstance(self.z_grid, str) and self.z_grid == grid_lib.NATIVE:
+        if isinstance(self.y_grid, str) and self.y_grid == grid_lib.NATIVE:
             return self.native_grid
-        return grid_lib.as_grid(self.z_grid)
+        if self.y_grid is not None:
+            return grid_lib.as_grid(self.y_grid)
+        low, high = self.y_range_
+        pad = DEFAULT_PADDING * (high - low) or DEFAULT_PADDING
+        return grid_lib.Grid.linear(low - pad, high + pad, DEFAULT_N_BINS)
 
     @property
     def native_grid(self) -> grid_lib.Grid:
@@ -213,6 +230,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         X = self._check_features(X, reset=True)
         y = _check_target(y, len(X))
+        self.y_range_ = (float(np.min(y)), float(np.max(y)))
         self._fit(X, y)
         # After _fit: a model's native grid is known only once it has seen
         # its context.
@@ -221,14 +239,14 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         return self
 
     def predict_proba(  # noqa: GS030 - scikit-learn's X, y.
-        self, X: _Features, z_grid: grid_lib.GridLike = None
+        self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:
-        """Conditional densities ``p(z | x)`` on ``z_grid``.
+        """Conditional densities ``p(z | x)`` on ``y_grid``.
 
         Args:
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
-            z_grid: A :class:`~lazy.grid.Grid`, an array of bin
+            y_grid: A :class:`~lazy.grid.Grid`, an array of bin
                 centres, ``"native"`` for the model's own grid, or ``None``
                 for this model's default.
 
@@ -244,7 +262,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
                 shape.
         """
         validation.check_is_fitted(self)
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         return self._densities(self._check_features(X, reset=False), grid)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
@@ -297,28 +315,28 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         return self.predict_distribution(X).ppf(quantiles)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
-        self, X: _Features, z_grid: grid_lib.GridLike = None
+        self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:
         """Alias of :meth:`predict_proba`, for when "pdf" reads better.
 
         Args:
             X: Features, shape (n_samples, n_features).
-            z_grid: The grid to evaluate on; ``None`` for this model's
+            y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
         Returns:
             Normalised densities, shape (n_samples, n_bins).
         """
-        return self.predict_proba(X, z_grid)
+        return self.predict_proba(X, y_grid)
 
     def predict_cdf(  # noqa: GS030 - scikit-learn's X, y.
-        self, X: _Features, z_grid: grid_lib.GridLike = None
+        self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:
-        """Cumulative distributions on ``z_grid``, at the bin centres.
+        """Cumulative distributions on ``y_grid``, at the bin centres.
 
         Args:
             X: Features, shape (n_samples, n_features).
-            z_grid: The grid to evaluate on; ``None`` for this model's
+            y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
         Returns:
@@ -328,21 +346,21 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             histogram grid.
         """
         validation.check_is_fitted(self)
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         return grid.cdf(self.predict_proba(X, grid))
 
     def predict(  # noqa: GS030 - scikit-learn's X, y.
         self,
         X: _Features,
-        method: str = "z_peak",
-        z_grid: grid_lib.GridLike = None,
+        method: str = "mode",
+        y_grid: grid_lib.GridLike = None,
     ) -> _typing.FloatArray:
         """One value per row, reducing each density by ``method``.
 
         The four definitions disagree exactly when a PDF is multimodal,
-        which is the interesting case: ``z_mean`` lands between two peaks,
-        where there is no probability at all, while ``z_peak`` and
-        ``z_weight`` pick one. If you want several, call
+        which is the interesting case: ``mean`` lands between two peaks,
+        where there is no probability at all, while ``mode`` and
+        ``peak_mean`` pick one. If you want several, call
         :meth:`predict_proba` once and pass the result to
         :func:`lazy.metrics.grid_point_estimates` rather than re-running the
         model per definition.
@@ -352,10 +370,10 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
 
         Args:
             X: Features, shape (n_samples, n_features).
-            method: One of :data:`POINT_ESTIMATORS`: ``"z_peak"`` (the mode,
-                DC1's ``z_PEAK``), ``"z_weight"`` (DC1's main-peak weighted
-                mean), ``"z_mean"`` or ``"z_median"``.
-            z_grid: The grid to evaluate on; ``None`` for this model's
+            method: One of :data:`POINT_ESTIMATORS`: ``"mode"`` (the peak,
+                DC1's ``z_PEAK``), ``"peak_mean"`` (DC1's main-peak weighted
+                mean), ``"mean"`` or ``"median"``.
+            y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
         Returns:
@@ -363,7 +381,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         method = _check_method(method)
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         X = self._check_features(X, reset=False)
         return np.concatenate(
             [
@@ -373,7 +391,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         )
 
     def score(  # noqa: GS030 - scikit-learn's X, y.
-        self, X: _Features, y: npt.ArrayLike, z_grid: grid_lib.GridLike = None
+        self, X: _Features, y: npt.ArrayLike, y_grid: grid_lib.GridLike = None
     ) -> float:
         """Negative conditional-density-estimate loss -- higher is better.
 
@@ -385,14 +403,14 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Args:
             X: Features, shape (n_samples, n_features).
             y: Finite true target values, shape (n_samples,).
-            z_grid: The grid to evaluate on; ``None`` for this model's
+            y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
         Returns:
             Minus :func:`lazy.metrics.cde_loss`.
         """
         validation.check_is_fitted(self)
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
@@ -406,10 +424,10 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         self,
         X: _Features,
         y: npt.ArrayLike,
-        method: str = "z_peak",
-        z_grid: grid_lib.GridLike = None,
+        method: str = "mode",
+        y_grid: grid_lib.GridLike = None,
         *,
-        scale: metrics.Scale = "1+z",
+        scale: metrics.Scale = "none",
     ) -> pd.DataFrame:
         """Scores predictions for ``X`` with the full diagnostic metric set.
 
@@ -423,14 +441,14 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             y: Finite true target values, shape (n_samples,).
             method: The point estimate to score, one of
                 :data:`POINT_ESTIMATORS`.
-            z_grid: The grid to evaluate on; ``None`` for this model's
+            y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
             scale: How the point metrics (bias, scatter, outlier rates)
-                scale residuals. ``"1+z"``, the default, divides them by
-                ``1 + y``: photo-z's convention, and DC1's numbers.
-                ``"none"`` scores the plain ``prediction - y`` of any other
-                target, in its units, outlier thresholds included; see
-                :func:`lazy.metrics.point_metrics`.
+                scale residuals. ``"none"``, the default, scores the plain
+                ``prediction - y``, in the target's units, outlier
+                thresholds included; ``"1+y"`` divides it by ``1 + y``, the
+                photometric-redshift convention, which DC1's numbers need.
+                See :func:`lazy.metrics.point_metrics`.
 
         Returns:
             A one-row table labelled with :attr:`name_`; its ``scale``
@@ -440,19 +458,19 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         method = _check_method(method)
         if scale not in metrics.SCALES:
             raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         X = self._check_features(X, reset=False)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
-        z_pred, cde_terms, pit = [], [], []
+        y_pred, cde_terms, pit = [], [], []
         for rows, density in self._density_blocks(X, grid):
-            z_pred.append(metrics.grid_point_estimates(grid, density)[method])
+            y_pred.append(metrics.grid_point_estimates(grid, density)[method])
             terms, values = metrics.per_object_scores(y[rows], grid, density)
             cde_terms.append(terms)
             pit.append(values)
         return metrics.summarize_scores(
             y,
-            np.concatenate(z_pred),
+            np.concatenate(y_pred),
             np.concatenate(cde_terms),
             np.concatenate(pit),
             point=method,
@@ -534,7 +552,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         return f"{self.backend}:{version}" if version else self.backend
 
     def point_estimates(
-        self, pdfs: npt.ArrayLike, z_grid: grid_lib.GridLike = None
+        self, pdfs: npt.ArrayLike, y_grid: grid_lib.GridLike = None
     ) -> dict[str, _typing.FloatArray]:
         """Every supported reduction of already-computed densities.
 
@@ -542,15 +560,15 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         re-run the model each time.
 
         Args:
-            pdfs: Densities on ``z_grid``, shape (n_samples, n_bins).
-            z_grid: The grid they are on; ``None`` for this model's default.
+            pdfs: Densities on ``y_grid``, shape (n_samples, n_bins).
+            y_grid: The grid they are on; ``None`` for this model's default.
 
         Returns:
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
             values, shape (n_samples,).
         """
         validation.check_is_fitted(self)
-        grid = self._resolve_grid(z_grid)
+        grid = self._resolve_grid(y_grid)
         return metrics.grid_point_estimates(
             grid.centers, pdfs, bin_edges=grid.histogram_edges
         )
@@ -561,12 +579,12 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self, "grid_")
         return self.grid_
 
-    def _resolve_grid(self, z_grid: grid_lib.GridLike) -> grid_lib.Grid:
-        """A call-time grid, this model's default, or the DC1 grid, in order."""
-        if isinstance(z_grid, str) and z_grid == grid_lib.NATIVE:
+    def _resolve_grid(self, y_grid: grid_lib.GridLike) -> grid_lib.Grid:
+        """A call-time grid, else this model's default."""
+        if isinstance(y_grid, str) and y_grid == grid_lib.NATIVE:
             return self.native_grid
-        if z_grid is not None:
-            return grid_lib.as_grid(z_grid)
+        if y_grid is not None:
+            return grid_lib.as_grid(y_grid)
         default = getattr(self, "grid_", None)
         return default if default is not None else self._default_grid()
 

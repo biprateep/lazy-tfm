@@ -77,10 +77,10 @@ def test_the_cache_changes_nothing(name, data):
     _skip_without(name)
     _, _, X_test = data
     cached = _fit(name, data, kv_cache=True).predict_proba(
-        X_test, lazy.DC1_GRID
+        X_test, lazy.datasets.DC1_GRID
     )
     uncached = _fit(name, data, kv_cache=False).predict_proba(
-        X_test, lazy.DC1_GRID
+        X_test, lazy.datasets.DC1_GRID
     )
     rtol = lazy.ESTIMATORS[name].kv_cache_rtol
     np.testing.assert_allclose(
@@ -95,8 +95,8 @@ def test_chunking_changes_nothing(name, data):
     _, _, X_test = data
     whole = _fit(name, data, chunk_size=0, kv_cache=False)
     chunked = _fit(name, data, chunk_size=7, kv_cache=False)
-    whole_pdfs = whole.predict_proba(X_test, lazy.DC1_GRID)
-    chunked_pdfs = chunked.predict_proba(X_test, lazy.DC1_GRID)
+    whole_pdfs = whole.predict_proba(X_test, lazy.datasets.DC1_GRID)
+    chunked_pdfs = chunked.predict_proba(X_test, lazy.datasets.DC1_GRID)
     if lazy.ESTIMATORS[name].exact_chunking:
         np.testing.assert_array_equal(whole_pdfs, chunked_pdfs)
     else:  # independent of the chunk, but batched differently: rounding
@@ -139,8 +139,10 @@ def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
     _skip_without(name)
     _, _, X_test = data
     np.testing.assert_array_equal(
-        _fit(name, data).predict_proba(X_test, lazy.DC1_GRID),
-        _fit(name, data, bag_size=10**6).predict_proba(X_test, lazy.DC1_GRID),
+        _fit(name, data).predict_proba(X_test, lazy.datasets.DC1_GRID),
+        _fit(name, data, bag_size=10**6).predict_proba(
+            X_test, lazy.datasets.DC1_GRID
+        ),
     )
 
 
@@ -149,10 +151,14 @@ def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
 def test_bagging_runs_and_the_seed_controls_it(name, data):
     _skip_without(name)
     _, _, X_test = data
-    first = _fit(name, data, bag_size=0.5).predict_proba(X_test, lazy.DC1_GRID)
-    again = _fit(name, data, bag_size=0.5).predict_proba(X_test, lazy.DC1_GRID)
+    first = _fit(name, data, bag_size=0.5).predict_proba(
+        X_test, lazy.datasets.DC1_GRID
+    )
+    again = _fit(name, data, bag_size=0.5).predict_proba(
+        X_test, lazy.datasets.DC1_GRID
+    )
     other = _fit(name, data, bag_size=0.5, random_state=7).predict_proba(
-        X_test, lazy.DC1_GRID
+        X_test, lazy.datasets.DC1_GRID
     )
     np.testing.assert_array_equal(first, again)
     assert np.isfinite(first).all() and not np.array_equal(first, other)
@@ -165,7 +171,7 @@ def test_every_transform_runs(name, transforms, data):
     _skip_without(name)
     _, _, X_test = data
     pdfs = _fit(name, data, transforms=transforms).predict_proba(
-        X_test, lazy.DC1_GRID
+        X_test, lazy.datasets.DC1_GRID
     )
     assert np.isfinite(pdfs).all()
 
@@ -176,9 +182,9 @@ def test_the_auto_recipe_is_the_default(name, data):
     _skip_without(name)
     _, _, X_test = data
     np.testing.assert_array_equal(
-        _fit(name, data).predict_proba(X_test, lazy.DC1_GRID),
+        _fit(name, data).predict_proba(X_test, lazy.datasets.DC1_GRID),
         _fit(name, data, transforms="auto").predict_proba(
-            X_test, lazy.DC1_GRID
+            X_test, lazy.datasets.DC1_GRID
         ),
     )
 
@@ -193,4 +199,6 @@ def test_unshuffled_columns_and_missing_values_run(name, data):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", lazy.PerformanceWarning)
         model = _model(name, feature_shuffle=False).fit(X, z)
-    assert np.isfinite(model.predict_proba(X_test, lazy.DC1_GRID)).all()
+    assert np.isfinite(
+        model.predict_proba(X_test, lazy.datasets.DC1_GRID)
+    ).all()

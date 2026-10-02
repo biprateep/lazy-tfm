@@ -38,7 +38,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         feature_shuffle=True,
         bag_size=None,
         kv_cache=True,
-        z_grid=None,
+        y_grid=None,
         device="auto",
         random_state=0,
         chunk_size=8_192,
@@ -55,7 +55,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

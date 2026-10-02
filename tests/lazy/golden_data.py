@@ -22,7 +22,7 @@ import lazy
 GOLDEN_DIR = pathlib.Path(__file__).with_name("golden")
 
 #: The grid every golden density is tabulated on.
-GRID = lazy.DC1_GRID
+GRID = lazy.datasets.DC1_GRID
 
 #: Settings when the files were recorded (commit 5144b23), per backend.
 RECORDED_PARAMS: dict[str, dict[str, Any]] = {
@@ -72,7 +72,7 @@ CURRENT_PARAMS: dict[str, dict[str, Any]] = {
             if k != "inference"
         },
         "kv_cache": True,
-        "z_grid": GRID,
+        "y_grid": GRID,
         "random_state": 1,
     },
 }

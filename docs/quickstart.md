@@ -25,9 +25,10 @@ X_test, z_test = test.features("mag-color"), test.redshift
 model = lazy.LazyModel()                        # TabPFN-3.5, the default
 model.fit(X_train, z_train)
 
-pdfs = model.predict_proba(X_test, lazy.DC1_GRID)    # (20000, 200) densities
-z_peak = lazy.metrics.grid_point_estimates(lazy.DC1_GRID.centers, pdfs)["z_peak"]
-print(lazy.metrics.summarize(z_test, lazy.DC1_GRID.centers, pdfs, label="TabPFN-3.5"))
+pdfs = model.predict_proba(X_test, lazy.datasets.DC1_GRID)    # (20000, 200) densities
+mode = lazy.metrics.grid_point_estimates(lazy.datasets.DC1_GRID.centers, pdfs)["mode"]
+# scale="1+y": the photo-z convention, residuals divided by 1 + z, as in DC1.
+print(lazy.metrics.summarize(z_test, lazy.datasets.DC1_GRID, pdfs, label="TabPFN-3.5", scale="1+y"))
 ```
 
 ````{admonition} No GPU?
@@ -55,8 +56,9 @@ catalogue's files are not in random order), or pass
 ````
 
 Scoring the densities you already have, as above, costs nothing; calling
-`model.evaluate(X_test, z_test, z_grid=lazy.DC1_GRID)` instead runs the model again.
-Pass `lazy.DC1_GRID` to reproduce the Data Challenge's numbers: without a
+`model.evaluate(X_test, z_test, y_grid=lazy.datasets.DC1_GRID, scale="1+y")` instead runs the
+model again.
+Pass `lazy.datasets.DC1_GRID` to reproduce the Data Challenge's numbers: without a
 grid, a model answers on its own native grid (5,000 buckets for TabPFN), which
 is finer but not the challenge's convention.
 

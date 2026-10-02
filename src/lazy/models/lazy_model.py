@@ -12,8 +12,8 @@ switching between them is a string change rather than an import change::
     model = LazyModel("limix", n_estimators=8)
 
     model.fit(X_train, z_train)
-    pdfs = model.predict_proba(X_test, z_grid)
-    z = model.predict(X_test, method="z_peak")
+    pdfs = model.predict_proba(X_test, y_grid)
+    z = model.predict(X_test, method="mode")
 
 The concrete classes (:class:`lazy.models.tabfm.TabFMHistogram`,
 :class:`lazy.models.tabicl.TabICLQuantile`,
@@ -54,7 +54,7 @@ class LazyModel(base.BaseDensityRegressor):
     ``regressor_``, ...), so ``model.n_estimators`` and ``model.inference_``
     work without reaching into ``estimator_`` yourself.
 
-    ``get_params`` lists ``model``, ``z_grid`` and every parameter of the
+    ``get_params`` lists ``model``, ``y_grid`` and every parameter of the
     chosen backend, flattened, so :func:`sklearn.base.clone` and the search
     objects work with no prefix: ``GridSearchCV(model, {"n_dither": [1, 3]})``.
 
@@ -68,10 +68,10 @@ class LazyModel(base.BaseDensityRegressor):
             classifiers, ``"tabicl"`` from a quantile regression head,
             ``"tabpfn"`` and ``"limix"`` from the bucket masses TabPFN and
             LimiX-2 predict natively.
-        z_grid: Default output grid for this model: a
+        y_grid: Default output grid for this model: a
             :class:`lazy.grid.Grid`, an array of bin centres, or ``None``
             for the backend's native grid (its ``native_grid_`` after fit).
-            Every prediction method takes a ``z_grid`` that overrides it
+            Every prediction method takes a ``y_grid`` that overrides it
             per call.
         **params: Passed straight to the backend's constructor. See
             :class:`lazy.models.tabfm.TabFMHistogram`,
@@ -101,11 +101,11 @@ class LazyModel(base.BaseDensityRegressor):
         self,
         model: str = "tabpfn",
         *,
-        z_grid: grid_lib.GridLike = None,
+        y_grid: grid_lib.GridLike = None,
         **params: Any,
     ):
         self.model = model
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         # The backend's own parameters, exactly as given. They cannot be
         # attributes of their own: scikit-learn allows only names from this
         # signature, and which names a backend takes depends on `model`.
@@ -132,8 +132,8 @@ class LazyModel(base.BaseDensityRegressor):
             for k, v in sorted(self._params.items())
             if not _is_default(v, defaults, k)
         }
-        if self.z_grid is not None:
-            params = {"z_grid": self.z_grid, **params}
+        if self.y_grid is not None:
+            params = {"y_grid": self.y_grid, **params}
         inner = ", ".join(f"{k}={v!r}" for k, v in params.items())
         return f"LazyModel({self.model!r}{', ' + inner if inner else ''})"
 
@@ -183,7 +183,7 @@ class LazyModel(base.BaseDensityRegressor):
                 f"{', '.join(map(repr, unknown))}; "
                 f"its parameters are {sorted(defaults)}"
             )
-        return cls(z_grid=self.z_grid, **self._params)
+        return cls(y_grid=self.y_grid, **self._params)
 
     def __getattr__(self, name: str) -> Any:
         """Exposes the backend's parameters and fitted attributes.
@@ -237,7 +237,7 @@ class LazyModel(base.BaseDensityRegressor):
     # one's.
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
-        """Returns ``model`` and ``z_grid`` plus everything the backend takes.
+        """Returns ``model`` and ``y_grid`` plus everything the backend takes.
 
         Args:
             deep: Accepted for scikit-learn compatibility and ignored: the
@@ -250,7 +250,7 @@ class LazyModel(base.BaseDensityRegressor):
         params: dict[str, Any] = {"model": self.model}
         params.update(_backend_defaults(self.model) or {})
         params.update(self._params)
-        params["z_grid"] = self.z_grid
+        params["y_grid"] = self.y_grid
         return params
 
     def set_params(self, **params: Any) -> LazyModel:
@@ -266,7 +266,7 @@ class LazyModel(base.BaseDensityRegressor):
         backend it tries.
 
         Args:
-            **params: New values for ``model``, ``z_grid`` or any parameter
+            **params: New values for ``model``, ``y_grid`` or any parameter
                 of the backend.
 
         Returns:
@@ -275,8 +275,8 @@ class LazyModel(base.BaseDensityRegressor):
         Raises:
             ValueError: If the backend does not take one of ``params``.
         """
-        if "z_grid" in params:
-            self.z_grid = params.pop("z_grid")
+        if "y_grid" in params:
+            self.y_grid = params.pop("y_grid")
         model = params.pop("model", self.model)
         if model != self.model:
             old_defaults = _backend_defaults(self.model) or {}
@@ -294,7 +294,7 @@ class LazyModel(base.BaseDensityRegressor):
         if defaults is not None:
             for name in params:
                 if name not in defaults:
-                    valid = sorted(["model", "z_grid", *defaults])
+                    valid = sorted(["model", "y_grid", *defaults])
                     raise ValueError(
                         f"invalid parameter {name!r} for "
                         f"LazyModel({self.model!r}); "
@@ -317,20 +317,20 @@ def _is_default(value: Any, defaults: dict[str, Any], name: str) -> bool:
 def _constructor_defaults(
     cls: type[base.BaseDensityRegressor],
 ) -> dict[str, Any]:
-    """Returns ``{name: default}`` for ``cls``'s parameters but ``z_grid``."""
+    """Returns ``{name: default}`` for ``cls``'s parameters but ``y_grid``."""
     return {
         name: parameter.default
         for name, parameter in inspect.signature(
             cls.__init__
         ).parameters.items()
-        if name not in ("self", "z_grid")
+        if name not in ("self", "y_grid")
         and parameter.kind
         not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
     }
 
 
 def _backend_defaults(model: object) -> dict[str, Any] | None:
-    """Returns ``{name: default}`` for a backend's parameters but ``z_grid``.
+    """Returns ``{name: default}`` for a backend's parameters but ``y_grid``.
 
     Args:
         model: The backend name, which may not be registered.

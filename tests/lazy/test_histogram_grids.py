@@ -81,9 +81,9 @@ def test_histogram_point_estimates_agree_with_the_distribution(bar):
         grid.centers, masses / grid.widths, bin_edges=grid.edges
     )
     dist = distributions.HistogramDistribution(edges, masses)
-    np.testing.assert_allclose(estimates["z_mean"], dist.mean(), rtol=1e-12)
-    np.testing.assert_allclose(estimates["z_median"], dist.median(), atol=1e-12)
-    np.testing.assert_allclose(estimates["z_peak"], dist.mode())
+    np.testing.assert_allclose(estimates["mean"], dist.mean(), rtol=1e-12)
+    np.testing.assert_allclose(estimates["median"], dist.median(), atol=1e-12)
+    np.testing.assert_allclose(estimates["mode"], dist.mode())
 
 
 def test_histogram_cdf_at_centres_is_exact(bar):

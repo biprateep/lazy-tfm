@@ -28,7 +28,7 @@ X_train, X_test = train.features("mag-color"), test.features("mag-color")
 
 model = lazy.LazyModel().fit(X_train, train.redshift)   # TabPFN-3.5; wants a GPU
 pdfs = model.predict_proba(X_test)                      # densities on its native grid
-print(model.evaluate(X_test, test.redshift, z_grid=lazy.DC1_GRID))
+print(model.evaluate(X_test, test.redshift, y_grid=lazy.datasets.DC1_GRID, scale="1+y"))
 ```
 
 The API is scikit-learn's, with `predict_proba` returning a density on a grid

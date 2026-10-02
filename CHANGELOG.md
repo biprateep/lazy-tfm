@@ -33,6 +33,17 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Changed
 
+- The point metrics and plots measure plain residuals, `y_pred - y_true`, by
+  default: `scale` defaults to `"none"` in `evaluate`, `summarize`,
+  `summarize_scores`, `point_metrics`, `evaluate_grid_pdfs`, `plot_residuals`
+  and `diagnostic_panel` (new there). Pass `scale="1+y"` for the
+  photometric-redshift convention and DC1's numbers. Likewise
+  `plot_actual_vs_predicted` draws DC1's outlier boundary only with
+  `outlier_lines=True`.
+- A model without a native grid defaults to 200 bins over its training
+  targets' range, widened by 5% on each side, instead of DC1's grid;
+  `as_grid(None)` raises, since only a model knows its default. `fit`
+  records the targets' range as `y_range_`.
 - `lazy-tfm[all]` installs everything, the `qp` extra included; a test keeps
   every future extra in it.
 - One default per parameter on every backend: `n_estimators=8` (TabFM had 4),
@@ -57,6 +68,25 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 - TabFM runs in float32 on a CPU (bfloat16 before) and in bfloat16 on a GPU.
 - LimiX-2 shuffles a bagged member's columns as upstream does, after its
   pipeline, rather than permuting the inputs.
+
+### Renamed
+
+The general-purpose API no longer uses redshift vocabulary; it follows
+scikit-learn's `y` for the target. Only `lazy.datasets` and `lazy.selection`,
+which load astronomical data, keep it. There are no aliases: replace
+
+| 0.1 | 0.2 |
+| --- | --- |
+| `z_grid` (every estimator, `LazyModel`, `predict_proba`, `predict`, `score`, `evaluate`, metrics, plots) | `y_grid` |
+| `z_true`, `z_pred` (metrics, plots) | `y_true`, `y_pred` |
+| `Grid.z_min`, `Grid.z_max`, `Grid.linear(z_min, z_max, n_bins)` | `Grid.y_min`, `Grid.y_max`, `Grid.linear(y_min, y_max, n_bins)` |
+| point estimates `"z_peak"`, `"z_weight"`, `"z_mean"`, `"z_median"` (`predict(method=)`, `POINT_ESTIMATORS`, `grid_point_estimates` keys, `point=`) | `"mode"`, `"peak_mean"`, `"mean"`, `"median"` |
+| `metrics.z_peak`, `metrics.z_weight` | `metrics.mode`, `metrics.peak_mean` |
+| `plotting.plot_zphot_ztrue` | `plotting.plot_actual_vs_predicted` |
+| `plotting.plot_nz` | `plotting.plot_stacked_pdfs` |
+| `scale="1+z"` | `scale="1+y"` |
+| summary column `median_abs_ez` | `median_abs_error` |
+| `lazy.DC1_GRID`, `lazy.grid.DC1_GRID` | `lazy.datasets.DC1_GRID` |
 
 ### Removed
 

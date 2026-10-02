@@ -265,9 +265,9 @@ class HistogramDistribution(_Base):
         The density inside a bucket is its mass over its width; zero outside
         the buckets and in zero-width buckets.
         """
-        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
+        y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         widths = self.widths
-        index = np.searchsorted(self.bins, z, side="right") - 1
+        index = np.searchsorted(self.bins, y, side="right") - 1
         inside = (index >= 0) & (index < widths.size)
         index = np.clip(index, 0, widths.size - 1)
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -280,23 +280,23 @@ class HistogramDistribution(_Base):
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
-        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
+        y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         widths = self.widths
         probabilities = self.probabilities
         cumulative = np.concatenate(
             [np.zeros((self.npdf, 1)), np.cumsum(probabilities, axis=1)], axis=1
         )
         index = np.clip(
-            np.searchsorted(self.bins, z, side="right") - 1, 0, widths.size - 1
+            np.searchsorted(self.bins, y, side="right") - 1, 0, widths.size - 1
         )
         with np.errstate(divide="ignore", invalid="ignore"):
             fraction = np.where(
-                widths[index] > 0, (z - self.bins[index]) / widths[index], 1.0
+                widths[index] > 0, (y - self.bins[index]) / widths[index], 1.0
             )
         fraction = np.clip(fraction, 0.0, 1.0)
         value = cumulative[:, index] + probabilities[:, index] * fraction
-        value = np.where(z < self.bins[0], 0.0, value)
-        return np.where(z >= self.bins[-1], 1.0, value)
+        value = np.where(y < self.bins[0], 0.0, value)
+        return np.where(y >= self.bins[-1], 1.0, value)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
@@ -462,11 +462,11 @@ class QuantileDistribution(_Base):
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
-        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
-        out = np.empty((self.npdf, z.size))
+        y = np.atleast_1d(np.asarray(values, dtype=np.float64))
+        out = np.empty((self.npdf, y.size))
         for row in range(self.npdf):
             out[row] = np.interp(
-                z, self.locs[row], self.quants, left=0.0, right=1.0
+                y, self.locs[row], self.quants, left=0.0, right=1.0
             )
         return out
 
@@ -476,12 +476,12 @@ class QuantileDistribution(_Base):
         Constant between knots; zero outside the outermost values (where the
         tails sit as point masses) and on zero-width segments.
         """
-        z = np.atleast_1d(np.asarray(values, dtype=np.float64))
+        y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         step = np.diff(self.quants)
-        out = np.zeros((self.npdf, z.size))
+        out = np.zeros((self.npdf, y.size))
         for row in range(self.npdf):
             locs = self.locs[row]
-            segment = np.searchsorted(locs, z, side="right") - 1
+            segment = np.searchsorted(locs, y, side="right") - 1
             inside = (segment >= 0) & (segment < step.size)
             segment = np.clip(segment, 0, step.size - 1)
             width = locs[segment + 1] - locs[segment]

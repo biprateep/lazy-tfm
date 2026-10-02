@@ -19,9 +19,9 @@ import lazy
 class GaussianDummy(lazy.BaseDensityRegressor):
     """p(z | x) = N(x's first column + offset, sigma). Not a photo-z method."""
 
-    def __init__(self, *, sigma=0.1, z_grid=None):
+    def __init__(self, *, sigma=0.1, y_grid=None):
         self.sigma = sigma
-        self.z_grid = z_grid
+        self.y_grid = y_grid
 
     def _fit(self, X, y):
         self.offset_ = float(np.mean(y) - np.mean(X.iloc[:, 0]))
@@ -43,20 +43,29 @@ def data():
     return X, X["a"].to_numpy()
 
 
+def _default_grid(y):
+    """The grid a model without a native grid defaults to: over y's range."""
+    low, high = float(np.min(y)), float(np.max(y))
+    pad = lazy.base.DEFAULT_PADDING * (high - low)
+    return lazy.Grid.linear(low - pad, high + pad, lazy.base.DEFAULT_N_BINS)
+
+
 def test_fit_returns_self_and_sets_fitted_attributes(data):
     X, y = data
     est = GaussianDummy()
     assert est.fit(X, y) is est
     assert est.n_features_in_ == 2
     assert list(est.feature_names_in_) == ["a", "b"]
-    assert est.grid_ is lazy.DC1_GRID
+    assert est.y_range_ == (float(y.min()), float(y.max()))
+    assert est.grid_ == _default_grid(y)
 
 
 def test_predict_proba_is_normalized_on_the_grid(data):
     X, y = data
     pdfs = GaussianDummy().fit(X, y).predict_proba(X)
-    assert pdfs.shape == (len(X), lazy.DC1_GRID.n_bins)
-    assert np.allclose(np.trapezoid(pdfs, lazy.DC1_GRID.centers, axis=1), 1.0)
+    grid = _default_grid(y)
+    assert pdfs.shape == (len(X), grid.n_bins)
+    assert np.allclose(np.trapezoid(pdfs, grid.centers, axis=1), 1.0)
 
 
 def test_predict_pdf_is_an_alias_of_predict_proba(data):
@@ -83,7 +92,7 @@ def test_every_point_estimate_method_is_usable(data, method):
 def test_z_peak_is_the_default_method(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    assert np.array_equal(est.predict(X), est.predict(X, method="z_peak"))
+    assert np.array_equal(est.predict(X), est.predict(X, method="mode"))
 
 
 def test_unknown_method_names_the_alternatives(data):
@@ -115,14 +124,14 @@ def test_a_grid_passed_at_call_time_is_used(data):
         len(X),
         30,
     )
-    assert est.predict(X, z_grid=np.linspace(0.05, 2.95, 30)).shape == (len(X),)
+    assert est.predict(X, y_grid=np.linspace(0.05, 2.95, 30)).shape == (len(X),)
 
 
 def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
     X, y = data
     est = GaussianDummy(sigma=0.05).fit(X, y)
-    coarse = est.predict(X, z_grid=lazy.Grid.linear(0.0, 2.0, 50))
-    fine = est.predict(X, z_grid=lazy.Grid.linear(0.0, 2.0, 400))
+    coarse = est.predict(X, y_grid=lazy.Grid.linear(0.0, 2.0, 50))
+    fine = est.predict(X, y_grid=lazy.Grid.linear(0.0, 2.0, 400))
     assert est.offset_ is not None  # nothing was refitted
     # Same estimator, coarser resolution.
     assert np.abs(coarse - fine).max() < 0.05
@@ -130,7 +139,7 @@ def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
 
 def test_the_constructor_grid_is_the_default(data):
     X, y = data
-    est = GaussianDummy(z_grid=lazy.Grid.linear(0.0, 3.0, 37)).fit(X, y)
+    est = GaussianDummy(y_grid=lazy.Grid.linear(0.0, 3.0, 37)).fit(X, y)
     assert est.predict_proba(X).shape == (len(X), 37)
     # ... and a call-time grid still wins
     assert est.predict_proba(X, lazy.Grid.linear(0.0, 2.0, 11)).shape == (
@@ -171,7 +180,7 @@ def test_numpy_input_is_accepted(data):
     assert not hasattr(est, "feature_names_in_")  # as in scikit-learn
     assert est.predict_proba(X.to_numpy()).shape == (
         len(X),
-        lazy.DC1_GRID.n_bins,
+        lazy.datasets.DC1_GRID.n_bins,
     )
 
 
@@ -220,7 +229,7 @@ def test_evaluate_returns_a_one_row_metric_table(data):
     table = GaussianDummy().fit(X, y).evaluate(X, y)
     assert len(table) == 1
     assert table["model"].iloc[0] == "GaussianDummy"
-    assert table["point_estimate"].iloc[0] == "z_peak"
+    assert table["point_estimate"].iloc[0] == "mode"
     assert {"bias", "sigma_iqr", "cde_loss", "pit_ks"} <= set(table.columns)
 
 
@@ -242,8 +251,8 @@ def test_the_default_distribution_is_the_density_on_the_default_grid(data):
     est = GaussianDummy().fit(X, y)
     dist = est.predict_distribution(X)
     assert isinstance(dist, lazy.distributions.HistogramDistribution)
-    np.testing.assert_array_equal(dist.bins, lazy.DC1_GRID.edges)
-    masses = est.predict_proba(X) * lazy.DC1_GRID.widths
+    np.testing.assert_array_equal(dist.bins, _default_grid(y).edges)
+    masses = est.predict_proba(X) * _default_grid(y).widths
     np.testing.assert_allclose(
         dist.probabilities,
         masses / masses.sum(axis=1, keepdims=True),
@@ -257,8 +266,8 @@ def test_quantiles_agree_with_the_grid_median(data):
     median = est.predict_quantiles(X, [0.5])[:, 0]
     np.testing.assert_allclose(
         median,
-        est.predict(X, method="z_median"),
-        atol=lazy.DC1_GRID.widths[0],
+        est.predict(X, method="median"),
+        atol=_default_grid(y).widths[0],
     )
     low, mid, high = est.predict_quantiles(X).T
     assert (low <= mid).all() and (mid <= high).all()
@@ -268,8 +277,8 @@ def test_the_native_grid_is_requested_by_name(data):
     X, y = data
     est = _WithNativeGrid().fit(X, y)
     assert est.predict_proba(X, "native").shape == (len(X), 30)
-    assert est.grid_ == lazy.DC1_GRID  # still the default
-    native = _WithNativeGrid(z_grid="native").fit(X, y)
+    assert est.grid_ == _default_grid(y)  # still the default
+    native = _WithNativeGrid(y_grid="native").fit(X, y)
     assert native.grid_ == native.native_grid
     assert native.predict_proba(X).shape == (len(X), 30)
 
@@ -302,13 +311,13 @@ def test_as_grid_refuses_the_native_sentinel():
         lambda est, X, y: est.native_grid,
     ],
 )
-@pytest.mark.parametrize("z_grid", [None, "native"])
+@pytest.mark.parametrize("y_grid", [None, "native"])
 def test_every_method_of_an_unfitted_model_raises_not_fitted(
-    data, call, z_grid
+    data, call, y_grid
 ):
     X, y = data
     with pytest.raises(exceptions.NotFittedError):
-        call(_WithNativeGrid(z_grid=z_grid), X, y)
+        call(_WithNativeGrid(y_grid=y_grid), X, y)
 
 
 def test_the_native_grid_error_tells_unfitted_from_absent(data):
@@ -378,16 +387,16 @@ def test_fitting_no_rows_is_refused_like_scikit_learn(data):
         (lambda est, X: est.predict_proba(X), (0, 30)),
         (lambda est, X: est.predict_cdf(X), (0, 30)),
         (lambda est, X: est.predict(X), (0,)),
-        (lambda est, X: est.predict(X, method="z_median"), (0,)),
+        (lambda est, X: est.predict(X, method="median"), (0,)),
         (lambda est, X: est.predict_quantiles(X, [0.1, 0.5]), (0, 2)),
-        (lambda est, X: est.predict_proba(X, lazy.DC1_GRID), (0, 200)),
+        (lambda est, X: est.predict_proba(X, lazy.datasets.DC1_GRID), (0, 200)),
     ],
 )
 def test_predicting_no_rows_gives_empty_results_without_inference(
     data, call, shape
 ):
     X, y = data
-    est = _CountingDummy(z_grid=lazy.Grid.linear(0.0, 3.0, 30)).fit(X, y)
+    est = _CountingDummy(y_grid=lazy.Grid.linear(0.0, 3.0, 30)).fit(X, y)
     out = call(est, X.iloc[:0])
     assert out.shape == shape
     assert getattr(est, "calls_", 0) == 0
@@ -434,11 +443,11 @@ def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
     X, y = data
     est = GaussianDummy().fit(X, y)
     pdfs = est.predict_proba(X)
-    grid = lazy.DC1_GRID
+    grid = _default_grid(y)
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 10 * 8 * grid.n_bins)
     np.testing.assert_array_equal(
-        est.predict(X, method="z_median"),
-        lazy.metrics.grid_point_estimates(grid, pdfs)["z_median"],
+        est.predict(X, method="median"),
+        lazy.metrics.grid_point_estimates(grid, pdfs)["median"],
     )
     assert est.score(X, y) == -lazy.metrics.cde_loss(y, grid, pdfs)
     pd.testing.assert_frame_equal(
@@ -447,13 +456,16 @@ def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
     )
 
 
-def test_evaluate_can_score_plain_residuals(data):
+def test_evaluate_scores_plain_residuals_by_default(data):
     X, y = data
     est = _CountingDummy().fit(X, y)
-    table = est.evaluate(X, y, scale="none")
+    table = est.evaluate(X, y)
     assert table["scale"].iloc[0] == "none"
     assert table["bias"].iloc[0] == np.median(est.predict(X) - y)
-    assert est.evaluate(X, y)["scale"].iloc[0] == "1+z"
+    scaled = est.evaluate(X, y, scale="1+y")
+    assert scaled["scale"].iloc[0] == "1+y"
+    expected = np.median((est.predict(X) - y) / (1 + y))
+    assert scaled["bias"].iloc[0] == pytest.approx(expected)
     calls = est.calls_
     with pytest.raises(ValueError, match="scale must be one of"):
         est.evaluate(X, y, scale="log")

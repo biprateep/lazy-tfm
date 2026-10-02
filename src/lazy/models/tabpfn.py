@@ -323,7 +323,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
             exact; v3 and later only), or ``False``. Worth its memory
             whenever the query set is much larger than the context.
-        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
+        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the bar distribution's own buckets, in full).
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
@@ -402,7 +402,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
-        z_grid: grid_lib.GridLike = None,
+        y_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -419,7 +419,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

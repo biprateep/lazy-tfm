@@ -184,7 +184,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             ``mixed_precision=True`` the cache is stored in float16, and the
             cached and uncached answers agree to float16 rounding (about
             1e-3 of the quantiles' spread).
-        z_grid: Default output grid: a :class:`lazy.grid.Grid`, an
+        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (equal-width bins, 1,000 across the training targets' range,
             which extend a quarter of that range beyond it on each side).
@@ -284,7 +284,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         feature_shuffle: bool = True,
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
-        z_grid: grid_lib.GridLike = None,
+        y_grid: grid_lib.GridLike = None,
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -300,7 +300,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         self.feature_shuffle = feature_shuffle
         self.bag_size = bag_size
         self.kv_cache = kv_cache
-        self.z_grid = z_grid
+        self.y_grid = y_grid
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
@@ -540,8 +540,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             warnings.warn(
                 f"{outside} of {len(X)} rows put more than "
                 f"{_OUTSIDE_TOLERANCE:.0%} of their probability outside the "
-                f"native grid [{grid.z_min:g}, {grid.z_max:g}], and their "
-                "densities there are renormalised. Pass a wider z_grid, or "
+                f"native grid [{grid.y_min:g}, {grid.y_max:g}], and their "
+                "densities there are renormalised. Pass a wider y_grid, or "
                 "use predict_distribution, which has full support.",
                 UserWarning,
                 skip_file_prefixes=(_PACKAGE_PREFIX,),
@@ -711,12 +711,12 @@ def _mass_outside(
         grid: The grid they are tabulated on.
 
     Returns:
-        The probability below ``grid.z_min`` plus that above ``grid.z_max``,
+        The probability below ``grid.y_min`` plus that above ``grid.y_max``,
         shape ``(n_rows,)``: a lower bound, short by at most one quantile
         level on each side.
     """
     levels = np.r_[0.0, dist.quants, 1.0]
     n_levels = dist.quants.size
-    below = np.count_nonzero(dist.locs < grid.z_min, axis=1)
-    above = np.count_nonzero(dist.locs > grid.z_max, axis=1)
+    below = np.count_nonzero(dist.locs < grid.y_min, axis=1)
+    above = np.count_nonzero(dist.locs > grid.y_max, axis=1)
     return levels[below] + (1.0 - levels[n_levels + 1 - above])

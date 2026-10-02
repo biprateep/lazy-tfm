@@ -287,8 +287,8 @@ def test_the_default_grid_is_native_and_integrates_to_one(cls, data):
 @pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_a_constructor_grid_overrides_the_native_one(cls, data):
     X, z, X_test = data
-    model = cls(z_grid=lazy.DC1_GRID).fit(X, z)
-    assert model.grid_ == lazy.DC1_GRID
+    model = cls(y_grid=lazy.datasets.DC1_GRID).fit(X, z)
+    assert model.grid_ == lazy.datasets.DC1_GRID
     assert model.predict_proba(X_test).shape == (len(X_test), 200)
     assert model.predict_proba(X_test, "native").shape[1] == (
         model.native_grid_.n_bins
@@ -348,19 +348,27 @@ def test_a_bag_as_large_as_the_context_is_no_bag(cls, data):
 def test_every_transform_runs(cls, transforms, data):
     X, z, X_test = data
     model = cls(transforms=transforms, bag_size=0.6).fit(X, z)
-    pdfs = model.predict_proba(X_test, lazy.DC1_GRID)
+    pdfs = model.predict_proba(X_test, lazy.datasets.DC1_GRID)
     assert np.isfinite(pdfs).all() and pdfs.shape == (len(X_test), 200)
 
 
 @pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_the_same_seed_repeats_and_another_does_not(cls, data):
     X, z, X_test = data
-    first = cls(bag_size=0.5).fit(X, z).predict_proba(X_test, lazy.DC1_GRID)
-    again = cls(bag_size=0.5).fit(X, z).predict_proba(X_test, lazy.DC1_GRID)
+    first = (
+        cls(bag_size=0.5)
+        .fit(X, z)
+        .predict_proba(X_test, lazy.datasets.DC1_GRID)
+    )
+    again = (
+        cls(bag_size=0.5)
+        .fit(X, z)
+        .predict_proba(X_test, lazy.datasets.DC1_GRID)
+    )
     other = (
         cls(bag_size=0.5, random_state=1)
         .fit(X, z)
-        .predict_proba(X_test, lazy.DC1_GRID)
+        .predict_proba(X_test, lazy.datasets.DC1_GRID)
     )
     np.testing.assert_array_equal(first, again)
     assert not np.array_equal(first, other)
@@ -677,9 +685,9 @@ def test_a_backend_without_the_uniform_features_cannot_register():
     class Incomplete(standins.HistogramStandIn):
         backend = "incomplete"
 
-        def __init__(self, *, n_estimators=4, z_grid=None, device="cpu"):
+        def __init__(self, *, n_estimators=4, y_grid=None, device="cpu"):
             self.n_estimators = n_estimators
-            self.z_grid = z_grid
+            self.y_grid = y_grid
             self.device = device
 
     with pytest.raises(TypeError, match="cannot be registered") as error:
@@ -735,10 +743,10 @@ def test_blocked_scoring_matches_the_whole_array(
     grid = model.grid_
     pdfs = model.predict_proba(X_test)
     whole = {
-        "predict": lazy.metrics.grid_point_estimates(grid, pdfs)["z_weight"],
+        "predict": lazy.metrics.grid_point_estimates(grid, pdfs)["peak_mean"],
         "score": -lazy.metrics.cde_loss(z_test, grid, pdfs),
         "evaluate": lazy.metrics.summarize(
-            z_test, grid, pdfs, point="z_weight", label=model.name_
+            z_test, grid, pdfs, point="peak_mean", label=model.name_
         ),
     }
     calls = []
@@ -755,14 +763,14 @@ def test_blocked_scoring_matches_the_whole_array(
     # product than the whole array, which some BLAS builds round differently
     # in the last bit.
     np.testing.assert_allclose(
-        model.predict(X_test, method="z_weight"), whole["predict"], rtol=1e-12
+        model.predict(X_test, method="peak_mean"), whole["predict"], rtol=1e-12
     )
     assert max(calls) == (4 if chunk_size else 7) and len(calls) > 1
     assert model.score(X_test, z_test) == pytest.approx(
         whole["score"], rel=1e-12
     )
     pd.testing.assert_frame_equal(
-        model.evaluate(X_test, z_test, method="z_weight"),
+        model.evaluate(X_test, z_test, method="peak_mean"),
         whole["evaluate"],
         check_exact=False,
         rtol=1e-12,

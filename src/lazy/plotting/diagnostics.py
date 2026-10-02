@@ -3,8 +3,8 @@
 """The standard diagnostic figures, drawn from PDFs and truth.
 
 These are the plots that decide whether a conditional density estimator is any
-good (photo-z's standard set; the calibration plots apply to any target), and
-the reason they live in the library rather than in a notebook is that the
+good, for any continuous target, and the reason they live in the library
+rather than in a notebook is that the
 comparison only means anything when every method is drawn the same way, on the
 same axes, at the same limits. Each function draws into an axes you supply (or
 makes one), returns it, and changes no global state -- call
@@ -14,7 +14,7 @@ rcParams::
     from lazy import plotting
 
     plotting.use_style()
-    fig = plotting.diagnostic_panel(z_true, est.grid_, pdfs)
+    fig = plotting.diagnostic_panel(y_true, est.grid_, pdfs)
 
 The PDF plots take the grid the densities are on: a
 :class:`lazy.grid.Grid`, which says how they integrate (a
@@ -24,15 +24,20 @@ trapezoid rule, with ``bin_edges=`` to mark them as histograms.
 
 Two families of diagnostic, and they answer different questions:
 
-* **Point accuracy** -- :func:`plot_zphot_ztrue`, :func:`plot_residuals`. How
-  close is the single value you would quote? Scatter, bias, outliers.
+* **Point accuracy** -- :func:`plot_actual_vs_predicted`,
+  :func:`plot_residuals`. How close is the single value you would quote?
+  Scatter, bias, outliers.
 * **Calibration** -- :func:`plot_pit`, :func:`plot_pit_qq`,
   :func:`plot_coverage`. Are the *widths* honest? A model can have excellent
   point accuracy and badly wrong error bars, and only these plots show it.
 
-:func:`plot_nz` is a third thing again: whether the stacked PDFs recover the
-distribution of the target over the sample -- for redshift, the n(z) that
-cosmological analyses actually consume.
+:func:`plot_stacked_pdfs` is a third thing again: whether the stacked PDFs
+recover the distribution of the target over the whole sample (for photometric
+redshifts, the n(z) that cosmological analyses consume).
+
+The point plots measure plain residuals, ``y_pred - y_true``, by default.
+``scale="1+y"`` and ``outlier_lines=True`` add the photometric-redshift
+conventions: residuals divided by ``1 + y_true``, and DC1's outlier boundary.
 """
 
 from __future__ import annotations
@@ -54,12 +59,12 @@ from lazy.plotting import style
 __all__ = [
     "diagnostic_panel",
     "plot_coverage",
-    "plot_nz",
+    "plot_stacked_pdfs",
     "plot_pdfs",
     "plot_pit",
     "plot_pit_qq",
     "plot_residuals",
-    "plot_zphot_ztrue",
+    "plot_actual_vs_predicted",
 ]
 
 _OUTLIER_FLOOR = 0.06
@@ -80,12 +85,12 @@ def _axes(ax: mpl_axes.Axes | None, **kwargs: Any) -> mpl_axes.Axes:
 
 
 def _geometry(
-    z_grid: _GridLike, bin_edges: npt.ArrayLike | None
+    y_grid: _GridLike, bin_edges: npt.ArrayLike | None
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
     """The grid's centres, and its bin edges if its densities are histograms.
 
     Args:
-        z_grid: A :class:`lazy.grid.Grid`, or bin centres, shape (g,).
+        y_grid: A :class:`lazy.grid.Grid`, or bin centres, shape (g,).
         bin_edges: The edges of histogram densities on centres, shape
             (g + 1,), or None.
 
@@ -98,26 +103,26 @@ def _geometry(
             do not fit the centres, or bare centres are not uniformly
             spaced, which leaves their bins unknown.
     """
-    if isinstance(z_grid, grid.Grid):
+    if isinstance(y_grid, grid.Grid):
         if bin_edges is not None:
             raise ValueError(
                 "pass either a Grid or bin_edges, not both: the Grid "
                 "carries its own edges"
             )
-        return z_grid.centers, z_grid.histogram_edges
-    centers = np.asarray(z_grid, dtype=float)
+        return y_grid.centers, y_grid.histogram_edges
+    centers = np.asarray(y_grid, dtype=float)
     if bin_edges is not None:
         edges = np.asarray(bin_edges, dtype=float)
         if edges.shape != (centers.size + 1,):
             raise ValueError(
-                f"bin_edges must have one more value than z_grid: "
+                f"bin_edges must have one more value than y_grid: "
                 f"{edges.shape=}, {centers.shape=}"
             )
         return centers, edges
     spacing = np.diff(centers)
     if spacing.size and not np.allclose(spacing, spacing[0], rtol=1e-6):
         raise ValueError(
-            "z_grid's centres are not uniformly spaced, so their bins "
+            "y_grid's centres are not uniformly spaced, so their bins "
             "cannot be told from them: pass the lazy.grid.Grid the PDFs are "
             "on (e.g. est.grid_) or bin_edges="
         )
@@ -177,56 +182,55 @@ def _central_range(
 
 
 def _finite_pairs(
-    z_true: npt.ArrayLike, z_pred: npt.ArrayLike
+    y_true: npt.ArrayLike, y_pred: npt.ArrayLike
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """The (true, predicted) pairs where both are finite.
 
     Raises:
         ValueError: If the shapes differ or no pair is finite.
     """
-    z_true = np.asarray(z_true, dtype=float).ravel()
-    z_pred = np.asarray(z_pred, dtype=float).ravel()
-    if z_true.shape != z_pred.shape:
+    y_true = np.asarray(y_true, dtype=float).ravel()
+    y_pred = np.asarray(y_pred, dtype=float).ravel()
+    if y_true.shape != y_pred.shape:
         raise ValueError(
-            f"z_true and z_pred differ in size: {z_true.size} != {z_pred.size}"
+            f"y_true and y_pred differ in size: {y_true.size} != {y_pred.size}"
         )
-    finite = np.isfinite(z_true) & np.isfinite(z_pred)
+    finite = np.isfinite(y_true) & np.isfinite(y_pred)
     if not finite.any():
         raise ValueError("no object has a finite true and predicted value")
-    return z_true[finite], z_pred[finite]
+    return y_true[finite], y_pred[finite]
 
 
-def plot_zphot_ztrue(
-    z_true: npt.ArrayLike,
-    z_pred: npt.ArrayLike,
+def plot_actual_vs_predicted(
+    y_true: npt.ArrayLike,
+    y_pred: npt.ArrayLike,
     *,
     ax: mpl_axes.Axes | None = None,
     bins: int = 200,
-    z_min: float | None = None,
-    z_max: float | None = None,
-    outlier_lines: bool = True,
+    y_min: float | None = None,
+    y_max: float | None = None,
+    outlier_lines: bool = False,
     cmap: str | None = None,
     **kwargs: Any,
 ) -> mpl_axes.Axes:
     """Plots predicted against true values as a log-density image.
 
-    A scatter plot of a survey-sized sample is a black blob, so this is a 2D
+    A scatter plot of a large sample is a black blob, so this is a 2D
     histogram on a log colour scale -- which is also the only way the outlier
     islands (catastrophic failures at the wrong value) stay visible against
     the main locus. Objects whose true or predicted value is not finite are
     left out.
 
     Args:
-        z_true: True values, shape (n_objects,).
-        z_pred: Point estimates, shape (n_objects,).
+        y_true: True values, shape (n_objects,).
+        y_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width square figure if None.
         bins: Number of histogram bins along each axis.
-        z_min: Lower limit of both axes; the smallest value if None.
-        z_max: Upper limit of both axes; the largest value if None.
-        outlier_lines: Draw the DC1 outlier boundary
-            ``|z_pred - z_true| = 0.06 (1 + z_true)``, so the fraction of
-            points outside it is readable by eye. A photo-z convention: turn
-            it off for other targets.
+        y_min: Lower limit of both axes; the smallest value if None.
+        y_max: Upper limit of both axes; the largest value if None.
+        outlier_lines: Draw DC1's photometric-redshift outlier boundary,
+            ``|y_pred - y_true| = 0.06 (1 + y_true)``, so the fraction of
+            points outside it is readable by eye.
         cmap: Colormap name; the rcParams default if None.
         **kwargs: Passed to ``ax.hist2d``.
 
@@ -236,15 +240,15 @@ def plot_zphot_ztrue(
     Raises:
         ValueError: If no object has a finite true and predicted value.
     """
-    z_true, z_pred = _finite_pairs(z_true, z_pred)
+    y_true, y_pred = _finite_pairs(y_true, y_pred)
     ax = _axes(ax, width="column", aspect="square")
-    both = np.concatenate([z_true, z_pred])
-    lo = float(z_min if z_min is not None else both.min())
-    hi = float(z_max if z_max is not None else both.max())
+    both = np.concatenate([y_true, y_pred])
+    lo = float(y_min if y_min is not None else both.min())
+    hi = float(y_max if y_max is not None else both.max())
     if not hi > lo:  # One value: centre a unit range on it.
         lo, hi = lo - 0.5, hi + 0.5
     extent = [[lo, hi], [lo, hi]]
-    counts, _, _ = np.histogram2d(z_true, z_pred, bins=bins, range=extent)
+    counts, _, _ = np.histogram2d(y_true, y_pred, bins=bins, range=extent)
     # Fixed limits: autoscaling a sample whose every bin holds one object
     # gives vmin == vmax, and a blank panel.
     kwargs.setdefault(
@@ -252,8 +256,8 @@ def plot_zphot_ztrue(
     )
     kwargs.setdefault("cmin", 1)
     ax.hist2d(
-        z_true,
-        z_pred,
+        y_true,
+        y_pred,
         bins=bins,
         range=extent,
         cmap=cmap or plt.rcParams["image.cmap"],
@@ -268,38 +272,38 @@ def plot_zphot_ztrue(
             )
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
-    ax.set_xlabel(r"$z_{\rm true}$")
-    ax.set_ylabel(r"$z_{\rm phot}$")
+    ax.set_xlabel(r"$y_{\rm true}$")
+    ax.set_ylabel(r"$y_{\rm pred}$")
     return ax
 
 
 def plot_residuals(
-    z_true: npt.ArrayLike,
-    z_pred: npt.ArrayLike,
+    y_true: npt.ArrayLike,
+    y_pred: npt.ArrayLike,
     *,
     ax: mpl_axes.Axes | None = None,
     n_bins: int = 20,
     quantiles: tuple[float, float, float] = (16.0, 50.0, 84.0),
-    scale: Literal["1+z", "none"] = "1+z",
+    scale: Literal["1+y", "none"] = "none",
 ) -> mpl_axes.Axes:
-    """Plots the scaled residual against the true value.
+    """Plots the residual against the true value.
 
-    The scaled residual is ``(z_phot - z_true) / (1 + z_true)``, photo-z's
-    convention; ``scale="none"`` plots the plain ``z_phot - z_true`` for
-    other targets. The running median and its 16th-84th percentile band say
-    where the bias lives: a model can have a fine global bias and still be
-    systematically high at low z and low at high z, which this shows and a
-    single number hides. Objects whose true or predicted value is not
+    The residual is ``y_pred - y_true``, or with ``scale="1+y"`` the
+    photometric-redshift convention ``(y_pred - y_true) / (1 + y_true)``.
+    The running median and its 16th-84th percentile band say where the bias
+    lives: a model can have a fine global bias and still be systematically
+    high at low values and low at high ones, which this shows and a single
+    number hides. Objects whose true or predicted value is not
     finite are left out.
 
     Args:
-        z_true: True values, shape (n_objects,).
-        z_pred: Point estimates, shape (n_objects,).
+        y_true: True values, shape (n_objects,).
+        y_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width figure if None.
         n_bins: Number of equal-count bins in the true value.
         quantiles: Lower edge, centre line and upper edge of the band, as
             percentiles between 0 and 100.
-        scale: ``"1+z"`` to divide the residual by ``1 + z_true``, or
+        scale: ``"1+y"`` to divide the residual by ``1 + y_true``, or
             ``"none"``.
 
     Returns:
@@ -307,41 +311,41 @@ def plot_residuals(
 
     Raises:
         ValueError: If ``scale`` is unknown, no object has a finite true
-            and predicted value, or ``scale="1+z"`` meets a true value at
-            or below -1, where ``1 + z_true`` is not a scale.
+            and predicted value, or ``scale="1+y"`` meets a true value at
+            or below -1, where ``1 + y_true`` is not a scale.
     """
-    if scale not in ("1+z", "none"):
-        raise ValueError(f"scale must be '1+z' or 'none': {scale=}")
-    z_true, z_pred = _finite_pairs(z_true, z_pred)
-    if scale == "1+z":
-        if (z_true <= -1.0).any():
+    if scale not in ("1+y", "none"):
+        raise ValueError(f"scale must be '1+y' or 'none': {scale=}")
+    y_true, y_pred = _finite_pairs(y_true, y_pred)
+    if scale == "1+y":
+        if (y_true <= -1.0).any():
             raise ValueError(
-                "scale='1+z' needs every true value above -1; pass "
-                "scale='none' for a target that is not a redshift"
+                "scale='1+y' needs every true value above -1; pass "
+                "scale='none' for plain residuals"
             )
-        ez = (z_pred - z_true) / (1.0 + z_true)
-        ylabel = r"$(z_{\rm phot} - z_{\rm true}) / (1 + z_{\rm true})$"
+        residual = (y_pred - y_true) / (1.0 + y_true)
+        ylabel = r"$(y_{\rm pred} - y_{\rm true}) / (1 + y_{\rm true})$"
     else:
-        ez = z_pred - z_true
-        ylabel = r"$z_{\rm phot} - z_{\rm true}$"
+        residual = y_pred - y_true
+        ylabel = r"$y_{\rm pred} - y_{\rm true}$"
     ax = _axes(ax, width="column", aspect="tall")
-    edges = np.quantile(z_true, np.linspace(0, 1, n_bins + 1))
+    edges = np.quantile(y_true, np.linspace(0, 1, n_bins + 1))
     edges = np.unique(edges)
     centers = 0.5 * (edges[1:] + edges[:-1])
     index = np.clip(
-        np.searchsorted(edges, z_true, side="right") - 1, 0, len(centers) - 1
+        np.searchsorted(edges, y_true, side="right") - 1, 0, len(centers) - 1
     )
     stats = np.full((len(centers), 3), np.nan)
     for i in range(len(centers)):
         rows = index == i
         if rows.any():
-            stats[i] = np.percentile(ez[rows], quantiles)
+            stats[i] = np.percentile(residual[rows], quantiles)
     ax.axhline(0.0, color="k", ls="--", lw=0.8)
     ax.fill_between(
         centers, stats[:, 0], stats[:, 2], alpha=0.3, lw=0, color="C0"
     )
     ax.plot(centers, stats[:, 1], color="C0")
-    ax.set_xlabel(r"$z_{\rm true}$")
+    ax.set_xlabel(r"$y_{\rm true}$")
     ax.set_ylabel(ylabel)
     return ax
 
@@ -465,11 +469,11 @@ def plot_coverage(
     return ax
 
 
-def plot_nz(
-    z_grid: _GridLike,
+def plot_stacked_pdfs(
+    y_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
-    z_true: npt.ArrayLike | None = None,
+    y_true: npt.ArrayLike | None = None,
     ax: mpl_axes.Axes | None = None,
     label: str | None = "stacked PDFs",
     truth_label: str | None = "truth",
@@ -479,18 +483,19 @@ def plot_nz(
 ) -> mpl_axes.Axes:
     """Plots the sample distribution of the target: stacked PDFs against truth.
 
-    Stacking is only an estimator of N(z) under assumptions that photo-z PDFs
-    rarely satisfy exactly, but it is what most analyses do, so how badly it
-    fails is worth knowing. Each PDF is normalised by its grid's own rule
-    before stacking, and the x-axis spans the truth and the central 99.8% of
-    the stacked mass, not the whole grid -- a model's native grid reaches far
-    into the tails.
+    The mean of the PDFs estimates the sample's distribution of the target
+    only under assumptions that real PDFs rarely satisfy exactly (in
+    photometric-redshift work this is the stacked n(z)), but it is what many
+    analyses do, so how badly it fails is worth knowing. Each PDF is
+    normalised by its grid's own rule before stacking, and the x-axis spans
+    the truth and the central 99.8% of the stacked mass, not the whole grid
+    -- a model's native grid reaches far into the tails.
 
     Args:
-        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+        y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
             uniformly spaced bin centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
-        z_true: True values, shape (n_objects,). If given, histogrammed
+        pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid).
+        y_true: True values, shape (n_objects,). If given, histogrammed
             on ``truth_bins`` for comparison.
         ax: The axes to draw into; a new column-width figure if None.
         label: Legend label of the stacked PDFs.
@@ -509,14 +514,14 @@ def plot_nz(
         ValueError: If bare centres are not uniformly spaced; pass the Grid
             or ``bin_edges``.
     """
-    centers, edges = _geometry(z_grid, bin_edges)
+    centers, edges = _geometry(y_grid, bin_edges)
     _, density = metrics.normalize_grid_pdfs(centers, pdfs, bin_edges=edges)
     stacked = density.mean(axis=0)
     ax = _axes(ax, width="column", aspect="golden")
     _stairs_or_line(ax, centers, edges, stacked, label=label, **kwargs)
     truth = None
-    if z_true is not None:
-        truth = np.asarray(z_true, dtype=float)
+    if y_true is not None:
+        truth = np.asarray(y_true, dtype=float)
         finite = truth[np.isfinite(truth)]
         ax.hist(
             finite,
@@ -529,8 +534,8 @@ def plot_nz(
         )
     ax.set_xlim(*_central_range(centers, edges, stacked, truth))
     ax.set_ylim(bottom=0)
-    ax.set_xlabel(r"$z$")
-    ax.set_ylabel(r"$n(z)$")
+    ax.set_xlabel(r"$y$")
+    ax.set_ylabel("density")
     return ax
 
 
@@ -583,10 +588,10 @@ def _pdf_axes(
 
 
 def plot_pdfs(
-    z_grid: _GridLike,
+    y_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
-    z_true: npt.ArrayLike | None = None,
+    y_true: npt.ArrayLike | None = None,
     indices: npt.ArrayLike | None = None,
     n_objects: int = 6,
     random_state: int = 0,
@@ -604,11 +609,11 @@ def plot_pdfs(
     objects' true values and the central 99.8% of each one's mass.
 
     Args:
-        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+        y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
             uniformly spaced bin centres, shape (n_grid,).
-        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid), or one PDF,
+        pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid), or one PDF,
             shape (n_grid,).
-        z_true: True values, shape (n_objects,), marked as dashed
+        y_true: True values, shape (n_objects,), marked as dashed
             vertical lines if given; a scalar with one PDF.
         indices: Rows of ``pdfs`` to draw; ``n_objects`` random rows if None.
         n_objects: Number of objects drawn at random when ``indices`` is
@@ -627,7 +632,7 @@ def plot_pdfs(
             or ``bin_edges``), ``pdfs`` does not fit the grid, or there is
             no object to draw.
     """
-    centers, edges = _geometry(z_grid, bin_edges)
+    centers, edges = _geometry(y_grid, bin_edges)
     pdfs = np.atleast_2d(np.asarray(pdfs, dtype=float))
     if pdfs.ndim != 2 or pdfs.shape[1] != centers.size:
         raise ValueError(
@@ -637,8 +642,8 @@ def plot_pdfs(
     axes_array = _pdf_axes(axes, len(indices))
     truth = (
         None
-        if z_true is None
-        else np.atleast_1d(np.asarray(z_true, dtype=float))
+        if y_true is None
+        else np.atleast_1d(np.asarray(y_true, dtype=float))
     )
     _, density = metrics.normalize_grid_pdfs(
         centers, pdfs[indices], bin_edges=edges
@@ -656,39 +661,44 @@ def plot_pdfs(
             ax.axvline(float(truth[row]), color="k", ls="--", lw=0.8)
         ax.set_xlim(*xlim)
         ax.set_ylim(bottom=0)
-        ax.set_xlabel(r"$z$")
+        ax.set_xlabel(r"$y$")
     for ax in axes_array[len(indices) :]:
         ax.set_visible(False)
     return axes_array
 
 
 def diagnostic_panel(
-    z_true: npt.ArrayLike,
-    z_grid: _GridLike,
+    y_true: npt.ArrayLike,
+    y_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
-    point: str = "z_peak",
+    point: str = "mode",
     label: str | None = None,
     bin_edges: npt.ArrayLike | None = None,
+    scale: Literal["1+y", "none"] = "none",
 ) -> mpl_figure.Figure:
     """Draws the four-panel summary of one estimator.
 
-    The panels cover accuracy, bias, calibration and N(z): z_phot-z_true, the
-    residual trend, the PIT Q-Q and the stacked N(z). The figure is returned
+    The panels cover accuracy, bias, calibration and the sample
+    distribution: predicted against true values, the residual trend, the
+    PIT Q-Q and the stacked PDFs against the truth. The figure is returned
     open; closing it is up to the caller.
 
     Args:
-        z_true: True values, shape (n_objects,).
-        z_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
+        y_true: True values, shape (n_objects,).
+        y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
             uniformly spaced bin centres, shape (n_grid,). Point estimates
             and PIT follow its normalisation, so a histogram grid's
             densities are read as constant across their bins.
-        pdfs: PDFs on ``z_grid``, shape (n_objects, n_grid).
+        pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid).
         point: Point estimate to use, a key of
             :func:`lazy.metrics.grid_point_estimates`.
         label: Legend label and figure title.
         bin_edges: With bare centres, the bin edges of histogram densities,
             shape (n_grid + 1,).
+        scale: ``"none"`` for plain residuals, or ``"1+y"`` for the
+            photometric-redshift convention, which also draws DC1's
+            outlier boundary on the first panel.
 
     Returns:
         The new :class:`matplotlib.figure.Figure`.
@@ -697,20 +707,24 @@ def diagnostic_panel(
         ValueError: If bare centres are not uniformly spaced; pass the Grid
             or ``bin_edges``.
     """
-    z_true = np.asarray(z_true, dtype=float)
-    centers, edges = _geometry(z_grid, bin_edges)
-    z_pred = metrics.grid_point_estimates(centers, pdfs, bin_edges=edges)[point]
+    y_true = np.asarray(y_true, dtype=float)
+    centers, edges = _geometry(y_grid, bin_edges)
+    y_pred = metrics.grid_point_estimates(centers, pdfs, bin_edges=edges)[point]
     _, _, pit = metrics.evaluate_grid_pdfs(
-        z_true, centers, pdfs, point=point, bin_edges=edges
+        y_true, centers, pdfs, point=point, bin_edges=edges
     )
 
     fig, axes = plt.subplots(
         2, 2, figsize=style.figsize(width="text", aspect=0.85)
     )
-    plot_zphot_ztrue(z_true, z_pred, ax=axes[0, 0])
-    plot_residuals(z_true, z_pred, ax=axes[0, 1])
+    plot_actual_vs_predicted(
+        y_true, y_pred, ax=axes[0, 0], outlier_lines=scale == "1+y"
+    )
+    plot_residuals(y_true, y_pred, ax=axes[0, 1], scale=scale)
     plot_pit_qq(pit, ax=axes[1, 0], label=label)
-    plot_nz(z_grid, pdfs, z_true=z_true, ax=axes[1, 1], bin_edges=bin_edges)
+    plot_stacked_pdfs(
+        y_grid, pdfs, y_true=y_true, ax=axes[1, 1], bin_edges=bin_edges
+    )
     axes[1, 1].legend(loc="upper right")
     if label:
         fig.suptitle(label)

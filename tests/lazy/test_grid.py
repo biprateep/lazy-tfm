@@ -8,14 +8,17 @@ import lazy
 
 
 def test_dc1_grid_matches_the_challenge_output_format():
-    assert lazy.DC1_GRID.n_bins == 200
-    assert lazy.DC1_GRID.z_min == 0.0
-    assert lazy.DC1_GRID.z_max == 2.0
-    assert np.allclose(lazy.DC1_GRID.widths, 0.01)
+    assert lazy.datasets.DC1_GRID.n_bins == 200
+    assert lazy.datasets.DC1_GRID.y_min == 0.0
+    assert lazy.datasets.DC1_GRID.y_max == 2.0
+    assert np.allclose(lazy.datasets.DC1_GRID.widths, 0.01)
 
 
 def test_from_centers_round_trips_a_uniform_grid():
-    assert lazy.Grid.from_centers(lazy.DC1_GRID.centers) == lazy.DC1_GRID
+    assert (
+        lazy.Grid.from_centers(lazy.datasets.DC1_GRID.centers)
+        == lazy.datasets.DC1_GRID
+    )
 
 
 def test_edges_must_increase():
@@ -100,10 +103,12 @@ def test_cdf_starts_at_zero_and_ends_at_one():
     assert cdf[:, -1] == pytest.approx(1.0, abs=1e-12)
 
 
-def test_as_grid_accepts_none_centers_and_grid():
-    assert lazy.as_grid(None) is lazy.DC1_GRID
-    assert lazy.as_grid(lazy.DC1_GRID) is lazy.DC1_GRID
-    assert lazy.as_grid(np.linspace(0.05, 2.95, 30)).n_bins == 30
+def test_as_grid_accepts_centers_and_a_grid_but_not_none():
+    grid = lazy.Grid.linear(0.0, 3.0, 30)
+    assert lazy.as_grid(grid) is grid
+    assert lazy.as_grid(np.linspace(0.05, 2.95, 30)) == grid
+    with pytest.raises(ValueError, match="only the model knows"):
+        lazy.as_grid(None)
 
 
 def test_bin_index_clips_outside_the_grid():
@@ -177,4 +182,6 @@ def test_equal_grids_hash_alike():
 
 def test_from_quantiles_names_a_one_dimensional_input():
     with pytest.raises(ValueError, match="values must be a 2D"):
-        lazy.DC1_GRID.from_quantiles([0.2, 0.5, 0.9], [0.16, 0.5, 0.84])
+        lazy.datasets.DC1_GRID.from_quantiles(
+            [0.2, 0.5, 0.9], [0.16, 0.5, 0.84]
+        )
