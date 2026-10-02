@@ -217,7 +217,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "LimiX-2 weights are released by Stable AI under the StableAI "
                 "LimiX Non-Commercial License 1.0, which also requires "
                 'distributions, derivatives and publications to display "Built '
-                'with StableAI LimiX"; LimiX\'s code is under the Apache-2.0-'
+                "with StableAI LimiX\"; LimiX's code is under the Apache-2.0-"
                 "based Stable AI Technology Co., Ltd. License 1.0. See "
                 "https://huggingface.co/stable-ai/LimiX-2."
             ),
