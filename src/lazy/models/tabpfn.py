@@ -208,7 +208,7 @@ _AUTO_RECIPES: dict[str, dict[str, Any]] = {
         "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
     },
 }
-# The fast variant is the same recipe on a distilled checkpoint.
+# The fast variant is the same recipe on a smaller checkpoint.
 _AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
 
 
@@ -386,7 +386,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     native_transforms = _native_transforms()
     supports_native_bagging = True
     native_outlier_clipping = True
-    # The distilled fast checkpoint runs DC1's 1,000 + 1,000 rows on a CPU in
+    # The fast checkpoint runs DC1's 1,000 + 1,000 rows on a CPU in
     # about 11 s with eight members (TabPFN-3.5 26 s, TabICL 7 s), within the
     # 5,000 context rows upstream allows on a CPU.
     cpu_friendly_versions = ("v3.5-fast",)

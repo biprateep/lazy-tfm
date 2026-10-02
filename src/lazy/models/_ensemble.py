@@ -185,7 +185,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             not, a fit that falls back to the CPU under ``device="auto"``
             warns.
         cpu_friendly_versions: Versions that run at a usable speed on a CPU
-            although the model as a whole does not (a distilled checkpoint,
+            although the model as a whole does not (a smaller checkpoint,
             say); they fit on a CPU without the warning, which suggests them.
     """
 

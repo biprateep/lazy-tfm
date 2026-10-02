@@ -80,7 +80,7 @@ print(model.evaluate(X_test, z_test, y_grid=lazy.datasets.DC1_GRID, scale="1+y")
 
 No GPU? TabPFN is slow on a CPU and refuses contexts above 5,000 rows there;
 `LazyModel("tabicl")` is small, BSD-licensed and quick on a laptop, and
-`LazyModel("tabpfn", version="v3.5-fast")` is TabPFN's distilled checkpoint,
+`LazyModel("tabpfn", version="v3.5-fast")` is TabPFN's smaller, faster checkpoint,
 usable on a CPU for contexts up to 5,000 rows. The
 [supported models](https://lazy-tfm.readthedocs.io/en/latest/guide/models.html)
 page compares them all.

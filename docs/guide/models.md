@@ -74,7 +74,7 @@ How the cost grows:
 - **A laptop, a CPU, or permissive licensing:** TabICLv2. It is small,
   BSD-licensed and nearly as fast on a CPU as on a GPU, at some cost in
   accuracy.
-- **A TabPFN on a CPU:** TabPFN-3.5-fast, a distilled TabPFN-3.5 at under half
+- **A TabPFN on a CPU:** TabPFN-3.5-fast, a smaller TabPFN-3.5 at under half
   its size: more than twice as fast on a CPU (within TabPFN's 5,000-row CPU
   limit), somewhat faster on a GPU, and less accurate than TabPFN-3.5 (−13.05
   against −13.47 in CDE loss on 10,000 DC1 context rows). `lazy` does not warn
