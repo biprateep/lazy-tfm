@@ -314,6 +314,32 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self)
         return self.predict_distribution(X).ppf(quantiles)
 
+    def predict_interval(  # noqa: GS030 - scikit-learn's X, y.
+        self, X: _Features, coverage: float = 0.95
+    ) -> _typing.FloatArray:
+        """The central interval holding ``coverage`` of each row's probability.
+
+        The bounds are the quantiles at ``(1 - coverage) / 2`` and
+        ``(1 + coverage) / 2``, computed exactly, as in
+        :meth:`predict_quantiles`.
+
+        Args:
+            X: Features with the columns ``fit`` saw, shape
+                (n_samples, n_features).
+            coverage: The probability inside the interval, in (0, 1); 0.95
+                gives the 2.5th and 97.5th percentiles.
+
+        Returns:
+            The lower and upper bounds, shape (n_samples, 2).
+
+        Raises:
+            ValueError: If ``coverage`` is not in (0, 1).
+        """
+        validation.check_is_fitted(self)
+        if not 0.0 < coverage < 1.0:
+            raise ValueError(f"coverage must lie in (0, 1): {coverage=}")
+        return self.predict_distribution(X).interval(coverage)
+
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:

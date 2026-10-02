@@ -30,6 +30,9 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   CPU-friendly: it fits on a CPU without the slow-CPU warning, which now
   suggests it beside TabICL. A backend can declare such versions with
   `cpu_friendly_versions`.
+- `predict_interval(X, coverage=0.95)` on every model: the central interval
+  holding `coverage` of each row's probability, shape `(n_samples, 2)`,
+  computed exactly from the native distribution.
 
 ### Changed
 

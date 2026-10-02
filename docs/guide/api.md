@@ -14,6 +14,7 @@ reduction of it:
 | `predict_cdf(X, y_grid)`            | The cumulative distributions.                               |
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
 | `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                |
+| `predict_interval(X, coverage)`     | `(n_samples, 2)` bounds of the central interval, exact.     |
 | `predict(X, method="mode")`       | One value per row: `mode`, `peak_mean`, `mean` or `median`. |
 | `score(X, y)`                       | Negative CDE loss, so higher is better.                     |
 | `evaluate(X, y)`                    | A one-row table of every diagnostic metric.                 |

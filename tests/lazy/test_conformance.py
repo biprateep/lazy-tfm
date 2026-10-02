@@ -309,6 +309,19 @@ def test_quantiles_invert_the_distribution(cls, data):
 
 
 @pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_interval_is_the_central_quantiles(cls, data):
+    X, z, X_test = data
+    model = cls().fit(X, z)
+    np.testing.assert_allclose(
+        model.predict_interval(X_test, coverage=0.9),
+        model.predict_quantiles(X_test, [0.05, 0.95]),
+        rtol=1e-12,
+    )
+    with pytest.raises(ValueError, match="coverage"):
+        model.predict_interval(X_test, coverage=1.0)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_chunking_changes_nothing_but_rounding(cls, data):
     """A row's answer does not depend on the rows chunked with it.
 
