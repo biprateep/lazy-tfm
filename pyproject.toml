@@ -75,8 +75,10 @@ limix = [
 qp = [
     "qp-prob>=1.1", # LSST DESC's PDF package: to_qp()/from_qp() and its file formats, for RAIL
 ]
+# Everything: every backend and every interoperability extra. A new extra
+# joins this list too (tests/lazy/test_packaging.py checks it).
 all = [
-    "lazy-tfm[limix,tabfm,tabicl,tabpfn]",
+    "lazy-tfm[limix,qp,tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.

@@ -30,6 +30,8 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Changed
 
+- `lazy-tfm[all]` installs everything, the `qp` extra included; a test keeps
+  every future extra in it.
 - One default per parameter on every backend: `n_estimators=8` (TabFM had 4),
   `random_state=0` (TabPFN and TabICL had 42, TabFM 1), `chunk_size=8192`
   (TabPFN, TabICL and TabFM had 16,384).
