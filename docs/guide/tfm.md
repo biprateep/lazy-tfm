@@ -30,7 +30,7 @@ network forward pass" ([Hollmann et al.
 only stores the context (and, with the key/value cache on, the network's
 encoding of it), and the predictions are computed in `predict`.
 
-```{figure} figures/figs/tfm_schematic.png
+```{figure} ../figures/figs/tfm_schematic.png
 :alt: Context rows with known targets and query rows with unknown targets go into a pretrained transformer, which returns a distribution for each query.
 :width: 100%
 
@@ -54,7 +54,7 @@ of a prediction grows with the number of context rows (quadratically for the
 attention between them), which is why the size of the context, rather than
 training time, is the main computational constraint of a TFM. For more details
 on each architecture, we refer the reader to the papers linked on each model's
-page under {doc}`models/index`.
+page under {doc}`../models/index`.
 
 ## Pretraining on synthetic data
 
@@ -73,7 +73,7 @@ causal models, random directed graphs of causes and effects between the
 features and the target ([Hollmann et al.
 2025](https://doi.org/10.1038/s41586-024-08328-6)).
 
-```{figure} figures/figs/prior_draws.png
+```{figure} ../figures/figs/prior_draws.png
 :alt: Six small synthetic one-feature regression datasets with different shapes and noise levels.
 :width: 100%
 
@@ -95,7 +95,7 @@ with 20 context rows TabPFN-3.5-fast cannot follow the oscillations and its
 curve closely and its interval narrows to roughly the spread of the noise. The
 model and its weights are the same in all three panels.
 
-```{figure} figures/figs/context_size.png
+```{figure} ../figures/figs/context_size.png
 :alt: Three panels showing TabPFN-3.5-fast's mean and 68% interval for a noisy curve given 20, 100 and 400 context points.
 :width: 100%
 
@@ -117,7 +117,7 @@ predicts 999 quantiles; and Google's TabFM predicts a single value for
 regression, so LAZY builds a distribution from its classifier instead. LAZY
 converts all of these to a common form, so that every model answers the same
 calls (`predict_proba`, `predict_quantiles`, `predict_interval`, etc.) with
-the same kind of output. {doc}`guide/api` describes how.
+the same kind of output. {doc}`distributions` describes how.
 
 ## Strengths and limits
 
@@ -132,13 +132,13 @@ for TabPFN v2 to a million for TabPFN-3), beyond which its performance is not
 guaranteed. Most of the models need a GPU to be practical, and several have
 weights released under non-commercial licenses. The models also inherit the
 assumptions of the prior they were pretrained on, so a dataset very unlike
-anything the prior generates may be predicted poorly. {doc}`models/index`
+anything the prior generates may be predicted poorly. {doc}`../models/index`
 lists each model's limits, hardware needs and license.
 
 ## Further reading
 
 The papers introducing each model are linked from its page under
-{doc}`models/index`. For the idea of training on a prior and its connection to
+{doc}`../models/index`. For the idea of training on a prior and its connection to
 Bayesian inference, see [Müller et al.
 (2022)](https://arxiv.org/abs/2112.10510); for a broader argument for tabular
 foundation models as a research direction, see [van Breugel & van der Schaar

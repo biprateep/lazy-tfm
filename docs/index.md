@@ -6,7 +6,7 @@ want (Z stands for [many
 things](https://en.wikipedia.org/wiki/Z#Other_uses)).</small>
 
 LAZY is a Python package that provides a unified wrapper around several
-pretrained [tabular foundation models](tfm) (TabPFN, TabICL, TabFM and
+pretrained [tabular foundation models](guide/tfm) (TabPFN, TabICL, TabFM and
 LimiX-2), so that the user does not have to bother with the nuances of each
 one. We standardize their interface, defaults and outputs behind one API,
 which is similar to and compatible with scikit-learn's, and LAZY returns the
@@ -97,10 +97,9 @@ is in
 :maxdepth: 2
 
 installation
-What are Tabular Foundation Models? <tfm>
-models/index
 Tutorials <tutorials/introduction>
 guide/index
+models/index
 API reference <autoapi/lazy/index>
 changelog
 contributing

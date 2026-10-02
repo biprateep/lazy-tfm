@@ -304,8 +304,9 @@ axes[0, 0].legend()
 #
 # For the next steps, we suggest the following pages:
 #
-# - [Supported models](https://lazy-tfm.readthedocs.io/en/latest/models/index.html):
+# - [Choosing a model](https://lazy-tfm.readthedocs.io/en/latest/guide/choosing.html):
 #   which model to choose, and what hardware it needs.
-# - [Backends](https://lazy-tfm.readthedocs.io/en/latest/guide/backends.html):
+# - [Scaling and performance](https://lazy-tfm.readthedocs.io/en/latest/guide/scaling.html):
 #   ensembling, bagging, and large contexts.
-# - [Metrics and figures](https://lazy-tfm.readthedocs.io/en/latest/guide/metrics.html).
+# - [From model output to distribution](https://lazy-tfm.readthedocs.io/en/latest/guide/distributions.html):
+#   the metrics and figures.

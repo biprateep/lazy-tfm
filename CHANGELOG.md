@@ -51,6 +51,12 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   models". The quickstart is gone; its advice for machines without a GPU is
   now in the installation page. The figures are drawn by
   `docs/figures/make_figures.py`.
+- The User guide is rebuilt as explanation and reference: what tabular
+  foundation models are, from model output to distribution (with the
+  metrics), one interface for every model, choosing a model, scaling and
+  performance, limits and pitfalls, reproducibility, clusters and offline
+  use, the demo datasets, and an FAQ. Its worked examples move to the
+  tutorials.
 
 ### Changed
 

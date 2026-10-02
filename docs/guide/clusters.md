@@ -1,4 +1,4 @@
-# Clusters and offline use
+# Clusters, caches and offline use
 
 No cache location is baked into the package, and the device is chosen at run
 time, so a laptop and a cluster node run the same code. The table lists where
@@ -10,9 +10,10 @@ override it:
 | Pretrained weights   | `~/.cache/huggingface/hub`                              | `HF_HOME`                            |
 | Benchmark catalogs   | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
 
-Compute nodes often have no outbound network access. In that case, warm both
-caches on a login node first and then run with downloads disabled, so that a
-missing file raises an immediate error rather than causing a hang:
+Compute nodes often have no outbound network access. In that case, we
+recommend warming both caches on a login node first and then running with
+downloads disabled, so that a missing file raises an immediate error rather
+than causing a hang:
 
 ```python
 from lazy import download_checkpoint, is_cached
