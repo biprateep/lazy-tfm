@@ -630,3 +630,32 @@ def test_the_features_keep_the_input_index(photometry, mode):
     features = datasets.build_features(subset, mode)
     pd.testing.assert_index_equal(features.index, subset.index)
     np.testing.assert_array_equal(features["IERR"], subset["IERR"])
+
+
+def test_make_chirp_cuts_its_gaps_into_the_test_rows():
+    X_train, X_test, y_train, y_test = datasets.make_chirp(
+        1000, n_gaps=3, gap_width=0.06, random_state=0
+    )
+    assert X_train.shape[1] == X_test.shape[1] == 1
+    assert len(X_train) + len(X_test) == 1000
+    assert len(X_train) == len(y_train) and len(X_test) == len(y_test)
+    # Three separate runs of test rows, each about 6% of the range wide.
+    x = np.linspace(0.0, 10.0, 1000)
+    in_gap = np.isin(x, X_test[:, 0])
+    assert np.count_nonzero(np.diff(in_gap.astype(int)) == 1) == 3
+    assert 3 * 55 <= len(X_test) <= 3 * 62
+    # The test targets are the noise-free curve; the training ones are not.
+    truth = (1 + 0.2 * x) * np.sin(2 * np.pi * (0.2 * x + 0.03 * x**2))
+    np.testing.assert_array_equal(y_test, truth[in_gap])
+    assert 0.15 < np.std(y_train - truth[~in_gap]) < 0.25
+
+
+def test_make_chirp_is_reproducible_and_validates():
+    first = datasets.make_chirp(random_state=1)
+    second = datasets.make_chirp(random_state=1)
+    for a, b in zip(first, second, strict=True):
+        np.testing.assert_array_equal(a, b)
+    _, X_test, _, _ = datasets.make_chirp(n_gaps=0, random_state=1)
+    assert len(X_test) == 0
+    with pytest.raises(ValueError, match="do not fit"):
+        datasets.make_chirp(n_gaps=10, gap_width=0.2)

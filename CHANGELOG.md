@@ -33,6 +33,8 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 - `predict_interval(X, coverage=0.95)` on every model: the central interval
   holding `coverage` of each row's probability, shape `(n_samples, 2)`,
   computed exactly from the native distribution.
+- `lazy.datasets.make_chirp`, a one-feature toy problem (a noisy chirp with
+  chunks cut out as the test set), for demonstrations.
 
 ### Changed
 

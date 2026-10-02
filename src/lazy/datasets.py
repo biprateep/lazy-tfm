@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Built-in photo-z catalogues: fetching, caching, turning them into features.
+"""Built-in datasets: photo-z catalogues, and a toy curve to fill in.
 
 The library is general purpose -- every estimator takes whatever tabular
 features you hand it -- but a photo-z method is hard to judge without a shared
@@ -50,6 +50,11 @@ not general tabular engineering -- but they act on a plain
 :class:`~pandas.DataFrame`, so a catalogue assembled outside this module goes
 through the same code, either via :meth:`Catalog.from_frame` or by calling
 :func:`build_features` on the frame directly.
+
+:func:`make_chirp` is not astronomy at all: a one-feature toy problem, a
+noisy curve with chunks cut out, generated on the spot for demonstrations::
+
+    X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
 """
 
 from __future__ import annotations
@@ -87,6 +92,7 @@ __all__ = [
     "fetch_dc1_biased",
     "fetch_hsc_grid",
     "load_trainz",
+    "make_chirp",
     "make_selection_split",
 ]
 
@@ -1216,3 +1222,70 @@ def fetch_dc1_biased(
         selection_seed=selection_seed,
         **selection_options,
     )
+
+
+def make_chirp(
+    n_samples: int = 1000,
+    *,
+    noise: float = 0.2,
+    n_gaps: int = 3,
+    gap_width: float = 0.06,
+    random_state: int | np.random.Generator | None = None,
+) -> tuple[
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
+    _typing.FloatArray,
+]:
+    """A noisy chirp with chunks missing, to fill in.
+
+    A toy regression problem with one feature: ``y = A(x) sin(phi(x))`` on
+    ``0 <= x <= 10``, where the amplitude ``A(x) = 1 + 0.2 x`` grows from 1
+    to 3 and the frequency ``phi'(x) / 2 pi = 0.2 + 0.06 x`` from 0.2 to 0.8
+    cycles per unit of ``x``. Gaussian noise is added to the training rows,
+    and ``n_gaps`` chunks of ``x`` are cut out of them and returned, without
+    noise, as the test rows, so the true curve is known where a model has to
+    interpolate. The gaps never overlap: the range is cut into ``n_gaps``
+    equal segments and each segment holds one gap, placed at random.
+
+    Args:
+        n_samples: Points evenly spaced over ``0 <= x <= 10``, before the gaps
+            are cut.
+        noise: The standard deviation of the noise on the training targets.
+        n_gaps: How many chunks to cut out; 0 for none.
+        gap_width: Each chunk's width, as a fraction of the range of ``x``.
+        random_state: A seed or a NumPy Generator, for the noise and where the
+            gaps fall.
+
+    Returns:
+        ``X_train, X_test, y_train, y_test``, in the order of
+        :func:`sklearn.model_selection.train_test_split`. The features have
+        shape (n_rows, 1), sorted by ``x``; ``y_test`` is the noise-free
+        curve.
+
+    Raises:
+        ValueError: If the gaps do not fit in their segments, or a count is
+            negative.
+    """
+    if n_samples < 1 or n_gaps < 0 or noise < 0:
+        raise ValueError(
+            "n_samples must be positive, n_gaps and noise non-negative: "
+            f"{n_samples=}, {n_gaps=}, {noise=}"
+        )
+    if n_gaps and not 0 < gap_width * n_gaps < 1:
+        raise ValueError(
+            f"{n_gaps} gaps of width {gap_width} do not fit in the range"
+        )
+    rng = np.random.default_rng(random_state)
+    x = np.linspace(0.0, 10.0, n_samples)
+    y = (1.0 + 0.2 * x) * np.sin(2.0 * np.pi * (0.2 * x + 0.03 * x**2))
+    width = 10.0 * gap_width
+    segment = 10.0 / max(n_gaps, 1)
+    starts = segment * np.arange(n_gaps) + rng.uniform(
+        0.0, segment - width, n_gaps
+    )
+    in_gap = np.zeros(n_samples, dtype=bool)
+    for start in starts:
+        in_gap |= (x >= start) & (x <= start + width)
+    y_train = y[~in_gap] + rng.normal(0.0, noise, int((~in_gap).sum()))
+    return x[~in_gap, None], x[in_gap, None], y_train, y[in_gap]
