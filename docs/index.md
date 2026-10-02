@@ -97,7 +97,7 @@ is in
 :maxdepth: 2
 
 installation
-Tutorials <tutorials/introduction>
+tutorials/index
 guide/index
 models/index
 API reference <autoapi/lazy/index>

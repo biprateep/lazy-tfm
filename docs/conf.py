@@ -18,9 +18,11 @@ Typical usage example:
 
 from importlib import metadata
 import pathlib
+import re
 import subprocess
 from typing import Any
 
+import jupytext
 from sphinx import application
 
 project = "lazy-tfm"
@@ -40,7 +42,13 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
-exclude_patterns = ["_build", "build", "**.ipynb_checkpoints"]
+# _gallery.md is a fragment that tutorials/index.md includes, not a page.
+exclude_patterns = [
+    "_build",
+    "build",
+    "**.ipynb_checkpoints",
+    "tutorials/_gallery.md",
+]
 root_doc = "index"
 
 # -- MyST and notebooks ------------------------------------------------------
@@ -53,21 +61,30 @@ myst_heading_anchors = 3
 nb_execution_mode = "off"
 TUTORIALS = pathlib.Path(__file__).parent / "tutorials"
 TUTORIALS_BRANCH = "tutorials"
+THUMBNAILS = TUTORIALS / "thumbnails"
 
 
 def _fetch_tutorials() -> None:
-    """Writes each tutorial's executed notebook from the ``tutorials`` branch.
+    """Writes each tutorial's notebook and thumbnail from ``tutorials``.
 
-    A notebook already in the working tree (a fresh ``execute.sh`` run) is
-    kept, so a local build shows the local outputs.
+    The branch holds ``<name>.ipynb`` and ``thumbnails/<name>.png``, both
+    written by ``execute.sh``. A file already in the working tree (a fresh
+    ``execute.sh`` run) is kept, so a local build shows the local outputs.
+    A thumbnail missing from the branch is not an error: its gallery card
+    shows a placeholder.
 
     Raises:
         RuntimeError: If a notebook is neither present nor on the branch.
     """
+    scripts = sorted(TUTORIALS.glob("*.py"))
     missing = [
-        script.with_suffix(".ipynb")
-        for script in sorted(TUTORIALS.glob("*.py"))
-        if not script.with_suffix(".ipynb").exists()
+        path
+        for script in scripts
+        for path in (
+            script.with_suffix(".ipynb"),
+            THUMBNAILS / f"{script.stem}.png",
+        )
+        if not path.exists()
     ]
     if not missing:
         return
@@ -79,21 +96,115 @@ def _fetch_tutorials() -> None:
         check=False,
     )
     if fetch.returncode:
-        raise RuntimeError(
-            f"cannot fetch the executed tutorials from the {TUTORIALS_BRANCH!r}"
-            f" branch: {fetch.stderr.strip()}"
+        if any(path.suffix == ".ipynb" for path in missing):
+            raise RuntimeError(
+                "cannot fetch the executed tutorials from the"
+                f" {TUTORIALS_BRANCH!r} branch: {fetch.stderr.strip()}"
+            )
+        return  # Only thumbnails are missing: the cards show placeholders.
+    for path in missing:
+        show = subprocess.run(
+            [*git, "show", f"FETCH_HEAD:{path.relative_to(TUTORIALS)}"],
+            capture_output=True,
+            check=path.suffix == ".ipynb",
         )
-    for notebook in missing:
-        notebook.write_bytes(
-            subprocess.run(
-                [*git, "show", f"FETCH_HEAD:{notebook.name}"],
-                capture_output=True,
-                check=True,
-            ).stdout
-        )
+        if not show.returncode:
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(show.stdout)
 
 
 _fetch_tutorials()
+
+# -- Tutorial gallery ----------------------------------------------------------
+# docs/tutorials/index.md includes _gallery.md, which this writes at import:
+# one sphinx-design card per tutorial (thumbnail, title, description, link)
+# and the hidden toctree. Each card is read from the tutorial's py:percent
+# source, so adding a tutorial needs no edit here beyond its place in the
+# order: the title is its first Markdown heading, the description the
+# optional `gallery: description:` key of its jupytext header, and the
+# thumbnail thumbnails/<name>.png (execute.sh documents the syntax). A
+# missing thumbnail gives a placeholder, and a missing description none.
+# Tutorials are shown in TUTORIAL_ORDER, then any others alphabetically.
+TUTORIAL_ORDER = ["introduction"]
+GALLERY = TUTORIALS / "_gallery.md"
+PLACEHOLDER = "/_static/tutorial-placeholder.svg"
+
+
+def _tutorial_card(script: pathlib.Path) -> str:
+    """Returns the gallery card of one tutorial, as MyST Markdown.
+
+    Args:
+        script: The tutorial's py:percent source.
+
+    Returns:
+        A ``grid-item-card`` directive linking to the tutorial's page.
+    """
+    notebook = jupytext.read(script)
+    title = script.stem.replace("_", " ").capitalize()
+    for cell in notebook.cells:
+        heading = re.search(r"^#\s+(.+)$", cell.source, re.MULTILINE)
+        if cell.cell_type == "markdown" and heading:
+            title = heading.group(1).strip()
+            break
+    gallery = notebook.metadata.get("gallery") or {}
+    description = " ".join(str(gallery.get("description", "")).split())
+    thumbnail = THUMBNAILS / f"{script.stem}.png"
+    image = (
+        f"/tutorials/thumbnails/{thumbnail.name}"
+        if thumbnail.exists()
+        else PLACEHOLDER
+    )
+    return (
+        f":::{{grid-item-card}} {title}\n"
+        f":img-top: {image}\n"
+        f":img-alt: {script.stem}\n"
+        f":link: /tutorials/{script.stem}\n"
+        ":link-type: doc\n"
+        ":shadow: none\n"
+        ":class-card: lazy-gallery-card\n"
+        f"\n{description}\n"
+        ":::\n"
+    )
+
+
+def _write_gallery() -> None:
+    """Writes the tutorial cards and toctree to ``tutorials/_gallery.md``.
+
+    The file is rewritten only when it changes, so an incremental build does
+    not re-read the gallery page every time.
+    """
+    scripts = sorted(
+        TUTORIALS.glob("*.py"),
+        key=lambda script: (
+            TUTORIAL_ORDER.index(script.stem)
+            if script.stem in TUTORIAL_ORDER
+            else len(TUTORIAL_ORDER),
+            script.stem,
+        ),
+    )
+    text = "\n".join(
+        [
+            "<!-- Written by docs/conf.py from the tutorials; do not edit. -->",
+            "",
+            "::::{grid} 1 2 3 3",
+            ":gutter: 3",
+            "",
+            *(_tutorial_card(script) for script in scripts),
+            "::::",
+            "",
+            "```{toctree}",
+            ":hidden:",
+            "",
+            *(script.stem for script in scripts),
+            "```",
+            "",
+        ]
+    )
+    if not GALLERY.exists() or GALLERY.read_text() != text:
+        GALLERY.write_text(text)
+
+
+_write_gallery()
 
 # -- API reference -------------------------------------------------------------
 autoapi_type = "python"
@@ -131,6 +242,7 @@ html_title = "lazy-tfm"
 # The logo and favicon are drawn by docs/logo/make_logo.py; the white logo
 # sits on the theme's blue sidebar header.
 html_static_path = ["_static"]
+html_css_files = ["gallery.css"]  # The tutorial cards (tutorials/index.md).
 html_logo = "_static/lazy-logo-white.svg"
 html_favicon = "_static/favicon.png"
 html_show_sourcelink = False
@@ -186,7 +298,8 @@ def _edit_tutorial_source(  # Sphinx's event signature.
 
     The page is built from the executed notebook, which is not on main.
     """
-    if pagename.startswith("tutorials/"):
+    # Not the gallery page, tutorials/index.md, which is its own source.
+    if (TUTORIALS.parent / f"{pagename}.py").exists():
         context["meta"] = {
             **(context.get("meta") or {}),
             "github_url": (

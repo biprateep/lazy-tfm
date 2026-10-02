@@ -43,3 +43,7 @@ paper/
 # Executed tutorials. main tracks their py:percent source; the notebooks,
 # outputs included, live on the orphan branch `tutorials` (docs/conf.py).
 docs/tutorials/*.ipynb
+# Their gallery thumbnails live there too (docs/tutorials/execute.sh), and the
+# gallery's cards are written by docs/conf.py at every build.
+docs/tutorials/thumbnails/
+docs/tutorials/_gallery.md

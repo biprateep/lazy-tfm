@@ -1,0 +1,22 @@
+/* Tutorial gallery cards (docs/tutorials/index.md): a thin border in the
+   theme's grey, the thumbnail on top, and the theme's link blue on hover. */
+.lazy-gallery-card {
+  border: 1px solid #e1e4e5;
+  border-radius: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.lazy-gallery-card:hover {
+  border-color: #2980b9;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+.lazy-gallery-card .sd-card-img-top {
+  border-bottom: 1px solid #e1e4e5;
+  border-radius: 0;
+}
+.lazy-gallery-card .sd-card-title {
+  color: #2980b9;
+  font-size: 1em;
+}
+.lazy-gallery-card .sd-card-text {
+  font-size: 0.9em;
+}
