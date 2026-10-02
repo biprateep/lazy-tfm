@@ -7,7 +7,7 @@ They differ a great deal in size, speed and what hardware they need.
 | Model | `LazyModel(...)` | Weights | Parameters | Licence of the weights | GPU | CPU-friendly |
 | ----- | ---------------- | ------: | ---------: | ---------------------- | --- | ------------ |
 | TabPFN-3.5 (**default**) | `"tabpfn"` | 0.88 GB | 219 M | Prior Labs, non-commercial | recommended | no |
-| TabPFN-3.5-fast | `"tabpfn", version="v3.5-fast"` | 0.33 GB | 84 M | Prior Labs, non-commercial | recommended | no |
+| TabPFN-3.5-fast | `"tabpfn", version="v3.5-fast"` | 0.33 GB | 84 M | Prior Labs, non-commercial | optional | ≤5,000 rows |
 | TabPFN-3 | `"tabpfn", version="v3"` | 0.23 GB | 58 M | Prior Labs, non-commercial | recommended | no |
 | TabPFN-2.6 | `"tabpfn", version="v2.6"` | 0.05 GB | 13 M | Prior Labs, non-commercial | optional | ≤1,000 rows |
 | TabPFN-2.5 | `"tabpfn", version="v2.5"` | 0.04 GB | 10 M | Prior Labs, non-commercial | optional | ≤1,000 rows |
@@ -33,13 +33,16 @@ at this context size, not a ranking.
 | Model | GPU: fit + predict | Peak GPU memory | CPU: fit + predict | CDE loss |
 | ----- | -----------------: | --------------: | -----------------: | -------: |
 | TabPFN-3.5 | 14 s | 3.2 GB | 36 s | −13.47 |
-| TabPFN-3.5-fast | 9 s | 2.3 GB | — | −13.00 |
+| TabPFN-3.5-fast | 9 s | 2.3 GB | 11 s\* | −13.00 |
 | TabPFN-3 | 9 s | 2.5 GB | — | −13.00 |
 | TabPFN-2.5 | 10 s | 5.0 GB | 18 s | −12.91 |
 | TabPFN-2 | 11 s | 3.5 GB | — | −12.88 |
 | TabICLv2 | 6 s | 4.1 GB | 7 s | −12.33 |
 | LimiX-2 | 46 s | 17.5 GB | 102 s | −13.71 |
 | TabFM v1.0 | 132 s | 7.8 GB | 8 min 16 s | −13.30 |
+
+\*Measured later, under the same conditions, beside TabPFN-3.5 at 26 s; with
+4 members, the fast checkpoint's own count, it takes 6 s.
 
 TabFM was measured with 4 members, its default at the time; the shared default
 is now 8, which roughly doubles its time. The other rows used 8 members. Since
@@ -71,6 +74,11 @@ How the cost grows:
 - **A laptop, a CPU, or permissive licensing:** TabICLv2. It is small,
   BSD-licensed and nearly as fast on a CPU as on a GPU, at some cost in
   accuracy.
+- **A TabPFN on a CPU:** TabPFN-3.5-fast, a distilled TabPFN-3.5 at under half
+  its size: more than twice as fast on a CPU (within TabPFN's 5,000-row CPU
+  limit), somewhat faster on a GPU, and less accurate than TabPFN-3.5 (−13.05
+  against −13.47 in CDE loss on 10,000 DC1 context rows). `lazy` does not warn
+  when it runs on a CPU.
 - **Large contexts:** TabPFN-3 and later were pretrained on contexts up to a
   million rows. LimiX-2 degrades above about 20,000 rows unless bagged
   (`bag_size=20_000` with enough members), and TabPFN-2 and 2.5 were

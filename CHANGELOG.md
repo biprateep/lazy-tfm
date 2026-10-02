@@ -23,6 +23,10 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   `transforms="auto"` and none under an explicit recipe. `provenance_` records
   the values used.
 - The registry enforces every shared parameter's default, not only some.
+- TabPFN-3.5-fast (`LazyModel("tabpfn", version="v3.5-fast")`) is treated as
+  CPU-friendly: it fits on a CPU without the slow-CPU warning, which now
+  suggests it beside TabICL. A backend can declare such versions with
+  `cpu_friendly_versions`.
 
 ### Changed
 

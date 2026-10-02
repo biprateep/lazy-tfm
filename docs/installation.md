@@ -46,7 +46,8 @@ Every model chooses its device when it is fitted (`device="auto"`: CUDA if
 available, otherwise CPU). Most of the models need a GPU to be practical:
 TabPFN-3.5, the default, is slow on a CPU and from v3 on refuses contexts above
 5,000 rows there, and `lazy` warns at `fit` when it finds no GPU. TabICL runs
-well on a laptop CPU. {doc}`guide/models` gives each model's hardware needs. Passing `device="cuda"` explicitly
+well on a laptop CPU, and so, within that 5,000-row limit, does TabPFN-3.5-fast
+(`version="v3.5-fast"`). {doc}`guide/models` gives each model's hardware needs. Passing `device="cuda"` explicitly
 raises an error on a machine without one, rather than quietly running on CPU.
 
 ## TabFM: install the repository build too

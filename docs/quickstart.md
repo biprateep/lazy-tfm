@@ -42,7 +42,14 @@ quick on a CPU:
 model = lazy.LazyModel("tabicl")
 ```
 
-or give TabPFN a context of at most 5,000 rows, drawn at random (the
+or TabPFN's distilled fast checkpoint, which runs on a CPU at more than twice
+TabPFN-3.5's speed, less accurately, with a context of at most 5,000 rows:
+
+```python
+model = lazy.LazyModel("tabpfn", version="v3.5-fast")
+```
+
+or give TabPFN-3.5 a context of at most 5,000 rows, drawn at random (the
 catalogue's files are not in random order), or pass
 `ignore_pretraining_limits=True` and be patient.
 ````
