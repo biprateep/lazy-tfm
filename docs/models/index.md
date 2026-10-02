@@ -4,7 +4,7 @@ Every model is a pretrained tabular foundation model used in context: `fit`
 stores your labelled rows, and each prediction is a forward pass over them.
 They differ a great deal in size, speed and what hardware they need.
 
-| Model | `LazyModel(...)` | Weights | Parameters | Licence of the weights | GPU | CPU-friendly |
+| Model | `LazyModel(...)` | Weights | Parameters | License of the weights | GPU | CPU-friendly |
 | ----- | ---------------- | ------: | ---------: | ---------------------- | --- | ------------ |
 | TabPFN-3.5 (**default**) | `"tabpfn"` | 0.88 GB | 219 M | Prior Labs, non-commercial | recommended | no |
 | TabPFN-3.5-fast | `"tabpfn", version="v3.5-fast"` | 0.33 GB | 84 M | Prior Labs, non-commercial | optional | ≤5,000 rows |
@@ -17,7 +17,7 @@ They differ a great deal in size, speed and what hardware they need.
 | TabFM v1.0 | `"tabfm"` | 6.6 GB | 1.64 B | Google, non-commercial | yes | no |
 
 The weights are downloaded once, at the first `fit`, and cached; see
-{doc}`../installation` for the licences in full and {doc}`clusters` for caches
+{doc}`../installation` for the licenses in full and {doc}`../guide/clusters` for caches
 and offline use.
 
 ## What it costs
@@ -84,7 +84,16 @@ How the cost grows:
   (`bag_size=20_000` with enough members), and TabPFN-2 and 2.5 were
   pretrained on at most 10,000 and 50,000 rows.
 - **Commercial use:** only TabICLv2 and TabPFN-2 have weights that allow it,
-  under their licences' terms; the others are non-commercial.
+  under their licenses' terms; the others are non-commercial.
 
 All of them take the same parameters and give the same outputs; see
-{doc}`backends` for how each implements them.
+{doc}`../guide/backends` for how each implements them.
+
+```{toctree}
+:maxdepth: 1
+
+tabpfn
+tabicl
+tabfm
+limix
+```

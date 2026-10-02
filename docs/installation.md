@@ -43,12 +43,29 @@ CUDA version, or ROCm, install PyTorch first by following
 `lazy-tfm`.
 
 Every model chooses its device when it is fitted (`device="auto"`: CUDA if
-available, otherwise CPU). Most of the models need a GPU to be practical:
-TabPFN-3.5, the default, is slow on a CPU and from v3 on refuses contexts above
-5,000 rows there, and `lazy` warns at `fit` when it finds no GPU. TabICL runs
-well on a laptop CPU, and so, within that 5,000-row limit, does TabPFN-3.5-fast
-(`version="v3.5-fast"`). {doc}`guide/models` gives each model's hardware needs. Passing `device="cuda"` explicitly
-raises an error on a machine without one, rather than quietly running on CPU.
+available, otherwise CPU), and passing `device="cuda"` explicitly raises an
+error on a machine without one, rather than quietly running on the CPU. Most
+of the models need a GPU to be practical. TabPFN-3.5, the default, is slow on
+a CPU and, like every TabPFN from v3 on, refuses contexts larger than 5,000
+rows there, so `lazy` warns at `fit` when it finds no GPU. On a laptop, we
+recommend TabICL, which is small, BSD-licensed and quick on a CPU:
+
+```python
+# pip install 'lazy-tfm[tabicl]'
+model = lazy.LazyModel("tabicl")
+```
+
+or TabPFN's smaller, faster checkpoint, TabPFN-3.5-fast, which runs on a CPU
+at more than twice TabPFN-3.5's speed, though less accurately, with a context
+of at most 5,000 rows:
+
+```python
+model = lazy.LazyModel("tabpfn", version="v3.5-fast")
+```
+
+Alternatively, give TabPFN-3.5 a context of at most 5,000 rows, drawn at
+random, or pass `ignore_pretraining_limits=True` and be patient.
+{doc}`models/index` gives each model's hardware needs.
 
 ## TabFM: install the repository build too
 
@@ -95,7 +112,7 @@ Weights are not bundled. They are downloaded from the Hugging Face Hub the
 first time a model is fitted or predicts, and cached from then on. None of the
 repositories is gated, so no Hugging Face account or token is needed.
 
-| Backend  | Versions        | Size           | Licence of the weights                          |
+| Backend  | Versions        | Size           | License of the weights                          |
 | -------- | --------------- | -------------- | ----------------------------------------------- |
 | `limix`  | `v2`            | ~1.6 GB        | StableAI LimiX, **non-commercial** (with the attribution "Built with StableAI LimiX") |
 | `tabfm`  | `v1.0`          | ~6.6 GB        | Google, **non-commercial**                      |
@@ -103,7 +120,7 @@ repositories is gated, so no Hugging Face account or token is needed.
 | `tabpfn` | `v2` to `v3.5`  | 41 MB – 880 MB | Prior Labs, **non-commercial**, except `v2` (Apache-2.0 with attribution) |
 
 Each version is pinned to a fixed revision; {data}`lazy.CHECKPOINTS <lazy.models.CHECKPOINTS>` lists them,
-with the licence text for each. To download ahead of time, for example before
+with the license text for each. To download ahead of time, for example before
 moving to a machine without a network:
 
 ```python

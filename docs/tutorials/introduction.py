@@ -125,7 +125,7 @@ X_train.head()
 # `lazy.LazyModel` chooses a backend by name and passes any other arguments
 # to it. With no name it uses TabPFN-3.5. `lazy.list_estimators()` shows the
 # other models, and the
-# [Supported models](https://lazy-tfm.readthedocs.io/en/latest/guide/models.html)
+# [Supported models](https://lazy-tfm.readthedocs.io/en/latest/models/index.html)
 # page compares their size, speed and licences.
 
 # %%
@@ -297,7 +297,7 @@ axes[0, 0].legend()
 #
 # Next steps:
 #
-# - [Supported models](https://lazy-tfm.readthedocs.io/en/latest/guide/models.html):
+# - [Supported models](https://lazy-tfm.readthedocs.io/en/latest/models/index.html):
 #   which model to choose, and what hardware it needs.
 # - [Backends](https://lazy-tfm.readthedocs.io/en/latest/guide/backends.html):
 #   ensembling, bagging, and large contexts.

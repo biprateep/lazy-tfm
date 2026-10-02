@@ -104,8 +104,9 @@ loses nothing:
 Native bucket grids reach far into both tails, below zero included, because
 that is where the buckets are. Pass a grid to restrict the range; `"native"`
 asks for the native grid explicitly. A plain
-{class}`~lazy.base.BaseDensityRegressor` subclass defaults to
-{data}`~lazy.datasets.DC1_GRID`, 200 bins over 0 < z < 2.
+{class}`~lazy.base.BaseDensityRegressor` subclass, which has no native grid,
+defaults to 200 equal bins over the range of the training targets, padded by
+5% on each side.
 
 ## Two normalisations
 

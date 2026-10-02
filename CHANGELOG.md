@@ -35,6 +35,11 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
   computed exactly from the native distribution.
 - `lazy.datasets.make_chirp`, a one-feature toy problem (a noisy chirp with
   chunks cut out as the test set), for demonstrations.
+- New documentation pages: the landing page's demo, "What are Tabular
+  Foundation Models?", and a page for each supported model under "Supported
+  models". The quickstart is gone; its advice for machines without a GPU is
+  now in the installation page. The figures are drawn by
+  `docs/figures/make_figures.py`.
 
 ### Changed
 
