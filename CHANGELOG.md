@@ -147,6 +147,10 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- The `plot_pit_qq` and `plot_pit` docstrings describe the PIT shapes
+  correctly: an S-shape means densities too narrow or too wide, and a curve
+  wholly below or above the diagonal (a sloped histogram) means predictions
+  biased high or low.
 - TabPFN checks its size limits on each member's bag, so a `bag_size` within
   the limit runs a larger context (above the CPU cap included) without
   `ignore_pretraining_limits`, and the error names the `bag_size` and

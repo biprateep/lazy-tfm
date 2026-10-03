@@ -362,7 +362,9 @@ def plot_pit(
 
     The shape names the failure: a U means the PDFs are too narrow
     (over-confident), a dome means they are too wide, a slope means they are
-    biased, and a spike at 0 or 1 counts catastrophic outliers.
+    biased (falling from 0 to 1 when the predictions are too high, rising
+    when they are too low), and a spike at 0 or 1 counts catastrophic
+    outliers.
 
     Args:
         pit: Probability integral transform of each object, in [0, 1],
@@ -403,9 +405,15 @@ def plot_pit_qq(
 ) -> mpl_axes.Axes:
     """Quantile-quantile plot of the PIT sample against U(0, 1).
 
-    Harder to misread than the histogram: perfect calibration is the diagonal,
-    above it means too wide, below means too narrow, and the deviation is in
-    the same units as the probability itself.
+    The sorted PIT values are drawn against the quantiles of a uniform
+    distribution, so perfect calibration is the diagonal and the deviation is
+    in the same units as the probability itself. PDFs that are too narrow
+    (over-confident) put too many PIT values near 0 and 1, which makes an S
+    that runs below the diagonal on the left and above it on the right, while
+    PDFs that are too wide make the mirrored S, above on the left and below on
+    the right. A curve that lies entirely below the diagonal means the
+    predictions are biased high (the true values fall low in their PDFs), and
+    one entirely above it means they are biased low.
 
     Args:
         pit: Probability integral transform of each object, in [0, 1],
