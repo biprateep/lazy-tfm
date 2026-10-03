@@ -64,6 +64,10 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Changed
 
+- `load_dataset("diamonds")` returns cut, color and clarity as ordered
+  categoricals from worst to best (cut Fair to Ideal, color J to D, clarity I1
+  to IF), so `.cat.codes` gives their natural order; it raises `ValueError` if
+  the source's categories change.
 - Bagging is the same on every backend. `lazy` draws every member's bag (the
   paper's draw), and each member fits its transform, outlier clip and target
   standardization on its own bag. TabPFN runs one regressor per bag, sharing

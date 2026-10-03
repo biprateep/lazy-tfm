@@ -676,6 +676,17 @@ LIST_COLUMNS = [
     "license",
     "url",
 ]
+# Each grade of diamonds from worst to best, and five diamonds' grades.
+DIAMOND_GRADES = {
+    "cut": ["Fair", "Good", "Very Good", "Premium", "Ideal"],
+    "color": ["J", "I", "H", "G", "F", "E", "D"],
+    "clarity": ["I1", "SI2", "SI1", "VS2", "VS1", "VVS2", "VVS1", "IF"],
+}
+DIAMOND_ROWS = {
+    "cut": ["Ideal", "Fair", "Very Good", "Premium", "Good"],
+    "color": ["E", "J", "D", "G", "I"],
+    "clarity": ["SI2", "IF", "I1", "VS1", "VVS2"],
+}
 OPENML_NAMES = [
     name
     for name, row in datasets.list_datasets().iterrows()
@@ -689,12 +700,13 @@ def fake_openml(monkeypatch):
 
     The stand-in answers with a frame of the registered width, its first
     column categorical, and a target named as registered, so nothing is
-    downloaded.
+    downloaded. For diamonds, the first three columns are the grades, served
+    as OpenML serves them: unordered, with the categories alphabetical.
     """
     table = datasets.list_datasets()
     by_id = {
-        int(row["source"].split()[1]): row
-        for _, row in table.iterrows()
+        int(row["source"].split()[1]): (name, row)
+        for name, row in table.iterrows()
         if row["source"].startswith("OpenML")
     }
     calls = []
@@ -708,12 +720,19 @@ def fake_openml(monkeypatch):
                 "as_frame": as_frame,
             }
         )
-        row = by_id[data_id]
+        name, row = by_id[data_id]
         n = 5
         frame = pd.DataFrame(
             {f"f{i}": np.arange(n, dtype=np.int64) for i in range(1, 99)}
         ).iloc[:, : row["n_features"] - 1]
         frame.insert(0, "kind", pd.Categorical(["a", "b", "a", "c", "b"]))
+        if name == "diamonds":
+            frame = frame.iloc[:, len(DIAMOND_ROWS) :]
+            for column, values in reversed(DIAMOND_ROWS.items()):
+                categories = sorted(DIAMOND_GRADES[column])
+                frame.insert(
+                    0, column, pd.Categorical(values, categories=categories)
+                )
         target = pd.Series(np.arange(n), name=target_column)
         return sklearn_utils.Bunch(data=frame, target=target)
 
@@ -769,7 +788,7 @@ def test_every_openml_dataset_loads_by_its_pinned_id(fake_openml, name):
 def test_dataset_fields_and_dtypes(fake_openml):
     dataset = datasets.load_dataset("diamonds")
     assert isinstance(dataset.X, pd.DataFrame)
-    assert isinstance(dataset.X["kind"].dtype, pd.CategoricalDtype)
+    assert isinstance(dataset.X["cut"].dtype, pd.CategoricalDtype)
     assert isinstance(dataset.y, np.ndarray)
     assert dataset.y.dtype == np.float64 and dataset.y.ndim == 1
     assert len(dataset) == len(dataset.X) == len(dataset.y)
@@ -778,6 +797,40 @@ def test_dataset_fields_and_dtypes(fake_openml):
     )
     with pytest.raises(AttributeError):
         dataset.name = "other"
+
+
+def test_unordered_categories_keep_the_source_dtype(fake_openml):
+    dataset = datasets.load_dataset("yacht")
+    assert isinstance(dataset.X["kind"].dtype, pd.CategoricalDtype)
+    assert not dataset.X["kind"].cat.ordered
+
+
+def test_diamond_grades_are_ordered_from_worst_to_best(fake_openml):
+    X = datasets.load_dataset("diamonds").X
+    for column, order in DIAMOND_GRADES.items():
+        assert X[column].cat.ordered, column
+        assert list(X[column].cat.categories) == order, column
+        assert list(X[column]) == DIAMOND_ROWS[column], column
+    # The codes rank the grades, so a model sees them in order.
+    assert list(X["cut"].cat.codes) == [4, 0, 2, 3, 1]
+    assert X["color"].max() == "D"
+
+
+def test_diamond_grades_the_source_does_not_have_are_reported(
+    fake_openml, monkeypatch
+):
+    fetch = sklearn_datasets.fetch_openml
+
+    def renamed(**kwargs):
+        bunch = fetch(**kwargs)
+        bunch.data["cut"] = bunch.data["cut"].cat.rename_categories(
+            {"Fair": "Poor"}
+        )
+        return bunch
+
+    monkeypatch.setattr(sklearn_datasets, "fetch_openml", renamed)
+    with pytest.raises(ValueError, match="categor"):
+        datasets.load_dataset("diamonds")
 
 
 def test_return_x_y_gives_the_features_and_target(fake_openml):

@@ -1309,8 +1309,10 @@ class Dataset:
 
     Attributes:
         name: The name it was loaded by, a key of :func:`list_datasets`.
-        X: The features exactly as the source gives them, one row per sample;
-            categorical columns keep the pandas ``category`` dtype.
+        X: The features as the source gives them, one row per sample;
+            categorical columns keep the pandas ``category`` dtype, and those
+            with a natural order (the cut, color and clarity of diamonds) are
+            ordered from worst to best.
         y: The target, shape (n_rows,), as float64.
         target: The name of the target column at the source.
         description: What the dataset is, in one line.
@@ -1353,6 +1355,8 @@ class _Entry:
         description: What the dataset is, in one line.
         license: The license the source states.
         citation: The reference to cite, or ``""``.
+        ordered: The categorical columns with a natural order, each mapped to
+            its categories from worst to best.
     """
 
     data_id: int | None
@@ -1362,6 +1366,9 @@ class _Entry:
     description: str
     license: str
     citation: str = ""
+    ordered: Mapping[str, tuple[str, ...]] = dataclasses.field(
+        default_factory=dict
+    )
 
     @property
     def source(self) -> str:
@@ -1407,6 +1414,13 @@ _REGISTRY: dict[str, _Entry] = {
         description="Prices of round-cut diamonds, from ggplot2",
         license="MIT",
         citation="Wickham 2016, ggplot2: Elegant Graphics for Data Analysis",
+        # OpenML stores the grades unordered. ggplot2 orders them too, but
+        # its color runs from best (D) to worst (J); here all three rise.
+        ordered={
+            "cut": ("Fair", "Good", "Very Good", "Premium", "Ideal"),
+            "color": ("J", "I", "H", "G", "F", "E", "D"),
+            "clarity": ("I1", "SI2", "SI1", "VS2", "VS1", "VVS2", "VVS1", "IF"),
+        },
     ),
     "kings_county": _Entry(
         data_id=44989,
@@ -1573,6 +1587,9 @@ def load_dataset(
     :func:`sklearn.datasets.fetch_openml` and cached under
     ``data_home()/"openml"``; later calls read the cache and need no network.
     DC1 is :func:`fetch_dc1`, both files, as the ``"mag-color"`` features.
+    Categorical columns with a natural order, such as the grades of
+    ``"diamonds"``, come as ordered categoricals, so ``.cat.codes`` turns
+    them into integers that keep that order.
 
     Args:
         name: A dataset's name, one of the index of :func:`list_datasets`.
@@ -1584,7 +1601,8 @@ def load_dataset(
         features and its target, shape (n_rows,), as float64.
 
     Raises:
-        ValueError: If ``name`` is not a known dataset.
+        ValueError: If ``name`` is not a known dataset, or the source's
+            categories of an ordered column are not the expected ones.
         OSError: If a download fails.
     """
     entry = _REGISTRY.get(name)
@@ -1606,6 +1624,11 @@ def load_dataset(
         )
         features = bunch.data
         target = bunch.target
+        for column, categories in entry.ordered.items():
+            # Raises if the source's categories ever stop matching.
+            features[column] = features[column].cat.reorder_categories(
+                categories, ordered=True
+            )
     y = np.asarray(target, dtype=np.float64)
     if return_X_y:
         return features, y

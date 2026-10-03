@@ -69,21 +69,16 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # round-cut diamonds, with their weight (carat), their dimensions and three
 # quality grades: the cut, the color and the clarity (see
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)).
-# Since every model treats every column as a number, we encode the grades as
-# integers in their natural order, from worst to best, so that the codes keep
-# the ordering of the grades (see
+# The grades come as ordered categories, from worst to best. Since every
+# model treats every column as a number, we replace each grade by its code
+# in that order, so that the codes keep the ordering of the grades (see
 # [Limits and pitfalls](https://lazy-tfm.readthedocs.io/en/latest/guide/limits.html)).
 
 # %%
 data = datasets.load_dataset("diamonds")
-grades = {
-    "cut": ["Fair", "Good", "Very Good", "Premium", "Ideal"],
-    "color": ["J", "I", "H", "G", "F", "E", "D"],
-    "clarity": ["I1", "SI2", "SI1", "VS2", "VS1", "VVS2", "VVS1", "IF"],
-}
 X = data.X.copy()
-for column, order in grades.items():
-    X[column] = pd.Categorical(X[column], categories=order).codes
+for column in ("cut", "color", "clarity"):
+    X[column] = X[column].cat.codes
 price = data.y
 
 print(f"Price from {price.min():,.0f} to {price.max():,.0f} USD")

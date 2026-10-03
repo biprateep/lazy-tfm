@@ -5,11 +5,15 @@ To try a model on something other than photometry,
 downloading it on first use and caching it under
 {func}`~lazy.datasets.data_home`, so later calls read the cached copy and need
 no network. It returns a {class}`~lazy.datasets.Dataset` holding the features as
-a {class}`pandas.DataFrame`, exactly as the source gives them (categorical
-columns keep the `category` dtype), the target as a float64 array, and the
-source, license and citation of the data, while `return_X_y=True` gives only the
-features and the target. {func}`~lazy.datasets.list_datasets` lists every
-dataset with its size and license without downloading anything:
+a {class}`pandas.DataFrame`, as the source gives them (categorical columns keep
+the `category` dtype), the target as a float64 array, and the source, license and
+citation of the data, while `return_X_y=True` gives only the features and the
+target. The one change to the features is that categorical columns with a
+natural order come ordered from worst to best, which for `diamonds` are the cut
+(Fair to Ideal), the color (J to D) and the clarity (I1 to IF), so that
+`.cat.codes` turns them into integers that keep their order.
+{func}`~lazy.datasets.list_datasets` lists every dataset with its size and
+license without downloading anything:
 
 ```python
 from lazy import datasets
