@@ -91,7 +91,11 @@ The key/value cache changes a prediction only by rounding. The cache is exact
 on a CPU. Since queries only ever attend to the context and never to each
 other, the answer is the uncached one up to float rounding. Under mixed
 precision on a GPU the two agree to the rounding of that precision (for
-TabICL, about 1e-3 of the quantile spread). TabPFN's own int8 cache, which
+TabICL, about 1e-3 of the quantile spread). For TabFM in bfloat16, that
+rounding moves a typical row's density by about 3% of its peak and single bins
+by up to a quarter of the peak, on either path and at any number of bins,
+while the CRPS and NLL moved by at most 0.004 on `yacht` and 0.001 on DC1,
+about as much as with a change of seed. TabPFN's own int8 cache, which
 LAZY uses only when asked with `kv_cache="int8"`, moves densities by up to
 about half a percent. Precision changes a prediction by the same kind of
 rounding: `mixed_precision=True` uses each model's reduced-precision path on a

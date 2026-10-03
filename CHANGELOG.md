@@ -174,6 +174,11 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- TabFM's bfloat16 rounding on a GPU is documented at its measured size, about
+  3% of a typical row's peak density and up to a quarter of the peak in single
+  bins on any path, with CRPS and NLL moving about as much as with a change of
+  seed; the docs had claimed a few percent between the cached and uncached
+  paths.
 - Chunked TabPFN predictions on a CPU are bit-identical to unchunked ones
   again: histogram-grid normalization sums each row on its own rather than in
   one BLAS matrix-vector product, whose rounding depended on how many rows came

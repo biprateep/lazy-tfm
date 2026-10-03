@@ -18,8 +18,8 @@ unmodified; only the order of operations differs. The model computes in the
 dtype its weights were loaded in. In float32 (always on the CPU) the results
 agree with calling ``predict_proba`` on the whole query set at once up to
 float rounding; in bfloat16 on CUDA, whose kernels round differently for
-different batch shapes, densities differ by up to a few per cent of their
-peak.
+different batch shapes, they differ as two bfloat16 runs do (see
+``TabFMHistogram``'s ``kv_cache``).
 
 Raw model outputs (classification logits over ``model.max_classes``) are
 handed to a callback per member batch and query block, leaving the caller to
