@@ -51,18 +51,20 @@ not general tabular engineering -- but they act on a plain
 through the same code, either via :meth:`Catalog.from_frame` or by calling
 :func:`build_features` on the frame directly.
 
-:func:`make_chirp` is not astronomy at all: a one-feature toy problem, a
-noisy curve with chunks cut out, generated on the spot for demonstrations::
-
-    X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
-
 For trying a model on something other than photometry, :func:`load_dataset`
-loads a regression benchmark by name -- DC1, or one of a dozen OpenML datasets
-pinned to their ids -- downloading it once and caching it under
+loads a regression dataset by name -- DC1, one of a dozen OpenML datasets
+pinned to their ids, or ``"chirp"``, a one-feature toy curve with chunks cut
+out, generated on the spot -- downloading it once and caching it under
 :func:`data_home`, and :func:`list_datasets` lists them without downloading
 anything::
 
     X, y = datasets.load_dataset("california_housing", return_X_y=True)
+
+DC1 and the chirp come with a train/test split of their own, one flag away::
+
+    X_train, X_test, y_train, y_test = datasets.load_dataset(
+        "chirp", split=True, return_X_y=True, random_state=0
+    )
 """
 
 from __future__ import annotations
@@ -104,7 +106,6 @@ __all__ = [
     "list_datasets",
     "load_dataset",
     "load_trainz",
-    "make_chirp",
     "make_selection_split",
 ]
 
@@ -1236,7 +1237,7 @@ def fetch_dc1_biased(
     )
 
 
-def make_chirp(
+def _make_chirp(
     n_samples: int = 1000,
     *,
     noise: float = 0.2,
@@ -1348,7 +1349,7 @@ class _Entry:
     """One row of the dataset registry, checked against its source.
 
     Attributes:
-        data_id: The OpenML dataset id, or None for DC1.
+        data_id: The OpenML dataset id, or None for DC1 and the chirp.
         target: The target column, OpenML's default target.
         n_rows: The number of rows.
         n_features: The number of feature columns, the target excluded.
@@ -1357,6 +1358,8 @@ class _Entry:
         citation: The reference to cite, or ``""``.
         ordered: The categorical columns with a natural order, each mapped to
             its categories from worst to best.
+        generated: Whether the data is generated on the spot by
+            :func:`_make_chirp` rather than downloaded.
     """
 
     data_id: int | None
@@ -1370,9 +1373,13 @@ class _Entry:
         default_factory=dict
     )
 
+    generated: bool = False
+
     @property
     def source(self) -> str:
         """Where the data comes from."""
+        if self.generated:
+            return "Generated"
         if self.data_id is None:
             return "Zenodo 10975874"
         return f"OpenML {self.data_id}"
@@ -1380,6 +1387,10 @@ class _Entry:
     @property
     def url(self) -> str:
         """The source's page for the data."""
+        if self.generated:
+            return (
+                "https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html"
+            )
         if self.data_id is None:
             return "https://zenodo.org/records/10975874"
         return f"https://www.openml.org/d/{self.data_id}"
@@ -1520,7 +1531,22 @@ _REGISTRY: dict[str, _Entry] = {
         license="CC BY 4.0",
         citation="Schmidt et al. 2020, MNRAS 499, 1587",
     ),
+    # The defaults of _make_chirp: 1,000 points, gaps included.
+    "chirp": _Entry(
+        data_id=None,
+        target="y",
+        n_rows=1_000,
+        n_features=1,
+        description="A noisy chirp with chunks cut out, generated on the spot",
+        license="MIT",
+        generated=True,
+    ),
 }
+
+# Keywords load_dataset passes to _make_chirp, which no other dataset takes.
+_CHIRP_OPTIONS = frozenset(
+    {"n_samples", "noise", "n_gaps", "gap_width", "random_state"}
+)
 
 
 def list_datasets() -> pd.DataFrame:
@@ -1548,12 +1574,20 @@ def list_datasets() -> pd.DataFrame:
     return table
 
 
+_XY: TypeAlias = tuple[pd.DataFrame, _typing.FloatArray]
+_SplitXY: TypeAlias = tuple[
+    pd.DataFrame, pd.DataFrame, _typing.FloatArray, _typing.FloatArray
+]
+
+
 @typing.overload
 def load_dataset(
     name: str,
     *,
+    split: Literal[False] = ...,
     data_home: str | pathlib.Path | None = ...,
     return_X_y: Literal[False] = ...,
+    **options: Any,
 ) -> Dataset: ...
 
 
@@ -1561,59 +1595,145 @@ def load_dataset(
 def load_dataset(
     name: str,
     *,
+    split: Literal[False] = ...,
     data_home: str | pathlib.Path | None = ...,
     return_X_y: Literal[True],
-) -> tuple[pd.DataFrame, _typing.FloatArray]: ...
+    **options: Any,
+) -> _XY: ...
 
 
 @typing.overload
 def load_dataset(
     name: str,
     *,
+    split: Literal[True],
     data_home: str | pathlib.Path | None = ...,
-    return_X_y: bool,
-) -> Dataset | tuple[pd.DataFrame, _typing.FloatArray]: ...
+    return_X_y: Literal[False] = ...,
+    **options: Any,
+) -> tuple[Dataset, Dataset]: ...
+
+
+@typing.overload
+def load_dataset(
+    name: str,
+    *,
+    split: Literal[True],
+    data_home: str | pathlib.Path | None = ...,
+    return_X_y: Literal[True],
+    **options: Any,
+) -> _SplitXY: ...
+
+
+@typing.overload
+def load_dataset(
+    name: str,
+    *,
+    split: bool = ...,
+    data_home: str | pathlib.Path | None = ...,
+    return_X_y: bool = ...,
+    **options: Any,
+) -> Dataset | _XY | tuple[Dataset, Dataset] | _SplitXY: ...
 
 
 def load_dataset(
     name: str,
     *,
+    split: bool = False,
     data_home: str | pathlib.Path | None = None,
     return_X_y: bool = False,
-) -> Dataset | tuple[pd.DataFrame, _typing.FloatArray]:
+    **options: Any,
+) -> Dataset | _XY | tuple[Dataset, Dataset] | _SplitXY:
     """Loads a demo regression dataset, downloading and caching it on first use.
 
-    Every dataset but DC1 is an OpenML dataset pinned to its id, fetched with
-    :func:`sklearn.datasets.fetch_openml` and cached under
+    Every dataset but DC1 and the chirp is an OpenML dataset pinned to its
+    id, fetched with :func:`sklearn.datasets.fetch_openml` and cached under
     ``data_home()/"openml"``; later calls read the cache and need no network.
     DC1 is :func:`fetch_dc1`, both files, as the ``"mag-color"`` features.
     Categorical columns with a natural order, such as the grades of
     ``"diamonds"``, come as ordered categoricals, so ``.cat.codes`` turns
     them into integers that keep that order.
 
+    ``"chirp"`` is generated on the spot, not downloaded: one feature ``x``
+    and ``y = A(x) sin(phi(x))`` on ``0 <= x <= 10``, where the amplitude
+    ``A(x) = 1 + 0.2 x`` grows from 1 to 3 and the frequency
+    ``phi'(x) / 2 pi = 0.2 + 0.03 x`` from 0.2 to 0.5 cycles per unit of
+    ``x``. Gaussian noise is added to the training rows, and ``n_gaps``
+    chunks of ``x`` are cut out of them as the test rows, without noise, so
+    the true curve is known where a model has to interpolate. The gaps never
+    overlap: the range is cut into ``n_gaps`` equal segments and each segment
+    holds one gap, placed at random.
+
     Args:
         name: A dataset's name, one of the index of :func:`list_datasets`.
+        split: When ``True``, return the dataset's own train/test split:
+            DC1's challenge split, or the chirp's gaps as the test rows.
+            The OpenML datasets have none. When ``False``, the training and
+            test rows come concatenated, in that order.
         data_home: Cache directory; see :func:`data_home`.
         return_X_y: When ``True``, return only the features and the target.
+        **options: The chirp's options, which no other dataset takes:
+            ``n_samples`` (points evenly spaced over ``0 <= x <= 10`` before
+            the gaps are cut, default 1000), ``noise`` (the standard
+            deviation of the noise on the training targets, default 0.2),
+            ``n_gaps`` (how many chunks to cut out, 0 for none, default 3),
+            ``gap_width`` (each chunk's width as a fraction of the range of
+            ``x``, default 0.04) and ``random_state`` (a seed or a NumPy
+            Generator, for the noise and where the gaps fall).
 
     Returns:
         A :class:`Dataset`, or with ``return_X_y`` a tuple (X, y) of its
-        features and its target, shape (n_rows,), as float64.
+        features and its target, shape (n_rows,), as float64. With
+        ``split``, a tuple (train, test) of Datasets, or with ``return_X_y``
+        too, ``X_train, X_test, y_train, y_test``, in the order of
+        :func:`sklearn.model_selection.train_test_split`. The chirp's rows
+        are sorted by ``x`` within each part.
 
     Raises:
-        ValueError: If ``name`` is not a known dataset, or the source's
-            categories of an ordered column are not the expected ones.
+        ValueError: If ``name`` is not a known dataset, ``split`` is asked of
+            one without a split, the source's categories of an ordered column
+            are not the expected ones, or the chirp's gaps do not fit in
+            their segments or a count is negative.
+        TypeError: If ``options`` are given for a dataset other than the
+            chirp, or are not the chirp's.
         OSError: If a download fails.
+
+    Examples:
+        >>> X, y = load_dataset("yacht", return_X_y=True)  # doctest: +SKIP
+        >>> train, test = load_dataset("chirp", split=True, random_state=0)
+        >>> train.X.shape, test.X.shape
+        ((881, 1), (119, 1))
     """
     entry = _REGISTRY.get(name)
     if entry is None:
         raise ValueError(
             f"unknown dataset {name!r}; choose one of {sorted(_REGISTRY)}"
         )
-    if entry.data_id is None:
-        catalog = fetch_dc1(data_home=data_home)
-        features = catalog.features("mag-color")
-        target = catalog.redshift
+    unknown = set(options) - (_CHIRP_OPTIONS if entry.generated else set())
+    if unknown:
+        raise TypeError(
+            f"load_dataset({name!r}) got unexpected keywords {sorted(unknown)}"
+        )
+    if split and entry.data_id is not None:
+        raise ValueError(
+            f"{name!r} has no train/test split of its own; split it with"
+            " sklearn.model_selection.train_test_split"
+        )
+    if entry.generated:
+        x_train, x_test, y_train, y_test = _make_chirp(**options)
+        parts = [
+            (pd.DataFrame({"x": x_train[:, 0]}), y_train),
+            (pd.DataFrame({"x": x_test[:, 0]}), y_test),
+        ]
+    elif entry.data_id is None:
+        catalogs = (
+            fetch_dc1(data_home=data_home, split=True)
+            if split
+            else [fetch_dc1(data_home=data_home)]
+        )
+        parts = [
+            (catalog.features("mag-color"), catalog.redshift)
+            for catalog in catalogs
+        ]
     else:
         bunch = sklearn_datasets.fetch_openml(
             data_id=entry.data_id,
@@ -1623,26 +1743,42 @@ def load_dataset(
             as_frame=True,
         )
         features = bunch.data
-        target = bunch.target
         for column, categories in entry.ordered.items():
             # Raises if the source's categories ever stop matching.
             features[column] = features[column].cat.reorder_categories(
                 categories, ordered=True
             )
-    y = np.asarray(target, dtype=np.float64)
+        parts = [(features, bunch.target)]
+    parts = [(X, np.asarray(y, dtype=np.float64)) for X, y in parts]
+    if not split:
+        parts = [
+            (
+                pd.concat([X for X, _ in parts], ignore_index=len(parts) > 1),
+                np.concatenate([y for _, y in parts]),
+            )
+        ]
     if return_X_y:
-        return features, y
-    return Dataset(
-        name=name,
-        X=features,
-        y=y,
-        target=entry.target,
-        description=entry.description,
-        source=entry.source,
-        license=entry.license,
-        url=entry.url,
-        citation=entry.citation,
-    )
+        if split:
+            (X_train, y_train), (X_test, y_test) = parts
+            return X_train, X_test, y_train, y_test
+        return parts[0]
+    loaded = [
+        Dataset(
+            name=name,
+            X=X,
+            y=y,
+            target=entry.target,
+            description=entry.description,
+            source=entry.source,
+            license=entry.license,
+            url=entry.url,
+            citation=entry.citation,
+        )
+        for X, y in parts
+    ]
+    if split:
+        return loaded[0], loaded[1]
+    return loaded[0]
 
 
 def _resolve_home(root: str | pathlib.Path | None) -> pathlib.Path:

@@ -38,10 +38,50 @@ datasets.list_datasets()
 | `yacht` | 308 | 6 | `Residuary.resistance` | Residuary resistance of sailing yacht hulls | [OpenML 42370](https://www.openml.org/d/42370) | CC0 |
 | `year` | 515,345 | 90 | `year` | Release years of songs from their audio timbre | [OpenML 44027](https://www.openml.org/d/44027) | CC BY 4.0 |
 | `dc1` | 434,476 | 12 | `redshift` | LSST DESC photo-z Data Challenge 1 galaxy photometry | [Zenodo 10975874](https://zenodo.org/records/10975874) | CC BY 4.0 |
+| `chirp` | 1,000 | 1 | `y` | A noisy chirp with chunks cut out, generated on the spot | Generated | MIT |
 
-Every dataset except DC1 comes from [OpenML](https://www.openml.org) and is
-pinned to its OpenML id, so a later upload under the same name never changes
-what is loaded. DC1 is {func}`~lazy.datasets.fetch_dc1` with both of its files
-concatenated and the `"mag-color"` features, and the toy curve of
-{func}`~lazy.datasets.make_chirp` is generated on the spot rather than
+Every dataset except DC1 and the chirp comes from
+[OpenML](https://www.openml.org) and is pinned to its OpenML id, so a later
+upload under the same name never changes what is loaded. DC1 is
+{func}`~lazy.datasets.fetch_dc1` with both of its files concatenated and the
+`"mag-color"` features, and the chirp is generated on the spot rather than
 downloaded.
+
+## Train and test splits
+
+DC1 and the chirp come with a train/test split of their own, which
+`split=True` returns: DC1's challenge split of 43,486 training and 390,990
+test galaxies, and for the chirp, the chunks cut out of the curve. The split
+comes as two {class}`~lazy.datasets.Dataset` objects, or with
+`return_X_y=True` as four arrays in the order of
+{func}`sklearn.model_selection.train_test_split`. Without `split`, the
+training and test rows come concatenated, in that order. The OpenML datasets
+have no split of their own, and `split=True` raises a `ValueError` for them.
+
+```python
+train, test = datasets.load_dataset("dc1", split=True)
+X_train, X_test, y_train, y_test = datasets.load_dataset(
+    "chirp", split=True, return_X_y=True, random_state=0
+)
+```
+
+## The chirp
+
+The chirp is a toy problem with one feature, `x`, and the target
+y = A(x) sin(φ(x)) on 0 ≤ x ≤ 10, where the amplitude A(x) = 1 + 0.2x grows
+from 1 to 3 and the frequency φ′(x)/2π = 0.2 + 0.03x from 0.2 to 0.5 cycles
+per unit of x. Gaussian noise is added to the training rows, and chunks of x
+are cut out as the test rows without noise, so the true curve is known where
+a model has to interpolate. It is the only dataset that takes options, which
+are passed to {func}`~lazy.datasets.load_dataset` as keywords:
+
+| Option | Default | What it sets |
+|---|---|---|
+| `n_samples` | 1000 | Points evenly spaced over 0 ≤ x ≤ 10, before the gaps are cut |
+| `noise` | 0.2 | The standard deviation of the noise on the training targets |
+| `n_gaps` | 3 | How many chunks to cut out; 0 for none |
+| `gap_width` | 0.04 | Each chunk's width, as a fraction of the range of x |
+| `random_state` | `None` | A seed or a NumPy Generator, for the noise and where the gaps fall |
+
+The gaps never overlap: the range is cut into `n_gaps` equal segments, and
+each segment holds one gap, placed at random.

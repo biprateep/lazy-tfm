@@ -10,7 +10,7 @@ value.
 In our tests, none of the models extrapolated a trend beyond the range of the
 context. We trained every model
 (TabPFN-3.5, TabPFN-3.5-fast, LimiX-2, TabICL and TabFM) on the noisy chirp of
-{func}`~lazy.datasets.make_chirp` restricted to x < 8 or x < 7, and predicted
+{func}`load_dataset("chirp") <lazy.datasets.load_dataset>` restricted to x < 8 or x < 7, and predicted
 beyond that range. Every model reverted toward a flat mean beyond the training
 range, with an interval that did not cover the curve, giving an rms error of
 1.8 to 2.4 and a 68%-interval coverage of 21% to 55%. Therefore, the width of

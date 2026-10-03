@@ -80,7 +80,9 @@ plt.rcParams.update(RC_PARAMS)
 # chunks cut out, and TabPFN-3.5-fast's mean and 68% interval in the gaps.
 
 # %%
-X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
+X_train, X_test, y_train, y_test = datasets.load_dataset(
+    "chirp", split=True, return_X_y=True, random_state=0
+)
 
 model = lazy.LazyModel(
     "tabpfn",
@@ -112,7 +114,7 @@ def _gaps(x: np.ndarray) -> list[slice]:
     return [slice(a, b) for a, b in zip(edges[:-1], edges[1:], strict=True)]
 
 
-x_train, x_test = X_train[:, 0], X_test[:, 0]
+x_train, x_test = X_train["x"].to_numpy(), X_test["x"].to_numpy()
 fig, ax = plt.subplots(
     figsize=(TEXT_WIDTH, 0.4 * TEXT_WIDTH), layout="constrained"
 )
@@ -313,9 +315,11 @@ plt.close(fig)
 # as the context grows, with no weights changed.
 
 # %%
-x_full, _, y_full, _ = datasets.make_chirp(n_gaps=0, random_state=0)
-# The noise-free curve on a 400-point grid, from make_chirp itself.
-x_grid, _, truth, _ = datasets.make_chirp(400, noise=0.0, n_gaps=0)
+full = datasets.load_dataset("chirp", n_gaps=0, random_state=0)
+x_full, y_full = full.X.to_numpy(), full.y
+# The noise-free curve on a 400-point grid, from the chirp itself.
+grid = datasets.load_dataset("chirp", n_samples=400, noise=0.0, n_gaps=0)
+x_grid, truth = grid.X.to_numpy(), grid.y
 sizes = (20, 100, 400)
 fig, axes = plt.subplots(
     1,

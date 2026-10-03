@@ -636,35 +636,6 @@ def test_the_features_keep_the_input_index(photometry, mode):
     np.testing.assert_array_equal(features["IERR"], subset["IERR"])
 
 
-def test_make_chirp_cuts_its_gaps_into_the_test_rows():
-    X_train, X_test, y_train, y_test = datasets.make_chirp(
-        1000, n_gaps=3, gap_width=0.06, random_state=0
-    )
-    assert X_train.shape[1] == X_test.shape[1] == 1
-    assert len(X_train) + len(X_test) == 1000
-    assert len(X_train) == len(y_train) and len(X_test) == len(y_test)
-    # Three separate runs of test rows, each about 6% of the range wide.
-    x = np.linspace(0.0, 10.0, 1000)
-    in_gap = np.isin(x, X_test[:, 0])
-    assert np.count_nonzero(np.diff(in_gap.astype(int)) == 1) == 3
-    assert 3 * 55 <= len(X_test) <= 3 * 62
-    # The test targets are the noise-free curve; the training ones are not.
-    truth = (1 + 0.2 * x) * np.sin(2 * np.pi * (0.2 * x + 0.015 * x**2))
-    np.testing.assert_array_equal(y_test, truth[in_gap])
-    assert 0.15 < np.std(y_train - truth[~in_gap]) < 0.25
-
-
-def test_make_chirp_is_reproducible_and_validates():
-    first = datasets.make_chirp(random_state=1)
-    second = datasets.make_chirp(random_state=1)
-    for a, b in zip(first, second, strict=True):
-        np.testing.assert_array_equal(a, b)
-    _, X_test, _, _ = datasets.make_chirp(n_gaps=0, random_state=1)
-    assert len(X_test) == 0
-    with pytest.raises(ValueError, match="do not fit"):
-        datasets.make_chirp(n_gaps=10, gap_width=0.2)
-
-
 # -- the demo dataset registry ------------------------------------------------
 
 LIST_COLUMNS = [
@@ -746,7 +717,21 @@ def fake_dc1(monkeypatch, photometry):
     catalog = datasets.Catalog.from_frame(
         photometry, redshift=np.linspace(0.1, 1.9, len(photometry))
     )
-    monkeypatch.setattr(datasets, "fetch_dc1", lambda **_: catalog)
+
+    def fetch(*, split=False, **_):
+        if not split:
+            return catalog
+        half = len(photometry) // 2
+        return (
+            datasets.Catalog.from_frame(
+                photometry.iloc[:half], redshift=catalog.redshift[:half]
+            ),
+            datasets.Catalog.from_frame(
+                photometry.iloc[half:], redshift=catalog.redshift[half:]
+            ),
+        )
+
+    monkeypatch.setattr(datasets, "fetch_dc1", fetch)
     return catalog
 
 
@@ -760,6 +745,7 @@ def test_list_datasets_has_one_complete_row_per_dataset():
     for column in ("target", "description", "license", "url"):
         assert table[column].str.len().gt(0).all(), column
     assert table.loc["dc1", "source"] == "Zenodo 10975874"
+    assert table.loc["chirp", "source"] == "Generated"
     for name in OPENML_NAMES:
         data_id = table.loc[name, "source"].removeprefix("OpenML ")
         assert table.loc[name, "url"] == f"https://www.openml.org/d/{data_id}"
@@ -891,3 +877,82 @@ def test_yacht_downloads_once_then_loads_offline(isolated_home, monkeypatch):
     monkeypatch.setattr(sklearn_openml, "urlopen", _no_network)
     again = datasets.load_dataset("yacht", data_home=isolated_home)
     pd.testing.assert_frame_equal(again.X, dataset.X)
+
+
+def test_dc1_splits_into_the_challenge_train_and_test(fake_dc1, fake_openml):
+    train, test = datasets.load_dataset("dc1", split=True)
+    assert not fake_openml
+    assert len(train) + len(test) == len(fake_dc1)
+    np.testing.assert_array_equal(
+        np.concatenate([train.y, test.y]), fake_dc1.redshift
+    )
+    X_train, X_test, y_train, y_test = datasets.load_dataset(
+        "dc1", split=True, return_X_y=True
+    )
+    pd.testing.assert_frame_equal(X_train, train.X)
+    pd.testing.assert_frame_equal(X_test, test.X)
+    np.testing.assert_array_equal(y_train, train.y)
+    np.testing.assert_array_equal(y_test, test.y)
+
+
+def test_openml_datasets_have_no_split(fake_openml):
+    with pytest.raises(ValueError, match="no train/test split"):
+        datasets.load_dataset("yacht", split=True)
+    assert not fake_openml
+
+
+def test_only_the_chirp_takes_options(fake_openml):
+    with pytest.raises(TypeError, match="noise"):
+        datasets.load_dataset("yacht", noise=0.1)
+    with pytest.raises(TypeError, match="colour"):
+        datasets.load_dataset("chirp", colour="red")
+    assert not fake_openml
+
+
+def test_the_chirp_cuts_its_gaps_into_the_test_rows(fake_openml):
+    train, test = datasets.load_dataset(
+        "chirp",
+        split=True,
+        n_samples=1000,
+        n_gaps=3,
+        gap_width=0.06,
+        random_state=0,
+    )
+    assert not fake_openml
+    assert list(train.X.columns) == list(test.X.columns) == ["x"]
+    assert len(train) + len(test) == 1000
+    assert (train.name, train.target, train.source) == (
+        "chirp",
+        "y",
+        "Generated",
+    )
+    # Three separate runs of test rows, each about 6% of the range wide.
+    x = np.linspace(0.0, 10.0, 1000)
+    in_gap = np.isin(x, test.X["x"])
+    assert np.count_nonzero(np.diff(in_gap.astype(int)) == 1) == 3
+    assert 3 * 55 <= len(test) <= 3 * 62
+    # The test targets are the noise-free curve; the training ones are not.
+    truth = (1 + 0.2 * x) * np.sin(2 * np.pi * (0.2 * x + 0.015 * x**2))
+    np.testing.assert_array_equal(test.y, truth[in_gap])
+    assert 0.15 < np.std(train.y - truth[~in_gap]) < 0.25
+
+
+def test_the_chirp_is_reproducible_and_validates():
+    first = datasets.load_dataset(
+        "chirp", split=True, return_X_y=True, random_state=1
+    )
+    second = datasets.load_dataset(
+        "chirp", split=True, return_X_y=True, random_state=1
+    )
+    for a, b in zip(first, second, strict=True):
+        np.testing.assert_array_equal(a, b)
+    # Unsplit, the training rows come first, then the test rows.
+    whole = datasets.load_dataset("chirp", random_state=1)
+    np.testing.assert_array_equal(whole.y, np.concatenate([first[2], first[3]]))
+    assert list(whole.X.index) == list(range(len(whole)))
+    _, X_test, _, _ = datasets.load_dataset(
+        "chirp", split=True, return_X_y=True, n_gaps=0, random_state=1
+    )
+    assert len(X_test) == 0
+    with pytest.raises(ValueError, match="do not fit"):
+        datasets.load_dataset("chirp", n_gaps=10, gap_width=0.2)

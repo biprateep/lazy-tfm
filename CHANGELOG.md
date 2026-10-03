@@ -46,13 +46,16 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 - `predict_interval(X, coverage=0.95)` on every model: the central interval
   holding `coverage` of each row's probability, shape `(n_samples, 2)`,
   computed exactly from the native distribution.
-- `lazy.datasets.make_chirp`, a one-feature toy problem (a noisy chirp with
-  chunks cut out as the test set), for demonstrations.
 - `lazy.datasets.load_dataset(name)` and `list_datasets()`: one loader for
   the demonstration datasets (California housing, insurance, diamonds, King
   County, bike sharing, wine quality, Ames, concrete, energy, kin8nm,
   protein, yacht, Year Prediction MSD, all pinned to an OpenML data id, and
-  DC1), downloaded once and cached under `data_home()`.
+  DC1), downloaded once and cached under `data_home()`, and `"chirp"`, a
+  one-feature toy problem generated on the spot (a noisy chirp with chunks cut
+  out as the test set, its size, noise and gaps set by keywords).
+  `split=True` returns the train/test split of DC1 (the challenge's) and of
+  the chirp (its gaps), as two `Dataset`s or, with `return_X_y=True`, as
+  `X_train, X_test, y_train, y_test`.
 - Three proper scores in `lazy.metrics`: `crps` (the continuous ranked
   probability score), `nll` (the negative log predictive density, floored at
   `NLL_DENSITY_FLOOR`) and `pinball_loss` (for `predict_quantiles`), with

@@ -100,7 +100,7 @@ model and its weights are the same in all three panels.
 :width: 100%
 
 **Figure 3.** TabPFN-3.5-fast's predictions for the noisy chirp of
-{func}`~lazy.datasets.make_chirp` given 20, 100 and 400 context rows drawn at
+{func}`load_dataset("chirp") <lazy.datasets.load_dataset>` given 20, 100 and 400 context rows drawn at
 random. The blue points show the context, the gray dashed line the true curve,
 the orange line the mean of each predicted distribution and the orange band
 its central 68% interval. We observe that the predicted distributions narrow

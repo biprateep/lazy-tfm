@@ -26,14 +26,16 @@ installation instructions, including support for specific models, refer to the {
 ### Usage
 
 As a quick demonstration, we predict the mean
-and 68% interval for the missing segments of a noisy curve. {func}`~lazy.datasets.make_chirp` generates a noisy sinusoid with three gaps as
-the test set.
+and 68% interval for the missing segments of a noisy curve. The `"chirp"` dataset of {func}`~lazy.datasets.load_dataset` is a noisy sinusoid, and
+`split=True` returns the three gaps cut out of it as the test set.
 
 ```python
 import lazy
 from lazy import datasets
 
-X_train, X_test, y_train, y_test = datasets.make_chirp(random_state=0)
+X_train, X_test, y_train, y_test = datasets.load_dataset(
+    "chirp", split=True, return_X_y=True, random_state=0
+)
 
 
 
