@@ -147,6 +147,8 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- With LimiX's code from `LAZY_LIMIX_SRC`, `provenance_["package"]` reads
+  "LimiX (source checkout at <commit>)" instead of "LimiX (not installed)".
 - The `plot_pit_qq` and `plot_pit` docstrings describe the PIT shapes
   correctly: an S-shape means densities too narrow or too wide, and a curve
   wholly below or above the diagonal (a sloped histogram) means predictions

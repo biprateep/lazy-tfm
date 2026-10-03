@@ -103,6 +103,17 @@ class Source:
     commit: str | None
     origin: str
 
+    @property
+    def package(self) -> str:
+        """The ``"package"`` label of a provenance: where LimiX came from.
+
+        ``"LimiX <version>"`` for an installed LimiX, and ``"LimiX (source
+        checkout at <commit>)"`` for a checkout an environment variable names.
+        """
+        if not self.origin.startswith("$"):
+            return self.origin.removeprefix("installed ")
+        return f"LimiX (source checkout at {self.commit or 'unknown commit'})"
+
 
 def locate() -> Source:
     """Finds LimiX's source, without importing any of it.

@@ -49,6 +49,15 @@ def test_an_environment_variable_names_the_source(clean_env, tmp_path):
     assert source.commit is None  # not a git checkout
 
 
+def test_the_package_label_says_where_the_code_came_from(tmp_path):
+    checkout = _limix_source.Source(tmp_path, "abc123", "$LAZY_LIMIX_SRC")
+    unknown = _limix_source.Source(tmp_path, None, "$LIMIX_SRC")
+    installed = _limix_source.Source(tmp_path, "abc123", "installed LimiX 2.0")
+    assert checkout.package == "LimiX (source checkout at abc123)"
+    assert unknown.package == "LimiX (source checkout at unknown commit)"
+    assert installed.package == "LimiX 2.0"
+
+
 def test_lazy_limix_src_wins_over_limix_src(clean_env, tmp_path):
     first = _fake_source(tmp_path / "first")
     second = _fake_source(tmp_path / "second")

@@ -272,6 +272,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.provenance_ = {
             **self.provenance_,
             "source_commit": source.commit,
+            "package": source.package,
             "source_origin": source.origin,
             "attribution": "Built with StableAI LimiX",
         }
