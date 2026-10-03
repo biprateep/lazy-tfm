@@ -18,6 +18,7 @@ and what it returns:
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
 | `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                   |
 | `predict_interval(X, coverage)`     | `(n_samples, 2)` bounds of the central interval, exact.     |
+| `predict_pit(X, y)`                 | `(n_samples,)` PIT values (CDF at the true value), exact.   |
 | `predict(X, method="mode")`         | One value per row: `mode`, `peak_mean`, `mean` or `median`. |
 | `score(X, y)`                       | Negative CDE loss, so higher is better.                     |
 | `evaluate(X, y)`                    | A one-row table of every diagnostic metric.                 |
@@ -42,6 +43,7 @@ DESC's [qp](https://github.com/LSSTDESC/qp):
 dist = model.predict_distribution(X_test)   # one per row
 dist.pdf(z)            # densities at any values of z
 dist.cdf(z)            # cumulative probabilities
+dist.pit(z_true)       # each row's CDF at its own value
 dist.ppf([0.16, 0.5, 0.84])                # quantiles, exact
 dist.mean(), dist.median(), dist.mode(), dist.std()
 dist.interval(0.68)    # central credible interval
@@ -53,7 +55,11 @@ ensemble = dist.to_qp()   # a qp.Ensemble, for RAIL (the qp extra)
 Since the operations are exact, `predict_quantiles(X, q)` is
 `predict_distribution(X).ppf(q)` and never goes through a grid, and
 `predict_interval(X, coverage)` gives the bounds of the central interval in the
-same way. For interoperability with RAIL and other qp users, `to_qp` converts
+same way. The `pdf` and `cdf` methods evaluate every row at every value, so
+`dist.cdf(z_true)` has shape `(n, n)`. The `pit` method instead evaluates
+each row at its own value, $F_i(y_i)$, which is the diagonal of that array,
+and `predict_pit(X, y)` is `predict_distribution(X).pit(y)`. For
+interoperability with RAIL and other qp users, `to_qp` converts
 any of the three kinds to a `qp.Ensemble`, and
 {func}`~lazy.distributions.from_qp` converts a histogram or quantile ensemble
 back (both need the `qp` extra, see {doc}`../installation`).
@@ -97,6 +103,16 @@ because that is where the buckets are. Passing a grid restricts the range, and
 defaults to 200 equal bins over the range of the training targets, padded by
 5% on each side. Probability outside the grid is dropped and each density is
 renormalized, so a grid should cover the targets (see {doc}`limits`).
+
+On any grid, `predict_proba(X, grid)` is
+`predict_distribution(X).on_grid(grid)`. Each bin receives the exact
+probability that the distribution places inside it, divided by the bin width,
+and each row is then renormalized by the grid's normalization (see below).
+Therefore, the densities differ from the bin averages of `dist.pdf` when part
+of the distribution lies outside the grid (e.g., the native buckets below zero
+on {data}`~lazy.datasets.DC1_GRID`), and on a trapezoid grid, whose rule gives
+the first and last bins only half their width. The probability in each bin
+before the renormalization is `dist.histogramize(grid.edges).masses`.
 
 ## Two normalizations
 
@@ -151,7 +167,9 @@ does not depend on the estimator, so it ranks methods without knowing the true
 density (lower is better, and `score` returns its negative). The probability
 integral transform (PIT) of an object is its predicted CDF at the true value,
 and the PIT values of a well-calibrated set of densities are uniform on [0,
-1]. {func}`~lazy.metrics.pit_statistics` measures their departure from
+1]. The metrics compute it from the densities on a grid, while
+`predict_pit` computes it exactly from the native distribution.
+{func}`~lazy.metrics.pit_statistics` measures their departure from
 uniformity in the ways DC1 quotes, each sensitive to a different departure:
 the Kolmogorov-Smirnov statistic (and its p-value), the Cramér-von Mises
 statistic, DC1's Anderson-Darling statistic on two cuts, (0.05, 0.95) and

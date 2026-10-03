@@ -48,10 +48,11 @@ def _integral_moments(dist, lo, hi, n=400_001):
 # -- histograms --------------------------------------------------------------
 
 
-def test_histogram_on_grid_is_exactly_the_rebinning(histogram):
+def test_histogram_on_grid_is_exactly_the_normalized_rebinning(histogram):
     grid = lazy.Grid.linear(0.0, 3.0, 57)
     np.testing.assert_array_equal(
-        histogram.on_grid(grid), grid.rebin(histogram.masses, histogram.bins)
+        histogram.on_grid(grid),
+        grid.normalize(grid.rebin(histogram.probabilities, histogram.bins)),
     )
 
 
@@ -195,12 +196,15 @@ def mixture(histogram):
     return distributions.MixtureDistribution((histogram, other), [0.3, 0.7])
 
 
-def test_mixture_on_grid_is_the_weighted_average(mixture):
-    grid = lazy.Grid.linear(0.0, 4.0, 40)
+def test_mixture_on_grid_is_the_normalized_weighted_average(mixture):
+    # The grid cuts the components' tails unequally, so normalizing the
+    # average differs from averaging the normalized components.
+    grid = lazy.Grid.linear(0.2, 3.0, 40)
     first, second = mixture.components
+    masses = 0.3 * first.histogramize(grid.edges).masses
+    masses += 0.7 * second.histogramize(grid.edges).masses
     np.testing.assert_allclose(
-        mixture.on_grid(grid),
-        0.3 * first.on_grid(grid) + 0.7 * second.on_grid(grid),
+        mixture.on_grid(grid), grid.normalize(masses / grid.widths)
     )
 
 
@@ -223,6 +227,83 @@ def test_mixture_ppf_inverts_the_cdf(mixture):
 def test_mixtures_take_histograms_only(histogram, quantiles):
     with pytest.raises(TypeError, match="HistogramDistribution"):
         distributions.MixtureDistribution((histogram, quantiles), [0.5, 0.5])
+
+
+# -- on a grid, and per-row CDFs, for every kind ------------------------------
+
+KINDS = ["histogram", "quantiles", "mixture"]
+
+
+@pytest.mark.parametrize("name", KINDS)
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+def test_on_grid_is_normalized_by_the_grid_even_when_it_cuts_mass(
+    request, name, normalization
+):
+    dist = request.getfixturevalue(name)
+    grid = lazy.Grid.linear(0.4, 1.6, 50, normalization=normalization)
+    assert (np.diff(dist.cdf([grid.y_min, grid.y_max])) < 1.0).any()
+    pdfs = dist.on_grid(grid)
+    np.testing.assert_allclose(
+        lazy.metrics.normalization_error(grid, pdfs), 0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(grid.normalize(pdfs), pdfs, rtol=1e-12)
+
+
+@pytest.mark.parametrize("name", KINDS)
+def test_pit_is_the_diagonal_of_the_cdf(request, name):
+    dist = request.getfixturevalue(name)
+    rng = np.random.default_rng(11)
+    values = rng.uniform(-0.5, 4.5, len(dist))
+    values[0] = -np.inf
+    values[1] = np.inf
+    pit = dist.pit(values)
+    assert pit.shape == (len(dist),)
+    np.testing.assert_allclose(pit, np.diag(dist.cdf(values)), atol=1e-15)
+    assert pit[0] == 0.0 and pit[1] == 1.0
+    # Away from the quantile fixture's atom, the CDF inverts the ppf.
+    median = dist.ppf([0.5])[:, 0]
+    np.testing.assert_allclose(dist.pit(median), 0.5, atol=1e-12)
+
+
+@pytest.mark.parametrize("name", KINDS)
+def test_pit_matches_the_grid_metrics_on_a_fine_grid(request, name):
+    dist = request.getfixturevalue(name)
+    values = dist.ppf([0.37])[:, 0] + 0.01
+    low, high = dist.ppf([0.0, 1.0]).T
+    grid = lazy.Grid.linear(
+        low.min() - 0.01, high.max() + 0.01, 20_000, normalization="histogram"
+    )
+    _, grid_pit = lazy.metrics.per_object_scores(
+        values, grid, dist.on_grid(grid)
+    )
+    np.testing.assert_allclose(dist.pit(values), grid_pit, atol=1e-6)
+
+
+def test_pit_is_exact_on_a_histogram_grid_of_its_own_buckets(histogram):
+    grid = lazy.Grid.from_edges(histogram.bins, normalization="histogram")
+    values = np.random.default_rng(12).uniform(0.0, histogram.bins[-1], 6)
+    _, grid_pit = lazy.metrics.per_object_scores(
+        values, grid, histogram.on_grid(grid)
+    )
+    np.testing.assert_allclose(histogram.pit(values), grid_pit, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("values", "match"),
+    [
+        (np.zeros(5), r"shape \(6,\)"),
+        (np.zeros((6, 1)), r"shape \(6,\)"),
+        (0.5, r"shape \(6,\)"),
+        (np.r_[np.zeros(5), np.nan], "NaN"),
+    ],
+)
+def test_pit_takes_one_value_per_row(histogram, values, match):
+    with pytest.raises(ValueError, match=match):
+        histogram.pit(values)
+
+
+def test_pit_of_no_rows_is_empty(histogram):
+    assert histogram[:0].pit(np.zeros(0)).shape == (0,)
 
 
 # -- rows, metadata, concatenation ------------------------------------------

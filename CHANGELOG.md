@@ -14,6 +14,9 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Added
 
+- `Distribution.pit(values)` gives each row's CDF at its own value, shape
+  `(n_rows,)`, exactly and without the `(n, n)` table `cdf` would build, and
+  `predict_pit(X, y)` gives exact PIT values from the native distribution.
 - A logo: "LAZY" with the L, A and Y drawn as data and the Z as predictions
   with error bars, in the docs, the README and the favicon. It is drawn by
   `docs/logo/make_logo.py`.
@@ -147,6 +150,11 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- `Distribution.on_grid(grid)` returns exactly what `predict_proba(X, grid)`
+  returns for histogram and mixture distributions too. It dropped probability
+  outside the grid without renormalizing and ignored the grid's normalization,
+  so on `DC1_GRID` it was off by up to about 18% for low-redshift objects.
+  `predict_proba` is unchanged.
 - The docs say what `fit` costs: it trains no weights, but with `kv_cache=True`
   it runs the context through the network once per member (TabFM defers that
   to `predict`). Limits and pitfalls gains a section on output grids finer than

@@ -54,7 +54,6 @@ from sklearn import model_selection
 
 import lazy
 from lazy import datasets
-from lazy import metrics
 from lazy import plotting
 
 SEED = 42  # One seed for the split, the subsample and the model
@@ -209,13 +208,11 @@ print(
 # A finer test is the probability integral transform (PIT), which is the
 # predicted cumulative distribution evaluated at the true value. For
 # calibrated distributions, the PIT values are uniform between 0 and 1. We
-# compute them from the densities on the model's default grid with
-# `metrics.per_object_scores` and plot their histogram with
-# `plotting.plot_pit`.
+# compute them exactly from the model's own output with `predict_pit`, as for
+# the quantiles above, and plot their histogram with `plotting.plot_pit`.
 
 # %%
-pdfs = model.predict_proba(X_test)
-_, pit = metrics.per_object_scores(y_test, model.grid, pdfs)
+pit = model.predict_pit(X_test, y_test)
 
 ax = plotting.plot_pit(pit)
 

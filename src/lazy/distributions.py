@@ -18,16 +18,19 @@ serves them all without approximation:
 
 The method names are those of :mod:`scipy.stats` and LSST DESC's ``qp``:
 ``pdf``, ``cdf``, ``ppf``, ``sf``, ``rvs``, ``mean``, ``median``, ``mode``,
-``std``, ``var``, ``interval``. :meth:`on_grid` gives the bin-averaged
-densities on a :class:`~lazy.grid.Grid`, which is what
-``predict_proba`` returns, and ``to_qp`` / :func:`from_qp` convert to and from
-qp ensembles (install ``lazy-tfm[qp]``) for RAIL.
+``std``, ``var``, ``interval``. ``pit`` gives each row's CDF at its own
+value, ``F_i(y_i)``, without the full ``cdf(values)`` table.
+:meth:`~HistogramDistribution.on_grid` gives the densities on a
+:class:`~lazy.grid.Grid` exactly as ``predict_proba`` returns them, and
+``to_qp`` / :func:`from_qp` convert to and from qp ensembles (install
+``lazy-tfm[qp]``) for RAIL.
 
 Typical usage example:
 
   dist = model.predict_distribution(X_test)
   low, median, high = dist.ppf([0.16, 0.5, 0.84]).T
   samples = dist.rvs(100, random_state=0)
+  pit = dist.pit(z_test)
 """
 
 from __future__ import annotations
@@ -90,6 +93,18 @@ def _slice_ancil(ancil: dict[str, Any] | None, rows: Any) -> Any:
     return {key: value[rows] for key, value in ancil.items()}
 
 
+def _as_row_values(values: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
+    """One value per row as a float array, shape (n_rows,), without NaN."""
+    out = np.asarray(values, dtype=np.float64)
+    if out.shape != (n_rows,):
+        raise ValueError(
+            f"values must have shape ({n_rows},), one per row: {out.shape=}"
+        )
+    if np.isnan(out).any():
+        raise ValueError("values must not contain NaN")
+    return out
+
+
 def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
     """Probability levels as a 1-D array inside [0, 1]."""
     out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
@@ -118,6 +133,27 @@ class _Base:
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         """Per-row inverse CDF at per-row levels, shape (n_rows, k)."""
         raise NotImplementedError
+
+    def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
+        """Each row's CDF at its own value, shape (n_rows,)."""
+        raise NotImplementedError
+
+    def pit(self, values: npt.ArrayLike) -> _typing.FloatArray:
+        """The probability integral transform: each row's CDF at its value.
+
+        Row ``i`` gives ``F_i(values[i])``, exactly, which is the diagonal of
+        ``cdf(values)`` without the (n_rows, n_rows) table. With the true
+        values, these are the PIT values that :mod:`lazy.metrics` computes
+        on a grid, here free of any grid.
+
+        Args:
+            values: One value per row, e.g. the true targets, shape
+                (n_rows,); infinite values give 0 or 1.
+
+        Returns:
+            The cumulative probabilities, within [0, 1], shape (n_rows,).
+        """
+        return self._cdf_rows(_as_row_values(values, self.npdf))
 
     def sf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The survival function 1 - CDF, shape (n_rows, len(values))."""
@@ -251,13 +287,30 @@ class HistogramDistribution(_Base):
         )
 
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
-        """Bin-averaged densities on ``grid``, shape (n_rows, grid.n_bins).
+        """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        Exact and mass-conserving (:meth:`lazy.grid.Grid.rebin`);
-        probability outside the grid is dropped, so rows need not integrate
-        to one over the grid.
+        Each bin gets the exact mass the buckets put in it
+        (:meth:`lazy.grid.Grid.rebin`), divided by its width; the
+        probability outside the grid is dropped and each row is normalized
+        by the grid's convention (:meth:`lazy.grid.Grid.normalize`). For
+        the masses before that normalization, use
+        ``histogramize(grid.edges).masses``.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            Normalized densities, shape (n_rows, grid.n_bins).
         """
-        return grid.rebin(self.masses, self.bins)
+        return grid.normalize(self._bin_densities(grid))
+
+    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
+        """The mass in each bin of ``grid`` over its width, unnormalized.
+
+        From :attr:`probabilities`, so that an empty row is uniform in
+        probability over the buckets here as in every other method.
+        """
+        return grid.rebin(self.probabilities, self.bins)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
@@ -281,22 +334,44 @@ class HistogramDistribution(_Base):
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
-        widths = self.widths
         probabilities = self.probabilities
-        cumulative = np.concatenate(
-            [np.zeros((self.npdf, 1)), np.cumsum(probabilities, axis=1)], axis=1
-        )
-        index = np.clip(
-            np.searchsorted(self.bins, y, side="right") - 1, 0, widths.size - 1
-        )
-        with np.errstate(divide="ignore", invalid="ignore"):
-            fraction = np.where(
-                widths[index] > 0, (y - self.bins[index]) / widths[index], 1.0
-            )
-        fraction = np.clip(fraction, 0.0, 1.0)
+        cumulative = _cumulative(probabilities)
+        index, fraction = self._locate(y)
         value = cumulative[:, index] + probabilities[:, index] * fraction
         value = np.where(y < self.bins[0], 0.0, value)
         return np.where(y >= self.bins[-1], 1.0, value)
+
+    def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
+        probabilities = self.probabilities
+        cumulative = _cumulative(probabilities)
+        index, fraction = self._locate(values)
+        rows = np.arange(self.npdf)
+        value = cumulative[rows, index] + probabilities[rows, index] * fraction
+        value = np.where(values < self.bins[0], 0.0, value)
+        return np.where(values >= self.bins[-1], 1.0, value)
+
+    def _locate(
+        self, values: _typing.FloatArray
+    ) -> tuple[_typing.IntArray, _typing.FloatArray]:
+        """Returns a tuple (bucket, fraction of it below each value).
+
+        Both have the shape of ``values``; the bucket is clipped to the
+        buckets, the fraction to [0, 1], and a zero-width bucket counts as
+        wholly below.
+        """
+        widths = self.widths
+        index = np.clip(
+            np.searchsorted(self.bins, values, side="right") - 1,
+            0,
+            widths.size - 1,
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            fraction = np.where(
+                widths[index] > 0,
+                (values - self.bins[index]) / widths[index],
+                1.0,
+            )
+        return index, np.clip(fraction, 0.0, 1.0)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
@@ -454,9 +529,17 @@ class QuantileDistribution(_Base):
         return cls(quants, locs, parts[0].ancil)
 
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
-        """Bin-averaged densities on ``grid``, shape (n_rows, grid.n_bins).
+        """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        Exactly :meth:`lazy.grid.Grid.from_quantiles`.
+        Exactly :meth:`lazy.grid.Grid.from_quantiles`: the mass in each bin
+        over its width, with the probability outside the grid dropped and
+        each row normalized by the grid's convention.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            Normalized densities, shape (n_rows, grid.n_bins).
         """
         return grid.from_quantiles(self.locs, self.quants)
 
@@ -467,6 +550,14 @@ class QuantileDistribution(_Base):
         for row in range(self.npdf):
             out[row] = np.interp(
                 y, self.locs[row], self.quants, left=0.0, right=1.0
+            )
+        return out
+
+    def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
+        out = np.empty(self.npdf)
+        for row in range(self.npdf):
+            out[row] = np.interp(
+                values[row], self.locs[row], self.quants, left=0.0, right=1.0
             )
         return out
 
@@ -636,13 +727,26 @@ class MixtureDistribution(_Base):
         return total
 
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
-        """The weighted average of the components' densities on ``grid``."""
+        """Densities on ``grid`` as ``predict_proba`` gives them.
+
+        The weighted average of the mass each component puts in each bin,
+        over the bin's width, with the probability outside the grid dropped
+        and each row then normalized by the grid's convention. Normalizing
+        after averaging, not before, is the mixture itself restricted to the
+        grid, even when its components put different mass outside it.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            Normalized densities, shape (n_rows, grid.n_bins).
+        """
         total = np.zeros((self.npdf, grid.n_bins))
         for weight, component in zip(
             self.weights, self.components, strict=True
         ):
-            total += weight * component.on_grid(grid)
-        return total
+            total += weight * component._bin_densities(grid)  # noqa: SLF001 - same module.
+        return grid.normalize(total)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values))."""
@@ -651,6 +755,11 @@ class MixtureDistribution(_Base):
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
         return self._weighted([c.cdf(values) for c in self.components])
+
+    def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
+        return self._weighted(
+            [c._cdf_rows(values) for c in self.components]  # noqa: SLF001 - same module.
+        )
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         # The union histogram is the same distribution, so its inverse is
@@ -681,6 +790,14 @@ class MixtureDistribution(_Base):
     def to_qp(self) -> Any:
         """The mixture as a ``qp.Ensemble`` (``hist`` on the union edges)."""
         return self.to_histogram().to_qp()
+
+
+def _cumulative(probabilities: _typing.FloatArray) -> _typing.FloatArray:
+    """The mass below each bucket edge, shape (n_rows, n_buckets + 1)."""
+    return np.concatenate(
+        [np.zeros((len(probabilities), 1)), np.cumsum(probabilities, axis=1)],
+        axis=1,
+    )
 
 
 #: Any per-object distribution this module defines.

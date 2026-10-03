@@ -273,6 +273,30 @@ def test_quantiles_agree_with_the_grid_median(data):
     assert (low <= mid).all() and (mid <= high).all()
 
 
+def test_predict_proba_is_the_distribution_on_the_default_grid(data):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    np.testing.assert_allclose(
+        est.predict_proba(X),
+        est.predict_distribution(X).on_grid(est.grid_),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_predict_pit_is_the_distributions_cdf_at_the_truth(data):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    pit = est.predict_pit(X, y)
+    assert pit.shape == (len(X),)
+    dist = est.predict_distribution(X)
+    np.testing.assert_allclose(pit, np.diag(dist.cdf(y)), atol=1e-15)
+    # The same distribution, scored bin by bin as a histogram grid.
+    grid = lazy.Grid.from_edges(est.grid_.edges, normalization="histogram")
+    _, grid_pit = lazy.metrics.per_object_scores(y, grid, est.predict_proba(X))
+    np.testing.assert_allclose(pit, grid_pit, atol=1e-12)
+
+
 def test_the_native_grid_is_requested_by_name(data):
     X, y = data
     est = _WithNativeGrid().fit(X, y)
@@ -304,6 +328,7 @@ def test_as_grid_refuses_the_native_sentinel():
         lambda est, X, y: est.predict(X),
         lambda est, X, y: est.predict_distribution(X),
         lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.predict_pit(X, y),
         lambda est, X, y: est.score(X, y),
         lambda est, X, y: est.evaluate(X, y),
         lambda est, X, y: est.point_estimates(np.ones((len(X), 200))),
@@ -352,7 +377,7 @@ def test_an_unknown_method_is_refused_before_inference(data, call):
     assert getattr(est, "calls_", 0) == 0
 
 
-@pytest.mark.parametrize("method", ["score", "evaluate"])
+@pytest.mark.parametrize("method", ["score", "evaluate", "predict_pit"])
 def test_scoring_refuses_non_finite_targets_before_inference(data, method):
     X, y = data
     est = _CountingDummy().fit(X, y)
@@ -363,7 +388,7 @@ def test_scoring_refuses_non_finite_targets_before_inference(data, method):
     assert getattr(est, "calls_", 0) == 0
 
 
-@pytest.mark.parametrize("method", ["score", "evaluate"])
+@pytest.mark.parametrize("method", ["score", "evaluate", "predict_pit"])
 def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
     X, y = data
     est = _CountingDummy().fit(X, y)
@@ -402,6 +427,13 @@ def test_predicting_no_rows_gives_empty_results_without_inference(
     assert getattr(est, "calls_", 0) == 0
 
 
+def test_no_rows_give_no_pit_values_without_inference(data):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    assert est.predict_pit(X.iloc[:0], y[:0]).shape == (0,)
+    assert getattr(est, "calls_", 0) == 0
+
+
 def test_no_rows_give_an_empty_distribution(data):
     X, y = data
     est = _CountingDummy().fit(X, y)
@@ -425,6 +457,7 @@ def test_scoring_no_rows_is_refused(data, method):
         lambda est, X, y: est.predict(X),
         lambda est, X, y: est.predict_cdf(X),
         lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.predict_pit(X, y),
         lambda est, X, y: est.score(X, y),
         lambda est, X, y: est.evaluate(X, y),
     ],

@@ -328,16 +328,15 @@ _ = axes[0, 0].legend()
 # draws a value uniformly within the jump instead,
 # $F(y - 0.5) + u\,[F(y + 0.5) - F(y - 0.5)]$ with $u$ uniform on $[0, 1]$,
 # which is uniform for calibrated distributions of a discrete target. We
-# compute both from the CDF at the integers and the half-integers, and test
-# each against a uniform distribution with `metrics.pit_statistics`.
+# compute both with the `pit` method of the distribution, which evaluates the
+# CDF of each wine at its own value, here the true score and the
+# half-integers on either side of it, and test each against a uniform
+# distribution with `metrics.pit_statistics`.
 
 # %%
-level = yw_test - 3  # Column of each true score
-cdf_ints = dist_w.cdf(k.astype(float))
-rows_w = np.arange(len(test_w))
-pit = cdf_ints[rows_w, level]
-low = cdf_edges[rows_w, level]  # F(y - 0.5)
-high = cdf_edges[rows_w, level + 1]  # F(y + 0.5)
+pit = dist_w.pit(yw_test)  # F(y)
+low = dist_w.pit(yw_test - 0.5)  # F(y - 0.5)
+high = dist_w.pit(yw_test + 0.5)  # F(y + 0.5)
 pit_random = low + rng.uniform(size=len(test_w)) * (high - low)
 
 position = (pit - low) / (high - low)

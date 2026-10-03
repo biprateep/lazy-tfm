@@ -349,6 +349,47 @@ def test_quantiles_invert_the_distribution(cls, data):
 
 
 @pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
+@pytest.mark.parametrize(
+    "y_grid",
+    [lazy.datasets.DC1_GRID, lazy.Grid.linear(0.5, 1.2, 40), "native"],
+    ids=["dc1", "cut", "native"],
+)
+def test_predict_proba_is_the_distribution_on_the_grid(
+    cls, bag_size, y_grid, data
+):
+    X, z, X_test = data
+    model = cls(n_estimators=3, bag_size=bag_size).fit(X, z)
+    grid = model.native_grid if y_grid == "native" else y_grid
+    np.testing.assert_allclose(
+        model.predict_proba(X_test, y_grid),
+        model.predict_distribution(X_test).on_grid(grid),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
+def test_predict_pit_is_exact_and_agrees_with_a_fine_grid(cls, bag_size, data):
+    X, z, _ = data
+    model = cls(n_estimators=3, bag_size=bag_size).fit(X, z)
+    pit = model.predict_pit(X, z)
+    assert pit.shape == (len(X),)
+    assert ((pit >= 0.0) & (pit <= 1.0)).all()
+    dist = model.predict_distribution(X)
+    np.testing.assert_allclose(pit, np.diag(dist.cdf(z)), atol=1e-15)
+    low, high = dist.ppf([0.0, 1.0]).T
+    grid = lazy.Grid.linear(
+        low.min() - 0.01, high.max() + 0.01, 20_000, normalization="histogram"
+    )
+    _, grid_pit = lazy.metrics.per_object_scores(
+        z, grid, model.predict_proba(X, grid)
+    )
+    np.testing.assert_allclose(pit, grid_pit, atol=1e-4)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_interval_is_the_central_quantiles(cls, data):
     X, z, X_test = data
     model = cls().fit(X, z)

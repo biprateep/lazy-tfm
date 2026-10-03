@@ -256,6 +256,9 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             bin centres, or ``sum(p * widths) == 1`` on a histogram grid),
             which is how every metric in :mod:`lazy.metrics` integrates
             them. Multiply by ``grid.widths`` for per-bin probability masses.
+            Probability outside the grid is dropped before normalizing. For
+            a model with a native distribution (every registered backend)
+            this is ``predict_distribution(X).on_grid(grid)``.
 
         Raises:
             RuntimeError: If the backend returns densities of the wrong
@@ -339,6 +342,33 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         if not 0.0 < coverage < 1.0:
             raise ValueError(f"coverage must lie in (0, 1): {coverage=}")
         return self.predict_distribution(X).interval(coverage)
+
+    def predict_pit(  # noqa: GS030 - scikit-learn's X, y.
+        self, X: _Features, y: npt.ArrayLike
+    ) -> _typing.FloatArray:
+        """Each row's probability integral transform (PIT), exactly.
+
+        The PIT of a row is its predicted CDF at its own target value,
+        ``F_i(y_i)``. Computed on the native distribution
+        (:meth:`predict_distribution`), never on a grid, as in
+        :meth:`predict_quantiles`; the PIT values of a well-calibrated
+        model are uniform on [0, 1] (:func:`lazy.metrics.pit_statistics`).
+
+        Args:
+            X: Features with the columns ``fit`` saw, shape
+                (n_samples, n_features).
+            y: Finite target values, one per row of ``X``, shape
+                (n_samples,).
+
+        Returns:
+            The PIT values, within [0, 1], shape (n_samples,).
+        """
+        validation.check_is_fitted(self)
+        X = self._check_features(X, reset=False)
+        y = _check_target(y, len(X))
+        if X.empty:
+            return np.zeros(0)
+        return self._predict_distribution(X).pit(y)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y_grid: grid_lib.GridLike = None
