@@ -199,6 +199,9 @@ models can be used in scikit-learn pipelines and search objects without any
 modification. `LazyModel` flattens the parameters of its backend into its own,
 so `GridSearchCV(model, {"n_estimators": [4, 8]})` needs no prefix. As in
 scikit-learn, constructing a model only stores its parameters, which are
-validated (and the checkpoint loaded) at `fit`. `score` returns the negative
-CDE loss, so a search object that maximizes it prefers the better
-distributions.
+validated (and the checkpoint loaded) at `fit`. Since the models are pretrained,
+`fit` trains no weights, but with `kv_cache=True` (the default) it builds the
+key/value cache of the context, which costs one forward pass over the context
+per member. TabFM is the exception, since it fits and prefills inside every
+`predict` call (see {doc}`scaling`). `score` returns the negative CDE loss, so
+a search object that maximizes it prefers the better distributions.

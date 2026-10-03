@@ -147,6 +147,10 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- The docs say what `fit` costs: it trains no weights, but with `kv_cache=True`
+  it runs the context through the network once per member (TabFM defers that
+  to `predict`). Limits and pitfalls gains a section on output grids finer than
+  a model's own bins, which can show spurious peaks.
 - With LimiX's code from `LAZY_LIMIX_SRC`, `provenance_["package"]` reads
   "LimiX (source checkout at <commit>)" instead of "LimiX (not installed)".
 - The `plot_pit_qq` and `plot_pit` docstrings describe the PIT shapes

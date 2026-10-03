@@ -74,6 +74,18 @@ tops several bins wide. On such a row the mode sits at the low edge of the
 plateau rather than at a location the model prefers, so `peak_mean` or the
 `median` is the better point estimate there (see {doc}`distributions`).
 
+## Very fine output grids
+
+The densities of TabPFN and LimiX-2 come from buckets and those of TabFM from a
+histogram, so each model has a resolution of its own, the width of its buckets
+or bins. On a grid much finer than that, the densities of neighboring bins can
+jitter around the shape the model predicts, and counting the peaks of a density
+or taking its mode on such a grid can find peaks that are not there. On the
+insurance dataset, for example, a grid of 25 USD bins gave 24 rows with two
+peaks, while a grid of 100 USD bins gave 3 to 4. Therefore, wherever the peaks
+matter, we recommend a grid no finer than the native resolution of the model,
+which its native grid (`native_grid_`) shows.
+
 ## Categorical columns
 
 Every column is treated as numeric on every model, and a column that is not

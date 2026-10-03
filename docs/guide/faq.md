@@ -7,13 +7,19 @@ Without a GPU, we recommend TabICLv2, which is small, BSD-licensed and nearly
 as fast on a CPU as on a GPU, or TabPFN-3.5-fast with a context of at most
 5,000 rows. {doc}`choosing` and {doc}`scaling` give the details.
 
-## Why is fit instant?
+## What does fit do?
 
-No weights are trained. `fit` only stores the context (and, with the key/value
-cache on, the network's encoding of it), and the predictions are computed in
-`predict`, which is where the cost of a tabular foundation model lies (see
-{doc}`tfm` and {doc}`scaling`). The first `fit` of a model also downloads its
-weights, which are cached from then on.
+`fit` trains no weights. On TabPFN, TabICL and LimiX-2 it fits each member's
+preprocessing on the context and, with the key/value cache on (`kv_cache=True`,
+the default), also runs the context through the network and stores the result,
+so it costs one forward pass over the context per member. TabPFN builds this
+cache with `fit_mode="fit_with_cache"`, TabICL with its own key/value cache and
+LimiX-2 with the cache that LAZY ports. TabFM only stores the context at `fit`,
+and fits its classifiers and prefills their cache inside every `predict` call.
+With `kv_cache=False`, `fit` runs no forward pass and every chunk of queries
+reads the context again in `predict` (see {doc}`tfm` and {doc}`scaling`). The
+first `fit` of a model also downloads its weights, which are cached from then
+on.
 
 ## Can I fine-tune?
 
