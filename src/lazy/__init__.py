@@ -69,6 +69,7 @@ from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
 from lazy.grid import Grid
 from lazy.models import CHECKPOINTS
+from lazy.models import clear_model_cache
 from lazy.models import ContextSizeWarning
 from lazy.models import DEFAULT_VERSIONS
 from lazy.models import download_checkpoint
@@ -80,7 +81,9 @@ from lazy.models import LazyModel
 from lazy.models import LimiXBarDistribution
 from lazy.models import list_estimators
 from lazy.models import list_versions
+from lazy.models import model_cache_enabled
 from lazy.models import PerformanceWarning
+from lazy.models import set_model_cache
 from lazy.models import TabFMHistogram
 from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
@@ -93,25 +96,28 @@ except metadata.PackageNotFoundError:  # pragma: no cover - a source tree only.
 _namespace.warn_if_shared()  # noqa: GS026 - the check must run at import.
 
 __all__ = [
+    "BaseDensityRegressor",
     "CHECKPOINTS",
+    "ContextSizeWarning",
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
-    "POINT_ESTIMATORS",
-    "BaseDensityRegressor",
-    "ContextSizeWarning",
+    "Grid",
     "LazyModel",
     "LimiXBarDistribution",
+    "POINT_ESTIMATORS",
     "PerformanceWarning",
-    "Grid",
     "TabFMHistogram",
     "TabICLQuantile",
     "TabPFNBarDistribution",
     "__version__",
     "as_grid",
+    "clear_model_cache",
     "download_checkpoint",
     "get_checkpoint",
     "get_estimator",
     "is_cached",
     "list_estimators",
     "list_versions",
+    "model_cache_enabled",
+    "set_model_cache",
 ]

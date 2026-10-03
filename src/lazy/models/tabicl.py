@@ -39,7 +39,10 @@ than by the data.
 from __future__ import annotations
 
 import collections
+from collections.abc import Callable, Iterator
+import contextlib
 import dataclasses
+import functools
 import math
 import os
 import types
@@ -55,6 +58,7 @@ from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _weights
 
 __all__ = [
     "AUTO_FEAT_SHUFFLE_METHOD",
@@ -400,7 +404,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
         def fit(n: int, norm_methods: list[str], seed: int) -> Any:
             regressor = self._regressor(n, norm_methods, shuffle, seed)
-            return _order_members(regressor.fit(X, y), norm_methods)
+            with self._shared_network(regressor):
+                regressor.fit(X, y)
+            return _order_members(regressor, norm_methods)
 
         # Each regressor, with the members it stands for by norm method.
         fitted: list[tuple[Any, collections.Counter[str]]] = []
@@ -465,6 +471,52 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             **_PINNED_REGRESSOR_ARGS,
         )
 
+    @contextlib.contextmanager
+    def _shared_network(self, regressor: Any) -> Iterator[None]:
+        """Has a regressor's fit load its network through the shared cache.
+
+        Upstream's ``fit`` builds a fresh ``TabICL`` from the checkpoint
+        every time. Its network holds nothing between calls (the key/value
+        caches are the regressor's ``model_kv_cache_``), so every fit with
+        the same checkpoint and device runs on one, through
+        :mod:`lazy.models._weights`. The loader is swapped on this one
+        regressor, for the duration of its fit, so a pickled regressor
+        reloads from the checkpoint as upstream's own does. The weights
+        stay in float32: ``use_amp`` autocasts and casts nothing.
+
+        Args:
+            regressor: An unfitted ``TabICLRegressor``.
+
+        Yields:
+            Nothing; the regressor's own loader is back on exit.
+        """
+        load = getattr(type(regressor), "_load_model", None)
+        if load is None:  # Not upstream's regressor: nothing to share.
+            yield
+            return
+        cache_key = _weights.key(
+            self.backend,
+            self.version,
+            self.checkpoint_,
+            self.device_,
+            "float32",
+            load,
+        )
+
+        def shared() -> None:
+            network, config, path = _weights.network(
+                cache_key, functools.partial(_load_network, regressor, load)
+            )
+            regressor.model_ = network
+            regressor.model_config_ = dict(config)
+            regressor.model_path_ = path
+
+        regressor._load_model = shared  # noqa: SLF001 - upstream's loader.
+        try:
+            yield
+        finally:
+            del regressor._load_model  # noqa: SLF001 - upstream's loader.
+
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
@@ -482,6 +534,8 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
                 handle.regressors, handle.weights, strict=True
             )
         )
+        for regressor in handle.regressors:
+            _release_network_cache(regressor)
         quantiles = np.asarray(quantiles) * scale + offset
         self.n_quantiles_ = int(quantiles.shape[1])
         return distributions.QuantileDistribution(
@@ -593,6 +647,36 @@ class _RegressorGroup:
                 )
             ],
         }
+
+
+def _load_network(
+    regressor: Any, load: Callable[[Any], None]
+) -> tuple[Any, dict[str, Any], Any]:
+    """Upstream's loader, run on ``regressor``.
+
+    Args:
+        regressor: The ``TabICLRegressor`` whose settings name the
+            checkpoint.
+        load: Upstream's ``TabICLRegressor._load_model``.
+
+    Returns:
+        The network, its config and the checkpoint path, as a tuple
+        (network, config, path).
+    """
+    load(regressor)
+    return regressor.model_, regressor.model_config_, regressor.model_path_
+
+
+def _release_network_cache(regressor: Any) -> None:
+    """Drops the key/value cache upstream leaves on a shared network.
+
+    A cached predict hands the network the regressor's cache and leaves it
+    there; on a network other models share, it would keep a cache alive
+    after its model is gone.
+    """
+    clear = getattr(getattr(regressor, "model_", None), "clear_cache", None)
+    if clear is not None:
+        clear()
 
 
 def _members_run(regressor: Any) -> collections.Counter[str]:

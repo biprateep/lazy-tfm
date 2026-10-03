@@ -49,7 +49,9 @@ than the output bin cannot change a density tabulated on it.
 from __future__ import annotations
 
 import collections
+from collections.abc import Callable
 import copy
+import functools
 import inspect
 import math
 import numbers
@@ -70,6 +72,7 @@ from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _weights
 
 __all__ = [
     "TabFMHistogram",
@@ -931,15 +934,17 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _backbone(self) -> Any:
         """The loaded TabFM classification model, cached on the instance.
 
-        The checkpoint is several gigabytes, so it is loaded once per estimator
-        and reused across calls. The weights are stored in float32 and TabFM
-        is designed to compute in bfloat16, which it does here only under
-        ``mixed_precision`` on CUDA; otherwise, the CPU included, the
-        float32 weights are kept. The cache is keyed by ``version``, device
-        and precision so that changing one can never leave a prediction
-        running on the previous model's weights, and it is dropped on
-        pickling: an unpickled estimator reloads from the local cache on next
-        use.
+        The checkpoint is several gigabytes, so it is loaded once per process
+        (:mod:`lazy.models._weights`) and shared by every estimator with the
+        same version, device and precision: it holds nothing between calls,
+        the classifiers and their caches being built per prediction. The
+        weights are stored in float32 and TabFM is designed to compute in
+        bfloat16, which it does here only under ``mixed_precision`` on CUDA;
+        otherwise, the CPU included, the float32 weights are kept. The
+        instance's reference is keyed by ``version``, device and precision so
+        that changing one can never leave a prediction running on the
+        previous model's weights, and it is dropped on pickling: an unpickled
+        estimator reloads, or finds the shared model, on next use.
         """
         key = (self.version, str(self.device_), self.mixed_precision_)
         cached_key, model = getattr(self, "_backbone_cache", (None, None))
@@ -952,19 +957,43 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             self.checkpoint_ = _hub.get_checkpoint(
                 "tabfm", self.version
             ).download()
-            self._log(
-                "loading TabFM classification checkpoint from"
-                f" {self.checkpoint_}"
-            )
-            model = tabfm_v1.load(
-                model_type="classification",
-                device=self.device_,
-                checkpoint_path=str(self.checkpoint_),
-                # None keeps the stored float32 weights.
-                dtype=torch.bfloat16 if self.mixed_precision_ else None,
+            # None keeps the stored float32 weights.
+            dtype = torch.bfloat16 if self.mixed_precision_ else None
+            load = tabfm_v1.load
+            model = _weights.network(
+                _weights.key(
+                    "tabfm",
+                    self.version,
+                    self.checkpoint_,
+                    self.device_,
+                    dtype or torch.float32,
+                    load,
+                ),
+                functools.partial(self._load_backbone, load, dtype),
             )
             self._backbone_cache = (key, model)
         return model
+
+    def _load_backbone(self, load: Callable[..., Any], dtype: Any) -> Any:
+        """Reads the backbone from the checkpoint; see :meth:`_backbone`.
+
+        Upstream keeps a process-wide cache of its own, which
+        :func:`lazy.clear_model_cache` could not empty; it is bypassed where
+        the installed TabFM has the switch.
+        """
+        self._log(
+            f"loading TabFM classification checkpoint from {self.checkpoint_}"
+        )
+        options: dict[str, Any] = {}
+        if "use_cache" in inspect.signature(load).parameters:
+            options["use_cache"] = False
+        return load(
+            model_type="classification",
+            device=self.device_,
+            checkpoint_path=str(self.checkpoint_),
+            dtype=dtype,
+            **options,
+        )
 
     def __getstate__(self) -> dict[str, Any]:
         return {

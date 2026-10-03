@@ -495,7 +495,8 @@ def test_tabpfns_bagged_members_share_one_network(monkeypatch, data):
     assert base.initialize_tabpfn_model.__name__ == "load"
     assert "_networks" not in vars(est)
     est.fit(X, y)
-    assert len(recorder.loads) == 2  # a refit loads its own network
+    assert len(recorder.loads) == 1  # a refit reuses it (lazy._weights)
+    assert est.handles_[0].models_[0] is network
 
 
 # -- TabPFN's size limits ------------------------------------------------------

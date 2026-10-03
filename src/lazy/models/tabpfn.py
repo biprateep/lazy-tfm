@@ -39,9 +39,10 @@ it on the bag, as every other model does, and only the bag meets the limits.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 import contextlib
 import copy
+import functools
 import itertools
 import os
 import pathlib
@@ -56,6 +57,7 @@ from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _weights
 
 __all__ = [
     "TabPFNBarDistribution",
@@ -574,17 +576,21 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     @contextlib.contextmanager
     def _shared_network(self, tabpfn: types.ModuleType) -> Iterator[None]:
-        """Loads the network once per fit, for every group's regressor.
+        """Loads the network once, for every group's regressor and every fit.
 
         Each ``TabPFNRegressor`` loads its own copy of the network at fit,
         so the regressors of a bagged ensemble (one per member) would hold
-        ``n_estimators`` copies on the device. Upstream's networks hold no
-        state between calls (the key/value cache lives in the inference
-        engine, and the architectures ignore
-        ``cache_trainset_representation``), so the regressors share one:
-        upstream's loader is wrapped, for the duration of a fit, to hand
-        back the network it loaded first for the same arguments. The bar
-        distribution, which a fit moves and rescales, is copied.
+        ``n_estimators`` copies on the device, and every refit would read
+        the checkpoint again. Upstream's networks hold no state between
+        calls (the key/value cache lives in the inference engine, and the
+        architectures ignore ``cache_trainset_representation``), so the
+        regressors share one: upstream's loader is wrapped, for the duration
+        of a fit, to hand back the network loaded first for the same
+        arguments, in this fit or, through :mod:`lazy.models._weights`, an
+        earlier one. Upstream moves the network to the device, and casts it
+        to a forced precision, in place, so both are part of the key. The
+        bar distribution and the configs, which a fit may move and rescale,
+        are copied.
 
         Args:
             tabpfn: The imported ``tabpfn`` package.
@@ -595,19 +601,54 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         base = tabpfn.base
         load = base.initialize_tabpfn_model
         networks = self.__dict__.setdefault("_networks", {})
+        precision = self._inference_precision()
 
         def shared(**kwargs: Any) -> Any:
-            key = tuple(sorted((k, str(v)) for k, v in kwargs.items()))
-            if key not in networks:
-                networks[key] = load(**kwargs)
-            models, configs, bardist, config = networks[key]
-            return list(models), configs, copy.deepcopy(bardist), config
+            local = tuple(sorted((k, str(v)) for k, v in kwargs.items()))
+            if local not in networks:
+                networks[local] = self._load_network(load, precision, kwargs)
+            models, configs, bardist, config = networks[local]
+            return list(models), *copy.deepcopy((configs, bardist, config))
 
         base.initialize_tabpfn_model = shared
         try:
             yield
         finally:
             base.initialize_tabpfn_model = load
+
+    def _load_network(
+        self,
+        load: Callable[..., Any],
+        precision: Any,
+        arguments: dict[str, Any],
+    ) -> Any:
+        """Upstream's loader, through the process-wide cache when it can be.
+
+        Args:
+            load: Upstream's ``initialize_tabpfn_model``.
+            precision: The ``inference_precision`` the regressors run at.
+            arguments: What upstream called the loader with.
+
+        Returns:
+            What ``load`` returns.
+        """
+        path = arguments.get("model_path")
+        if not isinstance(path, (str, os.PathLike)):
+            # Not one checkpoint file: nothing to key it by.
+            return load(**arguments)
+        # The overrides only reconcile several checkpoints' configs, so one
+        # file loads the same network whatever they are.
+        cache_key = _weights.key(
+            self.backend,
+            self.version,
+            path,
+            self.device_,
+            precision,
+            arguments.get("which"),
+            arguments.get("fit_mode"),
+            load,
+        )
+        return _weights.network(cache_key, functools.partial(load, **arguments))
 
     def _inference_precision(self) -> Any:
         """Upstream's ``inference_precision``: autocast, or float32.

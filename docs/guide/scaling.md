@@ -107,6 +107,30 @@ length, so TabFM runs its bagged members one at a time whatever
 `member_batch_size` says, and the native grid of TabPFN and LimiX-2 holds
 every member's buckets (see {doc}`interface`).
 
+## Reusing loaded weights
+
+Every model reads its checkpoint from disk and builds the network on its
+device when it is first fitted (TabFM when it first predicts), and for a small
+context this load is most of the cost of a fit. The network itself learns
+nothing from a fit, since the context and its key/value cache belong to the
+fitted model, so LAZY keeps every network it loads for the rest of the Python
+process and reuses it in any later fit with the same version, checkpoint,
+device and precision. Therefore, a grid search, a cross-validation or a sweep
+over `n_estimators` loads each network once. On the GB10, with one member and
+500 context rows, this cuts a refit of TabPFN-3.5 on the GPU from 0.8 s to
+under 0.1 s, and one of LimiX-2 from 1.5 s to 0.2 s. A shared network gives
+predictions bit for bit identical to those of a freshly loaded one.
+
+Each network is held once, and `lazy.clear_model_cache()` lets go of all of
+them (TabFM's backbone alone takes 6.6 GB). A fitted model keeps the network
+it ran on, so the memory is returned only once those models are deleted too.
+Setting `LAZY_MODEL_CACHE=0` in the environment, or calling
+`lazy.set_model_cache(False)`, turns the sharing off, and every fit then loads
+its own network. While the cache is safe for the parallel jobs of
+scikit-learn (`n_jobs`), which run in separate processes that each load their
+own network, two threads predicting on the same network at once are not, so
+we recommend turning it off before running fits in threads.
+
 ## GPU and CPU
 
 Every model chooses its device when it is fitted, and `device="auto"` selects

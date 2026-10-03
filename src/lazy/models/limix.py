@@ -45,8 +45,11 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import dataclasses
+import functools
 import os
+import pathlib
 import types
 from typing import Any
 import warnings
@@ -66,6 +69,7 @@ from lazy.models import _limix_stream
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _transforms
+from lazy.models import _weights
 
 __all__ = ["LimiXBarDistribution"]
 
@@ -394,6 +398,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _network(self) -> Any:
         """The loaded network, cached on the instance per version and device.
 
+        It comes from :mod:`lazy.models._weights`, so every fit with the same
+        checkpoint and device runs on one network: it holds nothing between
+        calls, the key/value caches being each member's own. The weights are
+        float32 whatever ``mixed_precision`` says, which only autocasts.
         Dropped on pickling: an unpickled estimator finds the checkpoint
         afresh, in this machine's Hugging Face cache, and reloads it on next
         use.
@@ -404,10 +412,25 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         key = (self.version, self.device_)
         cached_key, network = getattr(self, "_network_cache", (None, None))
         if network is None or cached_key != key:
-            self._log(f"loading LimiX network from {self.checkpoint_}")
-            network = _limix_stream.load_network(self.checkpoint_, self.device_)
+            load = _limix_stream.load_network
+            network = _weights.network(
+                _weights.key(
+                    self.backend,
+                    self.version,
+                    self.checkpoint_,
+                    self.device_,
+                    "float32",
+                    load,
+                ),
+                functools.partial(self._load_network, load),
+            )
             self._network_cache = (key, network)
         return network
+
+    def _load_network(self, load: Callable[[pathlib.Path, str], Any]) -> Any:
+        """Reads the network from the checkpoint; see :meth:`_network`."""
+        self._log(f"loading LimiX network from {self.checkpoint_}")
+        return load(self.checkpoint_, self.device_)
 
     def _prefill(self, handle: dict[str, Any]) -> None:
         """Caches each member's context that fits in the memory budget."""

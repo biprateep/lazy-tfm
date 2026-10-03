@@ -30,6 +30,9 @@ from lazy.models._hub import download_checkpoint
 from lazy.models._hub import get_checkpoint
 from lazy.models._hub import is_cached
 from lazy.models._hub import list_versions
+from lazy.models._weights import clear_model_cache
+from lazy.models._weights import model_cache_enabled
+from lazy.models._weights import set_model_cache
 from lazy.models.lazy_model import LazyModel
 from lazy.models.limix import LimiXBarDistribution
 from lazy.models.registry import ESTIMATORS
@@ -41,20 +44,23 @@ from lazy.models.tabpfn import TabPFNBarDistribution
 
 __all__ = [
     "CHECKPOINTS",
-    "DEFAULT_VERSIONS",
-    "ESTIMATORS",
     "ContextEnsembleEstimator",
     "ContextSizeWarning",
+    "DEFAULT_VERSIONS",
+    "ESTIMATORS",
     "LazyModel",
     "LimiXBarDistribution",
     "PerformanceWarning",
     "TabFMHistogram",
     "TabICLQuantile",
     "TabPFNBarDistribution",
+    "clear_model_cache",
     "download_checkpoint",
     "get_checkpoint",
     "get_estimator",
     "is_cached",
     "list_estimators",
     "list_versions",
+    "model_cache_enabled",
+    "set_model_cache",
 ]

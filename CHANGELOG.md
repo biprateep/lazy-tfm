@@ -14,6 +14,16 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Added
 
+- Loaded networks are shared across fits in one process: a later fit with the
+  same backend, version, checkpoint (file and pinned revision), device and
+  weight precision reuses the network instead of reading the checkpoint again,
+  so a grid search or a sweep loads each network once (a one-member refit on
+  500 rows on a GB10: TabPFN-3.5 0.8 s to under 0.1 s, LimiX-2 1.5 s to
+  0.2 s). Predictions are bit-identical with and without sharing.
+  `lazy.clear_model_cache()` frees the networks, and
+  `lazy.set_model_cache(False)` or `LAZY_MODEL_CACHE=0` turns sharing off.
+  TabFM's backbone goes through this cache instead of TabFM's own, which could
+  not be emptied.
 - `Distribution.pit(values)` gives each row's CDF at its own value, shape
   `(n_rows,)`, exactly and without the `(n, n)` table `cdf` would build, and
   `predict_pit(X, y)` gives exact PIT values from the native distribution.
