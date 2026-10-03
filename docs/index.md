@@ -64,16 +64,37 @@ y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
 :width: 100%
 ```
 
+<!-- The sidebar. :titlesonly: keeps a page's own sections out of it, so
+Installation, Contributing and Citing show no sub-list. -->
+
+```{toctree}
+:hidden:
+:titlesonly:
+
+installation
+```
+
 ```{toctree}
 :hidden:
 :maxdepth: 2
 
-installation
-tutorials/index
 guide/index
+tutorials/index
 models/index
 API reference <autoapi/lazy/index>
-changelog
+```
+
+```{toctree}
+:hidden:
+:titlesonly:
+
 contributing
 citing
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 2
+
+changelog
 ```
