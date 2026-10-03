@@ -206,14 +206,15 @@ plt.show()
 # all of the models lie within about 10% of the best, except TabFM on
 # `concrete`, and on `kin8nm` the CRPS of LimiX-2 and TabPFN-3.5 agree to the
 # three decimals of the table (0.044). TabFM is the worst on the three smaller
-# datasets, and the most so on `yacht`, where its CRPS is more than three
-# times that of LimiX-2 (0.631 vs. 0.173). This might be because its
-# hierarchy of classifiers over equal-mass bins of the target has few rows per
-# bin in a context of 277 rows, and because it runs with half as many members
-# as the others. The 68% coverage lies between 0.620 and 0.857 across the
-# table. With 31 to 200 test rows per dataset, these fractions are uncertain
-# by several percentage points, and only LimiX-2 on `energy` (0.857 on 77
-# rows) stands clearly apart from 0.68.
+# datasets, and the most so on `yacht`, where its CRPS is about three times
+# that of LimiX-2 (0.517 vs. 0.173). TabFM picks the number of its bins from
+# the size of the context, aiming at about five context rows per bin with at
+# most 10 by 10 bins, which gives 7 by 7 on the 277 rows of `yacht` and 10 by
+# 10 on the other datasets. Part of its gap might be because it runs with half
+# as many members as the others. The 68% coverage lies between 0.620 and 0.871
+# across the table. With 31 to 200 test rows per dataset, these fractions are
+# uncertain by several percentage points, and only LimiX-2 on `energy` (0.857
+# on 77 rows) stands clearly apart from 0.68.
 #
 # The times are from this run, on a GPU that was otherwise idle, and they
 # differ by more than an order of magnitude between the models. TabICLv2 and
@@ -221,7 +222,7 @@ plt.show()
 # `predict_proba` on every dataset and in `fit` on all but `yacht`, where
 # TabPFN-3.5 is the first model to run and its time likely includes the
 # start-up of the GPU. TabFM does all of its work in `predict_proba`, where it
-# takes the longest of all (between 7.7 and 11.6 s). Since these numbers come
+# takes the longest of all (between 8.3 and 11.1 s). Since these numbers come
 # from a single random split and a few hundred test rows at most, the
 # comparison is indicative only. A choice for real work should rest on several
 # splits of the data at hand, and

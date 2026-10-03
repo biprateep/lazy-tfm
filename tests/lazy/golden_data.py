@@ -45,6 +45,10 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
         "progress": False,
     },
     "tabfm": {
+        # Recorded at 10 x 10, before "auto" sized the bins from the context
+        # (it gives 300 rows 7 x 7).
+        "n_coarse_bins": 10,
+        "n_fine_bins": 10,
         "n_estimators": 1,
         "n_dither": 2,
         "kv_cache": True,

@@ -111,10 +111,11 @@ every backend. Since each member of TabPFN and LimiX-2 places its buckets from
 its own targets, their native grid under bagging is the union of every
 member's buckets, with up to `n_estimators` times as many bins as an unbagged
 one, so we recommend passing `y_grid` for a large query set. Two things are
-taken from the whole context rather than from a bag: TabFM's equal-mass bins,
-so that its members answer over the same classes, and the range of TabICL's
-native grid, which spans every context target. Each member is also seeded on
-its own (see {doc}`reproducibility`).
+taken from the whole context rather than from a bag: TabFM's equal-mass bins
+and their number, so that its members answer over the same classes (a
+constructor grid whose bins TabFM takes gives every member those bins), and
+the range of TabICL's native grid, which spans every context target. Each
+member is also seeded on its own (see {doc}`reproducibility`).
 
 ## Transforms
 

@@ -128,10 +128,17 @@ class TestTabFM:
         with pytest.raises(ValueError, match="at most 10 classes"):
             lazy.get_estimator("tabfm", n_coarse_bins=11).fit(X, z)
 
-    def test_context_smaller_than_the_bin_count_is_rejected(self, tiny):
+    def test_context_smaller_than_explicit_bin_counts_is_rejected(self, tiny):
         X, z = tiny
         with pytest.raises(ValueError, match="fewer than the"):
-            lazy.get_estimator("tabfm").fit(X.iloc[:10], z[:10])
+            lazy.get_estimator("tabfm", n_coarse_bins=10, n_fine_bins=10).fit(
+                X.iloc[:10], z[:10]
+            )
+
+    def test_a_small_context_fits_under_auto_bins(self, tiny):
+        X, z = tiny
+        est = lazy.get_estimator("tabfm").fit(X.iloc[:10], z[:10])
+        assert est.provenance_["bins"] == "auto equal-mass 2x2"
 
     @pytest.mark.parametrize("name", ["member_batch_size", "query_block_rows"])
     @pytest.mark.parametrize("value", [0, -1, 2.0, True, None])
@@ -260,9 +267,10 @@ class TestTabFM:
     )
     def test_tied_targets_give_valid_bins(self, z, monkeypatch):
         """Ties collapse quantiles into empty bins, which must stay valid."""
-        est = tabfm.TabFMHistogram()
+        est = tabfm.TabFMHistogram(n_coarse_bins=10, n_fine_bins=10)
         est.support_ = (float(z.min()), float(z.max()))
         est.y_context_ = z
+        est._resolve_bins(z.size)
         edges, coarse, fine = est._edges(z, 0.0)
         assert edges.size == 101
         assert np.all(np.diff(edges) >= 0)
@@ -325,8 +333,18 @@ class TestTabFM:
         np.testing.assert_allclose(masses.sum(axis=1), 1.0)
 
     @needs_checkpoint
-    def test_cuda_rounding_stays_within_the_declared_tolerance(self):
-        """bfloat16 on CUDA: neither chunking nor the cache is exact there."""
+    @pytest.mark.parametrize("bins", ["auto", 10])
+    def test_cuda_rounding_stays_within_the_measured_bounds(self, bins):
+        """bfloat16 on CUDA: neither chunking nor the cache is exact there.
+
+        Each path rounds differently, and the differences are those between
+        any two bfloat16 runs (each as far from a float32 run): about 3% of
+        a row's peak for a typical row, but up to a quarter of the peak in
+        single bins, at any bin count. Measured over 8 seeds at 5 x 5, 7 x 7
+        and 10 x 10: a median row's largest difference of at most 4.5% of
+        its peak, and at most 26% of the peak anywhere. In float32 the paths
+        agree to float rounding.
+        """
         torch = pytest.importorskip("torch")
         if not torch.cuda.is_available():
             pytest.skip("needs CUDA")
@@ -334,29 +352,33 @@ class TestTabFM:
         X = generator.normal(size=(360, 3))
         z = -1.0 + 0.3 * (X[:, 0] + 0.3 * generator.normal(size=360))
         grid = lazy.Grid.linear(-2.5, 0.5, 301)
-        backbone = None
 
         def run(**options):
-            nonlocal backbone
             est = tabfm.TabFMHistogram(
-                n_estimators=1, device="cuda", progress=False, **options
+                n_estimators=1,
+                device="cuda",
+                progress=False,
+                n_coarse_bins=bins,
+                n_fine_bins=bins,
+                **options,
             ).fit(X[:300], z[:300])
-            if backbone is not None:
-                est._backbone_cache = backbone
-            pdfs = est.predict_proba(X[300:], grid)
-            backbone = est._backbone_cache
-            return pdfs
+            return est.predict_proba(X[300:], grid)
 
-        whole = run(kv_cache=False, chunk_size=0)
-        rtol = tabfm.TabFMHistogram.kv_cache_rtol
         assert not tabfm.TabFMHistogram.exact_chunking
-        for other in (
-            run(kv_cache=False, chunk_size=7),
-            run(kv_cache=True),
+        for precision, typical, worst in (
+            (True, 0.06, 0.35),
+            (False, 1e-4, 1e-4),
         ):
-            np.testing.assert_allclose(
-                other, whole, rtol=rtol, atol=rtol * whole.max()
-            )
+            whole = run(kv_cache=False, chunk_size=0, mixed_precision=precision)
+            for options in (
+                {"kv_cache": False, "chunk_size": 7},
+                {"kv_cache": True},
+            ):
+                other = run(mixed_precision=precision, **options)
+                difference = np.abs(other - whole)
+                rows = difference.max(axis=1) / whole.max(axis=1)
+                assert np.median(rows) <= typical
+                assert difference.max() <= worst * whole.max()
 
     def test_mixed_precision_picks_the_weights_dtype(self, monkeypatch):
         """bfloat16 only under mixed precision on CUDA; float32 otherwise."""

@@ -8,9 +8,10 @@ does in-context learning. TabFM's own regressor predicts a single value per
 row, so LAZY instead builds the distribution from TabFM's classifier, which
 predicts at most ten classes: a classifier first predicts which of
 `n_coarse_bins` equal-mass bins of the target a row falls in, and one
-classifier per coarse bin then predicts which of `n_fine_bins` sub-bins,
-giving a histogram over 100 bins by default. TabFM is the largest model in
-LAZY and needs a GPU to be practical.
+classifier per coarse bin then predicts which of `n_fine_bins` sub-bins.
+This gives a histogram over at most 100 bins, which is 10 by 10 for a context
+of 500 rows or more. TabFM is the largest model in LAZY and needs a GPU to be
+practical.
 
 ```python
 model = lazy.LazyModel("tabfm")
@@ -32,7 +33,7 @@ TabFM that LAZY uses, next to LAZY's.
 
 | Setting | Creators' default | LAZY default |
 | ------- | ----------------- | ------------ |
-| Output for regression | one value per row, from the regression checkpoint | a histogram from the classification checkpoint (`n_coarse_bins=10`, `n_fine_bins=10`) |
+| Output for regression | one value per row, from the regression checkpoint | a histogram from the classification checkpoint (`n_coarse_bins="auto"`, `n_fine_bins="auto"`) |
 | Ensemble members | 32 | `n_estimators=8` |
 | Feature preprocessing | none and a power transform, alternating | the same (`transforms="auto"`) |
 | Feature shuffling | random permutations, with the class labels shifted | the same (`feature_shuffle=True`) |
@@ -53,8 +54,9 @@ standard deviations, then applies each member's transform (none, or a power
 transform) and soft-clips outliers at 4 standard deviations. Inside the
 network, any remaining missing value is replaced by $-100$; there are no
 missing-value indicators. Since LAZY uses the classifier, the target is never
-standardized: it is only binned, into equal-mass bins of the context targets,
-and a target outside the bins is clipped to them with a warning.
+standardized: it is only binned, into equal-mass bins of the context targets
+or, on request, the bins of `y_grid` (below), and a target outside the bins is clipped to
+them with a warning.
 
 ## Where LAZY differs
 
@@ -74,3 +76,35 @@ in its own implementation, which gives the same answers as re-encoding the
 context up to rounding and, in our tests, about 26 times less compute per
 query row. Under an explicit `transforms`, LAZY turns off both the soft clip
 and the 500-feature cap.
+
+## Choosing the bins
+
+By default (`"auto"`), TabFM picks its bins from the size of the context. Each
+level gets $\lfloor\sqrt{n/5}\rfloor$ bins, between 2 and 10, for a context of
+$n$ rows, so that a final bin holds about five context rows, and every context
+of 500 rows or more gets 10 by 10. With fewer rows per bin the histogram is
+overconfident. On the 277 context rows of `yacht` with 4 members, for
+example, the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517 and the NLL from
+1.28 to 0.50 relative to 10 by 10. An integer sets a level's bin count
+explicitly, from 2 to 10, and always gives equal-mass bins.
+
+The equal-mass bins are used whether or not a `y_grid` is passed to the
+constructor. With `n_coarse_bins="grid"` and `n_fine_bins="grid"` (always the
+two together), the bins of the constructor's `y_grid`, which must have at most
+100 bins, become the classes instead: the fine classes are its bins, and the
+coarse classes are the fewest consecutive runs of at most ten of them. The
+density is then built on that grid and never rebinned onto it. However, a bin
+with no context rows gets zero probability, since the classifier cannot
+predict a class it has not seen, so a true value that falls in such a bin has
+zero density. On `yacht`, whose targets crowd at the low end, a grid of 50
+equal-width bins left 2 of the 31 test values in empty bins and gave a CRPS of
+0.566 and an NLL of 2.66, against 0.517 and 0.50 for the default equal-mass
+bins. We therefore recommend `"grid"` only for a grid whose every bin is well
+populated by the context. It does not take `n_dither > 1`, since shifted
+copies would not keep the edges of the grid. A grid passed to `predict_proba`
+never changes the bins and only rebins the answer, and `provenance_["bins"]`
+records which bins a fit used.
+
+`n_dither=1` is the default. When accuracy matters, we recommend `n_dither=3`,
+which in our tests on `yacht`, `energy`, `concrete` and DC1 lowered the NLL
+in all but one of 13 settings, at two to three times the cost of a prediction.

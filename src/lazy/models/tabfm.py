@@ -22,6 +22,16 @@ The bins span the constructor grid's range, or the training values'; they
 never depend on the grid a prediction is asked on. The native grid is the
 union of every dither's edges.
 
+Under ``"auto"`` (the default for both levels) the bin counts follow the
+context: :func:`auto_bin_count` gives each level about ``sqrt(n / 5)`` bins,
+so a final bin holds about five context rows, and every context of 500 rows
+or more gets 10 x 10. Fewer rows per bin than that make the histogram
+overconfident, with spikes where the few rows of a bin happen to fall. With
+``"grid"`` at both levels, a constructor ``y_grid`` of at most 100 bins
+replaces the equal-mass bins altogether: its own bins are the fine classes,
+grouped into runs of at most ten for the coarse level, and the density lives
+on that grid as it is.
+
 The uniform features map onto TabFM's own machinery: ``kv_cache`` onto the
 streaming prefill/decode path (:mod:`lazy.models._icl_stream`),
 ``feature_shuffle`` and the transforms it has onto its classifier's own
@@ -75,8 +85,12 @@ from lazy.models import _progress
 from lazy.models import _weights
 
 __all__ = [
+    "AUTO_BINS",
+    "GRID_BINS",
     "TabFMHistogram",
     "TabFMPerformanceWarning",
+    "auto_bin_count",
+    "grid_groups",
     "prior_shift_em",
     "quantile_edges",
 ]
@@ -100,6 +114,21 @@ class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
 
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
+
+#: The ``n_coarse_bins`` and ``n_fine_bins`` value that sizes equal-mass
+#: bins from the context.
+AUTO_BINS = "auto"
+
+#: The ``n_coarse_bins`` and ``n_fine_bins`` value that takes the bins from
+#: the constructor's grid.
+GRID_BINS = "grid"
+
+#: Context rows per final bin that ``"auto"`` aims at.
+ROWS_PER_BIN = 5
+
+#: The most bins a constructor grid can have for its bins to be the classes:
+#: ten groups of ten.
+MAX_GRID_BINS = MAX_CLASSES * MAX_CLASSES
 
 # TabFM v1.0's own recipe, ``transforms="auto"``, written out here so that the
 # installed upstream version cannot change it: the values TabFMClassifier
@@ -153,6 +182,52 @@ _SLOW_PATH_WARNING = (
     "git+https://github.com/google-research/tabfm'\n"
     "Pass kv_cache=False to accept the slow path and silence this."
 )
+
+
+def auto_bin_count(n_context: int) -> int:
+    """Bins per hierarchy level under ``"auto"``, for a context of this size.
+
+    ``floor(sqrt(n_context / 5))``, between 2 and 10: the two levels then make
+    about five context rows per final bin, and 500 rows or more give the
+    full 10 x 10.
+
+    Args:
+        n_context: Context rows, at least 0.
+
+    Returns:
+        The bin count of each level.
+
+    Examples:
+        >>> [auto_bin_count(n) for n in (10, 100, 277, 499, 500, 10_000)]
+        [2, 4, 7, 9, 10, 10]
+    """
+    # isqrt of the floor is the floor of the square root, exactly.
+    root = math.isqrt(int(n_context) // ROWS_PER_BIN)
+    return min(MAX_CLASSES, max(2, root))
+
+
+def grid_groups(n_bins: int) -> _typing.IntArray:
+    """Where the coarse groups of a matched grid start and end.
+
+    The fewest consecutive runs of at most ten bins, as even in length as
+    they can be: 25 bins make runs of 9, 8 and 8.
+
+    Args:
+        n_bins: The grid's bins, from 1 to 100.
+
+    Returns:
+        The group boundaries as bin indices, shape ``(n_groups + 1,)``, from
+        0 to ``n_bins``.
+
+    Examples:
+        >>> grid_groups(25).tolist()
+        [0, 9, 17, 25]
+        >>> grid_groups(100).tolist()[:3]
+        [0, 10, 20]
+    """
+    n_groups = -(-n_bins // MAX_CLASSES)
+    sizes = [len(run) for run in np.array_split(np.arange(n_bins), n_groups)]
+    return np.cumsum([0, *sizes])
 
 
 def quantile_edges(
@@ -301,15 +376,22 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             context for every chunk of queries (``False``). Each classifier
             is fitted and its context prefilled inside every prediction
             call, so the cache serves the chunks of one call, not later
-            calls. In float32 the two paths agree to float rounding; in
+            calls. In float32 the two paths agree to float rounding. In
             bfloat16 on CUDA, whose kernels round differently for different
-            batch shapes, densities differ by up to a few per cent of their
-            peak.
+            batch shapes, they differ as any two bfloat16 runs do, each as
+            far from a float32 run: a typical row's density by about 3% of
+            its peak (at most 4.5% in our tests), single bins by up to a
+            quarter of the peak. In our tests the CRPS and NLL moved about
+            as much as with a change of seed, and ``mixed_precision=False``
+            removes the difference at two to three times the time.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
-            sets the range the equal-mass bins span; without one they span the
-            training values.
+            sets the range the bins span; without one they span the training
+            values. With ``"grid"`` bins, a constructor grid of at most 100
+            bins is matched: its bins become the classes, see
+            ``n_coarse_bins``. A grid passed to a prediction only rebins
+            the answer.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
             ``"mps"``, ``"cpu"``, or a ``torch.device``.
         random_state: Seed of the ensemble: a group's classifiers are seeded
@@ -339,14 +421,28 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             under ``transforms="auto"`` and off under an explicit
             ``transforms``; None is off (TabFM is passed an infinite
             threshold, which makes its clip the identity).
-        n_coarse_bins: Classes at the first hierarchy level (at most ten).
-        n_fine_bins: Classes within each coarse bin (at most ten). The
-            density is built on ``n_coarse_bins * n_fine_bins`` equal-mass
-            bins; the default 10 x 10 gives 100.
+        n_coarse_bins: Classes at the first hierarchy level: an int from 2
+            to 10, ``"auto"`` or ``"grid"``. An int gives equal-mass bins,
+            and so does ``"auto"``, with :func:`auto_bin_count` of the
+            context size (about five context rows per final bin; 10 from 500
+            rows up). ``"grid"``, which both levels must take together,
+            needs a constructor ``y_grid`` of at most 100 bins: the grid's
+            bins are then the fine classes, grouped into the fewest runs of
+            at most ten (:func:`grid_groups`) for the coarse level, so the
+            density is built on the grid itself and never rebinned onto it.
+            A bin no context row falls in gets zero probability, so a true
+            value there has zero density, and a context target outside the
+            grid is clipped into an end bin, with a warning. Recorded,
+            resolved, in ``provenance_["bins"]``.
+        n_fine_bins: Classes within each coarse bin: an int from 2 to 10,
+            ``"auto"`` or ``"grid"``, as for ``n_coarse_bins``. The density
+            is built on ``n_coarse_bins * n_fine_bins`` equal-mass bins.
         n_dither: Repeats of the whole hierarchy with bin edges shifted by
             ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
-            dithering; 3 is a good choice when you can afford three times
-            the compute.
+            dithering; 3 gives a better likelihood almost everywhere, at
+            about three times the compute, and is what we recommend when
+            accuracy matters. ``"grid"`` bins take only 1, since shifted
+            copies of the grid's edges would no longer be its edges.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
             the training prior, which is worth having when the context is a
@@ -372,7 +468,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The union of every dither's equal-mass bin edges, a
-            histogram-normalised grid set at fit.
+            histogram-normalised grid set at fit; under a matched grid, that
+            grid.
         inference_: The path actually used: ``"stream"`` or
             ``"predict_proba"``.
         support_: The range the equal-mass bins span, (low, high).
@@ -380,7 +477,15 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
             loads its backbone on the first prediction, so this appears then.
         bin_prior_: The context's bin fractions from the last prediction,
-            shape (n_coarse_bins * n_fine_bins,).
+            shape (n_bins,).
+        bins_: How the bins were chosen, for example
+            ``"auto equal-mass 7x7"`` or ``"grid 50 bins in 5 groups"``.
+        n_coarse_bins_: The resolved coarse classes, or a matched grid's
+            groups.
+        n_fine_bins_: The resolved fine classes, or the most bins in a
+            matched grid's group.
+        bin_grid_: The matched constructor grid, or None for equal-mass
+            bins.
         n_context_: Context rows ``fit`` was given.
 
     Examples:
@@ -400,10 +505,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
     native_outlier_clipping = True
-    # bfloat16 on CUDA (mixed_precision): chunking and the cache change the
-    # rounding.
+    # Chunking changes the float rounding even on a CPU, and in bfloat16 on
+    # CUDA it and the cache change it far more (see kv_cache above).
     exact_chunking = False
-    kv_cache_rtol = 5e-2
+    # Float rounding in float32, measured at up to 4e-5 of the peak density
+    # on CUDA.
+    kv_cache_rtol = 1e-4
     chunks_queries = False
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -422,8 +529,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         softmax_temperature: float | str = "auto",
         mixed_precision: bool = True,
         outlier_threshold: float | str | None = "auto",
-        n_coarse_bins: int = 10,
-        n_fine_bins: int = 10,
+        n_coarse_bins: int | str = AUTO_BINS,
+        n_fine_bins: int | str = AUTO_BINS,
         n_dither: int = 1,
         prior_shift: str | None = None,
         member_batch_size: int = 1,
@@ -481,16 +588,31 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return AUTO_OUTLIER_THRESHOLD
 
     def _check_backend_params(self) -> None:
-        if max(self.n_coarse_bins, self.n_fine_bins) > MAX_CLASSES:
-            raise ValueError(
-                f"TabFM classification supports at most {MAX_CLASSES} classes"
-                f" per level, got n_coarse_bins={self.n_coarse_bins},"
-                f" n_fine_bins={self.n_fine_bins}"
-            )
-        if min(self.n_coarse_bins, self.n_fine_bins) < 2:
-            raise ValueError("each hierarchy level needs at least two bins")
+        for name in ("n_coarse_bins", "n_fine_bins"):
+            value = getattr(self, name)
+            if _is_auto(value) or _is_grid(value):
+                continue
+            if not _is_count(value):
+                raise ValueError(
+                    f"{name} must be 'auto', 'grid' or an int from 2 to "
+                    f"{MAX_CLASSES}: {name}={value!r}"
+                )
+            if value > MAX_CLASSES:
+                raise ValueError(
+                    f"TabFM classification supports at most {MAX_CLASSES}"
+                    f" classes per level, got {name}={value}"
+                )
+            if value < 2:
+                raise ValueError(
+                    f"each hierarchy level needs at least two bins: "
+                    f"{name}={value}"
+                )
         if self.n_dither < 1:
             raise ValueError("n_dither must be at least 1")
+        self._check_grid_bins()
+        # _fit sets the clipped context targets before the base class
+        # validates, so the layout is fixed here, before any group is fitted.
+        self._resolve_bins(self.y_context_.size)
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
         for name in ("member_batch_size", "query_block_rows"):
@@ -535,11 +657,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         group: _members.MemberGroup,
     ) -> Any:
         del y  # The clipped targets of the same rows are y_context_'s.
-        if self.n_context_ < self.n_coarse_bins * self.n_fine_bins:
-            raise ValueError(
-                f"context has {self.n_context_} rows, fewer than the "
-                f"{self.n_coarse_bins * self.n_fine_bins} bins asked for"
-            )
         if self.inference_ == "predict_proba":
             self.kv_cache_ = False
         rows = slice(None) if group.rows is None else group.rows
@@ -553,6 +670,94 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.support_ = self._support(y)
         self.y_context_ = _clip_to_support(y, self.support_)
         super()._fit(X, y)
+
+    def _resolve_bins(self, n_context: int) -> None:
+        """Fixes the bin layout: a matched grid, or equal-mass bin counts.
+
+        Sets ``bin_grid_``, ``n_coarse_bins_``, ``n_fine_bins_`` and
+        ``bins_``. Explicit counts need a context row per bin; ``"auto"``
+        sizes them so that it has about five.
+
+        Args:
+            n_context: Context rows the bins are built from.
+
+        Raises:
+            ValueError: If explicit bin counts ask for more bins than there
+                are context rows.
+        """
+        self.bin_grid_ = self._matched_grid()
+        if self.bin_grid_ is not None:
+            bounds = grid_groups(self.bin_grid_.n_bins)
+            self.n_coarse_bins_ = int(bounds.size - 1)
+            self.n_fine_bins_ = int(np.diff(bounds).max())
+            self.bins_ = (
+                f"grid {self.bin_grid_.n_bins} bins in "
+                f"{self.n_coarse_bins_} groups"
+            )
+            return
+        auto = auto_bin_count(n_context)
+        counts = [
+            auto if _is_auto(value) else int(value)
+            for value in (self.n_coarse_bins, self.n_fine_bins)
+        ]
+        self.n_coarse_bins_, self.n_fine_bins_ = counts
+        layout = f"equal-mass {counts[0]}x{counts[1]}"
+        if _is_auto(self.n_coarse_bins) and _is_auto(self.n_fine_bins):
+            self.bins_ = f"auto {layout}"
+            return
+        self.bins_ = layout
+        if n_context < counts[0] * counts[1]:
+            raise ValueError(
+                f"context has {n_context} rows, fewer than the "
+                f"{counts[0] * counts[1]} bins asked for; pass "
+                "n_coarse_bins='auto' and n_fine_bins='auto' to size the "
+                "bins from the context"
+            )
+
+    def _check_grid_bins(self) -> None:
+        """Validates ``"grid"`` bins: both levels, a grid, and no dithers."""
+        levels = (self.n_coarse_bins, self.n_fine_bins)
+        if not any(_is_grid(value) for value in levels):
+            return
+        if not all(_is_grid(value) for value in levels):
+            raise ValueError(
+                "'grid' bins take the classes of both levels from y_grid, so "
+                "n_coarse_bins and n_fine_bins must both be 'grid': "
+                f"n_coarse_bins={self.n_coarse_bins!r}, "
+                f"n_fine_bins={self.n_fine_bins!r}"
+            )
+        if self.y_grid is None or isinstance(self.y_grid, str):
+            raise ValueError(
+                "'grid' bins are the bins of the constructor's y_grid, so "
+                f"they need a grid there: y_grid={self.y_grid!r}"
+            )
+        n_bins = grid_lib.as_grid(self.y_grid).n_bins
+        if n_bins > MAX_GRID_BINS:
+            raise ValueError(
+                f"'grid' bins hold at most {MAX_GRID_BINS} bins (ten groups "
+                f"of ten classes), but y_grid has {n_bins}; pass a coarser "
+                "grid, or 'auto' bins, which work with a grid of any size"
+            )
+        if self.n_dither > 1:
+            raise ValueError(
+                "n_dither > 1 shifts the bin edges, but 'grid' bins are "
+                f"y_grid's own and must keep its edges: n_dither="
+                f"{self.n_dither}. Pass n_dither=1, or 'auto' or int bin "
+                "counts for dithered equal-mass bins."
+            )
+
+    def _matched_grid(self) -> grid_lib.Grid | None:
+        """The constructor grid under ``"grid"`` bins, else None."""
+        if not _is_grid(self.n_coarse_bins):
+            return None
+        return grid_lib.as_grid(self.y_grid)
+
+    def _recipe(self) -> dict[str, Any]:
+        return {
+            **super()._recipe(),
+            "bins": self.bins_,
+            "n_dither": int(self.n_dither),
+        }
 
     def _support(self, y: _typing.FloatArray) -> tuple[float, float]:
         """The range the equal-mass bins span: the constructor grid's or z's."""
@@ -570,7 +775,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         parts = []
         with _progress.bar(
             self.progress,
-            total=self.n_dither * (1 + self.n_coarse_bins),
+            total=self.n_dither * (1 + self.n_coarse_bins_),
             desc=f"TabFM {self.version} ({len(X):,} rows)",
             unit="stage",
         ) as progress:
@@ -596,6 +801,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return distributions.MixtureDistribution.equal(parts)
 
     def _native_grid(self) -> grid_lib.Grid:
+        if self.bin_grid_ is not None:
+            return self.bin_grid_
         shifts = [d / self.n_dither for d in range(self.n_dither)]
         edges = np.unique(
             np.concatenate(
@@ -617,29 +824,38 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     ]:
         """Returns a tuple (all edges, coarse edges, fine edges per coarse bin).
 
-        The equal-mass edges for one dither, spanning ``support_``; the top
+        A matched grid's own edges, grouped by :func:`grid_groups`, or the
+        equal-mass edges for one dither, spanning ``support_``; the top
         edge is nudged up so the largest value falls inside. Tied targets
         (discrete, zero-inflated or constant ones) collapse neighbouring
         quantiles, which leaves zero-width, empty bins: an empty coarse bin
         gets evenly spaced fine edges across itself, and every empty bin
         gets zero probability.
         """
+        if self.bin_grid_ is not None:
+            edges = np.array(self.bin_grid_.edges)
+            bounds = grid_groups(self.bin_grid_.n_bins)
+            fine = [
+                edges[start : stop + 1]
+                for start, stop in zip(bounds[:-1], bounds[1:], strict=True)
+            ]
+            return edges, edges[bounds], fine
         low, high = self.support_
         # A constant target still gets a bin of non-zero width, on its scale.
         span = high - low if high > low else max(abs(high), 1.0)
         coarse = quantile_edges(
-            y, self.n_coarse_bins, low, high + 1e-6 * span, shift
+            y, self.n_coarse_bins_, low, high + 1e-6 * span, shift
         )
         labels = _bin_labels(coarse, y)
         fine = [
             quantile_edges(
                 y[labels == j],
-                self.n_fine_bins,
+                self.n_fine_bins_,
                 coarse[j],
                 coarse[j + 1],
                 shift,
             )
-            for j in range(self.n_coarse_bins)
+            for j in range(self.n_coarse_bins_)
         ]
         edges = np.r_[np.concatenate([f[:-1] for f in fine]), coarse[-1]]
         return edges, coarse, fine
@@ -672,6 +888,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """
         y, X_context, group = handle["y"], handle["X"], handle["group"]
         edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        n_coarse = coarse_edges.size - 1
         coarse = _bin_labels(coarse_edges, y)
         # Each member's rows of this group's context, for natively bagged
         # members; None when every member sees all of them.
@@ -682,7 +899,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             group,
             X_context,
             coarse,
-            self.n_coarse_bins,
+            n_coarse,
             X_query,
             group.seed,
             member_rows,
@@ -690,8 +907,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         _done(progress)
         prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
-        for j in range(self.n_coarse_bins):
+        for j in range(n_coarse):
             rows = coarse == j
+            n_fine = fine_edges[j].size - 1
             fine = _bin_labels(fine_edges[j], y[rows])
             level_rows = (
                 None
@@ -701,7 +919,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             _stage(
                 progress,
                 dither,
-                f"fine {j + 1}/{self.n_coarse_bins}",
+                f"fine {j + 1}/{n_coarse}",
                 int(rows.sum()),
             )
             p_fine = self._class_probabilities(
@@ -709,18 +927,16 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 group,
                 X_context.iloc[rows],
                 fine,
-                self.n_fine_bins,
+                n_fine,
                 X_query,
                 group.seed + 1 + j,
                 level_rows,
             )
             _done(progress)
-            prior.append(
-                np.bincount(fine, minlength=self.n_fine_bins) / max(y.size, 1)
-            )
+            prior.append(np.bincount(fine, minlength=n_fine) / max(y.size, 1))
             blocks.append(p_fine * p_coarse[:, [j]])
             self._log(
-                f"  coarse bin {j + 1}/{self.n_coarse_bins}"
+                f"  coarse bin {j + 1}/{n_coarse}"
                 f" ({int(rows.sum())} context rows)"
             )
         return np.concatenate(blocks, axis=1), edges, np.concatenate(prior)
@@ -1087,6 +1303,16 @@ def _member_views(
         view.n_estimators = 1
         views.append(view)
     return views
+
+
+def _is_auto(value: object) -> bool:
+    """Whether a bin count is ``"auto"``."""
+    return isinstance(value, str) and value == AUTO_BINS
+
+
+def _is_grid(value: object) -> bool:
+    """Whether a bin count is ``"grid"``."""
+    return isinstance(value, str) and value == GRID_BINS
 
 
 def _is_count(value: object) -> bool:

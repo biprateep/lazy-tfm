@@ -40,7 +40,10 @@ member's context is larger, whether the whole context without bagging or a bag
 of more than 20,000 rows, and bagging with a smaller `bag_size` keeps every
 member within it (see {doc}`scaling`). Under
 `transforms="auto"`, TabFM gives each member a random subset of 500 columns
-when a table has more, and an explicit `transforms` turns that cap off. The model pages under {doc}`../models/index`
+when a table has more, and an explicit `transforms` turns that cap off. At the
+other end, TabFM sizes its bins to the context, with about five context rows
+per bin below 500 rows, so a small context gives it a coarser histogram rather
+than an overconfident one. The model pages under {doc}`../models/index`
 give each model's limits in full.
 
 On a CPU, TabPFN also refuses contexts above 1,000 rows (v2 to v2.6) or 5,000
@@ -55,7 +58,10 @@ grid that ends inside the support of a distribution therefore moves its mass
 inward and makes it look narrower than it is, and a true value outside the
 grid has no density to score. If the targets reach beyond a grid, pass one
 that covers them, or use the native grid, which reaches far into both tails
-(see {doc}`distributions`).
+(see {doc}`distributions`). When TabFM is asked to take its bins from a
+constructor `y_grid` (`n_coarse_bins="grid"`, see {doc}`../models/tabfm`), a
+bin of that grid with no context rows gets zero probability, and a true value
+in it has zero density, so such a grid should have context rows in every bin.
 
 ## Discrete targets and the PIT
 

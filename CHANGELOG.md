@@ -14,6 +14,11 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Added
 
+- TabFM's opt-in `n_coarse_bins="grid"`, `n_fine_bins="grid"` takes its
+  classes from the constructor's `y_grid` (at most 100 bins), so the density
+  lives on that grid with no rebinning; empty bins get zero probability.
+  `provenance_["bins"]` records the layout, and new fitted attributes `bins_`,
+  `n_coarse_bins_`, `n_fine_bins_` and `bin_grid_` expose it.
 - Loaded networks are shared across fits in one process: a later fit with the
   same backend, version, checkpoint (file and pinned revision), device and
   weight precision reuses the network instead of reading the checkpoint again,
@@ -80,6 +85,12 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Changed
 
+- TabFM's `n_coarse_bins` and `n_fine_bins` default to `"auto"`:
+  floor(sqrt(n/5)) bins per level (2 to 10), about five context rows per bin.
+  Contexts of 500 rows or more keep 10x10 and give bit-identical predictions;
+  on yacht's 277 rows CRPS goes from 0.631 to 0.517 and NLL from 1.28 to 0.50.
+  TabFM now fits contexts of any size under `"auto"`, and `n_dither=3` is
+  documented as the setting to use when accuracy matters.
 - `load_dataset("diamonds")` returns cut, color and clarity as ordered
   categoricals from worst to best (cut Fair to Ideal, color J to D, clarity I1
   to IF), so `.cat.codes` gives their natural order; it raises `ValueError` if
