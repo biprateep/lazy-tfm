@@ -160,6 +160,10 @@ which load astronomical data, keep it. There are no aliases: replace
 
 ### Fixed
 
+- Chunked TabPFN predictions on a CPU are bit-identical to unchunked ones
+  again: histogram-grid normalization sums each row on its own rather than in
+  one BLAS matrix-vector product, whose rounding depended on how many rows came
+  with it.
 - `Distribution.on_grid(grid)` returns exactly what `predict_proba(X, grid)`
   returns for histogram and mixture distributions too. It dropped probability
   outside the grid without renormalizing and ignored the grid's normalization,

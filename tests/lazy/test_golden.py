@@ -26,7 +26,11 @@ needs_checkpoint = pytest.mark.skipif(
 RTOL = {"tabpfn": 1e-4, "tabicl": 1e-3, "tabfm": 1e-12}
 
 #: Absolute tolerance per backend, as a fraction of the peak density.
-ATOL = {"tabpfn": 1e-6}
+#: TabFM's is float64 rounding: rebinning onto the grid takes differences
+#: of cumulative masses, whose rounding is absolute (about 1e-16 of the
+#: peak), so a far-tail density of 1e-9 can move by 1e-6 of itself when
+#: the masses are scaled first (as on_grid has done since ee67572).
+ATOL = {"tabpfn": 1e-6, "tabfm": 1e-12}
 
 
 @needs_checkpoint

@@ -313,11 +313,11 @@ def normalize_grid_pdfs(
     np.clip(density, 0.0, None, out=density)
     if bin_edges is not None:
         widths = _bin_widths(bin_edges, grid.size)
-        mass = density @ widths
+        mass = _row_masses(density, widths)
         bad = ~(mass > 0)
         if bad.any():
             density[bad] = 1.0
-            mass = density @ widths
+            mass = _row_masses(density, widths)
         return grid, density / mass[:, None]
     mass = np.trapezoid(density, grid, axis=1)
     bad = ~(mass > 0)
@@ -325,6 +325,19 @@ def normalize_grid_pdfs(
         density[bad] = 1.0
         mass = np.trapezoid(density, grid, axis=1)
     return grid, density / mass[:, None]
+
+
+def _row_masses(
+    density: _typing.FloatArray, widths: _typing.FloatArray
+) -> _typing.FloatArray:
+    """Each row's ``sum(density * widths)``, shape (n,), row by row.
+
+    One dot product per row, so a row's mass does not depend on how many
+    rows come with it; ``density @ widths`` is one BLAS matrix-vector
+    product, which rounds a row differently with the row count and would
+    make chunked predictions differ from unchunked ones in the last bit.
+    """
+    return np.matmul(density[:, None, :], widths[:, None])[:, 0, 0]
 
 
 def normalization_error(
