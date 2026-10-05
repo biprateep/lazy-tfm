@@ -1,34 +1,24 @@
 # What are Tabular Foundation Models?
 
-A tabular dataset is a dataset where the data is organized like a table in which each row is an object and each column is a measured property of it (think of like a spreadsheet or `DataFrame`). The common way to make predictions by learning from such a data set would be to train a supervised machine learning model on the same dataset (e.g., a gradient-boosted tree ensemble, a neural network, a random forest,etc.), fit its parameters to the labeled rows by minimizing a loss, tune its hyperparameters on held-out data, and repeat this for every new dataset.
+A tabular dataset is a dataset where the data is organized like a table in which each row is an object and each column is a measured property of it (think of a spreadsheet or `DataFrame`). The common way to make predictions by learning from such a dataset would be to train a supervised machine learning model on the same dataset (e.g., a gradient-boosted tree ensemble, a neural network, a random forest, etc.), fit its parameters to the labeled rows by minimizing a loss, tune its hyperparameters on held-out data, make predictions, and repeat this for every new dataset. 
 
+A tabular foundation model (TFM), on the other hand, is a large neural network which has been trained using a very large number of algorithmically generated datasets to make predictions. The network learns to predict
+held-out labels from the labeled rows given as context. They work on a similar philosophy to large language models which try to predict the next word given an input sequence of words (also called context). In this case, the TFM is given an input sequence of numbers which represent the features and labels of the tabular data as a "training set", but is only given the features for the test object. So it predicts the target as the next token. This page provides a very short overview of the concept of TFMs; readers are requested to refer to the linked papers for more details. 
 
- A
-tabular foundation model (TFM) replaces this per-dataset training with a
-single, very expensive pretraining step that happens once, before the model
-ever sees our data. During pretraining, the network learns to predict
-held-out labels from the labeled rows of many tables, so when we give it our
-labeled rows it can predict the target for new rows directly, without updating
-any of its weights. This page gives a brief overview of how this works and what
-it means for the user, and links to the papers that describe each model in
-detail.
-
-## Learning in context
+## In-context learning
 
 A TFM receives the labeled rows, which we call the *context* (they play the
 role of the training set), and the rows we want predictions for (the
 *queries*) as one input, and it returns a prediction for every query in a
 forward pass (see Figure 1). This is called in-context learning, since
 everything the model knows about our dataset comes from the context it is
-given at prediction time rather than from gradient descent on it. As the TabPFN v2 paper puts it,
-the model "performs training and prediction on this dataset in a single neural
-network forward pass" ([Hollmann et al.
-2025](https://doi.org/10.1038/s41586-024-08328-6)). Therefore, `fit` in LAZY
+given at prediction time rather than from tuning the weights based on it.
+Therefore, `fit` in LAZY
 only stores the context (and, with the key/value cache on, the network's
 encoding of it), and the predictions are computed in `predict`.
 
 ```{figure} ../figures/figs/tfm_schematic.svg
-:alt: Context rows with known targets and query rows with unknown targets go into a pretrained transformer, which returns a distribution for each query.
+:alt: Context rows with known targets and query rows with unknown targets go into a pretrained model, which returns a distribution for each query.
 :width: 100%
 
 **Figure 1.** In-context learning with a tabular foundation model. The context
@@ -39,21 +29,9 @@ be narrow, broad or have more than one peak. No weights are updated at any
 point.
 ```
 
-Inside the network, TabPFN v2 uses attention in two directions: each cell
-attends to the other features in its row, and to the same feature in the other
-rows ([Hollmann et al. 2025](https://doi.org/10.1038/s41586-024-08328-6)). The
-other models in LAZY use variants of this design, such as TabICL's, which
-first summarizes each row in a single vector and then attends across rows ([Qu
-et al. 2025](https://arxiv.org/abs/2502.05564)). In TabPFN, the query rows
-attend only to the context rows and not to each other, so the prediction for a
-query does not depend on which other queries are predicted with it. The cost
-of a prediction grows with the number of context rows (quadratically for the
-attention between them), which is why the size of the context, rather than
-training time, is the main computational constraint of a TFM. The papers
-linked on each model's page under {doc}`../models/index` describe the
-architectures in detail.
 
-## Pretraining on synthetic data
+
+## Training on synthetic data
 
 The idea behind TFMs was laid out by [Müller et al.
 (2022)](https://arxiv.org/abs/2112.10510), who called these networks
@@ -61,14 +39,12 @@ prior-data fitted networks (PFNs). They proposed to draw a very large number
 of datasets from a *prior*, a random process that generates plausible
 datasets, hide some of the labels in each, and train a transformer to predict
 the hidden labels from the rest. They showed that a network trained this way
-learns to approximate Bayesian inference: for a new dataset, its output
+learns to approximate Bayesian inference, i.e., for a new dataset, its output
 approximates the posterior predictive distribution (PPD) of the target given
 the context, under the prior it was trained on. Since the prior generates the
-datasets, pretraining needs no real data. For example, TabPFN v2 was
-pretrained on about 130 million synthetic datasets generated from structural
-causal models, random directed graphs of causes and effects between the
-features and the target ([Hollmann et al.
-2025](https://doi.org/10.1038/s41586-024-08328-6)).
+datasets, pretraining needs no real data. Most TFMs are trained on $\sim 10^9$ synthetic datasets, generated via structural causal models (SCMs).
+
+These datasets are generated by first coming up with a random causal graph. Then, for each node of the graph, a random function is drawn from a set of functions (e.g., linear, polynomial, sinusoidal, etc.) and a random noise distribution is chosen and added. The data is then generated by passing randomly chosen initial points through these successive functional compositions to generate the final data. Some approaches also generate training data by creating a neural network of a randomly chosen architecture and then selecting the weights randomly from some distribution and using this network to generate the data. Repeated sampling of the weights will generate different datasets. In the limit of infinite samples, the idea is that the TFM will have seen every possible function. 
 
 ```{figure} ../figures/figs/prior_draws.svg
 :alt: Six small synthetic one-feature regression datasets with different shapes and noise levels.
@@ -76,8 +52,8 @@ features and the target ([Hollmann et al.
 
 **Figure 2.** Six datasets drawn from a toy prior over one-feature regression
 problems, in which each dataset comes from a small random network with a
-random activation function and random noise. The priors the models in LAZY
-were pretrained on are far richer (many features, causal structure between
+random activation function and random noise. The priors the TFMs
+were trained on are far richer (many features, causal structure between
 them, mixed types, missing values, etc.); this toy prior only illustrates the
 idea. A TFM is pretrained to predict held-out points in millions of datasets
 like these.
@@ -103,17 +79,7 @@ its central 68% interval. We observe that the predicted distributions narrow
 and follow the true curve as the context grows, with no weights changed.
 ```
 
-## Predicting distributions
 
-Most TFMs can predict a full probability distribution for the target rather
-than a single value, although they represent it in different ways. TabPFN and
-LimiX-2 predict the probability of each of several thousand bins of the target
-(also called a bar or Riemann distribution, from Müller et al. 2022); TabICLv2
-predicts 999 quantiles; and Google's TabFM predicts a single value for
-regression, so LAZY builds a distribution from its classifier instead. LAZY
-converts all of these to a common form, so that every model answers the same
-calls (`predict_proba`, `predict_quantiles`, `predict_interval`, etc.) with
-the same kind of output ({doc}`distributions` describes how).
 
 ## Strengths and limits
 
@@ -123,9 +89,9 @@ small and medium-sized tabular benchmarks ([Hollmann et al.
 hyperparameter search on the user's side, and most of them can provide
 distributions rather than only point estimates. However, the cost of every
 prediction grows with the size of the context, and each model supports
-contexts only up to a maximum number of rows and features (from 10,000 rows
-for TabPFN v2 to a million for TabPFN-3), beyond which its performance is not
-guaranteed. Most of the models need a GPU to be practical, and several have
+contexts only up to a maximum number of rows and features (from 20,000 rows
+for LimiX-2 to a million for TabPFN-3), beyond which its performance is not
+guaranteed. Moreover, when the training datasets are very large ($\sim 10^6$), TFMs perform similarly to or worse than supervised machine learning. The real benefit of TFMs comes when training sets are small. Most of the models need a GPU to be practical, and several have
 weights released under non-commercial licenses. The models also inherit the
 assumptions of the prior they were pretrained on, so a dataset very unlike
 anything the prior generates may be predicted poorly. {doc}`../models/index`
