@@ -14,6 +14,17 @@ TabFM 1) and, on TabFM, `n_estimators=4`.
 
 ### Added
 
+- `lazy setup` (also `python -m lazy setup`) finishes the installs PyPI
+  cannot: it installs TabFM's repository build, with its KV-cache API, over
+  the PyPI release, with pip or uv, and downloads LimiX's source. In a uv
+  project it prints the `uv add` that keeps the build instead of installing
+  one `uv sync` would undo. `--dry-run` says what it would do.
+- LimiX's source no longer needs installing: when neither `LAZY_LIMIX_SRC`
+  nor an installed `LimiX` provides it, the archive of the validated commit is
+  downloaded once into `limix/<commit>` under the catalogs' cache directory
+  and loaded from there. `download_checkpoint("limix")` fetches it too,
+  `is_cached("limix")` checks for it, and `HF_HUB_OFFLINE=1` prevents the
+  download.
 - TabFM's opt-in `n_coarse_bins="grid"`, `n_fine_bins="grid"` takes its
   classes from the constructor's `y_grid` (at most 100 bins), so the density
   lives on that grid with no rebinning; empty bins get zero probability.

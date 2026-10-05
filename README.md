@@ -140,44 +140,31 @@ Memory is bounded by `chunk_size` on every backend, and chunking is exact: a
 query row's answer never depends on which other query rows share its chunk
 (bit for bit on TabPFN and TabICL, to float rounding on LimiX-2).
 
-### For TabFM, install its repository build
+### Finishing the TabFM and LimiX-2 installs
 
-`pip install 'lazy-tfm[tabfm]'` installs TabFM's PyPI release, which works
-but has no KV-cache API. As a result, every chunk of query rows re-encodes the
-whole training context, which takes about **13.7 ms per member-row against
-0.53 ms** on the cached path, roughly **26× the compute** for identical
-answers. For anything beyond a few thousand query rows, install the repository
-build as well:
+PyPI cannot install everything these two backends need, so after their
+extras, one command completes them:
 
 ```bash
-pip install 'lazy-tfm[tabfm]'
-pip install --force-reinstall --no-deps 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff'
+pip install 'lazy-tfm[tabfm,limix]'
+lazy setup
 ```
 
-The `--force-reinstall` flag matters, because the repository build calls
-itself 1.0.1 like the release, so without it pip keeps the release and changes
-nothing. A checkout of this repository gets the repository build automatically
-(`uv sync --extra all`), pinned through `[tool.uv.sources]`. On the release
-build, the backend warns at `fit` with a `TabFMPerformanceWarning` rather than
-silently taking 26× longer. To check which build you have:
-
-```python
-from lazy.models._icl_stream import streaming_available
-streaming_available()   # True means the fast path is in use
-```
-
-Passing `kv_cache=False` chooses the slow path deliberately and silences the
-warning.
-
-### For LimiX-2, install its code
-
-LimiX is not on PyPI. The `limix` extra brings its dependencies, while the
-code comes from the repository, at the commit this package was validated on
-(or from a checkout named by `LAZY_LIMIX_SRC`):
+TabFM's PyPI release has no KV-cache API, so every chunk of query rows
+re-encodes the whole training context, which takes about **13.7 ms per
+member-row against 0.53 ms**, roughly **26× the compute** for identical
+answers. `lazy setup` installs the repository build, which has the API; on
+the release, `fit` warns with a `TabFMPerformanceWarning` rather than silently
+taking 26× longer, and `kv_cache=False` accepts the slow path and silences
+it. LimiX's code is not on PyPI, so `lazy` downloads it at the commit it was
+validated on, into its cache, the first time a LimiX-2 model is fitted;
+`lazy setup` does it ahead of time. A checkout of this repository
+(`uv sync --extra all`) gets the TabFM build automatically. In your own uv
+project, add the build in the same command instead, so that `uv sync` keeps
+it:
 
 ```bash
-pip install 'lazy-tfm[limix]'
-pip install 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
+uv add 'lazy-tfm[tabfm]' 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff'
 ```
 
 Upstream LimiX-2 has no key/value cache, and its answers depend on how the
