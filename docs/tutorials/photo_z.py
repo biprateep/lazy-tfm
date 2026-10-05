@@ -29,17 +29,15 @@
 # magnitudes alone, also known as a photometric redshift (photo-$z$), is the
 # problem `lazy` was first built for. In this tutorial, we predict redshift
 # PDFs for the galaxies of the LSST DESC Data Challenge 1, score them with the
-# metrics of the challenge, and compare two models on the hardest galaxies.
-# We then build a training set biased the way real spectroscopic samples are,
-# and show how much a small representative sample added to the context
-# repairs it.
+# metrics of the challenge, and compare two models on the hardest galaxies. We
+# then build a training set biased as real spectroscopic samples are, and show
+# how much a small representative sample added to the context repairs it.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN and TabICL backends and the `qp` extra. Elsewhere, the
-# package needs to be installed first with
+# On Google Colab, the cell below installs the package with the TabPFN and
+# TabICL backends and the `qp` extra. Elsewhere, install it first with
 # `pip install 'lazy-tfm[tabpfn,tabicl,qp]'`. On Colab, choose
 # *Runtime → Change runtime type → T4 GPU*.
 
@@ -72,12 +70,11 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # We use the catalog of the LSST DESC Photo-$z$ Data Challenge 1 (DC1;
 # [Schmidt, Malz et al. 2020](https://arxiv.org/abs/2001.03621)), in which a
 # dozen photo-$z$ codes were compared on the same simulated galaxies.
-# `datasets.fetch_dc1` downloads it (about 1 GB, checksummed) the first time
-# it is called, and with `split=True` it returns the training and test sets of
-# the challenge itself. The model sees the features that
-# `features("mag-color")` builds, which are the $i$-band magnitude and the five
-# adjacent colors ($u-g$, $g-r$, ...), with their errors propagated in
-# quadrature (see
+# `datasets.fetch_dc1` downloads it (about 1 GB, checksummed) on the first
+# call, and with `split=True` it returns the training and test sets of the
+# challenge. The model sees the features built by `features("mag-color")`,
+# i.e., the $i$-band magnitude and the five adjacent colors ($u-g$, $g-r$, ...)
+# with their errors propagated in quadrature (see
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)).
 # The whole training set of 43,486 galaxies is the context, and we take a
 # random 5,000 of the 390,990 test galaxies to keep this tutorial quick.
@@ -98,14 +95,13 @@ X_train.head()
 # ## Redshift PDFs
 #
 # We fit the default model, TabPFN-3.5, with the training galaxies as its
-# context. `fit` trains no weights; it encodes the context with the network
-# and keeps the result as a key/value cache, which every prediction then
-# reuses (the
+# context. `fit` trains no weights. It encodes the context with the network and
+# keeps the result as a key/value cache, which every prediction reuses (the
 # [basic usage](https://lazy-tfm.readthedocs.io/en/latest/tutorials/basic_usage.html)
 # tutorial explains what `fit` and `predict_proba` do). We ask for the PDFs on
 # the grid of the challenge, `datasets.DC1_GRID` (200 bins over
-# $0 \le z \le 2$), so that the numbers below are comparable with those of
-# the challenge.
+# $0 \le z \le 2$), so that the numbers below are comparable with those of the
+# challenge.
 
 # %%
 grid = datasets.DC1_GRID
@@ -127,9 +123,8 @@ for ax in axes:
 # The figure shows the PDFs of six random galaxies, with their true redshifts
 # as dashed lines. Five of them are narrow, while the last (bottom right) has
 # two peaks, with its true redshift under the smaller one, since galaxies at
-# two different redshifts can have similar colors. This
-# degeneracy between color and redshift is what a single point estimate per
-# galaxy hides.
+# two different redshifts can have similar colors. This degeneracy between
+# color and redshift is what a single point estimate per galaxy hides.
 
 # %% [markdown]
 # ## Scoring the PDFs
@@ -171,7 +166,7 @@ fig = plotting.diagnostic_panel(
 # TabICL is small, BSD-licensed and fast on a CPU. We run it on the same
 # galaxies with 4 ensemble members instead of the default 8, since caching a
 # context of this size for 8 members briefly needs about 14 GB of GPU memory,
-# more than a T4 has to spare.
+# more than a T4 can provide.
 
 # %%
 tabicl = lazy.LazyModel("tabicl", n_estimators=4, random_state=SEED)
@@ -229,16 +224,16 @@ plt.show()
 # %% [markdown]
 # ## A biased training set
 #
-# The DC1 training set is drawn like the test set. Real spectroscopic samples
-# are not: they are bright, incomplete, and truncated in redshift by which
+# The DC1 training set is drawn like the test set, unlike real spectroscopic
+# samples, which are bright, incomplete, and truncated in redshift by which
 # spectral features fall in the observed window. `datasets.fetch_dc1_biased`
 # builds this case from DC1. It first merges and reshuffles both DC1 files and
 # cuts them in two. It then runs the first part through a port of the HSC
 # `GridSelection` of RAIL (`lazy.selection.grid_selection`), which keeps each
 # galaxy with the HSC PDR2 ratio of spectroscopic to photometric galaxies in
-# its pixel of $i$-band magnitude and $g-z$ color, below a redshift ceiling
-# set by the HSC spectra in that pixel, and the galaxies it keeps form the
-# biased training set. Finally, it divides the second part at random into a
+# its pixel of $i$-band magnitude and $g-z$ color, below a redshift ceiling set
+# by the HSC spectra in that pixel, and the galaxies it keeps form the biased
+# training set. Finally, it divides the second part at random into a
 # representative calibration sample and a representative test set. Since the
 # selection keeps a nearly fixed fraction of whatever it sees, the position of
 # the cut is solved for to give `n_train` training galaxies (35,000 by

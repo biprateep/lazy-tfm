@@ -28,17 +28,16 @@
 # Many targets are positive, have a long tail toward large values (i.e., are
 # skewed), and are more uncertain the larger they are (i.e., are
 # heteroscedastic), such as prices, masses, incomes and counts. In this
-# tutorial, we predict the prices of diamonds, which have all three
-# properties. We show how the predicted intervals widen with the size of
-# a diamond, compare a model fitted on the price with one fitted on its
-# logarithm, and show how the choice of the output grid affects the densities.
+# tutorial, we predict the prices of diamonds, which have all three properties.
+# We show how the predicted intervals widen with the size of a diamond, compare
+# a model fitted on the price with one fitted on its logarithm, and show how
+# the choice of output grid affects the densities.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`.
+# On Google Colab, the cell below installs the package with the TabPFN backend.
+# Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`.
 
 # %%
 import sys
@@ -69,9 +68,9 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # round-cut diamonds, with their weight (carat), their dimensions and three
 # quality grades: the cut, the color and the clarity (see
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)).
-# The grades come as ordered categories, from worst to best. Since every
-# model treats every column as a number, we replace each grade by its code
-# in that order, so that the codes keep the ordering of the grades (see
+# The grades are ordered categories, from worst to best. Since every model
+# treats every column as a number, we replace each grade by its code in that
+# order (see
 # [Limits and pitfalls](https://lazy-tfm.readthedocs.io/en/latest/guide/limits.html)).
 
 # %%
@@ -86,7 +85,7 @@ print(f"Median {np.median(price):,.0f} USD, mean {price.mean():,.0f} USD")
 X.head()
 
 # %% [markdown]
-# The mean price is well above the median, which is the mark of a long tail
+# The mean price is well above the median, which is a sign of a long tail
 # toward expensive diamonds. To keep the tutorial quick, we use a random 5,000
 # diamonds as the context and another 2,000 as the test set. The full dataset
 # is well within the context limit of TabPFN-3.5 (see
@@ -180,22 +179,21 @@ q_log = np.exp(model_log.predict_quantiles(X_test, [0.16, 0.5, 0.84]))
 # $$p_Y(y) = p_\ell(\ln y)\,\left|\frac{d\ell}{dy}\right| =
 # \frac{p_\ell(\ln y)}{y},$$
 #
-# where $p_\ell$ is the density that the model predicts for $\ell$ and
-# $1/y$ is the Jacobian of the logarithm. This means that the density in
-# $y$ is not simply $p_\ell$ read at $\ln y$, and that its peak sits at a lower
-# price than $\exp$ of the peak in $\ell$.
+# where $p_\ell$ is the density that the model predicts for $\ell$ and $1/y$ is
+# the Jacobian of the logarithm. This means that the density in $y$ is not
+# $p_\ell$ read at $\ln y$, and that its peak sits at a lower price than $\exp$
+# of the peak in $\ell$.
 #
-# On a binned grid, we avoid the Jacobian altogether, since the probability in
-# a bin does not depend on the variable it is measured in. The probability
-# that the price falls between two edges $a$ and $b$ is the probability that
-# $\ell$ falls between $\ln a$ and $\ln b$. We therefore build a grid in price
-# with logarithmically spaced edges and ask the log model for its densities on
-# the logarithms of the same edges. Both grids use the `"histogram"`
-# normalization, in which the density is constant across each bin, so the
-# mass in a bin is the density times the width, and the density in price is
-# that mass divided by the width of the bin in dollars. Since the model
-# integrates its distribution over each bin exactly, this transformation is
-# exact.
+# On a binned grid, we avoid the Jacobian, since the probability in a bin does
+# not depend on the variable it is measured in. The probability that the price
+# falls between two edges $a$ and $b$ is the probability that $\ell$ falls
+# between $\ln a$ and $\ln b$. We therefore build a grid in price with
+# logarithmically spaced edges and ask the log model for its densities on the
+# logarithms of the same edges. Both grids use the `"histogram"` normalization,
+# in which the density is constant across each bin, so the mass in a bin is the
+# density times the width, and the density in price is that mass divided by the
+# width of the bin in dollars. Since the model integrates its distribution over
+# each bin exactly, the transformation is exact.
 
 # %%
 edges = np.geomspace(100.0, 40_000.0, 301)  # USD, covers every price
@@ -283,11 +281,11 @@ by_size.round(3)
 # %% [markdown]
 # ## The output grid
 #
-# Without a grid, `predict_proba` answers on the model's native grid, which
-# for TabPFN is its 5,000 buckets. These reach far into both tails, including
-# negative prices, because that is where the buckets of the model are. The
+# Without a grid, `predict_proba` answers on the native grid of the model,
+# which for TabPFN is its 5,000 buckets. These reach far into both tails,
+# including negative prices, because the buckets of the model lie there. The
 # native grid loses no information, but a grid of our own is easier to plot,
-# to store and to compare between models.
+# store and compare between models.
 
 # %%
 native = model.native_grid_
@@ -300,12 +298,11 @@ below_zero = dist.cdf([0.0])[:, 0]
 print(f"Mean probability of a negative price: {below_zero.mean():.1e}")
 
 # %% [markdown]
-# The native grid of the model fitted on the price spans about $\pm 5 \times
-# 10^5$ USD, although no diamond costs less than 326 USD, and the model puts
-# a mean probability of $9.0 \times 10^{-5}$ on negative prices. This is
-# small here, but it is not zero, and for a target closer to zero it can
-# matter. The model fitted on the logarithm cannot predict a negative price
-# at all.
+# The native grid of the model fitted on the price spans about
+# $\pm 5 \times 10^5$ USD, although no diamond costs less than 326 USD, and the
+# model puts a mean probability of $9.0 \times 10^{-5}$ on negative prices.
+# This is small here but not zero, and it can matter for a target closer to
+# zero. The model fitted on the logarithm cannot predict a negative price.
 #
 # Probability outside a grid of our own is dropped and each density is
 # renormalized over the grid (see

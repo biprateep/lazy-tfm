@@ -39,9 +39,8 @@ and later).
 | `"v3.5"`      | 24 | 1,000,000 | 20,000 | non-commercial |
 | `"v3.5-fast"` | 8  | 1,000,000 | 20,000 | non-commercial |
 
-The limits are the ones stored in each checkpoint, which TabPFN enforces; the
-model cards and reports quote smaller ones for some versions (e.g., 50,000
-rows for v2.6).
+The limits are the ones stored in each checkpoint. The model cards and reports
+quote smaller ones for some versions (e.g., 50,000 rows for v2.6).
 
 ## Defaults
 
@@ -88,9 +87,9 @@ checkpoint asks for four, and we never raise the count for wide tables as
 TabPFN does, so that a member count means the same thing for every model. We
 also turn off TabPFN's automatic detection of categorical columns (which
 treats a numeric column with few distinct values as categorical), so every
-column is treated as numeric, as in every other model. We cache the context's
-keys and values at full precision, which makes repeated predictions faster and
-changes them only by rounding, and we always compute in float32 on a CPU.
+column is numeric, as in every other model. We cache the context's keys and
+values at full precision, which makes repeated predictions faster and changes
+them only by rounding, and we always compute in float32 on a CPU.
 LAZY's density is also constant within each bucket, while TabPFN gives its two
 outermost buckets half-normal tails; this only matters about 128 standard
 deviations from the mean of the context targets. When `transforms` is set

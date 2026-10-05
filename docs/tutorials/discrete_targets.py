@@ -28,18 +28,16 @@
 # Every model in `lazy` predicts a density over the real line, while many
 # targets are counts that cannot go below zero, or scores that take only a
 # handful of integer values. In this tutorial, we predict hourly bike rentals
-# and wine quality scores, look at what the predicted distributions do near
-# the floor at zero and between the integers, and show how to compute the
-# probability of each integer level and a PIT that remains uniform for a
-# discrete target.
+# and wine quality scores, examine the predicted distributions near the floor
+# at zero and between the integers, and compute the probability of each
+# integer level and a PIT that remains uniform for a discrete target.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`. On Colab, choose
-# *Runtime → Change runtime type → T4 GPU*.
+# On Google Colab, the cell below installs the package with the TabPFN
+# backend. Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`.
+# On Colab, choose *Runtime → Change runtime type → T4 GPU*.
 
 # %%
 import sys
@@ -68,8 +66,8 @@ rng = np.random.default_rng(SEED)
 # ## Bike rentals: counts with a floor at zero
 #
 # The `bike_sharing` dataset gives the number of bikes rented in each hour
-# in Washington, DC, from the season, the hour, the weather and similar
-# columns (see
+# in Washington, DC, together with the season, the hour, the weather and
+# similar columns (see
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)).
 # Five of its columns are categorical, and since every model treats every
 # column as numeric, we replace each of them by its integer codes. To keep
@@ -99,7 +97,7 @@ y_test = y[test]
 print(f"counts from {y.min():.0f} to {y.max():.0f}, median {np.median(y):.0f}")
 
 # %% [markdown]
-# We fit the default model, TabPFN-3.5, and ask for the native distribution
+# We fit the default model, TabPFN-3.5, and obtain the native distribution
 # of each test hour with `predict_distribution`. Its `cdf` and `pdf` are
 # exact and need no grid (see
 # [From model output to distribution](https://lazy-tfm.readthedocs.io/en/latest/guide/distributions.html)).
@@ -167,7 +165,7 @@ _ = axes[0, 0].legend()
 #
 # ## Intervals near the floor
 #
-# The same spill shows up in the intervals. We print the 95% central interval
+# The same spill appears in the intervals. We print the 95% central interval
 # of the quietest hours, and the fraction of quiet hours whose true count falls
 # inside it.
 
@@ -325,12 +323,12 @@ _ = axes[0, 0].legend()
 # For a discrete target, $F$ jumps at $y$ from $F(y - 0.5)$ to $F(y + 0.5)$,
 # and the plain PIT lands at one place inside that jump, so it is not
 # uniform even when the distributions are calibrated. The randomized PIT
-# draws a value uniformly within the jump instead,
+# instead draws a value uniformly within the jump,
 # $F(y - 0.5) + u\,[F(y + 0.5) - F(y - 0.5)]$ with $u$ uniform on $[0, 1]$,
 # which is uniform for calibrated distributions of a discrete target. We
 # compute both with the `pit` method of the distribution, which evaluates the
-# CDF of each wine at its own value, here the true score and the
-# half-integers on either side of it, and test each against a uniform
+# CDF of each wine at its own value (here the true score and the
+# half-integers on either side of it), and test each against a uniform
 # distribution with `metrics.pit_statistics`.
 
 # %%

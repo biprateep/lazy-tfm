@@ -2,8 +2,8 @@
 
 A prediction from LAZY is fixed by the checkpoint, the context, the seed and
 the shared parameters, and by nothing on the machine it runs on. This page
-describes how each of these is pinned and recorded, and which settings change
-a prediction.
+describes how each is pinned and recorded, and which settings change a
+prediction.
 
 ## Seeds
 
@@ -19,8 +19,8 @@ call of a model serves (e.g., every member of TabPFN without bagging) is run
 with the seed of its first member. Hashing the pair keeps the seeds of
 neighboring ensembles apart, whereas an offset such as `random_state + i`
 would give member `i` at `random_state=r` the seed of member `i - 1` at
-`r + 1`, so that two runs differing only in their seed would share most of
-their members. The bags are drawn from a generator seeded with `random_state`
+`r + 1`, so two runs differing only in their seed would share most of their
+members. The bags are drawn from a generator seeded with `random_state`
 itself, and the same bags are drawn on every model (see {doc}`interface`).
 
 ## Pinned checkpoints
@@ -47,10 +47,10 @@ what it runs (see {doc}`interface`).
 
 ## Provenance
 
-What actually answered is recorded on the fitted model in `provenance_`, ready
-to be written out beside the numbers. It holds the weights, the code that read
-them and the ensemble that answered, and no local paths, so it means the same
-thing on another machine and survives a trip through JSON:
+What answered is recorded on the fitted model in `provenance_`, ready to be
+written out beside the numbers. It holds the weights, the code that read them
+and the ensemble that answered, and no local paths, so it means the same thing
+on another machine and survives a trip through JSON:
 
 ```python
 model.fit(X_train, z_train).provenance_
@@ -73,9 +73,9 @@ is also the only one whose weights allow commercial use.
 {func}`lazy.get_checkpoint <lazy.models.get_checkpoint>` returns each
 version's license and size notes. We therefore recommend comparing numbers
 only between runs whose `provenance_` agree on the version and the recipe. For
-example, the
-paper's TabFM numbers come from the streaming path in bfloat16, and the cost
-measurements in {doc}`scaling` predate the change to float32 on every CPU.
+example, the paper's TabFM numbers come from the streaming path in bfloat16,
+and the cost measurements in {doc}`scaling` predate the change to float32 on
+every CPU.
 
 ## What changes a prediction
 
@@ -87,9 +87,9 @@ the same bit for bit on TabPFN and TabICL and to float rounding on LimiX-2 and
 TabFM, and under mixed precision on a GPU it is the same to the rounding of
 that precision.
 
-The key/value cache changes a prediction only by rounding. The cache is exact
-on a CPU. Since queries only ever attend to the context and never to each
-other, the answer is the uncached one up to float rounding. Under mixed
+The key/value cache changes a prediction only by rounding. Since queries only
+ever attend to the context and never to each other, the answer is the uncached
+one up to float rounding, and the cache is exact on a CPU. Under mixed
 precision on a GPU the two agree to the rounding of that precision (for
 TabICL, about 1e-3 of the quantile spread). For TabFM in bfloat16, that
 rounding moves a typical row's density by about 3% of its peak and single bins

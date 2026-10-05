@@ -55,8 +55,8 @@ transform) and soft-clips outliers at 4 standard deviations. Inside the
 network, any remaining missing value is replaced by $-100$; there are no
 missing-value indicators. Since LAZY uses the classifier, the target is never
 standardized: it is only binned, into equal-mass bins of the context targets
-or, on request, the bins of `y_grid` (below), and a target outside the bins is clipped to
-them with a warning.
+or, on request, the bins of `y_grid` (below), and a target outside the bins is
+clipped to them with a warning.
 
 ## Where LAZY differs
 
@@ -84,8 +84,8 @@ level gets $\lfloor\sqrt{n/5}\rfloor$ bins, between 2 and 10, for a context of
 $n$ rows, so that a final bin holds about five context rows, and every context
 of 500 rows or more gets 10 by 10. With fewer rows per bin the histogram is
 overconfident. On the 277 context rows of `yacht` with 4 members, for
-example, the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517 and the NLL from
-1.28 to 0.50 relative to 10 by 10. An integer sets a level's bin count
+example, the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517
+and the NLL from 1.28 to 0.50 relative to 10 by 10. An integer sets a level's bin count
 explicitly, from 2 to 10, and always gives equal-mass bins.
 
 The equal-mass bins are used whether or not a `y_grid` is passed to the

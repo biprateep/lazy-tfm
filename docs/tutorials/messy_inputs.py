@@ -25,21 +25,19 @@
 # [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/messy_inputs.ipynb)
 # [![View on GitHub](https://img.shields.io/badge/View%20on-GitHub-181717?logo=github)](https://github.com/biprateep/lazy-tfm/blob/tutorials/messy_inputs.ipynb)
 #
-# Real tables are rarely a clean block of numbers. They have categorical
-# columns, missing entries, and columns in an arbitrary order. In this
-# tutorial, we predict the
-# distribution of house sale prices from such a table. We encode the
-# categorical columns inside a scikit-learn pipeline, measure how the
-# predicted distributions degrade as we remove more and more of the features,
-# and check what `lazy` does when the columns are shuffled.
+# Real tables are rarely a clean block of numbers, as they have categorical
+# columns, missing entries and columns in an arbitrary order. In this tutorial,
+# we predict the distribution of house sale prices from such a table, encode
+# the categorical columns inside a scikit-learn pipeline, measure how the
+# predicted distributions degrade as features are removed, and check what
+# `lazy` does when the columns are shuffled.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`. On Colab, choose
-# *Runtime → Change runtime type → T4 GPU*.
+# On Google Colab, the cell below installs the package with the TabPFN backend.
+# Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`. On Colab,
+# choose *Runtime → Change runtime type → T4 GPU*.
 
 # %%
 import sys
@@ -73,13 +71,13 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # %% [markdown]
 # ## The data
 #
-# We use the Ames housing dataset, which holds 2,930 house sales in Ames,
-# Iowa, from 2006 to 2010, each described by 80 features (see
+# We use the Ames housing dataset, which holds 2,930 house sales in Ames, Iowa,
+# from 2006 to 2010, each described by 80 features (see
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)).
-# `load_dataset` returns the features as a pandas DataFrame exactly as the
-# source gives them, so 46 of the columns keep the `category` dtype. We give
-# the sale price in thousands of US dollars and hold out 930 sales as the test
-# set, which leaves 2,000 as the context.
+# `load_dataset` returns the features as a pandas DataFrame as the source gives
+# them, so 46 columns keep the `category` dtype. The sale price is in thousands
+# of US dollars, and we hold out 930 sales as the test set, which leaves 2,000
+# as the context.
 
 # %%
 data = datasets.load_dataset("ames_housing")
@@ -96,10 +94,10 @@ X_train[categorical[:6]].head()
 # %% [markdown]
 # ## Categorical columns
 #
-# Every model in `lazy` treats every column as a number, and a column that is
-# not numeric is rejected rather than guessed at (see
+# Every model in `lazy` treats every column as a number and rejects a
+# non-numeric column rather than guessing (see
 # [Limits](https://lazy-tfm.readthedocs.io/en/latest/guide/limits.html)).
-# Passing the table as it is therefore fails, and the error names the
+# Passing the table as it is therefore fails, with an error that names the
 # offending columns.
 
 # %%
@@ -110,14 +108,13 @@ except ValueError as error:
 
 # %% [markdown]
 # We encode the categories as integer codes with scikit-learn's
-# `OrdinalEncoder`. To make sure the encoding is learned from the context
-# alone, we put it in a `Pipeline` with the model, so that `fit` fits both and
-# the whole thing is a single estimator. A category the encoder has not seen
-# in the context (`handle_unknown="use_encoded_value"`) becomes `NaN`, which
-# the model accepts as a missing value. The ordinal codes impose an order on
-# the categories that most of them do not have, which the model then treats
-# as an ordered quantity. One-hot columns avoid this at the cost of many more
-# features.
+# `OrdinalEncoder`. To learn the encoding from the context alone, we put it in
+# a `Pipeline` with the model, so that `fit` fits both and the pair is a single
+# estimator. A category not seen in the context
+# (`handle_unknown="use_encoded_value"`) becomes `NaN`, which the model accepts
+# as a missing value. The codes impose an order that most categories do not
+# have, and the model treats it as an ordered quantity. One-hot columns avoid
+# this at the cost of many more features.
 
 # %%
 encoder = compose.make_column_transformer(
@@ -137,11 +134,10 @@ model = pipeline.make_pipeline(encoder, lazy.LazyModel(random_state=SEED))
 model.fit(X_train, y_train)
 
 # %% [markdown]
-# Since the pipeline is an ordinary scikit-learn estimator, it works with
-# `cross_val_score`, which here refits the encoder and the context on each of
-# three folds of the full dataset. The score of a `lazy` model is the
-# negative CDE loss, so higher is better (the CDE loss can be negative, which
-# makes these scores positive).
+# Since the pipeline is a scikit-learn estimator, `cross_val_score` works on it
+# and refits the encoder and the context on each of three folds of the full
+# dataset. The score of a `lazy` model is the negative CDE loss, so higher is
+# better (the CDE loss can be negative, which makes these scores positive).
 
 # %%
 cv = model_selection.KFold(3, shuffle=True, random_state=SEED)
@@ -151,11 +147,11 @@ print("Score per fold:", np.round(scores, 4))
 # %% [markdown]
 # On the test set, we score the predicted distributions with the continuous
 # ranked probability score (CRPS), which is in the units of the target and
-# reduces to the absolute error for a point prediction, and check how often
+# reduces to the absolute error for a point prediction, and compute how often
 # the true price falls inside the central 90% interval. The pipeline passes
-# `y_grid` through to the model, and we ask for 400 bins between 0 and
-# 800 thousand USD. For the interval, we call the model, the last step of the
-# pipeline, on the encoded features.
+# `y_grid` to the model, for which we use 400 bins between 0 and 800 thousand
+# USD. For the interval, we call the last step of the pipeline, the model, on
+# the encoded features.
 
 
 # %%
@@ -178,16 +174,14 @@ print(f"CRPS {crps_clean:.2f} thousand USD, 90% coverage {coverage_clean:.1%}")
 # %% [markdown]
 # ## Missing values
 #
-# `lazy` accepts missing values marked with `NaN` in any column, and each
-# model handles them in its own way: TabPFN and LimiX-2 add missing-value
-# indicators, while TabICL and TabFM impute them (see
+# `lazy` accepts missing values marked with `NaN` in any column. TabPFN and
+# LimiX-2 add missing-value indicators, while TabICL and TabFM impute them (see
 # [One interface for every model](https://lazy-tfm.readthedocs.io/en/latest/guide/interface.html)).
-# The Ames table has no missing entries of its own, so we remove a random
-# fraction of the feature cells ourselves, in both numeric and categorical
-# columns. In the first case we remove them from the test rows only, and the
-# same fitted model predicts them. In the second case we remove the same
-# fraction from the context as well and refit, as when the whole table has
-# gaps.
+# Since the Ames table has no missing entries, we remove a random fraction of
+# the feature cells, in both numeric and categorical columns, in two ways. In
+# the first, we remove them from the test rows only and predict them with the
+# same fitted model. In the second, we also remove the same fraction from the
+# context and refit, as when the whole table has gaps.
 
 
 # %%
@@ -229,21 +223,19 @@ for f, (c1, v1), (c2, v2) in zip(fractions, test_only, both):
     print(f"{f:6.0%}   {c1:6.2f} {c2:6.2f}       {v1:6.1%} {v2:6.1%}")
 
 # %% [markdown]
-# The figure shows the CRPS (left) and the coverage of the 90% interval
-# (right) as a function of the fraction of feature cells we removed, and the
-# table gives the same numbers. With no missing values, the CRPS is 8.52
-# thousand USD, and 91.9% of the true prices fall inside the 90% interval.
-# When the cells are missing from the test rows only, the CRPS grows to 15.60
-# thousand USD at 50%, and the coverage rises to 99.7%, so the model answers
-# the missing cells with distributions that are wider than they need to be.
+# The figure shows the CRPS (left) and the coverage of the 90% interval (right)
+# against the fraction of removed feature cells, and the table gives the same
+# numbers. With no missing values, the CRPS is 8.52 thousand USD, and 91.9% of
+# the true prices fall inside the 90% interval. When the cells are missing from
+# the test rows only, the CRPS grows to 15.60 thousand USD at 50%, and the
+# coverage rises to 99.7%, so the distributions are wider than they need to be.
 # When the context has the same gaps, the CRPS grows less (11.45 vs 15.60
-# thousand USD at 50%), and the coverage stays between 91.4% and 92.4%.
-# This might be because a context with
-# missing cells shows the model how much the price varies when part of a
-# house's description is unknown, which a complete context cannot. While we
-# removed the cells at random here, which real gaps rarely are, this suggests
-# that a context with the same kind of gaps as the rows to be predicted is
-# better than one of complete rows only.
+# thousand USD at 50%), and the coverage stays between 91.4% and 92.4%. This
+# might be because a context with missing cells shows the model how much the
+# price varies when part of a house's description is unknown, which a complete
+# context cannot. While we removed the cells at random here, which real gaps
+# rarely are, this suggests that a context with the same kind of gaps as the
+# rows to be predicted is better than one of complete rows only.
 
 # %% [markdown]
 # ## Column names and order

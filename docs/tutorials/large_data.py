@@ -28,7 +28,7 @@
 # Since `fit` only stores the context, the cost of a foundation model is
 # paid at prediction time, and it grows with the number of context rows. In
 # this tutorial, we measure how the accuracy and the cost of the default model
-# grow with the size of the context on a dataset of about 46,000 rows, and we
+# grow with the size of the context on a dataset of about 46,000 rows, and
 # then go through the parameters that bound the cost: `chunk_size`,
 # `kv_cache`, `n_estimators` and `bag_size`. The
 # [Scaling and performance](https://lazy-tfm.readthedocs.io/en/latest/guide/scaling.html)
@@ -37,11 +37,10 @@
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`. Every timing below depends on the
-# GPU, so the numbers on a Colab T4 will differ from the ones shown here,
-# while the trends should not.
+# On Google Colab, the cell below installs the package with the TabPFN
+# backend. Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`.
+# Every timing below depends on the GPU, so the numbers on a Colab T4 will
+# differ from the ones shown here, while the trends should not.
 
 # %%
 import sys
@@ -63,7 +62,7 @@ from lazy import datasets
 from lazy import metrics
 from lazy import plotting
 
-SEED = 299792458  # The one constant to rule them all
+SEED = 299792458  # One seed for everything random
 
 plotting.use_style()
 plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
@@ -77,9 +76,9 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # protein structure from the true one, in ångströms, given nine
 # physicochemical properties of the structure. We hold out a random 2,000
 # rows as the test set and keep the remaining rows as the pool from which
-# we draw contexts of increasing size. All of our densities are written on
-# one grid of 420 bins over the range of the target, so that every model is
-# scored in the same way.
+# we draw contexts of increasing size. All densities are written on one grid
+# of 420 bins over the range of the target, so that every model is scored in
+# the same way.
 
 # %%
 data = datasets.load_dataset("protein")
@@ -169,9 +168,9 @@ for ax in (ax_crps, ax_time):
 # grows with the context as well, since the model processes the whole context
 # in every member and every test row attends to every context row. Therefore,
 # the full context is both the most accurate and the most expensive choice.
-# The timings come from a single run each and move from run to run (more so
+# The timings come from a single run each and vary from run to run (more so
 # on a GPU shared with other jobs), so we read them for their trend rather
-# than for their exact values.
+# than their exact values.
 
 # %% [markdown]
 # ## Memory: `chunk_size`
@@ -180,8 +179,8 @@ for ax in (ax_crps, ax_time):
 # default), which bounds the peak memory of a prediction. Since a row's
 # answer never depends on which other rows share its chunk, a smaller chunk
 # changes the answers only by floating-point rounding. To keep this tutorial
-# quick, we use the context of 16,000 rows from here on, and we predict the
-# test set again in chunks of 500 rows, with and without the key/value cache
+# quick, we use the context of 16,000 rows from here on, and predict the test
+# set again in chunks of 500 rows, with and without the key/value cache
 # (described below), and compare the densities with those of one pass.
 
 # %%
@@ -238,10 +237,9 @@ members.round(3)
 # ## Bagging: `bag_size`
 #
 # With `bag_size`, each member sees its own random subset of the context
-# instead of all of it, so that the members together still cover most of the
-# rows while each one attends to fewer of them. We give each of the 8 members
-# a bag of 10,000 rows drawn from the full pool and compare it with the full
-# context.
+# instead of all of it, so that the members together cover most of the rows
+# while each attends to fewer of them. We give each of the 8 members a bag of
+# 10,000 rows drawn from the full pool and compare it with the full context.
 
 # %%
 bagged, _ = run(len(pool), "bag_size=10000", bag_size=10_000)
@@ -278,12 +276,12 @@ bagging.round(3)
 # %% [markdown]
 # ## Much larger datasets
 #
-# The `year` dataset, with 515,345 rows and 90 features, is an example of a
-# dataset for which the full context is out of reach on a T4 within a few
-# minutes, and we do not run it here. Since the time grows with the context,
-# the number of members and the number of features, the parameters above
-# combine, and a reasonable start is a few members, each with a bag of tens
-# of thousands of rows, a moderate `chunk_size` and the cache left on:
+# The full context of the `year` dataset (515,345 rows, 90 features) is out of
+# reach on a T4 within a few minutes, so we do not run it here. Since the time
+# grows with the context, the number of members and the number of features,
+# the parameters above combine, and a reasonable start is a few members, each
+# with a bag of tens of thousands of rows, a moderate `chunk_size` and the
+# cache left on:
 #
 # ```python
 # X, y = datasets.load_dataset("year", return_X_y=True)

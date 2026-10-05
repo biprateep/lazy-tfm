@@ -1,10 +1,10 @@
 # Choosing a model
 
-All of the models take the same parameters and give the same outputs (see
-{doc}`interface`), so the choice between them comes down to accuracy, cost,
-hardware, the size and nature of the training set, and the license of the
-weights. {doc}`../models/index` lists each model's size, license and hardware
-needs, and {doc}`scaling` gives the measured cost of each.
+All models take the same parameters and give the same outputs (see
+{doc}`interface`), so the choice comes down to accuracy, cost, hardware, the
+size and nature of the training set, and the license of the weights.
+{doc}`../models/index` lists each model's size, license and hardware needs, and
+{doc}`scaling` gives the measured cost of each.
 
 ## With a GPU
 
@@ -15,7 +15,7 @@ later were pretrained on contexts up to a million rows, while TabPFN-2 and 2.5
 were pretrained on at most 10,000 and 50,000 rows, respectively.
 
 Our own testing shows that LimiX-2 performs best when the training set is
-biased, that is, when it is unrepresentative of the test set. However, LimiX-2
+biased (i.e., unrepresentative of the test set). However, LimiX-2
 degrades above about 20,000 context rows, so a larger training set needs
 bagging, with `bag_size=20_000` (so that each member sees at most 20,000 rows)
 and enough members, as in our own tests:

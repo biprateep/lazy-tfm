@@ -1,9 +1,8 @@
 # Scaling and performance
 
-The cost of a prediction is set by the size of the context rather than by any
-training, since `fit` only stores the context. This page gives the measured
-cost of each model, how it grows with the data, and the parameters that bound
-it.
+The cost of a prediction is set by the size of the context, since `fit` only
+stores the context. This page gives the measured cost of each model, how it
+grows with the data, and the parameters that bound it.
 
 ## What it costs
 
@@ -13,8 +12,8 @@ with every model at its default settings, on DC1 photometry (12 features). The
 *GPU* run fits on 10,000 context rows and predicts 10,000 more, while the
 *CPU* run fits on 1,000 and predicts 1,000 with the GPU unused. Peak GPU
 memory is what PyTorch allocated at the peak. The last column is the DC1 CDE
-loss on the GPU run (lower is better), which serves as a rough guide to
-accuracy at this context size and not as a ranking.
+loss on the GPU run (lower is better), a rough guide to accuracy at this
+context size and not a ranking.
 
 | Model | GPU: fit + predict | Peak GPU memory | CPU: fit + predict | CDE loss |
 | ----- | -----------------: | --------------: | -----------------: | -------: |
@@ -41,8 +40,8 @@ at every context size.
 The prediction time grows with the number of context rows times the number of
 query rows, times `n_estimators`, since every query attends to every context
 row in every member. Therefore, doubling the context roughly doubles the
-prediction time. The GPU memory grows with the context and with `chunk_size`,
-the number of query rows predicted at once, so lowering `chunk_size` lets a
+prediction time. The GPU memory grows with the context and with `chunk_size`
+(the number of query rows predicted at once), so lowering `chunk_size` lets a
 model fit on a smaller GPU. TabFM runs a hierarchy of `n_dither × (1 +
 n_coarse_bins)` in-context classifications (11 by default), which is why it is
 the slowest, and it needs its repository build to be even this fast (see
@@ -85,8 +84,8 @@ without replacement within a member and independently across members. This
 matters when the context outgrows what a model was pretrained on. LimiX-2
 degrades above about 20,000 context rows, and a
 {class}`~lazy.models.ContextSizeWarning` says so whenever a member's context
-is larger, whether that is the whole context without bagging or a bag of more
-than 20,000 rows. The remedy it suggests is the one we used in our own tests:
+is larger (the whole context without bagging, or a bag of more than 20,000
+rows). The remedy it suggests is the one we used in our own tests:
 
 ```python
 model = lazy.LazyModel("limix", bag_size=20_000, n_estimators=32)
@@ -111,25 +110,25 @@ every member's buckets (see {doc}`interface`).
 
 Every model reads its checkpoint from disk and builds the network on its
 device when it is first fitted (TabFM when it first predicts), and for a small
-context this load is most of the cost of a fit. The network itself learns
-nothing from a fit, since the context and its key/value cache belong to the
-fitted model, so LAZY keeps every network it loads for the rest of the Python
-process and reuses it in any later fit with the same version, checkpoint,
-device and precision. Therefore, a grid search, a cross-validation or a sweep
-over `n_estimators` loads each network once. On the GB10, with one member and
+context this load is most of the cost of a fit. The network learns nothing from
+a fit, since the context and its key/value cache belong to the fitted model.
+LAZY therefore keeps every network it loads for the rest of the Python process
+and reuses it in any later fit with the same version, checkpoint, device and
+precision, so a grid search, a cross-validation or a sweep over `n_estimators`
+loads each network once. On the GB10, with one member and
 500 context rows, this cuts a refit of TabPFN-3.5 on the GPU from 0.8 s to
 under 0.1 s, and one of LimiX-2 from 1.5 s to 0.2 s. A shared network gives
 predictions bit for bit identical to those of a freshly loaded one.
 
-Each network is held once, and `lazy.clear_model_cache()` lets go of all of
-them (TabFM's backbone alone takes 6.6 GB). A fitted model keeps the network
-it ran on, so the memory is returned only once those models are deleted too.
-Setting `LAZY_MODEL_CACHE=0` in the environment, or calling
+Each network is held once, and `lazy.clear_model_cache()` releases all of them
+(TabFM's backbone alone takes 6.6 GB). A fitted model keeps the network it ran
+on, so the memory is returned only once those models are deleted too. Setting
+`LAZY_MODEL_CACHE=0` in the environment, or calling
 `lazy.set_model_cache(False)`, turns the sharing off, and every fit then loads
-its own network. While the cache is safe for the parallel jobs of
-scikit-learn (`n_jobs`), which run in separate processes that each load their
-own network, two threads predicting on the same network at once are not, so
-we recommend turning it off before running fits in threads.
+its own network. While the cache is safe for the parallel jobs of scikit-learn
+(`n_jobs`), which run in separate processes that each load their own network,
+two threads predicting on the same network at once are not, so we recommend
+turning it off before running fits in threads.
 
 ## GPU and CPU
 

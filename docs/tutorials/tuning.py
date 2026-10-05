@@ -25,20 +25,20 @@
 # [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/tuning.ipynb)
 # [![View on GitHub](https://img.shields.io/badge/View%20on-GitHub-181717?logo=github)](https://github.com/biprateep/lazy-tfm/blob/tutorials/tuning.ipynb)
 #
-# Every model in `lazy` runs as an ensemble, and a handful of shared
-# parameters decide how many members it has, what each member sees and how
-# sharp the combined distribution is. The defaults are already good, so this
-# tutorial does not argue that they need tuning. Instead, we change one
-# setting at a time on a single dataset and measure what it does to the
-# accuracy, the calibration and the cost of the predicted distributions.
+# Every model in `lazy` runs as an ensemble, and a few shared parameters set
+# how many members it has, what each member sees and how sharp the combined
+# distribution is. Since the defaults are already good, we do not argue here
+# that they need tuning. Instead, we change one setting at a time on a single
+# dataset and measure its effect on the accuracy, calibration and cost of the
+# predicted distributions.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN and TabFM backends. Elsewhere, the package needs to be
-# installed first with `pip install 'lazy-tfm[tabpfn,tabfm]'`. TabFM is used
-# only in the last section, which is skipped when it is not installed.
+# On Google Colab, the cell below installs the package with the TabPFN and
+# TabFM backends. Elsewhere, install it first with
+# `pip install 'lazy-tfm[tabpfn,tabfm]'`. TabFM is used only in the last
+# section, which is skipped when it is not installed.
 
 # %%
 import sys
@@ -68,12 +68,12 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # %% [markdown]
 # ## The data
 #
-# We use `kin8nm`, the simulated forward kinematics of an eight-link robot
-# arm, which has 8,192 rows and eight features (the joint angles). The target
-# is the distance of the end of the arm from a fixed point. We make one random
-# split and keep 2,000 rows as the context and another 2,000 as the test set,
-# so that each of the many fits below takes seconds. The full dataset (about
-# 6,000 context rows) would make each fit a few times slower.
+# We use `kin8nm`, the simulated forward kinematics of an eight-link robot arm,
+# which has 8,192 rows and eight features (the joint angles). The target is the
+# distance of the end of the arm from a fixed point. We make one random split,
+# keeping 2,000 rows as the context and another 2,000 as the test set, so that
+# each of the many fits below takes seconds. The full dataset (about 6,000
+# context rows) would make each fit a few times slower.
 
 # %%
 data = datasets.load_dataset("kin8nm")
@@ -149,12 +149,12 @@ def show(rows: list[pd.DataFrame]) -> pd.DataFrame:
 
 # %% [markdown]
 # Every model loads its checkpoint at `fit`, so each time below includes a
-# cost of loading that does not depend on the setting. We first run one
-# throwaway fit, so that the download and the first load of the weights are
-# not counted. The GPU of this run was shared with other jobs, so the times
-# are only indicative, and differences of a second or so between them are
-# noise. For the comparison of ensemble sizes, where the time is the point,
-# we take the shortest of three runs of each.
+# loading cost that does not depend on the setting. We first run one throwaway
+# fit to exclude the download and the first load of the weights. The GPU of
+# this run was shared with other jobs, so the times are only indicative, and
+# differences of a second or so are noise. For the comparison of ensemble
+# sizes, where the time is the point, we take the shortest of three runs of
+# each.
 
 # %%
 _ = measure("warm-up", n_estimators=1)
@@ -162,14 +162,13 @@ _ = measure("warm-up", n_estimators=1)
 # %% [markdown]
 # ## The number of members
 #
-# `n_estimators` sets how many members run, exactly. Each member is a full
+# `n_estimators` sets exactly how many members run. Each member is a full
 # forward pass of the model through the context with its own view of the
 # features, so the cost of the ensemble itself grows in proportion to the
-# number of members. For
-# TabPFN, LimiX-2 and TabFM, each member predicts a histogram, and the
-# members are combined as an equally weighted mixture of their histograms.
-# For TabICL, which predicts quantiles, the members' quantiles are averaged
-# instead (see
+# number of members. For TabPFN, LimiX-2 and TabFM, each member predicts a
+# histogram and the members are combined as an equally weighted mixture of
+# their histograms. For TabICL, which predicts quantiles, the quantiles of the
+# members are averaged instead (see
 # [One interface for every model](https://lazy-tfm.readthedocs.io/en/latest/guide/interface.html)).
 
 # %%
@@ -210,14 +209,14 @@ for ax in axes:
 # ## Feature transforms
 #
 # `transforms` names what each member does to the features before the model
-# sees them, and the members take the names in round-robin order. The
-# default, `"auto"`, is the model's own tuned recipe, which for TabPFN-3.5
-# includes its fingerprint feature, its target transforms and a 12-sigma
-# outlier clip. An explicit recipe is all that the members see. With
-# `("none", "quantile")`, half of the members see the raw features and half
-# see them mapped to a normal distribution. An explicit recipe also turns off
-# the extras of `"auto"`, the outlier clip included, since
-# `outlier_threshold="auto"` then means no clip. The guide lists every
+# sees them, and the members take the names in round-robin order. The default,
+# `"auto"`, is the tuned recipe of the model, which for TabPFN-3.5 includes its
+# fingerprint feature, its target transforms and a 12-sigma outlier clip. An
+# explicit recipe is all the members see. With `("none", "quantile")`, half of
+# the members see the raw features and half see them mapped to a normal
+# distribution. An explicit recipe also turns off the extras of `"auto"`, the
+# outlier clip included, since `outlier_threshold="auto"` then means no clip.
+# The guide lists every
 # [transform](https://lazy-tfm.readthedocs.io/en/latest/guide/interface.html#transforms).
 
 # %%
@@ -244,9 +243,9 @@ by_transforms
 # ## Feature shuffling
 #
 # With `feature_shuffle=True` (the default), each member sees the feature
-# columns in a different order. Since the answer of a model depends slightly
-# on the order of the columns, the shuffling gives the members another source
-# of diversity at no extra cost.
+# columns in a different order. Since the answer of a model depends slightly on
+# the column order, shuffling adds diversity among the members at no extra
+# cost.
 
 # %%
 by_shuffle = show(
@@ -264,10 +263,10 @@ by_shuffle
 #
 # TabPFN predicts logits over the buckets of its bar distribution, and
 # `softmax_temperature` divides them before the softmax. A temperature below
-# one sharpens each member's distribution and a temperature above one widens
-# it. `"auto"` is the calibrated value of the checkpoint, which is 1.0 for
-# TabPFN-3.5 (and 0.9 for TabPFN's other versions, LimiX-2 and TabFM). TabICL
-# has no softmax, so it accepts only `"auto"`.
+# one sharpens the distribution of each member and a temperature above one
+# widens it. `"auto"` is the calibrated value of the checkpoint, which is 1.0
+# for TabPFN-3.5 (and 0.9 for TabPFN's other versions, LimiX-2 and TabFM).
+# TabICL has no softmax, so it accepts only `"auto"`.
 
 # %%
 temperatures = [0.7, 0.9, 1.1, 1.3]
@@ -288,27 +287,27 @@ ax.set_ylabel("density")
 ax.legend(loc="lower center")
 
 # %% [markdown]
-# The figure shows the PIT histograms of the default temperature and of the
-# two extremes, with the dashed line marking the flat histogram of calibrated
-# distributions. We see that the lowest temperature piles PIT values near 0
-# and 1, the signature of distributions that are too narrow, and the highest
-# one piles them in the middle, the signature of distributions that are too
-# wide. The coverage column of the table tells the same story, rising
-# steadily with the temperature from 58.6% at T = 0.7 to 73.8% at T = 1.3,
-# while the default stays close to 68% (67.9%). The CRPS changes much less
-# than the coverage, and the NLL is best at the default.
+# The figure shows the PIT histograms of the default temperature and of the two
+# extremes, with the dashed line marking the flat histogram of calibrated
+# distributions. We see that the lowest temperature piles PIT values near 0 and
+# 1, the signature of distributions that are too narrow, and the highest one
+# piles them in the middle, the signature of distributions that are too wide.
+# The coverage column of the table agrees, rising steadily with the temperature
+# from 58.6% at T = 0.7 to 73.8% at T = 1.3, while the default stays close to
+# 68% (67.9%). The CRPS changes much less than the coverage, and the NLL is
+# best at the default.
 
 # %% [markdown]
 # ## Outlier clipping
 #
-# `outlier_threshold` soft-clips each feature at that many standard
-# deviations of the context. Values beyond the bound keep their order but
-# lose their leverage. Under `transforms="auto"`, `"auto"` is the model's
-# own clip (12 standard deviations for TabPFN-3.5), and `None` turns
-# clipping off. The angles of `kin8nm` lie within $\pm\pi/2$, so no
-# feature in the data is anywhere near a bound. We therefore set the first
-# angle of 200 test rows to 20 radians, more than 20 standard deviations
-# from its mean, and score only those rows with and without the clip.
+# `outlier_threshold` soft-clips each feature at that many standard deviations
+# of the context. Values beyond the bound keep their order but lose their
+# leverage. Under `transforms="auto"`, `"auto"` is the model's own clip (12
+# standard deviations for TabPFN-3.5), and `None` turns clipping off. The
+# angles of `kin8nm` lie within $\pm\pi/2$, so no feature in the data is near a
+# bound. We therefore set the first angle of 200 test rows to 20 radians, more
+# than 20 standard deviations from its mean, and score only those rows with and
+# without the clip.
 
 # %%
 X_bad = X_test.iloc[:200].copy()

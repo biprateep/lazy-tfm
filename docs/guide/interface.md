@@ -17,19 +17,19 @@ page describes that shared interface and how each model implements it.
 {class}`~lazy.models.tabicl.TabICLQuantile`,
 {class}`~lazy.models.tabfm.TabFMHistogram`) are the same models, and the class
 pages document every parameter. We recommend `LazyModel` when the backend is a
-configuration value, as in a benchmark loop. All of the backends write onto
-whatever {class}`~lazy.grid.Grid` the user asks for, and each has a native
-grid on which it answers by default (see {doc}`distributions`).
+configuration value, as in a benchmark loop. All backends write onto
+any requested {class}`~lazy.grid.Grid`, and each has a native grid on which it
+answers by default (see {doc}`distributions`).
 
 ## Shared parameters and defaults
 
-Every backend takes the same parameters, with the same defaults, and means the
-same thing by them. Where a model has a setting of its own, the parameter is
-translated to it, and where it does not, LAZY builds the feature around the
-model. Every upstream setting that changes a prediction is either driven by
-one of these parameters or pinned by LAZY itself, so neither a model's own
-default nor an upgrade of its package can decide an answer without the user
-knowing. Only `version` differs between backends, because the checkpoints do.
+Every backend takes the same parameters, with the same defaults and the same
+meaning. Where a model has a setting of its own, the parameter is translated to
+it, and where it does not, LAZY builds the feature around the model. Every
+upstream setting that changes a prediction is either driven by one of these
+parameters or pinned by LAZY, so neither a model's own default nor an upgrade
+of its package can change an answer without the user knowing. Only `version`
+differs between backends, because the checkpoints do.
 
 | Parameter             | Meaning                                                                     | Default   |
 | --------------------- | --------------------------------------------------------------------------- | --------- |
@@ -52,13 +52,13 @@ knowing. Only `version` differs between backends, because the checkpoints do.
 The `softmax_temperature`, `mixed_precision` and `outlier_threshold` actually
 used are recorded in `provenance_`, together with the rest of the recipe (see
 {doc}`reproducibility`). Every column is treated as numeric on every model, so
-none of them guesses that a column with few distinct values is a category.
+none guesses that a column with few distinct values is a category.
 {doc}`scaling` describes `kv_cache`, `chunk_size` and `bag_size`, which affect
 the cost of a prediction.
 
 ## How LAZY scaffolds what a model lacks
 
-The table below shows how each model provides these parameters, where
+The table below shows how each model provides these parameters;
 "scaffolded" means that LAZY builds the feature itself.
 
 | Parameter             | TabPFN                                   | LimiX-2                                   | TabICL                                | TabFM                                     |
@@ -80,12 +80,12 @@ model joins by subclassing {class}`~lazy.models.ContextEnsembleEstimator`.
 ## Ensembling and feature shuffling
 
 Each model is run as an ensemble of `n_estimators` members, and exactly that
-many run on every model, including where a model's own default asks for a
+many run on every model, including where a model's own default is a
 different count. The members differ in their feature transform, taken from
-`transforms` in round-robin order, and with `feature_shuffle=True` each member
-also sees the feature columns in a different order. Their answers are combined
-as the last row of the table above shows. With `bag_size` set, each member
-also sees its own random subset of the context (below, and {doc}`scaling`).
+`transforms` in round-robin order, and with `feature_shuffle=True` each also
+sees the feature columns in a different order. Their answers are combined as in
+the last row of the table above. With `bag_size` set, each member also sees its
+own random subset of the context (below, and {doc}`scaling`).
 
 ## Bagging
 
@@ -158,10 +158,9 @@ TabICL and TabFM z-score whatever they are given, an affine transform such as
 | TabFM   | fills missing values with the context mean; drops constant columns; z-scores, clipped at ±100              |
 
 `"limix"` is LimiX-2's two pipelines written in the shared vocabulary,
-`("quantile_uniform+original", "power")`, and it can be used on any model; it
+`("quantile_uniform+original", "power")`, and it can be used on any model. It
 is what our own "with LimiX transforms" tests use. It lacks the SVD components
-of LimiX-2's own quantile pipeline, so on LimiX-2 it is not the same as
-`"auto"`.
+of LimiX-2's own quantile pipeline, so on LimiX-2 it differs from `"auto"`.
 
 ## Outlier clipping
 
@@ -178,7 +177,7 @@ applies it there), and `None` turns clipping off everywhere.
 
 ## Input data
 
-The features can be given in any of the forms that scikit-learn users expect:
+The features can be given in the forms that scikit-learn users expect:
 a NumPy array, a structured or record array, a pandas DataFrame, an astropy
 `Table` or `QTable` (whose quantities give their values), or anything with a
 `to_pandas()` method. When the input has column names, they are recorded as
@@ -186,7 +185,7 @@ a NumPy array, a structured or record array, a pandas DataFrame, an astropy
 different order are reordered, while an unnamed table meeting a named fit, or
 the reverse, is used by position with a warning.
 
-Missing values are marked with `NaN`, and the masked entries of an astropy
+Missing values are marked with `NaN`; the masked entries of an astropy
 table or masked array also become `NaN`. Each model handles them in its own
 way: TabPFN and LimiX add missing-value indicators, while TabICL and TabFM
 impute them inside their preprocessing. Infinities and non-numeric columns are
@@ -196,7 +195,7 @@ column has to be encoded as numbers before it is passed (see {doc}`limits`).
 ## scikit-learn compatibility
 
 Since `get_params`, `set_params` and {func}`sklearn.base.clone` all work, the
-models can be used in scikit-learn pipelines and search objects without any
+models can be used in scikit-learn pipelines and search objects without
 modification. `LazyModel` flattens the parameters of its backend into its own,
 so `GridSearchCV(model, {"n_estimators": [4, 8]})` needs no prefix. As in
 scikit-learn, constructing a model only stores its parameters, which are

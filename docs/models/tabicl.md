@@ -58,9 +58,9 @@ quietly runs fewer, and LAZY adds members to make up the count. We also fix
 the order of the members, which upstream takes from a Python set and which can
 therefore change between sessions. We use the same seed (0) as every other
 model rather than TabICL's 42, and we treat every column as numeric. LAZY also
-caches the context's keys and values, and uses mixed precision on every GPU
-run rather than only for large tables, which change the predictions only by
-rounding. The distribution itself is the piecewise-linear cumulative
+caches the context's keys and values and uses mixed precision on every GPU
+run rather than only for large tables, both of which change the predictions
+only by rounding. The distribution itself is the piecewise-linear cumulative
 distribution through the 999 quantiles, so the 0.1% of probability beyond each
 outermost quantile is placed at it, rather than in the exponential tails
 TabICL uses for its own sampling. Its native grid is 1,500 equal bins over the

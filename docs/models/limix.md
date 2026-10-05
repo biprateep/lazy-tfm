@@ -2,8 +2,8 @@
 
 LimiX-2, from Stable AI, is a large structured-data model pretrained on
 synthetic data from structural causal models with a context-conditional
-masked-modeling objective, with which it learns to approximate the joint
-distribution of the features and the target given the context. A single
+masked-modeling objective, which it uses to approximate the joint distribution
+of the features and the target given the context. A single
 pretrained model performs classification, regression and missing-value
 imputation. For regression it predicts the probability of each of 5,000
 buckets of the standardized target, which LAZY keeps as the model's native
@@ -58,15 +58,15 @@ rescaled by the fraction that are valid. LAZY keeps all of these.
 
 ## Where LAZY differs
 
-LAZY keeps the distribution that LimiX-2 predicts, where LimiX's own `predict`
+LAZY keeps the distribution that LimiX-2 predicts, while LimiX's own `predict`
 reduces it to its mean. We also fit every preprocessing step on the context
-alone, where LimiX fits its column filter and transforms on the context and
-the queries together, so that the prediction for a query does not depend on
-the other queries; and we treat every column as numeric. The member recipe,
+alone (LimiX fits its column filter and transforms on the context and the
+queries together), so that the prediction for a query does not depend on the
+other queries, and we treat every column as numeric. The member recipe,
 the transforms, the column permutations and their seeds are LimiX's. However,
 the random feature embeddings inside the network are drawn from a separate
 generator per member rather than from PyTorch's global one, so LAZY's answers
-agree with LimiX's only to within the variation between random seeds, not bit
+agree with LimiX's only within the variation between random seeds, not bit
 for bit. LAZY also adds a key/value cache, which upstream LimiX lacks, and
 lets `n_estimators` take any value by repeating the eight-member recipe. LimiX
 states no maximum context size, but in our tests on DC1 photometry its

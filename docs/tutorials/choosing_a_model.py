@@ -26,12 +26,12 @@
 # [![View on GitHub](https://img.shields.io/badge/View%20on-GitHub-181717?logo=github)](https://github.com/biprateep/lazy-tfm/blob/tutorials/choosing_a_model.ipynb)
 #
 # Every model in `lazy` takes the same parameters and gives the same outputs,
-# so comparing them takes a loop over names and nothing else. In this
-# tutorial, we run TabPFN-3.5, TabPFN-3.5-fast, TabICLv2, LimiX-2 and TabFM on
-# four regression benchmarks from the literature on probabilistic deep
-# learning, and we compare their cost and the quality of their predicted
-# distributions. We then show how a model fits into scikit-learn's tools, and
-# how a run is made reproducible.
+# so comparing them takes a loop over names. In this tutorial, we run
+# TabPFN-3.5, TabPFN-3.5-fast, TabICLv2, LimiX-2 and TabFM on four regression
+# benchmarks from the literature on probabilistic deep learning, and compare
+# their cost and the quality of their predicted distributions. We then show
+# how a model fits into scikit-learn's tools, and how a run is made
+# reproducible.
 
 # %% [markdown]
 # ## Setup
@@ -41,8 +41,8 @@
 # only its dependencies, and the second line (commented out) installs the
 # code itself (see
 # [Installation](https://lazy-tfm.readthedocs.io/en/latest/installation.html)).
-# Without it, the loop below skips LimiX-2 with a printed note, and it does
-# the same for any other model whose package is missing.
+# Without it, the loop below skips LimiX-2 with a printed note, as it does
+# for any other model whose package is missing.
 #
 # The licenses of the weights differ between the models. TabICLv2 is
 # BSD-licensed, while the weights of TabPFN-3.5, TabPFN-3.5-fast, LimiX-2 and
@@ -71,7 +71,7 @@ from lazy import datasets
 from lazy import metrics
 from lazy import plotting
 
-SEED = 299792458  # The one constant to rule them all
+SEED = 299792458  # One seed for splits and models
 
 plotting.use_style()
 plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
@@ -88,8 +88,8 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # [Lakshminarayanan et al. 2017](https://arxiv.org/abs/1612.01474)), which we
 # report below together with the CRPS. To keep the runtime modest, we take at
 # most 2,000 random rows of each dataset, which affects only `kin8nm` (8,192
-# rows). We leave out the larger `protein` (45,730 rows), which can be added
-# to `NAMES` at the cost of a longer run. Each dataset is then split once, at
+# rows). The larger `protein` (45,730 rows) is left out, and can be added to
+# `NAMES` at the cost of a longer run. Each dataset is then split once, at
 # random, into 90% context and 10% test rows.
 
 # %%
@@ -128,12 +128,12 @@ MODELS = [
 # For each dataset and model, we time `fit` and `predict_proba` and score the
 # densities on a common grid of 1,000 bins that spans the target with a margin
 # on either side. We report the CRPS, which is in the units of the target, and
-# the NLL, both lower is better, together with the fraction of test rows whose
-# truth falls inside the central 68% interval. The truth falls inside that
-# interval exactly when its PIT (the predicted CDF at the truth) lies between
-# 0.16 and 0.84, so we compute the coverage from the PIT values. Each model
-# loads its weights (and downloads them on first use) within these calls, so
-# the times include that loading.
+# the NLL (lower is better for both), together with the fraction of test rows
+# whose truth falls inside the central 68% interval. The truth falls inside
+# that interval exactly when its PIT (the predicted CDF at the truth) lies
+# between 0.16 and 0.84, so we compute the coverage from the PIT values. Each
+# model loads its weights (and downloads them on first use) within these
+# calls, so the times include that loading.
 
 # %%
 records = []
@@ -216,8 +216,8 @@ plt.show()
 # uncertain by several percentage points, and only LimiX-2 on `energy` (0.857
 # on 77 rows) stands clearly apart from 0.68.
 #
-# The times are from this run, on a GPU that was otherwise idle, and they
-# differ by more than an order of magnitude between the models. TabICLv2 and
+# The times are from this run, on an otherwise idle GPU, and they differ by
+# more than an order of magnitude between the models. TabICLv2 and
 # TabPFN-3.5-fast are the fastest. LimiX-2 takes longer than TabPFN-3.5 in
 # `predict_proba` on every dataset and in `fit` on all but `yacht`, where
 # TabPFN-3.5 is the first model to run and its time likely includes the
@@ -233,8 +233,8 @@ plt.show()
 # ## Working with scikit-learn
 #
 # A `LazyModel` is a scikit-learn estimator. `get_params` lists the
-# parameters of its backend next to `model` itself, so `clone` (which we used
-# in the loop above) and the search objects work without prefixes.
+# parameters of its backend next to `model` itself, so `clone` (used in the
+# loop above) and the search objects work without prefixes.
 
 # %%
 params = MODELS[0].get_params()

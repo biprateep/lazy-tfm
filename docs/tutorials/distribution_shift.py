@@ -37,9 +37,8 @@
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend and the dependencies of LimiX. Elsewhere, the
-# package needs to be installed first with
+# On Google Colab, the cell below installs the package with the TabPFN
+# backend and the dependencies of LimiX. Elsewhere, install it first with
 # `pip install 'lazy-tfm[tabpfn,limix]'`. The code of LimiX itself is not on
 # PyPI and is installed separately (see
 # [Installation](https://lazy-tfm.readthedocs.io/en/latest/installation.html)).
@@ -113,8 +112,8 @@ biased = rng.choice(south, size=3_000, replace=False)
 X_test, y_test = X.iloc[test], y[test]
 
 # %% [markdown]
-# The figure below shows where the districts of each set lie (left) and how
-# their house values are distributed (right).
+# The figure below shows where the districts of each set lie (left) and the
+# distribution of their house values (right).
 
 # %%
 fig, (ax_map, ax_hist) = plt.subplots(
@@ -184,8 +183,8 @@ def score(
 
 # %% [markdown]
 # We fit TabPFN-3.5 on the representative context, on the biased context,
-# and on the biased context with 300 of the calibration districts added to
-# it (the remedy, discussed below), and score each on the same test set.
+# and on the biased context with 300 of the calibration districts added (the
+# remedy, discussed below), and score each on the same test set.
 
 # %%
 contexts = {
@@ -237,7 +236,7 @@ print(f"Median PIT on the biased context: {np.median(pits['biased']):.2f}")
 # To see how many representative rows the context needs, we add the first
 # 30, 100, 300 and 1,000 districts of the calibration pool to the biased
 # context and score each on the same test set. The rows with 0 and 300
-# calibration districts are the ones already scored above.
+# calibration districts were already scored above.
 
 # %%
 sizes = [0, 30, 100, 300, 1_000]

@@ -1,13 +1,13 @@
 # From model output to distribution
 
 The estimators in LAZY follow scikit-learn's API, with one difference. The
-natural output of these models is a distribution rather than a number, so
+natural output of these models is a distribution, so
 {meth}`~lazy.base.BaseDensityRegressor.predict_proba` returns a density on a
 grid of the target rather than class probabilities, and `predict` is a
 documented reduction of it. This page describes how each model's answer
-becomes a distribution, how that distribution is put on a grid and reduced to
-a number, and how LAZY scores it. The table lists every method of an estimator
-and what it returns:
+becomes a distribution, how it is put on a grid and reduced to a number, and
+how LAZY scores it. The table lists every method of an estimator and what it
+returns:
 
 | Method                              | Returns                                                     |
 | ----------------------------------- | ----------------------------------------------------------- |
@@ -25,17 +25,16 @@ and what it returns:
 
 ## Each model's native output
 
-Each model has a native form for its answer. TabPFN and LimiX-2 predict the
-probability of each of several thousand buckets, TabICL predicts 999
-quantiles, and TabFM predicts the probability of equal-mass bins, averaged
-over shifted copies of them. LAZY keeps each of these in one of three kinds of
-distribution: {class}`~lazy.distributions.HistogramDistribution` (bucket
+TabPFN and LimiX-2 predict the probability of each of several thousand
+buckets, TabICL predicts 999 quantiles, and TabFM predicts the probability of
+equal-mass bins, averaged over shifted copies of them. LAZY keeps each of these
+as one of three kinds of distribution: {class}`~lazy.distributions.HistogramDistribution` (bucket
 masses, for TabPFN and LimiX), {class}`~lazy.distributions.QuantileDistribution`
 (for TabICL) and {class}`~lazy.distributions.MixtureDistribution` (histograms
 on different buckets, as from bagging or TabFM's shifted bins). Every
 operation is exact on the piecewise-linear CDF that the model implies.
 
-`predict_distribution` returns this answer as it is, in a
+`predict_distribution` returns this answer as it is, as a
 {mod}`lazy.distributions` object whose methods follow scipy.stats and LSST
 DESC's [qp](https://github.com/LSSTDESC/qp):
 
@@ -58,19 +57,18 @@ Since the operations are exact, `predict_quantiles(X, q)` is
 same way. The `pdf` and `cdf` methods evaluate every row at every value, so
 `dist.cdf(z_true)` has shape `(n, n)`. The `pit` method instead evaluates
 each row at its own value, $F_i(y_i)$, which is the diagonal of that array,
-and `predict_pit(X, y)` is `predict_distribution(X).pit(y)`. For
-interoperability with RAIL and other qp users, `to_qp` converts
-any of the three kinds to a `qp.Ensemble`, and
+and `predict_pit(X, y)` is `predict_distribution(X).pit(y)`. For RAIL and
+other qp users, `to_qp` converts any of the three kinds to a `qp.Ensemble`, and
 {func}`~lazy.distributions.from_qp` converts a histogram or quantile ensemble
 back (both need the `qp` extra, see {doc}`../installation`).
 
 ## The grid belongs to the prediction
 
-Nothing about fitting depends on the output binning. The models place their
+Fitting does not depend on the output binning. The models place their
 internal bins according to the distribution of the *context* targets, and a
 grid only enters at the final, exact integration of the distribution over its
-bins. Therefore, one fitted model can answer on as many grids as needed,
-without being refitted:
+bins. Therefore, one fitted model can answer on any number of grids without
+being refitted:
 
 ```python
 import numpy as np
@@ -84,7 +82,7 @@ model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))   # bin centers
 ```
 
 A grid given at call time takes precedence, and the constructor's `y_grid`
-serves as the default for when every call would pass the same grid. When both
+is the default for when every call would pass the same grid. When both
 are `None`, a foundation model answers on its **native grid**,
 `model.native_grid_`, which loses no information. The table lists the native
 grid of each backend:
@@ -96,9 +94,9 @@ grid of each backend:
 | `tabicl` | 1,500 equal bins over the context targets, padded by 25% each side. |
 | `tabfm`  | The union of every shifted copy's bin edges.                        |
 
-The native bucket grids reach far into both tails, including below zero,
-because that is where the buckets are. Passing a grid restricts the range, and
-`"native"` asks for the native grid explicitly. A plain
+The native bucket grids reach far into both tails, including below zero.
+Passing a grid restricts the range, and `"native"` asks for the native grid
+explicitly. A plain
 {class}`~lazy.base.BaseDensityRegressor` subclass, which has no native grid,
 defaults to 200 equal bins over the range of the training targets, padded by
 5% on each side. Probability outside the grid is dropped and each density is
@@ -118,8 +116,8 @@ before the renormalization is `dist.histogramize(grid.edges).masses`.
 
 A density on a grid can be normalized in two ways, and a
 {class}`~lazy.grid.Grid` records which one it uses. The default,
-**`"trapezoid"`**, is the DC1 convention, in which the density has unit
-trapezoid mass over the bin centers, `np.trapezoid(pdf, grid.centers) == 1`.
+**`"trapezoid"`**, is the DC1 convention, with unit trapezoid mass over the bin
+centers, `np.trapezoid(pdf, grid.centers) == 1`.
 Every grid built with `Grid.linear`, `from_edges` or `from_centers` uses it,
 and so does {data}`~lazy.datasets.DC1_GRID`, so the numbers computed on those
 grids are directly comparable with the Data Challenge. Under
@@ -141,8 +139,8 @@ multimodal: `mean` lands between two peaks, where there is no probability,
 while `mode` and `peak_mean` pick one of them. To obtain several of them, we
 recommend calling `predict_proba` once and reducing its output with
 {meth}`~lazy.base.BaseDensityRegressor.point_estimates` or
-{func}`lazy.metrics.grid_point_estimates`, rather than running the model again
-for each definition. The `median` is also `predict_quantiles(X, [0.5])`, which
+{func}`lazy.metrics.grid_point_estimates`, rather than rerunning the model for
+each definition. The `median` is also `predict_quantiles(X, [0.5])`, which
 is computed without a grid.
 
 ## Metrics
@@ -154,8 +152,8 @@ metric takes the {class}`~lazy.grid.Grid` that the densities are on and scores
 them according to the grid's own normalization. On a model's
 histogram-normalized native grid it scores them exactly, bin by bin, and on
 grids such as {data}`~lazy.datasets.DC1_GRID` it uses the Data Challenge's
-trapezoid rule, so that the numbers are then the challenge's, byte for byte.
-Bin centers alone also work, and are read as a trapezoid grid. The metrics
+trapezoid rule, so that the numbers are the challenge's, byte for byte. Bin
+centers alone also work, and are read as a trapezoid grid. The metrics
 take `bin_edges=` to score a histogram grid exactly, and `score`, `evaluate`
 and `point_estimates` pass it automatically.
 
@@ -197,8 +195,8 @@ numbers.
 
 {func}`~lazy.metrics.summarize` scores densities that the user already has,
 from any method, and returns every metric as a one-row table, with `crps` and
-`nll` columns beside the CDE loss and the PIT statistics. For one fitted
-model, `model.evaluate(X, y)` returns the same table:
+`nll` columns beside the CDE loss and the PIT statistics. For one fitted model,
+`model.evaluate(X, y)` returns the same table:
 
 ```python
 import pandas as pd
@@ -211,7 +209,7 @@ table = pd.concat([
 ```
 
 {mod}`lazy.plotting` draws the standard diagnostics (accuracy, calibration and
-the sample distribution) identically for every method, so that the
+the sample distribution) identically for every method, so that
 comparisons between methods hold up by eye:
 
 ```python

@@ -1,9 +1,9 @@
 # Supported models
 
-Every model in LAZY is a pretrained tabular foundation model used in context,
-in which `fit` stores the labeled rows and each prediction is a forward pass
-over them. The models differ a great deal in size, speed and the hardware they
-need.
+Every model in LAZY is a pretrained tabular foundation model used in context
+(i.e., `fit` stores the labeled rows and each prediction is a forward pass
+over them). The models differ a great deal in size, speed and hardware
+requirements.
 
 | Model | `LazyModel(...)` | Weights | Parameters | License of the weights | GPU | CPU-friendly |
 | ----- | ---------------- | ------: | ---------: | ---------------------- | --- | ------------ |
@@ -17,14 +17,14 @@ need.
 | LimiX-2 | `"limix"` | 1.6 GB | 406 M | StableAI LimiX, non-commercial | yes | no (and Linux only) |
 | TabFM v1.0 | `"tabfm"` | 6.6 GB | 1.64 B | Google, non-commercial | yes | no |
 
-The weights are downloaded once, at the first `fit`, and cached from then on.
+The weights are downloaded at the first `fit` and cached from then on.
 {doc}`../installation` gives the licenses in full, and
 {doc}`../guide/clusters` describes caches and offline use.
 
-{doc}`../guide/choosing` describes which model to use for which purpose, and
-{doc}`../guide/scaling` gives the measured time and memory of each. All of the
-models take the same parameters and give the same outputs, and
-{doc}`../guide/interface` describes how each one implements them.
+{doc}`../guide/choosing` describes which model to use for which purpose and
+{doc}`../guide/scaling` gives the measured time and memory of each. All models
+take the same parameters and give the same outputs; {doc}`../guide/interface`
+describes how each implements them.
 
 ```{toctree}
 :maxdepth: 1

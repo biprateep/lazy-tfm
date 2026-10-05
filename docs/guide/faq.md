@@ -18,23 +18,22 @@ LimiX-2 with the cache that LAZY ports. TabFM only stores the context at `fit`,
 and fits its classifiers and prefills their cache inside every `predict` call.
 With `kv_cache=False`, `fit` runs no forward pass and every chunk of queries
 reads the context again in `predict` (see {doc}`tfm` and {doc}`scaling`). The
-first `fit` of a model also downloads its weights, which are cached from then
-on.
+first `fit` of a model also downloads and caches its weights.
 
 ## Can I fine-tune?
 
 LAZY does not fine-tune the weights. The models are pretrained and used in
 context, so everything a model knows about a dataset comes from the context it
-is given. What LAZY does let the user change is the context itself and the
-shared parameters, such as the ensemble, the transforms and the softmax
-temperature (see {doc}`interface`).
+is given. LAZY lets the user change the context itself and the shared
+parameters (e.g., the ensemble, the transforms and the softmax temperature;
+see {doc}`interface`).
 
 ## Can I use it commercially?
 
 LAZY itself is released under the MIT license, but the license of the weights
 decides. Only TabICLv2 (BSD-3-Clause) and TabPFN-2 (Apache-2.0 with attribution) have
-weights that allow commercial use, under the terms of their licenses, while
-the others are non-commercial. LimiX-2's weights are released under the
+weights that allow commercial use, under the terms of their licenses; the
+others are non-commercial. LimiX-2's weights are released under the
 StableAI LimiX Non-Commercial License 1.0, which also requires distributions,
 derivatives and publications to display "Built with StableAI LimiX", while
 LimiX's code is under the Apache-2.0-based Stable AI Technology Co., Ltd.
@@ -59,14 +58,14 @@ checkpoint and the preprocessing recipe are pinned and recorded in
 A predicted distribution is broad when the context holds little information
 about a query and narrow when it holds a lot (see {doc}`tfm`), so a small
 context gives wide intervals. An interval that is too narrow to cover the
-truth can mean that the query lies outside the range of the context or
-that the context is unrepresentative of the queries, and a grid that ends
-inside a distribution also narrows it (see {doc}`limits`). Over a test set,
-the PIT histogram shows whether the intervals are too wide (a hump in the
-middle) or too narrow (peaks at 0 and 1), and {doc}`distributions` describes
-the statistics that measure it. On the
-models with a softmax, `softmax_temperature` sets how sharp the densities are,
-with lower values sharpening them and higher values broadening them.
+truth can mean that the query lies outside the range of the context or that
+the context is unrepresentative of the queries, and a grid that ends inside a
+distribution also narrows it (see {doc}`limits`). Over a test set, the PIT
+histogram shows whether the intervals are too wide (a hump in the middle) or
+too narrow (peaks at 0 and 1), and {doc}`distributions` describes the
+statistics that measure it. On the models with a softmax, `softmax_temperature`
+sets how sharp the densities are, with lower values sharpening them and higher
+values broadening them.
 
 ## Which model should I use?
 

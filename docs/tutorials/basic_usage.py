@@ -27,17 +27,16 @@
 #
 # This tutorial walks through the core workflow of `lazy` on a standard
 # regression dataset, the median house values of California districts. We fit
-# a model, ask it for point predictions, intervals and quantiles, check
-# whether its intervals are as wide as they should be, and score its
-# predicted distributions, all with the scikit-learn interface.
+# a model, obtain point predictions, intervals and quantiles, check whether
+# its intervals are calibrated, and score its predicted distributions, all
+# with the scikit-learn interface.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`. On Colab, choose
-# *Runtime → Change runtime type → T4 GPU*.
+# On Google Colab, the cell below installs the package with the TabPFN
+# backend. Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`.
+# On Colab, choose *Runtime → Change runtime type → T4 GPU*.
 
 # %%
 import sys
@@ -64,14 +63,14 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # %% [markdown]
 # ## The data
 #
-# `datasets.load_dataset` downloads a dataset by name the first time it is
-# called and reads it from a local cache after that (the
+# `datasets.load_dataset` downloads a dataset by name on the first call and
+# reads it from a local cache after that (the
 # [Demo datasets](https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html)
 # page lists them all). The California housing dataset has 20,640 districts,
 # each described by eight features (e.g., the median income, the age of the
 # houses, the number of rooms, the location, etc.), and the target is the
 # median house value in US dollars. We divide the target by 100,000 so that
-# the numbers and axes below read in units of \$100,000. The values in the
+# the numbers and axes below are in units of \$100,000. The values in the
 # source were capped at \$500,001, and we count the districts at the cap.
 
 # %%
@@ -83,7 +82,7 @@ X.head()
 # %% [markdown]
 # We hold out 20% of the districts as a test set with scikit-learn's
 # `train_test_split`. The remaining districts are the labeled rows that the
-# model will see as its context. To keep this tutorial quick, we use a random
+# model uses as its context. To keep this tutorial quick, we use a random
 # 5,000 of them rather than all 16,512.
 
 # %%
@@ -100,10 +99,10 @@ print(f"{len(X_train):,} context rows, {len(X_test):,} test rows")
 # ## The model
 #
 # `lazy.LazyModel()` with no arguments uses TabPFN-3.5. `fit` does not train
-# anything. It checks the features and stores the labeled rows as the context,
-# and the model then predicts each test row in a forward pass conditioned on
-# that context. The first call also downloads the weights of the model, which
-# are cached after that.
+# the model. It checks the features and stores the labeled rows as the
+# context, and the model then predicts each test row in a forward pass
+# conditioned on that context. The first call also downloads the weights of
+# the model, which are cached after that.
 
 # %%
 model = lazy.LazyModel(random_state=SEED)
@@ -115,7 +114,8 @@ model.fit(X_train, y_train)
 # The model predicts a full distribution of the house value for each district.
 # `predict` reduces it to one number, by default its mode (`method="mode"`),
 # and `method="mean"` and `method="median"` give the other common choices.
-# They differ most when a distribution is skewed or has more than one peak.
+# The three differ most when a distribution is skewed or has more than one
+# peak.
 
 # %%
 points = pd.DataFrame(
@@ -131,17 +131,17 @@ points.head()
 # For these five districts, the three estimates agree to within about
 # \$22,000, and the largest difference is between the mean and the mode of
 # the fifth district (2.86 vs. 2.64). To obtain several point estimates
-# without running the model once for each, we can instead call `predict_proba`
-# once and pass its output to `model.point_estimates`.
+# without running the model once for each, we can call `predict_proba` once
+# and pass its output to `model.point_estimates`.
 
 # %% [markdown]
 # ## Intervals and quantiles
 #
 # `predict_interval` returns the central interval holding a given probability
-# of each distribution, and `predict_quantiles` returns any quantiles we ask
-# for. Both are computed exactly from the model's own output rather than from
-# a grid. Here we ask for the 68% interval, and for the 16th, 50th and 84th
-# percentiles, which give the same interval and the median.
+# of each distribution, and `predict_quantiles` returns any requested
+# quantiles. Both are computed exactly from the model's own output rather than
+# from a grid. Here we ask for the 68% interval, and for the 16th, 50th and
+# 84th percentiles, which give the same interval and the median.
 
 # %%
 interval = model.predict_interval(X_test, coverage=0.68)
@@ -156,8 +156,8 @@ print(q[:3])
 # since nothing tells the model that the values stop at the cap.
 
 # %% [markdown]
-# To see what these predictions look like, we plot the median and the 68%
-# interval for 40 random test districts, sorted by their true value.
+# We plot the median and the 68% interval for 40 random test districts,
+# sorted by their true value.
 
 # %% tags=["thumbnail"]
 sample = rng.choice(len(X_test), size=40, replace=False)
@@ -205,11 +205,11 @@ print(
 )
 
 # %% [markdown]
-# A finer test is the probability integral transform (PIT), which is the
+# A finer test is the probability integral transform (PIT), i.e., the
 # predicted cumulative distribution evaluated at the true value. For
 # calibrated distributions, the PIT values are uniform between 0 and 1. We
-# compute them exactly from the model's own output with `predict_pit`, as for
-# the quantiles above, and plot their histogram with `plotting.plot_pit`.
+# compute them exactly with `predict_pit`, as for the quantiles above, and
+# plot their histogram with `plotting.plot_pit`.
 
 # %%
 pit = model.predict_pit(X_test, y_test)
@@ -257,8 +257,7 @@ model.score(X_test, y_test)
 # %% [markdown]
 # ## Next steps
 #
-# This tutorial covered the steps that every analysis with `lazy` shares.
-# The next tutorials build on them. The
+# This tutorial covered the steps that every analysis with `lazy` shares. The
 # [multimodal targets](https://lazy-tfm.readthedocs.io/en/latest/tutorials/multimodal.html)
 # tutorial looks at targets whose distributions have more than one peak,
 # where the point estimates above disagree, and the

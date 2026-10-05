@@ -25,20 +25,19 @@
 # [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/biprateep/lazy-tfm/blob/tutorials/multimodal.ipynb)
 # [![View on GitHub](https://img.shields.io/badge/View%20on-GitHub-181717?logo=github)](https://github.com/biprateep/lazy-tfm/blob/tutorials/multimodal.ipynb)
 #
-# A single number per row hides most of what a model of $p(y \mid x)$
-# knows. In this tutorial, we predict the annual medical insurance charges of
+# A single number per row hides most of what a model of $p(y \mid x)$ knows. In
+# this tutorial, we predict the annual medical insurance charges of
 # individuals, a target which splits into bands, so that for some people the
 # predicted distribution has two peaks and its mean falls between them, where
-# there is little probability. We compare the four point estimates that
-# `lazy` offers, draw samples from the distributions, and score them with
-# proper scoring rules alongside the usual point metrics.
+# there is little probability. We compare the four point estimates of `lazy`,
+# draw samples from the distributions, and score them with proper scoring rules
+# alongside the usual point metrics.
 
 # %% [markdown]
 # ## Setup
 #
-# When the notebook runs on Google Colab, the cell below installs the package
-# with the TabPFN backend. Elsewhere, the package needs to be installed first
-# with `pip install 'lazy-tfm[tabpfn]'`.
+# On Google Colab, the cell below installs the package with the TabPFN backend.
+# Elsewhere, install it first with `pip install 'lazy-tfm[tabpfn]'`.
 
 # %%
 import sys
@@ -81,9 +80,9 @@ X.head()
 # Since the models accept only numbers, we first replace each categorical
 # column by its integer codes (the
 # [messy_inputs](https://lazy-tfm.readthedocs.io/en/latest/tutorials/messy_inputs.html)
-# tutorial covers this and other preparation in more detail). We then hold
-# out a quarter of the rows as a test set, which leaves 1,003 rows as the
-# context of the model.
+# tutorial covers this and other preparation in more detail). We then hold out
+# a quarter of the rows as the test set, which leaves 1,003 rows as the
+# context.
 
 # %%
 categorical = ["sex", "smoker", "region"]
@@ -128,10 +127,10 @@ ax.legend()
 # %% [markdown]
 # ## Densities
 #
-# We fit the default model (TabPFN-3.5) and evaluate the densities of the
-# test set on a grid of 650 bins of \$100 each between \$0 and \$65,000.
-# These bins are narrow compared with the gaps between the bands, and wide
-# enough to keep the densities free of jitter from one bin to the next.
+# We fit the default model (TabPFN-3.5) and evaluate the densities of the test
+# set on a grid of 650 bins of \$100 each between \$0 and \$65,000, which are
+# narrow compared with the gaps between the bands and wide enough to keep the
+# densities free of jitter from one bin to the next.
 
 # %%
 model = lazy.LazyModel(random_state=SEED)
@@ -162,11 +161,11 @@ multimodal = np.flatnonzero(n_peaks > 1)
 X_test.iloc[multimodal].assign(charges=y_test[multimodal])
 
 # %% [markdown]
-# Only 3 of the 335 test densities have a second peak by this criterion,
-# and all three belong to smokers whose BMI lies between 29.70 and 30.00, just
-# at or below the threshold. Every other density has a single peak above 10%
-# of its maximum. The figure below shows the densities of these three people,
-# with their mean, median and mode and their true charges.
+# Only 3 of the 335 test densities have a second peak by this criterion, all of
+# them for smokers whose BMI lies between 29.70 and 30.00, just at or below the
+# threshold. Every other density has a single peak above 10% of its maximum.
+# The figure below shows the densities of these three people with their mean,
+# median, mode and true charges.
 
 # %% tags=["thumbnail"]
 estimates = metrics.grid_point_estimates(grid, pdfs)
@@ -198,13 +197,13 @@ axes[0].set_ylabel("$p$ [per thousand USD]")
 axes[0].legend(fontsize=8)
 
 # %% [markdown]
-# We see that each density has one peak in the band of smokers with a BMI up
-# to 30 and a second one in the band above it, which for the person in the
-# middle panel is low and broad. The mode sits on the taller peak, which for all
-# three people is the lower one, and it lies within \$400 of the true charges
-# in every case. The mean, in contrast, falls between the two peaks, where
-# the density is low, and the median lands in either band depending on how
-# the probability is split between them.
+# We see that each density has one peak in the band of smokers with a BMI up to
+# 30 and a second one in the band above it, which for the person in the middle
+# panel is low and broad. The mode sits on the taller peak, which is the lower
+# one for all three people, and lies within \$400 of the true charges in every
+# case. The mean, in contrast, falls between the two peaks, where the density
+# is low, and the median lands in either band depending on how the probability
+# is split between them.
 
 # %%
 chosen = X_test.iloc[multimodal]
@@ -226,23 +225,22 @@ pd.DataFrame(
 # %% [markdown]
 # The table gives the same numbers, together with the probability that the
 # charges exceed \$30,000 (from the CDF of the native distribution) and the
-# density at the mean relative to the density at the mode. The density at
-# the mean is between 1% and 3% of that at the mode, so the mean is a value
-# which the model itself considers unlikely. For two of the people (rows 137
-# and 652), more than half of the probability lies above \$30,000 (0.56 and
-# 0.53), although their tallest peak lies below it. Therefore, the mode picks
-# the tallest peak, which is not always the band holding most of the
-# probability.
+# density at the mean relative to that at the mode. The density at the mean is
+# between 1% and 3% of that at the mode, so the model itself considers the mean
+# unlikely. For two of the people (rows 137 and 652), more than half of the
+# probability lies above \$30,000 (0.56 and 0.53), although their tallest peak
+# lies below it. Therefore, the mode picks the tallest peak, which is not
+# always the band holding most of the probability.
 
 # %% [markdown]
 # ## Crossing the threshold
 #
-# To see where the second peak comes from, we take one hypothetical person
-# (a 40-year-old male smoker with one child, in the northwest) and vary only
-# his BMI from 28 to 32. For each BMI, `predict` reduces the density to each
-# of the four point estimates of `lazy`, which are the mean and the median of
-# the whole density, its `mode` (the center of its highest bin) and its
-# `peak_mean` (the mean over the main peak alone). The
+# To see where the second peak comes from, we take one hypothetical person (a
+# 40-year-old male smoker with one child, in the northwest) and vary only his
+# BMI from 28 to 32. For each BMI, `predict` reduces the density to the four
+# point estimates of `lazy`: the mean and the median of the whole density, its
+# `mode` (the center of its highest bin) and its `peak_mean` (the mean over the
+# main peak alone). The
 # [Point estimates](https://lazy-tfm.readthedocs.io/en/latest/guide/distributions.html#point-estimates)
 # section of the User guide defines them in full.
 
@@ -341,10 +339,9 @@ X_test.loc[largest, ["age", "bmi", "smoker"]].assign(
 # %% [markdown]
 # ## Sampling
 #
-# `predict_distribution` returns the native answer of the model, on no grid
-# at all, and its `rvs` method draws values from each row. Here we draw
-# 10,000 values for the first multimodal person and compare their histogram
-# with the density.
+# `predict_distribution` returns the native answer of the model, on no grid,
+# and its `rvs` method draws values from each row. Here we draw 10,000 values
+# for the first multimodal person and compare their histogram with the density.
 
 # %%
 i = multimodal[0]
@@ -370,24 +367,23 @@ print(f"Probability above $30,000 from the CDF: {dist.sf([30_000])[0, 0]:.3f}")
 # %% [markdown]
 # We see that the histogram of the draws follows the density, both peaks
 # included. The fraction of draws above \$30,000 (0.570) is close to the
-# probability computed from the CDF (0.561), given that the standard error of
-# a fraction estimated from 10,000 draws is about 0.005. Draws like these can
-# be passed to any downstream calculation (e.g., the total charges of a group
-# of people) without first reducing each person to a single number.
+# probability computed from the CDF (0.561), given that the standard error of a
+# fraction estimated from 10,000 draws is about 0.005. Draws like these can be
+# passed to any downstream calculation (e.g., the total charges of a group of
+# people) without reducing each person to a single number.
 
 # %% [markdown]
 # ## Scoring distributions and point estimates
 #
-# Point metrics score one number per row, and each of them favors a
-# different point estimate: the mean minimizes the expected squared error and
-# the median the expected absolute error. Proper scoring rules score the
-# whole distribution instead. The continuous ranked probability score (CRPS)
-# is the integral of the squared difference between the predicted CDF and the
-# step function at the true value. It is in the units of the target and
-# reduces to the absolute error for a single number, so it can be compared
-# directly with the mean absolute error. The negative log likelihood (NLL) is
-# minus the logarithm of the density at the true value. Lower is better for
-# both.
+# Point metrics score one number per row, and each favors a different point
+# estimate: the mean minimizes the expected squared error and the median the
+# expected absolute error. Proper scoring rules score the whole distribution
+# instead. The continuous ranked probability score (CRPS) is the integral of
+# the squared difference between the predicted CDF and the step function at the
+# true value. It is in the units of the target and reduces to the absolute
+# error for a single number, so it can be compared directly with the mean
+# absolute error. The negative log likelihood (NLL) is minus the logarithm of
+# the density at the true value. Lower is better for both.
 
 # %%
 residuals = points.sub(y_test, axis=0)
@@ -404,13 +400,13 @@ print(f"NLL of the densities:  {metrics.nll(y_test, grid, pdfs):.3f}")
 # %% [markdown]
 # No single point estimate is best on both point metrics. The mean has the
 # lowest RMSE (\$5,288) and the highest MAE (\$2,443), while the mode has the
-# lowest MAE (\$1,711). If the densities were exact, the median would have
-# the lowest expected absolute error, whereas here its MAE is slightly higher
-# than that of the mode (\$1,788 vs \$1,711). The CRPS of the densities,
-# \$1,649, is lower than the MAE of each of the four point estimates. The NLL
-# (6.711) has no point-estimate counterpart, and since its value depends on
-# the units of the target (here, densities per dollar), it is meant for
-# comparing models on the same target rather than for reading on its own.
+# lowest MAE (\$1,711). If the densities were exact, the median would have the
+# lowest expected absolute error, whereas here its MAE is slightly higher than
+# that of the mode (\$1,788 vs \$1,711). The CRPS of the densities, \$1,649, is
+# lower than the MAE of each of the four point estimates. The NLL (6.711) has
+# no point-estimate counterpart and depends on the units of the target (here,
+# densities per dollar), so it serves to compare models on the same target
+# rather than to be read on its own.
 
 # %% [markdown]
 # ## Next steps
