@@ -54,7 +54,7 @@ import sys
 
 if "google.colab" in sys.modules:
     # %pip install -q 'lazy-tfm[tabpfn,tabicl,tabfm,limix]'
-    # %pip install -q 'LimiX @ git+https://github.com/limix-ldm-ai/LimiX@516bf396333feb3198cf7aff8a6c10421f218e24'
+    # !lazy setup
     pass
 
 # %%

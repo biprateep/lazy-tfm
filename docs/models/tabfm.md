@@ -23,8 +23,8 @@ post:** [Introducing
 TabFM](https://research.google/blog/introducing-tabfm-a-zero-shot-foundation-model-for-tabular-data/).
 **Weights:** [google/tabfm-1.0.0-pytorch on Hugging
 Face](https://huggingface.co/google/tabfm-1.0.0-pytorch), under a
-non-commercial license. For more than a few thousand query rows, install
-TabFM's repository build as well (see {doc}`../installation`).
+non-commercial license. For more than a few thousand query rows, run
+`lazy setup` to install TabFM's repository build (see {doc}`../installation`).
 
 ## Defaults
 

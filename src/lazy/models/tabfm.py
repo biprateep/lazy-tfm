@@ -87,6 +87,7 @@ from lazy.models import _weights
 __all__ = [
     "AUTO_BINS",
     "GRID_BINS",
+    "REPOSITORY_BUILD",
     "TabFMHistogram",
     "TabFMPerformanceWarning",
     "auto_bin_count",
@@ -169,6 +170,14 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
 }
 
 
+#: The repository build of TabFM, with the KV-cache API, at the commit lazy
+#: was validated on. PyPI refuses direct URLs in an extra, so ``lazy setup``
+#: installs it (see :mod:`lazy._cli`); pyproject.toml pins the same commit.
+REPOSITORY_BUILD = (
+    "tabfm[pytorch] @ git+https://github.com/google-research/tabfm"
+    "@fbb665569425fd2f490c6576b3af967876fe11ff"
+)
+
 _SLOW_PATH_WARNING = (
     "the installed tabfm has no KV-cache API (TabFM.prefill and "
     "TabFM.decode; the PyPI releases 1.0.0 and 1.0.1 lack it), so "
@@ -177,9 +186,8 @@ _SLOW_PATH_WARNING = (
     "measured at roughly 26x the compute per query row (13.7 ms vs 0.53 ms "
     "per member-row). The answers agree up to rounding; only the runtime "
     "differs, so a large prediction will simply take far longer than "
-    "expected. The repository build has the API:\n"
-    "    pip install 'tabfm[pytorch] @ "
-    "git+https://github.com/google-research/tabfm'\n"
+    "expected. The repository build has the API; install it with\n"
+    "    lazy setup\n"
     "Pass kv_cache=False to accept the slow path and silence this."
 )
 

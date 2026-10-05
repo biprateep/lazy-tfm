@@ -5,6 +5,7 @@ import pathlib
 import tomllib
 
 import lazy
+from lazy.models import tabfm
 
 
 def test_version():
@@ -27,3 +28,14 @@ def test_the_all_extra_installs_every_other_extra():
     (requirement,) = extras["all"]
     named = requirement.partition("[")[2].rstrip("]").split(",")
     assert sorted(named) == sorted(set(extras) - {"all"})
+
+
+def test_lazy_setup_installs_the_tabfm_commit_uv_pins():
+    """``lazy setup`` and a uv checkout get the same TabFM build."""
+    pyproject = pathlib.Path(__file__).parents[2] / "pyproject.toml"
+    config = tomllib.loads(pyproject.read_text())
+    source = config["tool"]["uv"]["sources"]["tabfm"]
+    assert tabfm.REPOSITORY_BUILD.endswith(
+        f"git+{source['git']}@{source['rev']}"
+    )
+    assert config["project"]["scripts"]["lazy"] == "lazy._cli:main"
