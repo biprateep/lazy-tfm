@@ -13,7 +13,7 @@
 # Every figure in the documentation that shows a model's output is made here,
 # so each one can be remade from the code that the page shows. The model is
 # TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU in seconds at these
-# sizes. Running the script rewrites every PNG in `docs/figures/figs/`:
+# sizes. Running the script rewrites every SVG in `docs/figures/figs/`:
 #
 #     python docs/figures/make_figures.py
 
@@ -68,6 +68,12 @@ RC_PARAMS = {
     "xtick.color": INK,
     "ytick.color": INK,
     "figure.dpi": 300,
+    # Vector figures stay sharp at any display size and pixel density, which a
+    # raster scaled down by the browser does not. Text is drawn as outlines, so
+    # the figures do not depend on the reader having the serif font, and a
+    # fixed salt keeps the ids in the files, and so their diffs, stable.
+    "svg.fonttype": "path",
+    "svg.hashsalt": "lazy",
     "mathtext.fontset": "cm",
     "axes.formatter.use_mathtext": True,
 }
@@ -154,7 +160,7 @@ ax.set_ylabel(r"$y$")
 ax.set_xlim(0, 10)
 ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncols=4)
 FIGS.mkdir(exist_ok=True)
-fig.savefig(FIGS / "chirp_demo.png", bbox_inches="tight", dpi=300)
+fig.savefig(FIGS / "chirp_demo.svg", bbox_inches="tight")
 plt.close(fig)
 
 # %% [markdown]
@@ -256,7 +262,7 @@ for i, (loc, scale) in enumerate([(-0.8, 0.5), (0.4, 0.9), (1.0, 0.35)]):
     ax.plot(xs, y_base + 0.55 * pdf / pdf.max(), c="C1", lw=1)
     ax.plot([7.5, 9.7], [y_base, y_base], c=INK, lw=0.5)
 ax.text(8.6, 3.35, r"$p(y \mid x, \mathrm{context})$", ha="center", va="bottom")
-fig.savefig(FIGS / "tfm_schematic.png", bbox_inches="tight", dpi=300)
+fig.savefig(FIGS / "tfm_schematic.svg", bbox_inches="tight")
 plt.close(fig)
 
 # %% [markdown]
@@ -304,7 +310,7 @@ for ax in axes[-1]:
     ax.set_xlabel(r"$x$")
 for ax in axes[:, 0]:
     ax.set_ylabel(r"$y$")
-fig.savefig(FIGS / "prior_draws.png", bbox_inches="tight", dpi=300)
+fig.savefig(FIGS / "prior_draws.svg", bbox_inches="tight")
 plt.close(fig)
 
 # %% [markdown]
@@ -358,7 +364,6 @@ for ax, size in zip(axes, sizes, strict=True):
         c="C0",
         label="Context",
         zorder=3,
-        rasterized=True,
     )
     ax.set_title(f"{size:,} context rows")
     ax.set_xticks([0, 5, 10])
@@ -371,5 +376,5 @@ fig.legend(
     loc="outside upper center",
     ncols=4,
 )
-fig.savefig(FIGS / "context_size.png", bbox_inches="tight", dpi=300)
+fig.savefig(FIGS / "context_size.svg", bbox_inches="tight")
 plt.close(fig)

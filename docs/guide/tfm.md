@@ -1,11 +1,9 @@
 # What are Tabular Foundation Models?
 
-A tabular dataset is a table in which each row is an object (a galaxy, a
-patient, a transaction) and each column is a measured property of it. The
-usual way to learn from such a table is supervised learning: we choose a model
-(e.g., a gradient-boosted tree ensemble, a neural network, a random forest,
-etc.), fit its parameters to the labeled rows by minimizing a loss, tune its
-hyperparameters on held-out data, and repeat this for every new dataset. A
+A tabular dataset is a dataset where the data is organized like a table in which each row is an object and each column is a measured property of it (think of like a spreadsheet or `DataFrame`). The common way to make predictions by learning from such a data set would be to train a supervised machine learning model on the same dataset (e.g., a gradient-boosted tree ensemble, a neural network, a random forest,etc.), fit its parameters to the labeled rows by minimizing a loss, tune its hyperparameters on held-out data, and repeat this for every new dataset.
+
+
+ A
 tabular foundation model (TFM) replaces this per-dataset training with a
 single, very expensive pretraining step that happens once, before the model
 ever sees our data. During pretraining, the network learns to predict
@@ -29,7 +27,7 @@ network forward pass" ([Hollmann et al.
 only stores the context (and, with the key/value cache on, the network's
 encoding of it), and the predictions are computed in `predict`.
 
-```{figure} ../figures/figs/tfm_schematic.png
+```{figure} ../figures/figs/tfm_schematic.svg
 :alt: Context rows with known targets and query rows with unknown targets go into a pretrained transformer, which returns a distribution for each query.
 :width: 100%
 
@@ -72,7 +70,7 @@ causal models, random directed graphs of causes and effects between the
 features and the target ([Hollmann et al.
 2025](https://doi.org/10.1038/s41586-024-08328-6)).
 
-```{figure} ../figures/figs/prior_draws.png
+```{figure} ../figures/figs/prior_draws.svg
 :alt: Six small synthetic one-feature regression datasets with different shapes and noise levels.
 :width: 100%
 
@@ -93,7 +91,7 @@ with 20 context rows TabPFN-3.5-fast cannot follow the oscillations and its
 curve closely and its interval narrows to roughly the spread of the noise. The
 model and its weights are the same in all three panels.
 
-```{figure} ../figures/figs/context_size.png
+```{figure} ../figures/figs/context_size.svg
 :alt: Three panels showing TabPFN-3.5-fast's mean and 68% interval for a noisy curve given 20, 100 and 400 context points.
 :width: 100%
 

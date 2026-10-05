@@ -61,7 +61,7 @@ y_mean = model.predict(X_test, method="mean")
 y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
 ```
 
-```{figure} figures/figs/chirp_demo.png
+```{figure} figures/figs/chirp_demo.svg
 :alt: A noisy chirp with three gaps, filled by TabPFN-3.5-fast's mean and 68% interval.
 :width: 100%
 ```
