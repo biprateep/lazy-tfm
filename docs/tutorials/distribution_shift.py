@@ -317,12 +317,12 @@ comparison
 
 # %% [markdown]
 # On the biased context alone, LimiX-2 has a lower CRPS than TabPFN-3.5
-# (0.498 vs 0.539) and a 68% coverage closer to nominal (61.4% vs 43.2%).
-# However, its bias is larger (-0.794 vs -0.682), and its CRPS is still
+# (0.498 vs. 0.539) and a 68% coverage closer to nominal (61.4% vs. 43.2%).
+# However, its bias is larger (-0.794 vs. -0.682), and its CRPS is still
 # about three times that of the representative context, so neither model
 # recovers from the selection on its own. With 300 calibration districts,
-# the two models are very similar (a CRPS of 0.202 vs 0.206, and a coverage
-# of 65.1% vs 67.3%). Therefore, on this dataset, LimiX-2 is the better of
+# the two models are very similar (a CRPS of 0.202 vs. 0.206, and a coverage
+# of 65.1% vs. 67.3%). Therefore, on this dataset, LimiX-2 is the better of
 # the two on a biased context only by a small margin in CRPS, and the
 # calibration sample matters far more than the choice of model. This is one
 # split of one dataset with one seed, which is not enough to confirm or rule

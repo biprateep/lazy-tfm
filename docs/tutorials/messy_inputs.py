@@ -229,7 +229,7 @@ for f, (c1, v1), (c2, v2) in zip(fractions, test_only, both):
 # the true prices fall inside the 90% interval. When the cells are missing from
 # the test rows only, the CRPS grows to 15.60 thousand USD at 50%, and the
 # coverage rises to 99.7%, so the distributions are wider than they need to be.
-# When the context has the same gaps, the CRPS grows less (11.45 vs 15.60
+# When the context has the same gaps, the CRPS grows less (11.45 vs. 15.60
 # thousand USD at 50%), and the coverage stays between 91.4% and 92.4%. This
 # might be because a context with missing cells shows the model how much the
 # price varies when part of a house's description is unknown, which a complete

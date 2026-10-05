@@ -335,13 +335,13 @@ plt.show()
 
 # %% [markdown]
 # The figure shows the density of this diamond on the native grid and on the
-# grid that stops at 5,000 USD, along with its true price of 6,000 USD. On the
-# native grid, the density peaks close to the true price. The short grid holds
-# only 8.0% of the probability of this diamond, and since that 8.0% is
-# renormalized to one, the density piles up against the end of the grid, with
-# its peak at 5,000 USD and almost twice as high as the peak on the native grid.
-# Therefore, a grid must cover the targets, and the log-spaced grid we used
-# above, from 100 to 40,000 USD, covers every price in the dataset.
+# grid that stops at 5,000 USD, along with its true price (about
+# 6,000 USD). On the native grid, the density peaks close to the true price. The
+# short grid holds only 8.0% of the probability of this diamond, and since that
+# 8.0% is renormalized to one, the density piles up against the end of the grid,
+# with its peak at 5,000 USD and almost twice as high as the peak on the native
+# grid. Therefore, a grid must cover the targets, and the log-spaced grid we
+# used above, from 100 to 40,000 USD, covers every price in the dataset.
 #
 # For the next steps, we suggest the following pages:
 #

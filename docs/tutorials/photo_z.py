@@ -229,16 +229,16 @@ plt.show()
 # spectral features fall in the observed window. `datasets.fetch_dc1_biased`
 # builds this case from DC1. It first merges and reshuffles both DC1 files and
 # cuts them in two. It then runs the first part through a port of the HSC
-# `GridSelection` of RAIL (`lazy.selection.grid_selection`), which keeps each
-# galaxy with the HSC PDR2 ratio of spectroscopic to photometric galaxies in
-# its pixel of $i$-band magnitude and $g-z$ color, below a redshift ceiling set
-# by the HSC spectra in that pixel, and the galaxies it keeps form the biased
-# training set. Finally, it divides the second part at random into a
-# representative calibration sample and a representative test set. Since the
-# selection keeps a nearly fixed fraction of whatever it sees, the position of
-# the cut is solved for to give `n_train` training galaxies (35,000 by
-# default), and since the calibration sample comes out of the hold-out, no
-# galaxy is both in a context and scored on.
+# `GridSelection` of RAIL (`lazy.selection.grid_selection`), which keeps, in
+# each pixel of $i$-band magnitude and $g-z$ color, a fraction of the galaxies
+# proportional to the HSC PDR2 ratio of spectroscopic to photometric galaxies in
+# that pixel, below a redshift ceiling set by the HSC spectra in that pixel, and
+# the galaxies it keeps form the biased training set. Finally, it divides the
+# second part at random into a representative calibration sample and a
+# representative test set. Since the selection keeps a nearly fixed fraction of
+# whatever it sees, the position of the cut is solved for to give `n_train`
+# training galaxies (35,000 by default), and since the calibration sample comes
+# out of the hold-out, no galaxy is both in a context and scored on.
 
 # %%
 split = datasets.fetch_dc1_biased()

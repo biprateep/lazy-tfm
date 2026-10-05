@@ -41,4 +41,4 @@ context rows), and `lazy` does not warn when it runs on a CPU.
 
 For commercial use, only TabICLv2 and TabPFN-2 have weights that allow it,
 under the terms of their licenses, while the others are non-commercial.
-{doc}`../installation` gives the licenses in full.
+Please check the license of each backend at its original source before use.

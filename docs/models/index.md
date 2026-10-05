@@ -17,8 +17,9 @@ requirements.
 | LimiX-2 | `"limix"` | 1.6 GB | 406 M | StableAI LimiX, non-commercial | yes | no (and Linux only) |
 | TabFM v1.0 | `"tabfm"` | 6.6 GB | 1.64 B | Google, non-commercial | yes | no |
 
-The weights are downloaded at the first `fit` and cached from then on.
-{doc}`../installation` gives the licenses in full, and
+The weights are downloaded at the first `fit` and cached from then on. The
+licenses are summarized here and quoted in `lazy.CHECKPOINTS`; please check
+the license of each backend at its original source before use.
 {doc}`../guide/clusters` describes caches and offline use.
 
 {doc}`../guide/choosing` describes which model to use for which purpose and

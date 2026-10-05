@@ -229,7 +229,7 @@ by_transforms
 # %% [markdown]
 # The table shows that `("none",)` and `("power",)` score as well as the
 # default in CRPS and NLL, or marginally better, on this dataset, though
-# their coverage is slightly lower (0.6735 and 0.6720 vs 0.6785). Every
+# their coverage is slightly lower (0.6735 and 0.6720 vs. 0.6785). Every
 # recipe with the quantile transform scores worse in both CRPS and NLL.
 # Since the joint angles of `kin8nm` are spread evenly over their range, a
 # power transform has little to straighten out, and mapping them to a normal

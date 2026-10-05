@@ -37,7 +37,8 @@ others are non-commercial. LimiX-2's weights are released under the
 StableAI LimiX Non-Commercial License 1.0, which also requires distributions,
 derivatives and publications to display "Built with StableAI LimiX", while
 LimiX's code is under the Apache-2.0-based Stable AI Technology Co., Ltd.
-License 1.0. {doc}`../installation` gives the licenses in full.
+License 1.0. Please check the license of each backend at its original source
+before use.
 
 Built with StableAI LimiX.
 
