@@ -91,9 +91,9 @@ executed notebooks, with their outputs and figures, live on the orphan branch
 buttons open them. This keeps megabytes of images out of main's history.
 After changing a tutorial, re-execute it on a GPU machine and commit the
 notebook, with the gallery thumbnail that `execute.sh` cuts from its figure
-cell tagged `thumbnail`, to that branch. A tutorial that uses LimiX-2 also
-needs `LAZY_LIMIX_SRC` pointing at a checkout of LimiX to execute (see the
-installation page):
+cell tagged `thumbnail`, to that branch. A tutorial that uses LimiX-2
+downloads LimiX's source on first use, or takes a checkout from
+`LAZY_LIMIX_SRC` (see the installation page):
 
 ```bash
 docs/tutorials/execute.sh basic_usage   # writes the notebook and thumbnails/basic_usage.png (git-ignored)

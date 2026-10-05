@@ -31,6 +31,8 @@ import dataclasses
 from importlib import metadata
 import pathlib
 
+from lazy.models import _limix_source
+
 __all__ = [
     "CHECKPOINTS",
     "DEFAULT_VERSIONS",
@@ -409,7 +411,9 @@ def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
 
     Safe to call repeatedly: the Hugging Face cache makes every call after the
     first a no-op. Use it to warm the cache on a login node before submitting
-    a job to a compute node with no outbound network.
+    a job to a compute node with no outbound network. For LimiX it fetches
+    LimiX's source too, which is not on PyPI (see
+    :func:`lazy.models._limix_source.fetch`).
 
     Args:
         name: A backend name or a ``"backend:version"`` key, as for
@@ -422,13 +426,17 @@ def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
     Raises:
         KeyError: If there is no pinned checkpoint for ``name`` at
             ``version``.
+        ImportError: If LimiX's source cannot be found or downloaded.
 
     Examples:
         >>> sorted(CHECKPOINTS)  # doctest: +NORMALIZE_WHITESPACE
         ['limix:v2', 'tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5',
          'tabpfn:v2.6', 'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
     """
-    return get_checkpoint(name, version).download()
+    checkpoint = get_checkpoint(name, version)
+    if checkpoint.backend == "limix":
+        _limix_source.locate()
+    return checkpoint.download()
 
 
 def is_cached(name: str, version: str | None = None) -> bool:
@@ -443,10 +451,14 @@ def is_cached(name: str, version: str | None = None) -> bool:
         version: The model version, or ``None`` for the default.
 
     Returns:
-        ``True`` if the weights can be loaded without a network connection.
+        ``True`` if the weights, and for LimiX its source, can be loaded
+        without a network connection.
     """
     try:
-        get_checkpoint(name, version).download(local_files_only=True)
+        checkpoint = get_checkpoint(name, version)
+        if checkpoint.backend == "limix":
+            _limix_source.locate(download=False)
+        checkpoint.download(local_files_only=True)
     except Exception:  # noqa: BLE001 - any failure to load offline is a miss.
         return False
     return True

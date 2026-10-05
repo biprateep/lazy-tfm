@@ -9,9 +9,10 @@ override it:
 | -------------------- | ------------------------------------------------------- | ------------------------------------ |
 | Pretrained weights   | `~/.cache/huggingface/hub`                              | `HF_HOME`                            |
 | Benchmark catalogs   | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
+| LimiX's source       | `limix/` in the catalogs' directory                     | `LAZY_LIMIX_SRC` (a checkout), else as the catalogs |
 
 Compute nodes often have no outbound network access. In that case, we
-recommend warming both caches on a login node first and then running with
+recommend warming the caches on a login node first and then running with
 downloads disabled, so that a missing file raises an immediate error rather
 than causing a hang:
 
@@ -27,8 +28,10 @@ is_cached("tabpfn", "v3.5")             # on the compute node: True
 fetch_dc1(download_if_missing=False)
 ```
 
-Setting `HF_HUB_OFFLINE=1` on the compute node has the same effect for the
-weights. The checkpoint that a model loads is exactly the one
+For LimiX-2, `download_checkpoint("limix")` also fetches LimiX's source,
+which is not on PyPI, and `is_cached("limix")` checks for both. Setting
+`HF_HUB_OFFLINE=1` on the compute node has the same effect for the weights,
+and stops the source from being downloaded too. The checkpoint that a model loads is exactly the one
 {func}`~lazy.models.download_checkpoint` fetches, because the pinned revision
 is passed to the backend rather than left to its own default. Therefore,
 warming the cache cannot prefetch the wrong file.

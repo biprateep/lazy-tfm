@@ -373,7 +373,7 @@ def data():
 
 def _has_limix():
     try:
-        _limix_source.locate()
+        _limix_source.locate(download=False)  # a skip check never downloads
     except ImportError:
         return False
     return True

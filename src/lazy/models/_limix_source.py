@@ -13,10 +13,14 @@ loaded from wherever the source lives, under private aliases:
   ``lazy.models._limix_ext.inference``.
 
 No ``sys.path`` edits, no copies of LimiX's code in this package. The source
-is found, in order, from ``$LAZY_LIMIX_SRC``, ``$LIMIX_SRC``, or an installed
-``LimiX`` distribution (``pip install "LimiX @ git+<REPOSITORY>@<commit>"``).
-Its commit is checked against :data:`LIMIX_COMMIT`, the one the backend was
-validated on, and a :class:`LimiXSourceWarning` says so when they differ.
+is found, in order, from ``$LAZY_LIMIX_SRC``, ``$LIMIX_SRC``, an installed
+``LimiX`` distribution (``pip install "LimiX @ git+<REPOSITORY>@<commit>"``),
+or :func:`cache_dir`. When none of them has it, the archive of
+:data:`LIMIX_COMMIT` is downloaded from GitHub into :func:`cache_dir`, once,
+like a checkpoint: nothing is installed, so the generic names never reach the
+environment. The commit is checked against :data:`LIMIX_COMMIT`, the one the
+backend was validated on, and a :class:`LimiXSourceWarning` says so when they
+differ.
 
 Typical usage example:
 
@@ -33,10 +37,16 @@ from importlib import util
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import types
+import urllib.request
 import warnings
+
+from lazy import datasets
 
 __all__ = [
     "ENV_VARS",
@@ -44,6 +54,8 @@ __all__ = [
     "REPOSITORY",
     "LimiXSourceWarning",
     "Source",
+    "cache_dir",
+    "fetch",
     "load",
     "locate",
     "missing_dependency",
@@ -61,6 +73,10 @@ LIMIX_COMMIT = "516bf396333feb3198cf7aff8a6c10421f218e24"
 REPOSITORY = "https://github.com/limix-ldm-ai/LimiX"
 #: Environment variables naming a LimiX checkout, in the order they are read.
 ENV_VARS = ("LAZY_LIMIX_SRC", "LIMIX_SRC")
+#: GitHub's archive of :data:`LIMIX_COMMIT`, which :func:`fetch` downloads.
+ARCHIVE = f"{REPOSITORY}/archive/{LIMIX_COMMIT}.tar.gz"
+#: The :attr:`Source.origin` of the source in :func:`cache_dir`.
+CACHE_ORIGIN = "lazy's cache"
 
 _ALIAS = "lazy.models._limix_ext"
 _SUBTREES = {"model": ("model", "v2_0"), "inference": ("inference", "v2_0")}
@@ -72,10 +88,11 @@ _loaded: dict[pathlib.Path, types.SimpleNamespace] = {}
 _ignored: set[pathlib.Path] = set()
 
 _INSTALL_HINT = (
-    "LimiXBarDistribution needs LimiX's source, which is not on PyPI. "
-    f'Install it with pip install "LimiX @ git+{REPOSITORY}@{LIMIX_COMMIT}" '
-    "and its dependencies with pip install 'lazy-tfm[limix]', or point "
-    "$LAZY_LIMIX_SRC at a checkout."
+    "LimiXBarDistribution needs LimiX's source, which is not on PyPI. lazy "
+    f"downloads it from {ARCHIVE} on first use; on a machine without a "
+    'network, run lazy.download_checkpoint("limix") on one with a network '
+    "first, or point $LAZY_LIMIX_SRC at a checkout. Its dependencies come "
+    "with pip install 'lazy-tfm[limix]'."
 )
 
 # The top-level modules LimiX's two subtrees import that are not in the
@@ -95,8 +112,8 @@ class Source:
     Attributes:
         root: The directory holding ``model/`` and ``inference/``.
         commit: Its git commit, or None when it cannot be told.
-        origin: How it was found: an environment variable's name, or
-            ``"installed LimiX <version>"``.
+        origin: How it was found: an environment variable's name,
+            ``"installed LimiX <version>"``, or :data:`CACHE_ORIGIN`.
     """
 
     root: pathlib.Path
@@ -107,23 +124,30 @@ class Source:
     def package(self) -> str:
         """The ``"package"`` label of a provenance: where LimiX came from.
 
-        ``"LimiX <version>"`` for an installed LimiX, and ``"LimiX (source
-        checkout at <commit>)"`` for a checkout an environment variable names.
+        ``"LimiX <version>"`` for an installed LimiX, ``"LimiX (source
+        checkout at <commit>)"`` for a checkout an environment variable
+        names, and ``"LimiX (source archive at <commit>)"`` for the cache.
         """
-        if not self.origin.startswith("$"):
+        if self.origin.startswith("installed "):
             return self.origin.removeprefix("installed ")
-        return f"LimiX (source checkout at {self.commit or 'unknown commit'})"
+        kind = "archive" if self.origin == CACHE_ORIGIN else "checkout"
+        return f"LimiX (source {kind} at {self.commit or 'unknown commit'})"
 
 
-def locate() -> Source:
+def locate(*, download: bool = True) -> Source:
     """Finds LimiX's source, without importing any of it.
+
+    Args:
+        download: Download the source into :func:`cache_dir` when nothing
+            else has it. Off, or with ``$HF_HUB_OFFLINE`` set, a source that
+            is not already there is an error.
 
     Returns:
         Where it is, and at which commit.
 
     Raises:
-        ImportError: If no source is found, or an environment variable names
-            a directory without LimiX's v2 code.
+        ImportError: If no source is found or can be downloaded, or an
+            environment variable names a directory without LimiX's v2 code.
     """
     for name in ENV_VARS:
         value = os.environ.get(name)
@@ -138,7 +162,15 @@ def locate() -> Source:
     try:
         distribution = metadata.distribution("LimiX")
     except metadata.PackageNotFoundError:
-        raise ImportError(_INSTALL_HINT) from None
+        root = cache_dir()
+        if not _has_subtrees(root):
+            if not download or _offline():
+                raise ImportError(
+                    f"LimiX's source is not in {root}, and downloading it is "
+                    f"off. {_INSTALL_HINT}"
+                ) from None
+            fetch()
+        return Source(root, LIMIX_COMMIT, CACHE_ORIGIN)
     root = pathlib.Path(str(distribution.locate_file("")))
     if not _has_subtrees(root):
         raise ImportError(
@@ -150,6 +182,73 @@ def locate() -> Source:
         _installed_commit(distribution),
         f"installed LimiX {distribution.version}",
     )
+
+
+def cache_dir() -> pathlib.Path:
+    """Where :func:`fetch` unpacks LimiX's source.
+
+    ``limix/<commit>`` under :func:`lazy.datasets.data_home`, so
+    ``$LAZY_DATA_HOME`` moves it with the catalogues.
+
+    Returns:
+        The directory, which holds the source once :func:`fetch` has run.
+    """
+    return datasets.data_home() / "limix" / LIMIX_COMMIT
+
+
+def fetch() -> pathlib.Path:
+    """Downloads LimiX's source at :data:`LIMIX_COMMIT` into the cache.
+
+    A no-op when it is already there. The archive is unpacked next to
+    :func:`cache_dir` and moved into place whole, so an interrupted download
+    never leaves a half-written source behind.
+
+    Returns:
+        :func:`cache_dir`.
+
+    Raises:
+        ImportError: If the download fails, or the archive does not hold
+            LimiX's v2 code.
+    """
+    root = cache_dir()
+    if _has_subtrees(root):
+        return root
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root.parent) as scratch:
+        archive = pathlib.Path(scratch) / "LimiX.tar.gz"
+        try:
+            with (
+                urllib.request.urlopen(ARCHIVE, timeout=60) as response,
+                archive.open("wb") as f,
+            ):
+                shutil.copyfileobj(response, f)
+        except OSError as error:  # urllib's URLError is an OSError.
+            raise ImportError(
+                f"could not download LimiX's source from {ARCHIVE}: {error}. "
+                f"{_INSTALL_HINT}"
+            ) from error
+        unpacked = pathlib.Path(scratch) / "unpacked"
+        with tarfile.open(archive) as tar:
+            tar.extractall(unpacked, filter="data")
+        # GitHub's archive holds one directory, LimiX-<commit>.
+        tops = list(unpacked.iterdir())
+        if len(tops) != 1 or not _has_subtrees(tops[0]):
+            raise ImportError(
+                f"the archive {ARCHIVE} does not hold LimiX's model/v2_0 and "
+                "inference/v2_0."
+            )
+        try:
+            tops[0].rename(root)
+        except OSError:
+            if not _has_subtrees(root):  # Not another process's download.
+                raise
+    return root
+
+
+def _offline() -> bool:
+    """Whether ``$HF_HUB_OFFLINE`` asks for no downloads, as for weights."""
+    value = os.environ.get("HF_HUB_OFFLINE", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load() -> types.SimpleNamespace:
@@ -238,8 +337,7 @@ def missing_dependency(name: str) -> ImportError:
     message = (
         f"LimiXBarDistribution needs {top!r}, one of LimiX's dependencies, "
         "which is not installed. Install them with pip install "
-        "'lazy-tfm[limix]', and LimiX's source, which is not on PyPI, with "
-        f'pip install "LimiX @ git+{REPOSITORY}@{LIMIX_COMMIT}".'
+        "'lazy-tfm[limix]'."
     )
     if top == "triton":
         message += (

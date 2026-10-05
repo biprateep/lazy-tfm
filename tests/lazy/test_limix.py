@@ -22,7 +22,7 @@ from lazy.models import limix
 
 def _has_limix() -> bool:
     try:
-        _limix_source.locate()
+        _limix_source.locate(download=False)  # a skip check never downloads
     except ImportError:
         return False
     return True
@@ -403,7 +403,7 @@ def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
     X, z, _ = data
     with pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught:
         _model().fit(X, z)
-    assert "LimiX @ git+" in str(caught.value)
+    assert "'torch'" in str(caught.value)
 
 
 def test_a_spread_float64_cannot_resolve_is_refused():
