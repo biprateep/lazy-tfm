@@ -7,6 +7,8 @@ change the API.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 Every backend now takes one set of parameters with one set of defaults, and no
 upstream default decides a prediction unseen. **Default predictions change**
 (below); to reproduce 0.1.x numbers, pin `random_state` (TabPFN and TabICL 42,
@@ -454,6 +456,7 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/biprateep/lazy-tfm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/biprateep/lazy-tfm/releases/tag/v0.1.0
