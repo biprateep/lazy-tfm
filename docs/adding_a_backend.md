@@ -242,10 +242,19 @@ start.
 | A model page, in the models toctree | `docs/models/<name>.md`, `docs/models/index.md` | `test_backend_completeness.py` |
 | Golden densities, their settings and tolerances | `tests/lazy/golden_data.py`, `tests/lazy/golden/<name>.npz` (written by `tests/lazy/record_golden.py <name>`), `RTOL` and `ATOL` in `tests/lazy/test_golden.py` | `test_backend_completeness.py`, `test_golden.py` |
 | Small CPU settings for the checkpoint tests | `tests/lazy/backend_settings.py` | `test_backend_completeness.py`, `test_conformance_backends.py` |
-| A fake upstream for the bagging tests | `_FAKES` in `tests/lazy/test_bagging.py` | `test_backend_completeness.py` |
+| A fake upstream, with `install` and `SETTINGS` | `tests/lazy/fakes/<name>.py` | `test_backend_completeness.py`, `test_conformance.py`, `test_bagging.py` |
 | A real-weights entry in the shared-network test | `_REAL` in `tests/lazy/test_weights_cache.py` | `test_backend_completeness.py` |
 | A row in the hand-written model lists | `README.md`, `docs/installation.md` | review |
 | A line in the changelog | `CHANGELOG.md`, under `[Unreleased]` | review |
+
+The fake replaces what the backend needs from outside the package (the
+upstream model, its network, the checkpoint download) with stand-ins whose
+answers depend on each query and its member's context alone, so that the
+behavioral conformance tests in `tests/lazy/test_conformance.py` (seeds,
+chunking, the cache, transforms, bagging, pickling) run the backend's own code
+in the default suite, on a CPU and in seconds; `tests/lazy/fakes/__init__.py`
+describes what a fake provides, and the four existing ones are the models to
+follow. A fake that needs the upstream package skips without it.
 
 The golden file is recorded once, on a CPU, and never regenerated afterwards:
 it is the guard on the published numbers. The tests that load a checkpoint run

@@ -2,9 +2,13 @@
 # Copyright (c) 2025 Biprateep Dey
 """Every backend supports the uniform features, the same way (tier A).
 
-Parametrised over the backend-free stand-ins, which implement exactly the
-per-backend interface; the real backends join through the registry. Nothing
-here needs a GPU or a checkpoint.
+The behavioral tests (the grid, quantiles, seeds, chunking, the cache,
+transforms, bagging, pickling) run on the backend-free stand-ins, which
+implement exactly the per-backend interface, and on every registered backend
+with its upstream model replaced by its fake (tests/lazy/fakes): the
+backend's own code runs, on a CPU, with no checkpoint. A fake that needs its
+backend's upstream package skips without it. The registry's static contract
+is checked on the real classes. Nothing here needs a GPU or a checkpoint.
 """
 
 import builtins
@@ -14,6 +18,7 @@ import re
 import sys
 import warnings
 
+import fakes
 import numpy as np
 import pandas as pd
 import pytest
@@ -36,6 +41,20 @@ def data():
         [np.sin(z * k) + rng.normal(0, 0.05, z.size) for k in (1, 2, 3)]
     )
     return X[:70], z[:70], X[70:]
+
+
+@pytest.fixture(
+    params=[*standins.STANDINS, *sorted(lazy.ESTIMATORS)],
+    ids=lambda model: model if isinstance(model, str) else model.__name__,
+)
+def cls(request, monkeypatch):
+    """A stand-in class, or a registered backend on its fake upstream.
+
+    Either is called like a class; the backend is built small, on a CPU.
+    """
+    if isinstance(request.param, str):
+        return fakes.Backend(request.param, monkeypatch)
+    return request.param
 
 
 # -- the parameter contract --------------------------------------------------
@@ -312,7 +331,6 @@ def test_numpy_numbers_are_accepted_as_bag_sizes():
         _members.resolve_bag_size(np.True_, 100)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_numpy_integers_are_accepted_as_counts_and_seeds(cls, data):
     """Values from np.arange or a parameter grid are NumPy integers."""
     X, z, X_test = data
@@ -324,10 +342,9 @@ def test_numpy_integers_are_accepted_as_counts_and_seeds(cls, data):
     assert type(model.provenance_["n_estimators"]) is int
 
 
-# -- behaviour, on every stand-in -------------------------------------------
+# -- behavior, on every stand-in and every backend's fake ---------------------
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_the_default_grid_is_native_and_integrates_to_one(cls, data):
     X, z, X_test = data
     model = cls().fit(X, z)
@@ -338,7 +355,6 @@ def test_the_default_grid_is_native_and_integrates_to_one(cls, data):
     np.testing.assert_allclose(pdfs @ model.grid_.widths, 1.0)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_a_constructor_grid_overrides_the_native_one(cls, data):
     X, z, X_test = data
     model = cls(y_grid=lazy.datasets.DC1_GRID).fit(X, z)
@@ -349,7 +365,6 @@ def test_a_constructor_grid_overrides_the_native_one(cls, data):
     )
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_quantiles_invert_the_distribution(cls, data):
     X, z, X_test = data
     model = cls().fit(X, z)
@@ -362,7 +377,6 @@ def test_quantiles_invert_the_distribution(cls, data):
         )
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 @pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
 @pytest.mark.parametrize(
     "y_grid",
@@ -383,7 +397,6 @@ def test_predict_proba_is_the_distribution_on_the_grid(
     )
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 @pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
 def test_predict_pit_is_exact_and_agrees_with_a_fine_grid(cls, bag_size, data):
     X, z, _ = data
@@ -403,7 +416,6 @@ def test_predict_pit_is_exact_and_agrees_with_a_fine_grid(cls, bag_size, data):
     np.testing.assert_allclose(pit, grid_pit, atol=1e-4)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_interval_is_the_central_quantiles(cls, data):
     X, z, X_test = data
     model = cls().fit(X, z)
@@ -416,7 +428,6 @@ def test_interval_is_the_central_quantiles(cls, data):
         model.predict_interval(X_test, coverage=1.0)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_chunking_changes_nothing_but_rounding(cls, data):
     """A row's answer does not depend on the rows chunked with it.
 
@@ -432,7 +443,33 @@ def test_chunking_changes_nothing_but_rounding(cls, data):
     np.testing.assert_allclose(chunked, whole, rtol=1e-12, atol=0)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_the_cache_changes_nothing(cls, data):
+    X, z, X_test = data
+    cached = cls(kv_cache=True, bag_size=40).fit(X, z)
+    uncached = cls(kv_cache=False, bag_size=40).fit(X, z)
+    expected = uncached.predict_proba(X_test)
+    rtol = cls.kv_cache_rtol
+    np.testing.assert_allclose(
+        cached.predict_proba(X_test),
+        expected,
+        rtol=rtol,
+        atol=rtol * expected.max(),
+    )
+
+
+@pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
+@pytest.mark.parametrize("kv_cache", [True, False], ids=["cached", "uncached"])
+def test_a_pickled_model_predicts_the_same(cls, bag_size, kv_cache, data):
+    X, z, X_test = data
+    model = cls(n_estimators=3, bag_size=bag_size, kv_cache=kv_cache)
+    model.fit(X, z)
+    expected = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
+    np.testing.assert_array_equal(model.predict_proba(X_test), expected)
+    assert restored.provenance_ == model.provenance_
+
+
 def test_a_bag_as_large_as_the_context_is_no_bag(cls, data):
     X, z, X_test = data
     plain = cls().fit(X, z)
@@ -443,7 +480,6 @@ def test_a_bag_as_large_as_the_context_is_no_bag(cls, data):
     )
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 @pytest.mark.parametrize(
     "transforms",
     [
@@ -460,7 +496,6 @@ def test_every_transform_runs(cls, transforms, data):
     assert np.isfinite(pdfs).all() and pdfs.shape == (len(X_test), 200)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_the_same_seed_repeats_and_another_does_not(cls, data):
     X, z, X_test = data
     first = (
@@ -482,7 +517,6 @@ def test_the_same_seed_repeats_and_another_does_not(cls, data):
     assert not np.array_equal(first, other)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_no_seed_draws_one_and_records_it(cls, data):
     X, z, X_test = data
     params = {"n_estimators": 3, "bag_size": 40, "random_state": None}
@@ -604,7 +638,6 @@ def test_a_provenance_without_a_required_key_is_refused(data):
         _ForgetsTheRevision().fit(X, z)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_a_fitted_provenance_holds_every_required_key(cls, data):
     X, z, _ = data
     model = cls().fit(X, z)
@@ -819,7 +852,6 @@ def test_soft_clip_is_the_upstream_models_clip():
     np.testing.assert_allclose(ours, theirs, rtol=1e-12)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_no_query_rows_give_an_empty_answer(cls, data):
     X, z, X_test = data
     model = cls(n_estimators=3, bag_size=40).fit(X, z)
@@ -841,7 +873,6 @@ def test_a_refit_into_several_groups_drops_the_single_regressor(data):
     assert not hasattr(model, "regressor_")
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS)
 def test_a_scaffold_is_fitted_on_its_members_bag(cls, data):
     """As the _transforms docstring says, with native bagging or without."""
     X, z, _ = data
@@ -961,7 +992,6 @@ def test_only_uniform_layer_backends_can_register():
         registry.register("plain", Plain)
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
     X, z, X_test = data
     model = cls(n_estimators=2, progress=False).fit(X, z)
@@ -973,14 +1003,12 @@ def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
     assert len(model.predict_distribution(empty)) == 0
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 def test_fitting_no_rows_is_refused(cls, data):
     X, z, _ = data
     with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
         cls(n_estimators=2, progress=False).fit(X[:0], z[:0])
 
 
-@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
 @pytest.mark.parametrize("chunk_size", [0, 4])
 def test_blocked_scoring_matches_the_whole_array(
     cls, chunk_size, data, monkeypatch

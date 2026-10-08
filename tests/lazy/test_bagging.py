@@ -2,30 +2,25 @@
 # Copyright (c) 2025 Biprateep Dey
 """Bagging means the same on every backend: lazy's bags, fitted per bag.
 
-Each backend's upstream model is replaced by a recording fake, so these run
-on a CPU with nothing downloaded: what is checked is which rows, transforms
-and targets each member is handed, not what a network makes of them. Every
-feature column is ``row + 1000 * column``, so a row's smallest value names
-it whatever order its columns arrive in.
+Each backend's upstream model is replaced by its recording fake
+(tests/lazy/fakes), so these run on a CPU with nothing downloaded: what is
+checked is which rows, transforms and targets each member is handed, not
+what a network makes of them. Every feature column is
+``row + 1000 * column``, so a row's smallest value names it whatever order
+its columns arrive in.
 """
 
-import collections
 import os
-import pathlib
-import types
 
+import fakes
 import numpy as np
 import pytest
 
-from lazy.models import _hub
-from lazy.models import _icl_stream
-from lazy.models import _limix_preprocess
-from lazy.models import _limix_stream
+import lazy
 from lazy.models import _members
 from lazy.models import _transforms
 from lazy.models import limix
 from lazy.models import tabfm
-from lazy.models import tabicl
 from lazy.models import tabpfn
 
 needs_checkpoint = pytest.mark.skipif(
@@ -37,7 +32,7 @@ needs_checkpoint = pytest.mark.skipif(
 
 N_ROWS, N_MEMBERS, BAG_ROWS, SEED = 60, 4, 25, 3
 
-BACKENDS = ("tabpfn", "tabicl", "tabfm", "limix")
+BACKENDS = sorted(lazy.ESTIMATORS)
 
 
 @pytest.fixture
@@ -47,11 +42,6 @@ def data():
     X = rows + 1000.0 * np.arange(3)
     y = np.random.default_rng(0).uniform(0.1, 1.5, N_ROWS)
     return X, y
-
-
-def _row_ids(features):
-    """The rows some prepared features came from, in their order."""
-    return np.asarray(features, dtype=float).min(axis=1).round().astype(int)
 
 
 def _bags(n_rows=N_ROWS):
@@ -64,246 +54,18 @@ def _member_of(seed):
     return seeds[seed]
 
 
-class _Recorder:
-    """What each fake upstream model was handed, keyed by member."""
-
-    def __init__(self):
-        self.calls = collections.defaultdict(list)
-        self.loads = []
-
-    def add(self, key, **seen):
-        self.calls[key].append(types.SimpleNamespace(**seen))
-
-
-def _provenance(est):
-    """The provenance a real checkpoint load records, for a faked load."""
-    return _hub.get_checkpoint(est.backend, est.version).provenance(
-        device=est.device_
-    )
-
-
-# -- the fakes -----------------------------------------------------------------
-
-
-def _fake_tabpfn(monkeypatch, recorder, *, limit=None):
-    """TabPFNRegressor without a network, validating sizes as upstream does.
-
-    Its bucket borders are fixed in standardised units and stretched by the
-    targets it is given, as upstream's are. It loads its "network" through
-    upstream's loader, as the real regressor does, and the loader counts
-    the networks it builds in ``recorder.loads``.
-    """
-    pytest.importorskip("tabpfn")
-    import tabpfn as upstream  # noqa: PLC0415 - optional extra.
-    from tabpfn import base  # noqa: PLC0415 - optional extra.
-    from tabpfn import validation  # noqa: PLC0415 - optional extra.
-    import torch  # noqa: PLC0415 - optional extra.
-
-    def load(**kwargs):
-        recorder.loads.append(kwargs)
-        return [object()], None, torch.nn.Module(), None
-
-    monkeypatch.setattr(base, "initialize_tabpfn_model", load)
-
-    class Regressor:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def fit(self, X, y):
-            self.models_, *_ = base.initialize_tabpfn_model(
-                model_path=self.kwargs["model_path"],
-                which="regressor",
-                fit_mode=self.kwargs["fit_mode"],
-                softmax_temperature_override=None,
-                n_estimators_override=self.kwargs["n_estimators"],
-            )
-            self.inference_config_ = types.SimpleNamespace(
-                MAX_NUMBER_OF_SAMPLES=limit or 10**9, MAX_CPU_SAMPLES=10**9
-            )
-            validation.validate_dataset_size(
-                X,
-                y,
-                max_num_samples=limit or 10**9,
-                max_num_features=500,
-                devices=(torch.device("cpu"),),
-                ignore_pretraining_limits=self.kwargs[
-                    "ignore_pretraining_limits"
-                ],
-                max_cpu_samples=10**9,
-            )
-            recorder.add(
-                self.kwargs["random_state"],
-                rows=_row_ids(X),
-                y=np.array(y),
-                config=self.kwargs["inference_config"],
-            )
-            self.znorm_space_bardist_ = types.SimpleNamespace(
-                borders=torch.linspace(-3.0, 3.0, 11, dtype=torch.float64)
-            )
-            self.y_train_mean_ = float(np.mean(y))
-            self.y_train_std_ = float(np.std(y))
-            return self
-
-        def predict(self, X, output_type):
-            del output_type  # Unused: always the full output.
-            return {
-                "criterion": self.znorm_space_bardist_,
-                "logits": torch.zeros(len(X), 10),
-            }
-
-    monkeypatch.setattr(upstream, "TabPFNRegressor", Regressor)
-
-    def load(est):
-        est.checkpoint_ = pathlib.Path("tabpfn-v3.ckpt")
-        est.provenance_ = _provenance(est)
-
-    monkeypatch.setattr(tabpfn.TabPFNBarDistribution, "_load_checkpoint", load)
-    return tabpfn.TabPFNBarDistribution
-
-
-def _fake_tabicl(monkeypatch, recorder):
-    """TabICLRegressor without a backbone, with upstream's member plan."""
-    upstream = pytest.importorskip("tabicl")
-    preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
-
-    class Regressor:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.random_state = kwargs["random_state"]
-
-        def fit(self, X, y):
-            recorder.add(self.random_state, rows=_row_ids(X), y=np.array(y))
-            self.ensemble_generator_ = preprocessing.EnsembleGenerator(
-                classification=False,
-                n_estimators=self.kwargs["n_estimators"],
-                norm_methods=self.kwargs["norm_methods"],
-                feat_shuffle_method=self.kwargs["feat_shuffle_method"],
-                outlier_threshold=self.kwargs["outlier_threshold"],
-                random_state=self.random_state,
-            ).fit(X, y)
-            return self
-
-        def predict(self, X, output_type):
-            del output_type  # Unused: always the raw quantiles.
-            return np.zeros((len(X), 1)) + np.array([-1.0, 0.0, 1.0])
-
-    monkeypatch.setattr(upstream, "TabICLRegressor", Regressor)
-
-    def load(est):
-        est.checkpoint_ = pathlib.Path("tabicl-regressor.ckpt")
-        est.provenance_ = _provenance(est)
-
-    monkeypatch.setattr(tabicl.TabICLQuantile, "_load_checkpoint", load)
-    return tabicl.TabICLQuantile
-
-
-def _fake_limix(monkeypatch, recorder):
-    """LimiX without its source or network: pipelines that record."""
-
-    class Pipeline:
-        def __init__(self, token, seeds, *, shuffle):
-            self.token, self.seeds, self.shuffle = token, seeds, shuffle
-
-        def fit(self, context):
-            self.n_features_out_ = context.shape[1]
-            return self
-
-        def transform(self, features):
-            return features
-
-    class Member(_limix_stream.Member):
-        def __init__(self, x, y, seed):
-            super().__init__(x, y, seed)
-            recorder.add(seed, rows=_row_ids(x), y=np.array(y))
-
-    monkeypatch.setattr(_limix_preprocess, "MemberPipeline", Pipeline)
-    monkeypatch.setattr(_limix_stream, "Member", Member)
-    monkeypatch.setattr(
-        limix.LimiXBarDistribution,
-        "_import_backend",
-        lambda est: types.ModuleType("limix"),
-    )
-
-    def load(est):
-        est.checkpoint_ = pathlib.Path("limix.ckpt")
-        est.provenance_ = _provenance(est)
-        est.borders_ = np.linspace(-3.0, 3.0, 11)
-        est.n_buckets_ = 10
-
-    monkeypatch.setattr(limix.LimiXBarDistribution, "_load_checkpoint", load)
-    monkeypatch.setattr(
-        limix.LimiXBarDistribution,
-        "_member_probabilities",
-        lambda est, entry, X: np.full((len(X), est.n_buckets_), 0.1),
-    )
-    return limix.LimiXBarDistribution
-
-
-def _fake_tabfm(monkeypatch, recorder):
-    """TabFM's real classifier and member views, without the backbone.
-
-    Records, for every member run on either path, the rows of its view and
-    the scaling its standardisation was refitted with.
-    """
-    upstream = pytest.importorskip("tabfm")
-    monkeypatch.setattr(_icl_stream, "streaming_available", lambda: True)
-    monkeypatch.setattr(
-        tabfm.TabFMHistogram,
-        "_backbone",
-        lambda est: types.SimpleNamespace(max_classes=10),
-    )
-
-    def logits(classifier, model, targets, **kwargs):
-        del model, kwargs  # Unused: nothing runs.
-        generator = classifier.ensemble_generator_
-        (pipeline,) = generator.preprocessors_.values()
-        recorder.add(
-            "tabfm",
-            rows=_row_ids(generator.X_),
-            n_members=classifier.n_estimators,
-            mean=pipeline.standard_scaler_.mean_,
-            features=np.asarray(generator.X_),
-        )
-        n_rows = len(targets["query"])
-        return {
-            "query": {"mean_logits": np.zeros((n_rows, classifier.n_classes_))}
-        }
-
-    def internal(classifier, X):
-        frame = {"query": X}
-        return logits(classifier, None, frame)["query"]["mean_logits"][None]
-
-    monkeypatch.setattr(_icl_stream, "classification_logits", logits)
-    monkeypatch.setattr(
-        upstream.TabFMClassifier, "_predict_proba_internal", internal
-    )
-    return tabfm.TabFMHistogram
-
-
-_FAKES = {
-    "tabpfn": _fake_tabpfn,
-    "tabicl": _fake_tabicl,
-    "tabfm": _fake_tabfm,
-    "limix": _fake_limix,
-}
-
-_SMALL = {
-    "tabfm": {"n_coarse_bins": 2, "n_fine_bins": 2, "n_dither": 1},
-}
-
-
 def _fit(name, monkeypatch, X, y, **params):
     """A bagged fit (and, for TabFM, a prediction) on the fake backend."""
-    recorder = _Recorder()
-    cls = _FAKES[name](monkeypatch, recorder)
+    recorder = fakes.Recorder()
+    cls = fakes.install(name, monkeypatch, recorder)
     settings = {
+        **fakes.settings(name),
         "n_estimators": N_MEMBERS,
         "bag_size": BAG_ROWS,
         "random_state": SEED,
         "device": "cpu",
         "progress": False,
         "kv_cache": name != "limix",
-        **_SMALL.get(name, {}),
         **params,
     }
     est = cls(**settings).fit(X, y)
@@ -412,7 +174,8 @@ def test_tabfm_members_refit_their_preprocessing_on_their_rows(
     X, y = data
     _, recorder = _fit("tabfm", monkeypatch, X, y)
     for call in recorder.calls["tabfm"]:
-        np.testing.assert_allclose(call.mean, call.features.mean(axis=0))
+        (mean,) = call.mean  # A member's view has one norm method.
+        np.testing.assert_allclose(mean, call.features.mean(axis=0))
         np.testing.assert_array_equal(
             call.rows, np.unique(call.rows)
         )  # its own rows, each once
@@ -513,8 +276,8 @@ def test_tabpfns_bagged_members_share_one_network(monkeypatch, data):
 def test_tabpfn_takes_a_large_context_in_small_bags(monkeypatch, data):
     """Only the bag meets upstream's limit, so bagging is the way in."""
     X, y = data
-    recorder = _Recorder()
-    cls = _fake_tabpfn(monkeypatch, recorder, limit=BAG_ROWS)
+    recorder = fakes.Recorder()
+    cls = fakes.install("tabpfn", monkeypatch, recorder, limit=BAG_ROWS)
     est = cls(
         n_estimators=N_MEMBERS,
         bag_size=BAG_ROWS,
@@ -536,7 +299,7 @@ def test_tabpfn_says_bagging_below_its_limit_is_the_remedy(
     monkeypatch, data, bag_size, seen
 ):
     X, y = data
-    cls = _fake_tabpfn(monkeypatch, _Recorder(), limit=BAG_ROWS)
+    cls = fakes.install("tabpfn", monkeypatch, limit=BAG_ROWS)
     est = cls(n_estimators=2, bag_size=bag_size, device="cpu", progress=False)
     with pytest.raises(ValueError, match="officially supported") as raised:
         est.fit(X, y)
@@ -601,7 +364,7 @@ def test_every_group_is_seeded_by_its_first_member(bag_rows, native):
 
 def test_no_seed_draws_a_fresh_ensemble_each_fit(monkeypatch, data):
     X, y = data
-    cls = _fake_tabicl(monkeypatch, _Recorder())
+    cls = fakes.install("tabicl", monkeypatch)
     params = {"n_estimators": 2, "random_state": None, "device": "cpu"}
     first = cls(**params).fit(X, y)
     second = cls(**params).fit(X, y)

@@ -11,15 +11,16 @@ models are written by docs/conf.py from the checkpoints and the registry, so
 what is checked for them is the fields they are written from.
 """
 
+import importlib
 import pathlib
 import re
 import tomllib
 
 import backend_settings
+import fakes
 import golden_data
 import pytest
 import standins
-import test_bagging
 import test_golden
 import test_weights_cache
 
@@ -134,8 +135,19 @@ def _test_gaps(name, cls):
         found.append(
             "no CPU settings in tests/lazy/backend_settings.BACKEND_SETTINGS"
         )
-    if name not in test_bagging._FAKES:
-        found.append("no fake upstream in tests/lazy/test_bagging._FAKES")
+    fake = fakes.FAKES_DIR / f"{name}.py"
+    if not fake.is_file():
+        found.append(
+            f"no fake upstream tests/lazy/fakes/{name}.py (see "
+            "tests/lazy/fakes/__init__.py)"
+        )
+    else:
+        module = importlib.import_module(f"fakes.{name}")
+        found.extend(
+            f"tests/lazy/fakes/{name}.py defines no {attribute}"
+            for attribute in ("install", "SETTINGS")
+            if not hasattr(module, attribute)
+        )
     real = [param.values[0] for param in test_weights_cache._REAL]
     if cls not in real:
         found.append(
@@ -176,7 +188,7 @@ def test_a_new_backend_is_told_everything_it_lacks(monkeypatch):
         "golden/newcomer.npz",
         "RTOL",
         "BACKEND_SETTINGS",
-        "_FAKES",
+        "fakes/newcomer.py",
         "_REAL",
     ):
         assert gap in missing
