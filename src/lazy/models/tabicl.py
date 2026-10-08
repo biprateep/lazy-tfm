@@ -318,18 +318,9 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         self.verbose = verbose
 
     def _import_backend(self) -> types.ModuleType:
-        try:
-            import tabicl  # noqa: PLC0415 - an optional, heavy extra.
-        except ImportError as error:
-            # Only the backend itself missing is a missing extra; anything
-            # it fails to import in turn is reported as it is.
-            if (error.name or "").partition(".")[0] != "tabicl":
-                raise
-            raise ImportError(
-                "TabICLQuantile needs the tabicl backend: "
-                "pip install 'lazy-tfm[tabicl]'"
-            ) from error
-        return tabicl
+        return _ensemble.import_extra(
+            "tabicl", needed_by=type(self).__name__, extra=self.extra
+        )
 
     def _auto_outlier_threshold(self) -> float | None:
         return AUTO_OUTLIER_THRESHOLD
@@ -347,11 +338,13 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             }
         )
 
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+    def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        del X  # Unused: the native grid depends on the targets alone.
         # The native grid spans every context target, not only those some
         # bag happened to draw.
         self._support = (float(np.min(y)), float(np.max(y)))
-        super()._fit(X, y)
+
+    def _after_fit(self) -> None:
         # The base class keeps the one group's handle; regressor_ is the
         # TabICLRegressor itself, when one serves the whole ensemble.
         handle = self.__dict__.pop("regressor_", None)

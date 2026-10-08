@@ -7,8 +7,11 @@ per-backend interface; the real backends join through the registry. Nothing
 here needs a GPU or a checkpoint.
 """
 
+import builtins
 import inspect
+import pickle
 import re
+import sys
 import warnings
 
 import numpy as np
@@ -606,6 +609,81 @@ def test_a_fitted_provenance_holds_every_required_key(cls, data):
     X, z, _ = data
     model = cls().fit(X, z)
     assert set(_ensemble.REQUIRED_PROVENANCE) <= set(model.provenance_)
+
+
+class _Hooked(standins.HistogramStandIn):
+    """Records when its fit hooks run, and keeps a network memo."""
+
+    def _before_fit(self, X, y):
+        self.calls_ = [("before", hasattr(self, "random_state_"), len(y))]
+
+    def _check_backend_params(self):
+        self.calls_.append(("check",))
+
+    def _after_fit(self):
+        self.calls_.append(("after", "groups" in self.provenance_))
+
+    def network(self):
+        def get():
+            self.loads_ = getattr(self, "loads_", 0) + 1
+            return object()
+
+        return self._memoized_network((self.version, self.device_), get)
+
+
+def test_the_fit_hooks_bracket_the_fit(data):
+    X, z, _ = data
+    model = _Hooked().fit(X, z)
+    assert model.calls_ == [
+        ("before", False, len(z)),
+        ("check",),
+        ("after", True),
+    ]
+
+
+def test_a_memoized_network_is_kept_until_its_key_changes(data):
+    X, z, _ = data
+    model = _Hooked().fit(X, z)
+    first = model.network()
+    assert model.network() is first
+    assert model.loads_ == 1
+    model.version = "v1"
+    assert model.network() is not first
+    assert model.loads_ == 2
+
+
+def test_a_memoized_network_is_not_pickled(data):
+    X, z, X_test = data
+    model = _Hooked().fit(X, z)
+    model.network()
+    restored = pickle.loads(pickle.dumps(model))
+    assert "_network_cache" not in vars(restored)
+    assert "_network_cache" in vars(model)  # the original keeps it
+    np.testing.assert_array_equal(
+        restored.predict_pdf(X_test), model.predict_pdf(X_test)
+    )
+    restored.network()
+    assert restored.loads_ == 2
+
+
+def test_a_missing_extra_is_named(monkeypatch):
+    monkeypatch.setitem(sys.modules, "mymodel", None)
+    with pytest.raises(ImportError, match=r"pip install 'lazy-tfm\[mine\]'"):
+        _ensemble.import_extra("mymodel", needed_by="Mine", extra="mine")
+
+
+def test_a_broken_extra_reports_its_own_error(monkeypatch):
+    real_import = builtins.__import__
+
+    def importing(module, *args, **kwargs):
+        if module == "mymodel":
+            raise ModuleNotFoundError("No module named 'torch'", name="torch")
+        return real_import(module, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", importing)
+    with pytest.raises(ModuleNotFoundError, match="torch") as raised:
+        _ensemble.import_extra("mymodel", needed_by="Mine", extra="mine")
+    assert "lazy-tfm" not in str(raised.value)
 
 
 # -- softmax_temperature, mixed_precision, outlier_threshold -----------------

@@ -505,18 +505,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.verbose = verbose
 
     def _import_backend(self) -> types.ModuleType:
-        try:
-            import tabpfn  # noqa: PLC0415 - an optional, heavy extra.
-        except ImportError as error:
-            # Only the backend itself missing is a missing extra; anything
-            # it fails to import in turn is reported as it is.
-            if (error.name or "").partition(".")[0] != "tabpfn":
-                raise
-            raise ImportError(
-                "TabPFNBarDistribution needs the tabpfn backend: "
-                "pip install 'lazy-tfm[tabpfn]'"
-            ) from error
-        return tabpfn
+        return _ensemble.import_extra(
+            "tabpfn", needed_by=type(self).__name__, extra=self.extra
+        )
 
     @classmethod
     def clear_upstream_caches(cls) -> None:
@@ -591,7 +582,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return regressor
 
     def _fit(self, X: Any, y: _typing.FloatArray) -> None:
-        # The loaded networks of this fit, shared by its regressors.
+        # The loaded networks of this fit, shared by its regressors. An
+        # override rather than _before_fit and _after_fit, because they must
+        # be let go of when the fit fails too.
         self._networks: dict[tuple[Any, ...], Any] = {}
         try:
             super()._fit(X, y)

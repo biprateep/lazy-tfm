@@ -387,7 +387,7 @@ def classification_logits(
 
 
 def softmax(
-    logits: _typing.FloatArray, temperature: float = 0.9
+    logits: _typing.FloatArray, temperature: float
 ) -> _typing.FloatArray:
     """Temperature-scaled softmax over the last axis.
 
@@ -399,7 +399,7 @@ def softmax(
         Probabilities of the same shape, summing to one over the last axis.
 
     Examples:
-        >>> softmax(np.zeros((1, 4))).round(3).tolist()
+        >>> softmax(np.zeros((1, 4)), temperature=0.9).round(3).tolist()
         [[0.25, 0.25, 0.25, 0.25]]
     """
     scaled = logits / temperature

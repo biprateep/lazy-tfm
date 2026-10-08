@@ -35,7 +35,12 @@ also set fitted attributes of its own (TabPFN records its bucket borders,
 TabFM resolves its bins and its inference path), lower `kv_cache_` to the mode
 that actually ran, and add keys to `provenance_`. It may not change the
 members, their rows or their seeds, which the base class has already planned
-and recorded.
+and recorded. What a backend must do around the whole fit goes in
+`_before_fit`, which runs once the package is imported and before any
+parameter is validated (TabFM clips the context targets to its bins' support
+there), and `_after_fit`, which runs once the fit has succeeded and
+`provenance_` is checked (LimiX records each member's pipeline there), rather
+than in an override of `_fit`.
 
 `_predict_group` receives a chunk of prepared queries and must return a
 {mod}`lazy.distributions` object of the kind `native_output` declares (a
@@ -56,15 +61,16 @@ resolved uniform settings, and a fit that ends without every key in
 record the checkpoint's keys.
 
 A fitted estimator must survive pickling and give the same predictions
-afterwards. A network shared between estimators through
-`lazy.models._weights` should not travel with it: TabFM and LimiX drop their
-reference in `__getstate__` and fetch the network again on first use, so a
-pickle does not carry gigabytes of weights. The base class resolves `device`
-into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or `"mps"`) before the
-checkpoint is loaded, and sets `mixed_precision_` only on CUDA; a backend runs
-on `device_`, in float32 unless `mixed_precision_` is set, and raises a clear
-error on a device its model does not support. No current backend is tested on
-`"mps"`.
+afterwards. A network shared between estimators through `lazy.models._weights`
+should not travel with it: a backend that loads its network outside
+`_fit_group` keeps it through `_memoized_network`, whose reference the base
+class drops on pickling and which loads the network again on first use, so a
+pickle does not carry gigabytes of weights (TabFM and LimiX do this). The base
+class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
+`"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
+CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
+and raises a clear error on a device its model does not support. No current
+backend is tested on `"mps"`.
 
 ## Hooks for the rest of the package
 
@@ -161,16 +167,10 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
         self.verbose = verbose
 
     def _import_backend(self) -> types.ModuleType:
-        try:
-            import mymodel  # noqa: PLC0415 - an optional, heavy extra.
-        except ImportError as error:
-            if (error.name or "").partition(".")[0] != "mymodel":
-                raise
-            raise ImportError(
-                "MyModelHistogram needs the mymodel backend: "
-                "pip install 'lazy-tfm[mymodel]'"
-            ) from error
-        return mymodel
+        # Names the extra when mymodel is missing.
+        return _ensemble.import_extra(
+            "mymodel", needed_by=type(self).__name__, extra=self.extra
+        )
 
     @classmethod
     def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:

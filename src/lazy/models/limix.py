@@ -358,9 +358,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         )
         self.n_buckets_ = int(self.borders_.size - 1)
 
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+    def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        del X, y  # Unused: only the cache budget is reset.
         self._reset_cache_budget()
-        super()._fit(X, y)
+
+    def _after_fit(self) -> None:
         # The groups as they ran: LimiX's shuffler, not the planned
         # permutation, orders a bagged member's columns (see _prepare).
         self.member_groups_ = tuple(
@@ -480,23 +482,24 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         if self.__dict__.pop("_relocate_checkpoint", False):
             spec = _hub.get_checkpoint(self.backend, self.version)
             self.checkpoint_ = spec.download()
-        key = (self.version, self.device_)
-        cached_key, network = getattr(self, "_network_cache", (None, None))
-        if network is None or cached_key != key:
-            load = _limix_stream.load_network
-            network = _weights.network(
-                _weights.key(
-                    self.backend,
-                    self.version,
-                    self.checkpoint_,
-                    self.device_,
-                    "float32",
-                    load,
-                ),
-                functools.partial(self._load_network, load),
-            )
-            self._network_cache = (key, network)
-        return network
+        return self._memoized_network(
+            (self.version, self.device_), self._shared_network
+        )
+
+    def _shared_network(self) -> Any:
+        """Finds or loads the shared network; see :meth:`_network`."""
+        load = _limix_stream.load_network
+        return _weights.network(
+            _weights.key(
+                self.backend,
+                self.version,
+                self.checkpoint_,
+                self.device_,
+                "float32",
+                load,
+            ),
+            functools.partial(self._load_network, load),
+        )
 
     def _load_network(self, load: Callable[[pathlib.Path, str], Any]) -> Any:
         """Reads the network from the checkpoint; see :meth:`_network`."""
@@ -642,8 +645,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the network or the caches, which reload."""
-        state = self.__dict__.copy()
-        state.pop("_network_cache", None)
+        state = super().__getstate__()
         if "handles_" in state:
             state["handles_"] = [
                 {

@@ -48,9 +48,10 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Hashable, Iterator, Mapping
 import numbers
 import os
+import sys
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
 import warnings
@@ -76,6 +77,7 @@ __all__ = [
     "ContextEnsembleEstimator",
     "ContextSizeWarning",
     "PerformanceWarning",
+    "import_extra",
 ]
 
 # Warnings skip every frame inside this package, so that they point at the
@@ -196,8 +198,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     records the checkpoint's and :meth:`_recipe` the ensemble's.
 
     A fitted estimator pickles and predicts the same after unpickling; a network
-    shared through :mod:`lazy.models._weights` is dropped in ``__getstate__``
-    and fetched again on first use rather than pickled. The device is resolved
+    shared through :mod:`lazy.models._weights` is kept through
+    :meth:`_memoized_network`, which ``__getstate__`` drops, so it is fetched
+    again on first use rather than pickled. The device is resolved
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
@@ -293,7 +296,31 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     @abc.abstractmethod
     def _import_backend(self) -> types.ModuleType:
-        """Imports the model's package, naming the extra if it is missing."""
+        """Imports the model's package, naming the extra if it is missing.
+
+        :func:`import_extra` does this for a package that imports by name.
+        """
+
+    def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        """Prepares a fit; runs once the backend's package is imported.
+
+        It runs before any parameter is validated, so it may set what
+        :meth:`_check_backend_params` reads (TabFM clips the context targets
+        to its bins' support here). The default does nothing.
+
+        Args:
+            X: The whole context, shape (n_rows, n_features).
+            y: Its target values, shape (n_rows,).
+        """
+        del X, y  # Unused: nothing to prepare.
+
+    def _after_fit(self) -> None:
+        """Finishes a fit that succeeded, once ``provenance_`` is checked.
+
+        It may record more fitted attributes and provenance keys, but under
+        the same rules as :meth:`_fit_group`. The default does nothing.
+        """
+        return
 
     def _check_backend_params(self) -> None:
         """Validates the backend's own parameters; raises ValueError.
@@ -487,6 +514,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         # A missing backend package is the likeliest reason a first fit
         # fails, so it is reported before any parameter complaint.
         self._import_backend()
+        self._before_fit(X, y)
         self._check_uniform_params()
         self._check_backend_params()
         _progress.check_progress(self.progress)
@@ -566,6 +594,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             **self._recipe(),
         }
         self._check_provenance()
+        self._after_fit()
 
     def _check_provenance(self) -> None:
         """Raises unless ``provenance_`` holds :data:`REQUIRED_PROVENANCE`."""
@@ -904,10 +933,79 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             return self.native_grid
         return super()._default_grid()
 
+    # -- the network ---------------------------------------------------------
+
+    def _memoized_network(
+        self, memo_key: Hashable, get: Callable[[], Any]
+    ) -> Any:
+        """The loaded network, kept on the instance until ``memo_key`` changes.
+
+        A backend that loads its network outside the fit (lazily, on the
+        first prediction, say) keeps it here rather than in an attribute of
+        its own: the reference is dropped on pickling and on cloning, and an
+        unpickled estimator calls ``get`` again on first use.
+
+        Args:
+            memo_key: Everything that decides which network the instance
+                needs, such as its version, device and precision; a change
+                calls ``get`` again, so that no prediction can run on the
+                previous one.
+            get: Loads or finds the network, usually through
+                :func:`lazy.models._weights.network`; called only when the
+                instance holds none for ``memo_key``.
+
+        Returns:
+            The network.
+        """
+        cached_key, network = getattr(self, "_network_cache", (None, None))
+        if network is None or cached_key != memo_key:
+            network = get()
+            self._network_cache = (memo_key, network)
+        return network
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickles without the memoized network, which reloads on first use."""
+        state = dict(super().__getstate__())
+        state.pop("_network_cache", None)
+        return state
+
     def _log(self, message: str) -> None:
         """Prints a log line when ``verbose``."""
         if self.verbose:
             print(f"[{type(self).__name__}] {message}", flush=True)
+
+
+def import_extra(
+    module: str, *, needed_by: str, extra: str
+) -> types.ModuleType:
+    """Imports a backend's optional package, naming the extra if it is missing.
+
+    Only the package itself missing is a missing extra; anything it fails to
+    import in turn is reported as it is.
+
+    Args:
+        module: The package to import, such as ``"tabicl"``.
+        needed_by: The class that needs it, for the message.
+        extra: The pip extra of lazy-tfm that installs it.
+
+    Returns:
+        The imported package.
+
+    Raises:
+        ImportError: Naming the extra when ``module`` is not installed, or
+            upstream's own when something it imports is missing or broken.
+    """
+    try:
+        # What `import module` runs, so that it fails as the statement would.
+        __import__(module)
+    except ImportError as error:
+        if (error.name or "").partition(".")[0] != module.partition(".")[0]:
+            raise
+        raise ImportError(
+            f"{needed_by} needs the {module} backend: "
+            f"pip install 'lazy-tfm[{extra}]'"
+        ) from error
+    return sys.modules[module]
 
 
 def _resolve_seed(random_state: int | None) -> int:

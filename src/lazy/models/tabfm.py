@@ -595,20 +595,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # -- the per-backend interface -------------------------------------------
 
     def _import_backend(self) -> types.ModuleType:
-        # A missing `tabfm` is the likeliest reason a first fit fails, and it
-        # is reported before any parameter complaint.
-        try:
-            import tabfm  # noqa: PLC0415 - an optional, heavy extra.
-        except ImportError as error:
-            # Only the backend itself missing is a missing extra; anything
-            # it fails to import in turn is reported as it is.
-            if (error.name or "").partition(".")[0] != "tabfm":
-                raise
-            raise ImportError(
-                "TabFMHistogram needs the tabfm backend: "
-                "pip install 'lazy-tfm[tabfm]'"
-            ) from error
-        return tabfm
+        return _ensemble.import_extra(
+            "tabfm", needed_by=type(self).__name__, extra=self.extra
+        )
 
     @classmethod
     def setup(cls, *, dry_run: bool) -> bool:
@@ -763,14 +752,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         rows = slice(None) if group.rows is None else group.rows
         return {"X": _frame(X), "y": self.y_context_[rows], "group": group}
 
-    def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        self._import_backend()
+    def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
+        del X  # Unused: the bins come from the targets alone.
         # One set of equal-mass bins for the whole ensemble, from the whole
         # context: natively bagged members share a classifier, so they must
         # share its classes, and every group then predicts on the same bins.
         self.support_ = self._support(y)
         self.y_context_ = _clip_to_support(y, self.support_)
-        super()._fit(X, y)
 
     def _resolve_bins(self, n_context: int) -> None:
         """Fixes the bin layout: a matched grid, or equal-mass bin counts.
@@ -1263,33 +1251,35 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         previous model's weights, and it is dropped on pickling: an unpickled
         estimator reloads, or finds the shared model, on next use.
         """
-        key = (self.version, str(self.device_), self.mixed_precision_)
-        cached_key, model = getattr(self, "_backbone_cache", (None, None))
-        if model is None or cached_key != key:
-            from tabfm import (  # noqa: PLC0415 - optional backend, imported at use.
-                tabfm_v1_0_0_pytorch as tabfm_v1,
-            )
-            import torch  # noqa: PLC0415 - optional backend, imported at use.
+        return self._memoized_network(
+            (self.version, str(self.device_), self.mixed_precision_),
+            self._shared_backbone,
+        )
 
-            self.checkpoint_ = _hub.get_checkpoint(
-                self.backend, self.version
-            ).download()
-            # None keeps the stored float32 weights.
-            dtype = torch.bfloat16 if self.mixed_precision_ else None
-            load = tabfm_v1.load
-            model = _weights.network(
-                _weights.key(
-                    self.backend,
-                    self.version,
-                    self.checkpoint_,
-                    self.device_,
-                    dtype or torch.float32,
-                    load,
-                ),
-                functools.partial(self._load_backbone, load, dtype),
-            )
-            self._backbone_cache = (key, model)
-        return model
+    def _shared_backbone(self) -> Any:
+        """The checkpoint and the shared model; see :meth:`_backbone`."""
+        from tabfm import (  # noqa: PLC0415 - optional backend, imported at use.
+            tabfm_v1_0_0_pytorch as tabfm_v1,
+        )
+        import torch  # noqa: PLC0415 - optional backend, imported at use.
+
+        self.checkpoint_ = _hub.get_checkpoint(
+            self.backend, self.version
+        ).download()
+        # None keeps the stored float32 weights.
+        dtype = torch.bfloat16 if self.mixed_precision_ else None
+        load = tabfm_v1.load
+        return _weights.network(
+            _weights.key(
+                self.backend,
+                self.version,
+                self.checkpoint_,
+                self.device_,
+                dtype or torch.float32,
+                load,
+            ),
+            functools.partial(self._load_backbone, load, dtype),
+        )
 
     def _load_backbone(self, load: Callable[..., Any], dtype: Any) -> Any:
         """Reads the backbone from the checkpoint; see :meth:`_backbone`.
@@ -1311,11 +1301,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             dtype=dtype,
             **options,
         )
-
-    def __getstate__(self) -> dict[str, Any]:
-        return {
-            k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
-        }
 
 
 def _install_command(requirement: str) -> list[str] | None:
