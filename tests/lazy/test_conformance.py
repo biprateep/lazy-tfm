@@ -542,6 +542,72 @@ def test_provenance_records_every_resolved_setting(data):
     assert recorded["outlier_threshold"] == 4.0
 
 
+# -- the runtime contract ------------------------------------------------------
+
+
+class _AnswersInQuantiles(standins.HistogramStandIn):
+    """Declares histograms but answers with quantiles."""
+
+    def _predict_group(self, handle, X):
+        locs = np.tile([0.0, 1.0], (len(X), 1))
+        return lazy.distributions.QuantileDistribution(
+            np.array([0.25, 0.75]), locs
+        )
+
+
+class _DropsARow(standins.HistogramStandIn):
+    """Answers one row short."""
+
+    def _predict_group(self, handle, X):
+        return super()._predict_group(handle, X)[1:]
+
+
+class _ForgetsTheRevision(standins.HistogramStandIn):
+    """Records a provenance without the checkpoint's revision."""
+
+    def _load_checkpoint(self):
+        super()._load_checkpoint()
+        del self.provenance_["revision"]
+
+
+# One group serves the whole ensemble, or a scaffolded transform splits it.
+GROUPINGS = [
+    pytest.param({}, 1, id="one-group"),
+    pytest.param({"transforms": ("robust", "none")}, 2, id="two-groups"),
+]
+
+
+@pytest.mark.parametrize(("params", "n_groups"), GROUPINGS)
+def test_a_group_answering_in_the_wrong_kind_is_refused(params, n_groups, data):
+    X, z, X_test = data
+    model = _AnswersInQuantiles(n_estimators=2, **params).fit(X, z)
+    assert len(model.member_groups_) == n_groups
+    with pytest.raises(TypeError, match="needs a HistogramDistribution"):
+        model.predict_distribution(X_test)
+
+
+@pytest.mark.parametrize(("params", "n_groups"), GROUPINGS)
+def test_a_group_answering_the_wrong_rows_is_refused(params, n_groups, data):
+    X, z, X_test = data
+    model = _DropsARow(n_estimators=2, **params).fit(X, z)
+    assert len(model.member_groups_) == n_groups
+    with pytest.raises(RuntimeError, match="19 rows for 20 query rows"):
+        model.predict_distribution(X_test)
+
+
+def test_a_provenance_without_a_required_key_is_refused(data):
+    X, z, _ = data
+    with pytest.raises(RuntimeError, match=r"lacks \['revision'\]"):
+        _ForgetsTheRevision().fit(X, z)
+
+
+@pytest.mark.parametrize("cls", standins.STANDINS, ids=lambda c: c.__name__)
+def test_a_fitted_provenance_holds_every_required_key(cls, data):
+    X, z, _ = data
+    model = cls().fit(X, z)
+    assert set(_ensemble.REQUIRED_PROVENANCE) <= set(model.provenance_)
+
+
 # -- softmax_temperature, mixed_precision, outlier_threshold -----------------
 
 

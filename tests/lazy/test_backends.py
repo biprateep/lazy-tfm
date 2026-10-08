@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 
 import lazy
+from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import _members
 from lazy.models import _transforms
@@ -697,6 +698,13 @@ class _MemberRegressor:
         return np.zeros((len(X), 1)) + share + np.array([-1.0, 0.0, 1.0])
 
 
+def _provenance(est):
+    """The provenance a real checkpoint load records, for a faked load."""
+    return _hub.get_checkpoint(est.backend, est.version).provenance(
+        device=est.device_
+    )
+
+
 class TestTabICL:
     @pytest.fixture(autouse=True)
     def _needs_tabicl(self):
@@ -711,7 +719,7 @@ class TestTabICL:
 
         def load(est):
             est.checkpoint_ = pathlib.Path("tabicl-regressor.ckpt")
-            est.provenance_ = {}
+            est.provenance_ = _provenance(est)
 
         monkeypatch.setattr(tabicl.TabICLQuantile, "_load_checkpoint", load)
 

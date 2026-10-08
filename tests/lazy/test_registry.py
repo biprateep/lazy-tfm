@@ -8,6 +8,7 @@ import huggingface_hub
 import pytest
 
 import lazy
+from lazy.models import _hub
 
 
 def _explode(*args, **kwargs):
@@ -111,6 +112,11 @@ def test_provenance_identifies_the_weights_and_the_code():
         "a provenance record travels between machines, so it carries no local"
         " paths"
     )
+
+
+def test_provenance_has_the_documented_keys():
+    for spec in lazy.CHECKPOINTS.values():
+        assert tuple(spec.provenance()) == _hub.PROVENANCE_KEYS
 
 
 def test_provenance_is_json_serialisable():

@@ -68,6 +68,7 @@ from lazy.models import _transforms
 
 __all__ = [
     "AUTO",
+    "REQUIRED_PROVENANCE",
     "UNIFORM_DEFAULTS",
     "UNIFORM_PARAMS",
     "ContextEnsembleEstimator",
@@ -122,6 +123,36 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
 #: The ``softmax_temperature`` and ``outlier_threshold`` value that defers to
 #: the model's own setting.
 AUTO = "auto"
+
+#: The keys every fitted backend's ``provenance_`` carries: which weights and
+#: code answered (:data:`lazy.models._hub.PROVENANCE_KEYS`, recorded by
+#: ``_load_checkpoint``) and the ensemble's resolved settings (``_recipe``).
+#: A backend may record more.
+REQUIRED_PROVENANCE: tuple[str, ...] = (
+    *_hub.PROVENANCE_KEYS,
+    "n_estimators",
+    "transforms",
+    "feature_shuffle",
+    "random_state",
+    "bag_rows",
+    "kv_cache",
+    "chunk_size",
+    "softmax_temperature",
+    "mixed_precision",
+    "outlier_threshold",
+    "groups",
+)
+
+#: The distributions ``_predict_group`` may answer with, by ``native_output``.
+#: A histogram model may answer with a mixture of histograms (TabFM's
+#: dithered bins).
+_NATIVE_TYPES: dict[str, tuple[type[distributions.Distribution], ...]] = {
+    "histogram": (
+        distributions.HistogramDistribution,
+        distributions.MixtureDistribution,
+    ),
+    "quantiles": (distributions.QuantileDistribution,),
+}
 
 
 #: What the CPU warning adds for a backend with more to say about the CPU.
@@ -410,7 +441,23 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         if len(self.handles_) == 1:
             self.regressor_ = self.handles_[0]
         self.native_grid_ = self._native_grid()
-        self.provenance_ = {**self.provenance_, **self._recipe()}
+        self.provenance_ = {
+            **getattr(self, "provenance_", {}),
+            **self._recipe(),
+        }
+        self._check_provenance()
+
+    def _check_provenance(self) -> None:
+        """Raises unless ``provenance_`` holds :data:`REQUIRED_PROVENANCE`."""
+        missing = [
+            key for key in REQUIRED_PROVENANCE if key not in self.provenance_
+        ]
+        if missing:
+            raise RuntimeError(
+                f"{type(self).__name__}.provenance_ lacks {missing}: "
+                "_load_checkpoint records the checkpoint's keys "
+                "(Checkpoint.provenance) and _recipe the ensemble's"
+            )
 
     def _check_uniform_params(self) -> None:
         """Validates the uniform parameters, before anything is loaded."""
@@ -615,8 +662,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             self.handles_
         )
         parts = [
-            self._predict_group(
-                handle, self._prepare(features, group, fitted, clipper)
+            self._check_group_output(
+                self._predict_group(
+                    handle, self._prepare(features, group, fitted, clipper)
+                ),
+                len(features),
             )
             for handle, group, fitted, clipper in zip(
                 self.handles_,
@@ -627,6 +677,38 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         ]
         return self._combine(parts)
+
+    def _check_group_output(
+        self, part: object, n_rows: int
+    ) -> distributions.Distribution:
+        """``_predict_group``'s answer, once it is checked against the contract.
+
+        Args:
+            part: What ``_predict_group`` returned.
+            n_rows: How many query rows it was given.
+
+        Returns:
+            ``part`` itself, unchanged.
+
+        Raises:
+            TypeError: If ``part`` is not a distribution of the kind
+                ``native_output`` declares.
+            RuntimeError: If it does not have one row per query.
+        """
+        kinds = _NATIVE_TYPES[self.native_output]
+        if not isinstance(part, kinds):
+            expected = " or ".join(kind.__name__ for kind in kinds)
+            raise TypeError(
+                f"{type(self).__name__}._predict_group returned a "
+                f"{type(part).__name__}, but native_output="
+                f"{self.native_output!r} needs a {expected}"
+            )
+        if len(part) != n_rows:
+            raise RuntimeError(
+                f"{type(self).__name__}._predict_group returned {len(part)} "
+                f"rows for {n_rows} query rows"
+            )
+        return part
 
     def _combine(
         self, parts: list[distributions.Distribution]

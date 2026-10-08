@@ -38,12 +38,25 @@ from lazy.models import _limix_source
 __all__ = [
     "CHECKPOINTS",
     "DEFAULT_VERSIONS",
+    "PROVENANCE_KEYS",
     "Checkpoint",
     "download_checkpoint",
     "get_checkpoint",
     "is_cached",
     "list_versions",
 ]
+
+#: The keys of every :meth:`Checkpoint.provenance` record, in its order.
+PROVENANCE_KEYS: tuple[str, ...] = (
+    "backend",
+    "version",
+    "repo_id",
+    "filename",
+    "revision",
+    "package",
+    "lazy",
+    "device",
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -155,7 +168,7 @@ class Checkpoint:
             A JSON-serialisable record with the keys ``backend``, ``version``,
             ``repo_id``, ``filename``, ``revision``, ``package`` (the
             backend's distribution and installed version), ``lazy`` (this
-            package's) and ``device``.
+            package's) and ``device``: :data:`PROVENANCE_KEYS`.
 
         Examples:
             >>> record = get_checkpoint("tabpfn", "v2.5").provenance(

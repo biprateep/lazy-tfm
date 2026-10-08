@@ -15,6 +15,7 @@ import numpy as np
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
+from lazy.models import _hub
 
 
 def _power(features):
@@ -71,7 +72,11 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
 
     def _load_checkpoint(self):
         self.checkpoint_ = None
-        self.provenance_ = {"backend": "standin", "version": self.version}
+        self.provenance_ = dict.fromkeys(_hub.PROVENANCE_KEYS) | {
+            "backend": "standin",
+            "version": self.version,
+            "device": self.device_,
+        }
 
     def _members(self, X, y, group):
         """Each member's rows, columns and transform, as the model would."""

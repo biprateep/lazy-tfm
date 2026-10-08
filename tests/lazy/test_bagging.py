@@ -17,6 +17,7 @@ import types
 import numpy as np
 import pytest
 
+from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_stream
@@ -72,6 +73,13 @@ class _Recorder:
 
     def add(self, key, **seen):
         self.calls[key].append(types.SimpleNamespace(**seen))
+
+
+def _provenance(est):
+    """The provenance a real checkpoint load records, for a faked load."""
+    return _hub.get_checkpoint(est.backend, est.version).provenance(
+        device=est.device_
+    )
 
 
 # -- the fakes -----------------------------------------------------------------
@@ -147,7 +155,7 @@ def _fake_tabpfn(monkeypatch, recorder, *, limit=None):
 
     def load(est):
         est.checkpoint_ = pathlib.Path("tabpfn-v3.ckpt")
-        est.provenance_ = {}
+        est.provenance_ = _provenance(est)
 
     monkeypatch.setattr(tabpfn.TabPFNBarDistribution, "_load_checkpoint", load)
     return tabpfn.TabPFNBarDistribution
@@ -183,7 +191,7 @@ def _fake_tabicl(monkeypatch, recorder):
 
     def load(est):
         est.checkpoint_ = pathlib.Path("tabicl-regressor.ckpt")
-        est.provenance_ = {}
+        est.provenance_ = _provenance(est)
 
     monkeypatch.setattr(tabicl.TabICLQuantile, "_load_checkpoint", load)
     return tabicl.TabICLQuantile
@@ -218,7 +226,7 @@ def _fake_limix(monkeypatch, recorder):
 
     def load(est):
         est.checkpoint_ = pathlib.Path("limix.ckpt")
-        est.provenance_ = {}
+        est.provenance_ = _provenance(est)
         est.borders_ = np.linspace(-3.0, 3.0, 11)
         est.n_buckets_ = 10
 
