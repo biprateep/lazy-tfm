@@ -47,3 +47,7 @@ docs/tutorials/*.ipynb
 # gallery's cards are written by docs/conf.py at every build.
 docs/tutorials/thumbnails/
 docs/tutorials/_gallery.md
+# The tables of the models, written by docs/conf.py from lazy.CHECKPOINTS and
+# the registry at every build.
+docs/models/_overview.md
+docs/guide/_backends.md

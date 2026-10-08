@@ -80,6 +80,21 @@ class Checkpoint:
         license_note: Anything a user must know before downloading. Surfaced
             in the docs.
         size_note: The download size, and any limit the model declares.
+            The docs quote its first word, such as ``"~880 MB"``.
+        display_name: The model's name at this version, as its authors
+            write it (``"TabPFN-3.5"``).
+        parameters: The number of parameters, counted over the
+            checkpoint's tensors.
+        size_bytes: The download size in bytes, at ``revision``.
+        license_name: The license of the weights, in a few words.
+        gpu: Whether the model needs a GPU: ``"yes"``, ``"recommended"``
+            or ``"optional"``.
+        cpu: Whether it runs at a usable speed on a CPU: ``"yes"``,
+            ``"no"``, or up to how many context rows (``"≤1,000 rows"``),
+            with any condition in parentheses.
+
+    The last six fields write the documentation's table of the models
+    (docs/models/index.md), so they are kept with the weights they describe.
     """
 
     backend: str
@@ -91,6 +106,12 @@ class Checkpoint:
     revision: str | None = None
     license_note: str = ""
     size_note: str = ""
+    display_name: str = ""
+    parameters: int = 0
+    size_bytes: int = 0
+    license_name: str = ""
+    gpu: str = ""
+    cpu: str = ""
 
     @property
     def key(self) -> str:
@@ -220,6 +241,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/google/tabfm-1.0.0-pytorch before use."
             ),
             size_note="~6.6 GB for the classification checkpoint.",
+            display_name="TabFM v1.0",
+            parameters=1_639_444_522,
+            size_bytes=6_557_901_837,
+            license_name="Google, non-commercial",
+            gpu="yes",
+            cpu="no",
         ),
         Checkpoint(
             backend="limix",
@@ -237,6 +264,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/stable-ai/LimiX-2."
             ),
             size_note="~1.6 GB. Pretrained for at most about 20,000 rows.",
+            display_name="LimiX-2",
+            parameters=406_232_101,
+            size_bytes=1_625_774_719,
+            license_name="StableAI LimiX, non-commercial",
+            gpu="yes",
+            cpu="no (and Linux only)",
         ),
         Checkpoint(
             backend="tabicl",
@@ -250,6 +283,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/jingang/TabICL."
             ),
             size_note="~100 MB.",
+            display_name="TabICLv2",
+            parameters=28_544_991,
+            size_bytes=114_324_594,
+            license_name="BSD-3-Clause",
+            gpu="optional",
+            cpu="yes",
         ),
         # The TabPFN family. Every filename below names "the default" of its
         # release, which is a moving name -- the repository is free to replace
@@ -270,6 +309,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/Prior-Labs/TabPFN-v2-reg."
             ),
             size_note="~45 MB. Pretrained for at most 10,000 context rows.",
+            display_name="TabPFN-2",
+            parameters=11_091_865,
+            size_bytes=44_390_977,
+            license_name="Apache-2.0 + attribution",
+            gpu="optional",
+            cpu="≤1,000 rows",
         ),
         Checkpoint(
             backend="tabpfn",
@@ -284,6 +329,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/Prior-Labs/tabpfn_2_5 before use."
             ),
             size_note="~41 MB. Pretrained for at most 50,000 context rows.",
+            display_name="TabPFN-2.5",
+            parameters=10_196_761,
+            size_bytes=40_831_995,
+            license_name="Prior Labs, non-commercial",
+            gpu="optional",
+            cpu="≤1,000 rows",
         ),
         Checkpoint(
             backend="tabpfn",
@@ -298,6 +349,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/Prior-Labs/tabpfn_2_6 before use."
             ),
             size_note="~52 MB.",
+            display_name="TabPFN-2.6",
+            parameters=12_864_793,
+            size_bytes=51_576_286,
+            license_name="Prior Labs, non-commercial",
+            gpu="optional",
+            cpu="≤1,000 rows",
         ),
         Checkpoint(
             backend="tabpfn",
@@ -312,6 +369,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/Prior-Labs/tabpfn_3 before use."
             ),
             size_note="~230 MB.",
+            display_name="TabPFN-3",
+            parameters=58_279_945,
+            size_bytes=233_289_807,
+            license_name="Prior Labs, non-commercial",
+            gpu="recommended",
+            cpu="no",
         ),
         # From v3.5 on one checkpoint carries both a classification and a
         # regression head, so these two files are not regressor-specific.
@@ -328,6 +391,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "https://huggingface.co/Prior-Labs/tabpfn_3_5 before use."
             ),
             size_note="~880 MB.",
+            display_name="TabPFN-3.5",
+            parameters=218_987_657,
+            size_bytes=876_027_932,
+            license_name="Prior Labs, non-commercial",
+            gpu="recommended",
+            cpu="no",
         ),
         Checkpoint(
             backend="tabpfn",
@@ -344,6 +413,12 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             size_note=(
                 "~335 MB. A separate, faster model, not a smaller copy of v3.5."
             ),
+            display_name="TabPFN-3.5-fast",
+            parameters=83_534_985,
+            size_bytes=334_181_708,
+            license_name="Prior Labs, non-commercial",
+            gpu="optional",
+            cpu="≤5,000 rows",
         ),
     )
 }

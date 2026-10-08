@@ -526,6 +526,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     backend = "tabfm"
     display_name = "TabFM"
+    method_note = (
+        "A hierarchy of TabFM in-context classifiers over "
+        "equal-mass bins of the target."
+    )
     extra = "tabfm"
     native_output = "histogram"
     # Only TabFM's norm methods that are lazy's transforms: its robust scales

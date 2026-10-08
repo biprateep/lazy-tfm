@@ -198,6 +198,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     backend = "limix"
     display_name = "LimiX"
+    method_note = "Bucket masses of LimiX-2's 5,000-bucket head."
     extra = "limix"
     native_output = "histogram"
     native_transforms = _limix_preprocess.NATIVE_TRANSFORMS

@@ -6,7 +6,9 @@ Registering a class puts it in LazyModel, the ensembles and the conformance
 suites, but a backend needs more than the registry can check: a pinned commit
 and recipe for every version, a pip extra, a docs page, golden densities, and
 the settings and fakes the other test suites run it with. One test per
-registered backend lists everything it still lacks.
+registered backend lists everything it still lacks. The docs' tables of the
+models are written by docs/conf.py from the checkpoints and the registry, so
+what is checked for them is the fields they are written from.
 """
 
 import pathlib
@@ -25,6 +27,9 @@ import lazy
 
 ROOT = pathlib.Path(__file__).parents[2]
 MODELS_DOCS = ROOT / "docs" / "models"
+GPU_NEEDS = ("yes", "recommended", "optional")
+# The size docs/conf.py quotes from a checkpoint's size_note.
+SIZE_NOTE = re.compile(r"~?[\d.,]+ [kMGT]?B\b")
 
 
 def _extras():
@@ -56,6 +61,7 @@ def _checkpoint_gaps(name, cls):
                 f"checkpoint {name}:{version} pins no full commit hash "
                 f"(revision={revision!r} in _hub.CHECKPOINTS)"
             )
+        found.extend(_table_gaps(lazy.get_checkpoint(name, version)))
         try:
             recipe = cls._pinned_recipe(version)
         except KeyError:
@@ -69,15 +75,44 @@ def _checkpoint_gaps(name, cls):
     return found
 
 
-def _docs_gaps(name):
+def _table_gaps(checkpoint):
+    """What a checkpoint lacks for the docs' tables of the models."""
+    found = [
+        f"checkpoint {checkpoint.key} has no {field} (_hub.CHECKPOINTS)"
+        for field in (
+            "display_name",
+            "parameters",
+            "size_bytes",
+            "license_name",
+            "cpu",
+        )
+        if not getattr(checkpoint, field)
+    ]
+    if checkpoint.gpu not in GPU_NEEDS:
+        found.append(
+            f"checkpoint {checkpoint.key} has gpu={checkpoint.gpu!r}, not one "
+            f"of {GPU_NEEDS} (_hub.CHECKPOINTS)"
+        )
+    if not SIZE_NOTE.match(checkpoint.size_note):
+        found.append(
+            f"checkpoint {checkpoint.key}'s size_note does not start with "
+            "its size, such as '~100 MB' (_hub.CHECKPOINTS)"
+        )
+    return found
+
+
+def _docs_gaps(name, cls):
     """What the documentation lacks."""
     found = []
     if not (MODELS_DOCS / f"{name}.md").is_file():
         found.append(f"no docs page docs/models/{name}.md")
     if name not in _docs_toctree():
         found.append(f"docs/models/index.md's toctree does not list {name}")
-    if f'| `"{name}"' not in (MODELS_DOCS / "index.md").read_text():
-        found.append(f'docs/models/index.md has no table row for `"{name}"`')
+    if not getattr(cls, "method_note", ""):
+        found.append(
+            f"no method_note on {cls.__name__} for the table in "
+            "docs/guide/interface.md"
+        )
     return found
 
 
@@ -115,7 +150,7 @@ def _missing(name):
     found = _checkpoint_gaps(name, cls)
     if cls.extra not in _extras():
         found.append(f"no pip extra {cls.extra!r} in pyproject.toml")
-    found.extend(_docs_gaps(name))
+    found.extend(_docs_gaps(name, cls))
     found.extend(_test_gaps(name, cls))
     return found
 
@@ -136,7 +171,7 @@ def test_a_new_backend_is_told_everything_it_lacks(monkeypatch):
         "pip extra",
         "docs/models/newcomer.md",
         "toctree",
-        "table row",
+        "method_note",
         "RECORDED_PARAMS",
         "golden/newcomer.npz",
         "RTOL",
@@ -158,3 +193,20 @@ def test_a_version_without_a_recipe_is_reported(monkeypatch):
     assert _checkpoint_gaps("tabicl", cls) == [
         "no recipe pinned for version 'v9' (TabICLQuantile._pinned_recipe)"
     ]
+
+
+def test_a_checkpoint_without_its_table_fields_is_reported(monkeypatch):
+    cls = lazy.ESTIMATORS["tabicl"]
+    checkpoint = lazy.get_checkpoint("tabicl")
+    bare = {
+        **vars(checkpoint),
+        "display_name": "",
+        "parameters": 0,
+        "gpu": "some",
+        "size_note": "About 100 MB.",
+    }
+    monkeypatch.setitem(lazy.CHECKPOINTS, "tabicl:v2", type(checkpoint)(**bare))
+    missing = "\n".join(_checkpoint_gaps("tabicl", cls))
+    for gap in ("display_name", "parameters", "gpu='some'", "size_note"):
+        assert gap in missing
+    assert "size_bytes" not in missing

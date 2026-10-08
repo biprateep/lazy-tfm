@@ -254,6 +254,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             say); they fit on a CPU without the warning, which suggests them.
         cpu_note: What the CPU warning adds after "runs slowly on CPU", as a
             clause starting with a space; empty for nothing.
+        method_note: How the model gives a distribution, in one sentence,
+            for the documentation's table of the backends.
     """
 
     display_name: ClassVar[str] = ""
@@ -275,6 +277,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
     cpu_note: ClassVar[str] = ""
+    method_note: ClassVar[str] = ""
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str

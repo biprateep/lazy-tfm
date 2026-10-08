@@ -255,6 +255,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     backend = "tabicl"
     display_name = "TabICL"
+    method_note = "Quantiles of TabICLv2's regression head."
     extra = "tabicl"
     native_output = "quantiles"
     # TabICL's other norm methods are not the uniform transforms of the same

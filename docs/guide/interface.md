@@ -4,12 +4,11 @@ Every model in LAZY is reached through the same estimator, takes the same
 parameters with the same defaults, and accepts the same kinds of input. This
 page describes that shared interface and how each model implements it.
 
-| Name     | Method                                                                          | Weights        |
-| -------- | ------------------------------------------------------------------------------- | -------------- |
-| `tabpfn` | Bucket masses of TabPFN's bar distribution.                                     | 41 MB – 880 MB |
-| `limix`  | Bucket masses of LimiX-2's 5,000-bucket head.                                   | ~1.6 GB        |
-| `tabicl` | Quantiles of TabICLv2's regression head.                                        | ~100 MB        |
-| `tabfm`  | A hierarchy of TabFM in-context classifiers over equal-mass bins of the target. | ~6.6 GB        |
+<!-- The table is written by docs/conf.py from lazy.CHECKPOINTS and the
+registry: see the "Tables of the models" section there. -->
+
+```{include} _backends.md
+```
 
 `LazyModel("tabpfn", ...)` and the concrete classes
 ({class}`~lazy.models.tabpfn.TabPFNBarDistribution`,

@@ -17,6 +17,7 @@ Typical usage example:
 # ruff: noqa: GS004
 
 from importlib import metadata
+import inspect
 import pathlib
 import re
 import subprocess
@@ -24,6 +25,8 @@ from typing import Any
 
 import jupytext
 from sphinx import application
+
+import lazy
 
 project = "lazy-tfm"
 author = "Biprateep Dey"
@@ -42,12 +45,15 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
-# _gallery.md is a fragment that tutorials/index.md includes, not a page.
+# _gallery.md is a fragment that tutorials/index.md includes, not a page, and
+# so are the tables of the models (below).
 exclude_patterns = [
     "_build",
     "build",
     "**.ipynb_checkpoints",
     "tutorials/_gallery.md",
+    "models/_overview.md",
+    "guide/_backends.md",
 ]
 root_doc = "index"
 
@@ -217,6 +223,208 @@ def _write_gallery() -> None:
 
 
 _write_gallery()
+
+# -- Tables of the models ------------------------------------------------------
+# docs/models/index.md and docs/guide/interface.md include the tables below,
+# which this writes at import from lazy.CHECKPOINTS and the registry: one row
+# per pinned checkpoint in the first, from the fields that describe it, and
+# one per backend in the second, from its class's method_note and its
+# checkpoints' size notes. A new backend or version therefore needs no edit
+# here. The overview lists LazyModel's default first and the rest by the size
+# of their default checkpoint; the guide follows INTERFACE_ORDER, the order
+# its prose takes, and then any other backend alphabetically. The "yes" of a
+# model that runs on a CPU at any size is in bold.
+MODEL_TABLES = {
+    "overview": pathlib.Path(__file__).parent / "models" / "_overview.md",
+    "interface": pathlib.Path(__file__).parent / "guide" / "_backends.md",
+}
+INTERFACE_ORDER = ["tabpfn", "limix", "tabicl", "tabfm"]
+
+
+def _version_key(version: str) -> list[tuple[int, int | str]]:
+    """Returns a key that sorts ``"v2.6"`` before ``"v10"``."""
+    return [
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.split(r"(\d+)", version)
+        if part
+    ]
+
+
+def _gigabytes(size_bytes: int) -> str:
+    """Returns ``"0.88 GB"``, or ``"6.6 GB"`` from one gigabyte on."""
+    size = size_bytes / 1e9
+    return f"{size:.2f} GB" if size < 1 else f"{size:.1f} GB"
+
+
+def _parameter_count(parameters: int) -> str:
+    """Returns ``"219 M"``, or ``"1.64 B"`` from a billion on."""
+    if parameters >= 1e9:
+        return f"{parameters / 1e9:.2f} B"
+    return f"{parameters / 1e6:.0f} M"
+
+
+def _size_note(checkpoint: Any, *, approximate: bool = True) -> str:
+    """Returns the download size a checkpoint's note quotes.
+
+    Args:
+        checkpoint: A checkpoint from ``lazy.CHECKPOINTS``.
+        approximate: Whether to keep the note's ``"~"``.
+
+    Returns:
+        The size, such as ``"~1.6 GB"``, or ``"1.6 GB"`` if not approximate.
+
+    Raises:
+        ValueError: If the note starts with no size.
+    """
+    found = re.match(r"~?[\d.,]+ [kMGT]?B\b", checkpoint.size_note)
+    if not found:
+        raise ValueError(
+            f"{checkpoint.key}'s size_note does not start with its size: "
+            f"{checkpoint.size_note!r}"
+        )
+    return found.group() if approximate else found.group().lstrip("~")
+
+
+def _markdown_table(
+    header: list[str], align: list[str], rows: list[list[str]]
+) -> list[str]:
+    """Returns a Markdown table as lines, its columns padded to one width.
+
+    Args:
+        header: The column titles.
+        align: Each column's alignment, ``"left"`` or ``"right"``.
+        rows: The cells, row by row.
+
+    Returns:
+        The header, the rule and the rows, one line each.
+    """
+    widths = [
+        max(len(cell) for cell in column) for column in zip(header, *rows)
+    ]
+    rule = [
+        "-" * (width - 1) + (":" if side == "right" else "-")
+        for width, side in zip(widths, align)
+    ]
+    lines = []
+    for cells in (header, rule, *rows):
+        padded = (
+            cell.rjust(width) if side == "right" else cell.ljust(width)
+            for cell, width, side in zip(cells, widths, align)
+        )
+        lines.append("| " + " | ".join(padded) + " |")
+    return lines
+
+
+def _overview_table() -> list[str]:
+    """Returns docs/models/index.md's table, one row per checkpoint."""
+    default_backend = (
+        inspect.signature(lazy.LazyModel).parameters["model"].default
+    )
+    backends = sorted(
+        (name for name in lazy.ESTIMATORS if lazy.list_versions(name)),
+        key=lambda name: (
+            name != default_backend,
+            lazy.get_checkpoint(name).size_bytes,
+            name,
+        ),
+    )
+    rows = []
+    for name in backends:
+        default = lazy.DEFAULT_VERSIONS[name]
+        others = sorted(
+            (v for v in lazy.list_versions(name) if v != default),
+            key=_version_key,
+            reverse=True,
+        )
+        for version in (default, *others):
+            checkpoint = lazy.get_checkpoint(name, version)
+            title = checkpoint.display_name
+            call = f'`"{name}"`'
+            if version != default:
+                call = f'`"{name}", version="{version}"`'
+            elif name == default_backend:
+                title += " (**default**)"
+            cpu = "**yes**" if checkpoint.cpu == "yes" else checkpoint.cpu
+            rows.append(
+                [
+                    title,
+                    call,
+                    _gigabytes(checkpoint.size_bytes),
+                    _parameter_count(checkpoint.parameters),
+                    checkpoint.license_name,
+                    checkpoint.gpu,
+                    cpu,
+                ]
+            )
+    return _markdown_table(
+        [
+            "Model",
+            "`LazyModel(...)`",
+            "Weights",
+            "Parameters",
+            "License of the weights",
+            "GPU",
+            "CPU-friendly",
+        ],
+        ["left", "left", "right", "right", "left", "left", "left"],
+        rows,
+    )
+
+
+def _interface_table() -> list[str]:
+    """Returns docs/guide/interface.md's table, one row per backend."""
+    backends = sorted(
+        (name for name in lazy.ESTIMATORS if lazy.list_versions(name)),
+        key=lambda name: (
+            INTERFACE_ORDER.index(name)
+            if name in INTERFACE_ORDER
+            else len(INTERFACE_ORDER),
+            name,
+        ),
+    )
+    rows = []
+    for name in backends:
+        checkpoints = sorted(
+            (lazy.get_checkpoint(name, v) for v in lazy.list_versions(name)),
+            key=lambda checkpoint: checkpoint.size_bytes,
+        )
+        weights = _size_note(checkpoints[0])
+        if len(checkpoints) > 1:
+            weights = (
+                f"{_size_note(checkpoints[0], approximate=False)} – "
+                f"{_size_note(checkpoints[-1], approximate=False)}"
+            )
+        rows.append([f"`{name}`", lazy.ESTIMATORS[name].method_note, weights])
+    return _markdown_table(
+        ["Name", "Method", "Weights"], ["left", "left", "left"], rows
+    )
+
+
+def _write_model_tables() -> None:
+    """Writes the tables of the models, each to its include file.
+
+    A file is rewritten only when it changes, as the gallery is.
+    """
+    tables = {
+        "overview": _overview_table(),
+        "interface": _interface_table(),
+    }
+    for key, lines in tables.items():
+        text = "\n".join(
+            [
+                "<!-- Written by docs/conf.py from lazy.CHECKPOINTS and the "
+                "registry; do not edit. -->",
+                "",
+                *lines,
+                "",
+            ]
+        )
+        path = MODEL_TABLES[key]
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+
+
+_write_model_tables()
 
 # -- API reference -------------------------------------------------------------
 autoapi_type = "python"

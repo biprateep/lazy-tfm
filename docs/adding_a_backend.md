@@ -126,6 +126,7 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
 
     backend = "mymodel"
     display_name = "MyModel"
+    method_note = "Bucket masses of MyModel's regression head."
     extra = "mymodel"
     native_output = "histogram"
     native_transforms = {"none": "none"}
@@ -215,7 +216,12 @@ The module is registered at the end of `src/lazy/models/registry.py`, with
 in `src/lazy/models/_hub.py`, as an entry in `CHECKPOINTS` with a full commit
 hash as its `revision` and an entry in `DEFAULT_VERSIONS`. Registering is what
 puts the backend in `LazyModel`, `LazyEnsembleModel`, `list_estimators` and
-both conformance suites.
+both conformance suites. It also puts the backend in the tables of the models
+on {doc}`models/index` and {doc}`guide/interface`, which `docs/conf.py` writes
+at every build from each checkpoint's description (`display_name`,
+`parameters`, `size_bytes`, `license_name`, `gpu`, `cpu` and the size that
+starts its `size_note`) and from the class's `method_note`, so those tables
+are never edited by hand.
 
 ## What else a backend needs
 
@@ -231,12 +237,14 @@ start.
 | A pinned recipe for every version | the backend's `_pinned_recipe` | `test_backend_completeness.py` |
 | A pip extra, also named in the `all` extra | `[project.optional-dependencies]` in `pyproject.toml` | `test_backend_completeness.py`, `test_packaging.py` |
 | The upstream package among the optional modules mypy may miss | `[[tool.mypy.overrides]]` in `pyproject.toml` | mypy, without the extras installed |
-| A model page, in the models toctree and overview table | `docs/models/<name>.md`, `docs/models/index.md` | `test_backend_completeness.py` |
+| A description of every checkpoint for the docs' tables | the fields above, in `CHECKPOINTS` in `src/lazy/models/_hub.py` | `test_backend_completeness.py` |
+| A one-sentence account of the method for the docs' tables | the backend's `method_note` | `test_backend_completeness.py` |
+| A model page, in the models toctree | `docs/models/<name>.md`, `docs/models/index.md` | `test_backend_completeness.py` |
 | Golden densities, their settings and tolerances | `tests/lazy/golden_data.py`, `tests/lazy/golden/<name>.npz` (written by `tests/lazy/record_golden.py <name>`), `RTOL` and `ATOL` in `tests/lazy/test_golden.py` | `test_backend_completeness.py`, `test_golden.py` |
 | Small CPU settings for the checkpoint tests | `tests/lazy/backend_settings.py` | `test_backend_completeness.py`, `test_conformance_backends.py` |
 | A fake upstream for the bagging tests | `_FAKES` in `tests/lazy/test_bagging.py` | `test_backend_completeness.py` |
 | A real-weights entry in the shared-network test | `_REAL` in `tests/lazy/test_weights_cache.py` | `test_backend_completeness.py` |
-| A row in the hand-written model tables | `docs/guide/interface.md`, `README.md`, `docs/installation.md` | review |
+| A row in the hand-written model lists | `README.md`, `docs/installation.md` | review |
 | A line in the changelog | `CHANGELOG.md`, under `[Unreleased]` | review |
 
 The golden file is recorded once, on a CPU, and never regenerated afterwards:

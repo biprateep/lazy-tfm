@@ -449,6 +449,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
     backend = "tabpfn"
     display_name = "TabPFN"
+    method_note = "Bucket masses of TabPFN's bar distribution."
     extra = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()

@@ -14,6 +14,10 @@ change the API.
 - Backends gain class hooks for what shared code used to do by name:
   `cpu_note`, `prefetch`, `clear_upstream_caches` and `setup`, which
   `lazy setup` now runs for every registered backend.
+- Each pinned checkpoint describes its model (`display_name`, `parameters`,
+  `size_bytes`, `license_name`, `gpu`, `cpu`), and each backend its method
+  (`method_note`). The documentation's tables of the models are written from
+  them at every build.
 
 ### Changed
 
