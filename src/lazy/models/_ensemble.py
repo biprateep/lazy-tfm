@@ -31,7 +31,9 @@ outlier clipping and column permutations applied per member
 setting that changes a prediction is either driven by one of these parameters
 or pinned by the backend, so no upstream default decides an answer silently.
 A new backend subclasses :class:`ContextEnsembleEstimator`, declares what its
-model has natively, and implements four small methods.
+model has natively, and implements four small methods, under the contract
+the class docstring sets out. The "Adding a backend" page of the
+documentation gives a skeleton module and everything else a backend needs.
 
 Typical usage example:
 
@@ -181,6 +183,35 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     validation, checkpoints, bagging, scaffolded transforms, member
     combination, chunking, progress and the native grid -- lives here.
 
+    The contract a subclass meets is the following. Its constructor takes every
+    name in :data:`UNIFORM_PARAMS` as a keyword, with the default in
+    :data:`UNIFORM_DEFAULTS`, stores each verbatim and takes no ``**kwargs``, so
+    that ``cls()`` builds a working estimator (``register`` checks this).
+    ``_fit`` splits the ensemble into groups of members that one call of the
+    model serves together, and :meth:`_fit_group` returns, for each, a *handle*:
+    any object, kept in ``handles_`` (and in ``regressor_`` when there is one
+    group) and passed back unchanged to :meth:`_predict_group` for every chunk
+    of queries. Besides returning it, a fit may set fitted attributes of its
+    own, lower ``kv_cache_`` to the mode that actually ran and add keys to
+    ``provenance_``, but it may not change the planned members, their rows or
+    their seeds. :meth:`_check_backend_params` may likewise record the backend's
+    own resolved parameters.
+
+    Every answer of :meth:`_predict_group` is checked to be a distribution of
+    the kind ``native_output`` declares with one row per query, and each row
+    must depend on its own query alone; a prediction leaves the handle as it
+    found it. After ``_fit``, ``provenance_`` holds every key in
+    :data:`REQUIRED_PROVENANCE`, which is checked: :meth:`_load_checkpoint`
+    records the checkpoint's and :meth:`_recipe` the ensemble's.
+
+    A fitted estimator pickles and predicts the same after unpickling; a network
+    shared through :mod:`lazy.models._weights` is dropped in ``__getstate__``
+    and fetched again on first use rather than pickled. The device is resolved
+    into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
+    before the checkpoint loads; a backend runs there, in float32 unless
+    ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
+    does not support.
+
     Attributes:
         display_name: The model's name in progress bars and warnings.
         extra: The pip extra that installs the model.
@@ -264,7 +295,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Imports the model's package, naming the extra if it is missing."""
 
     def _check_backend_params(self) -> None:
-        """Validates the backend's own parameters; raises ValueError."""
+        """Validates the backend's own parameters; raises ValueError.
+
+        Runs after the uniform parameters are validated and before the
+        checkpoint loads. It may record the backend's resolved parameters as
+        fitted attributes (TabFM fixes its bins and inference path here).
+        """
         return
 
     @abc.abstractmethod
@@ -276,25 +312,56 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     ) -> Any:
         """Fits one group of members; returns a handle for prediction.
 
+        Called once per group, in order, after the checkpoint is loaded. It
+        may set fitted attributes of its own, lower ``kv_cache_`` to the
+        mode that actually ran and add keys to ``provenance_``; it may not
+        change ``member_groups_`` or anything the plan fixed.
+
         Args:
             X: The group's context features, already restricted to its rows,
                 transformed and permuted, shape (n_rows, n_features').
             y: Their target values, shape (n_rows,).
             group: The members to serve and how.
+
+        Returns:
+            The handle: any object, which the base class keeps in
+            ``handles_`` and passes back unchanged to
+            :meth:`_predict_group`. It is pickled with the estimator.
         """
 
     @abc.abstractmethod
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.Distribution:
-        """Predicts one group's distributions for prepared query features."""
+        """Predicts one group's distributions for prepared query features.
+
+        Args:
+            handle: What :meth:`_fit_group` returned for the group.
+            X: Query features prepared as the group's context was, shape
+                (n_queries, n_features').
+
+        Returns:
+            One row per query, each depending on its own query alone: a
+            :class:`~lazy.distributions.HistogramDistribution` or a
+            :class:`~lazy.distributions.MixtureDistribution` of them when
+            ``native_output`` is ``"histogram"``, a
+            :class:`~lazy.distributions.QuantileDistribution` when it is
+            ``"quantiles"``. The base class checks both and raises
+            otherwise. A prediction leaves the handle as it found it.
+        """
 
     @abc.abstractmethod
     def _native_grid(self) -> grid_lib.Grid:
         """The model's own output grid; called at the end of ``_fit``."""
 
     def _load_checkpoint(self) -> None:
-        """Fetches the pinned weights; sets ``checkpoint_`` and provenance."""
+        """Fetches the pinned weights; sets ``checkpoint_`` and provenance.
+
+        An override, say one that defers the download to the first
+        prediction, must still set ``provenance_`` to a dict with every key
+        in :data:`lazy.models._hub.PROVENANCE_KEYS`, as
+        ``Checkpoint.provenance`` gives it.
+        """
         spec = _hub.get_checkpoint(self.backend or "", self.version)
         self.checkpoint_ = spec.download()
         self.provenance_ = spec.provenance(device=self.device_)

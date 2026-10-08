@@ -91,6 +91,7 @@ API reference <autoapi/lazy/index>
 :titlesonly:
 
 contributing
+adding_a_backend
 citing
 ```
 

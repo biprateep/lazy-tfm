@@ -47,6 +47,16 @@ CI runs the tests on Python 3.12 to 3.14 against the lockfile, a daily job
 against the newest resolvable dependencies, the pre-commit hooks, a docs build
 with warnings treated as errors, and a build of the package itself.
 
+## Adding a backend
+
+A new foundation model joins LAZY as a backend: a subclass of
+`ContextEnsembleEstimator`, registered by name. [Adding a
+backend](docs/adding_a_backend.md) describes the contract it must meet, gives
+a skeleton module, and lists everything else it needs (a pinned checkpoint and
+recipe for every version, a pip extra, a docs page, golden densities and test
+fakes). `tests/lazy/test_backend_completeness.py` checks every registered
+backend for all of them.
+
 ## Changing dependencies
 
 Edit `pyproject.toml`, then run `uv lock` and commit both files. CI runs

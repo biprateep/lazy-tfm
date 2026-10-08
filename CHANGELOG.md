@@ -7,6 +7,11 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The documentation gains "Adding a backend", a contributor's page with the
+  contract a new backend meets, a skeleton module and a checklist.
+
 ## [0.3.0] - 2026-10-08
 
 A cross-model ensemble, `LazyEnsembleModel`, pools the densities of several
