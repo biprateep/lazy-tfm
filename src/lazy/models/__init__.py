@@ -33,6 +33,8 @@ from lazy.models._hub import list_versions
 from lazy.models._weights import clear_model_cache
 from lazy.models._weights import model_cache_enabled
 from lazy.models._weights import set_model_cache
+from lazy.models.ensemble import EnsembleSizeWarning
+from lazy.models.ensemble import LazyEnsembleModel
 from lazy.models.lazy_model import LazyModel
 from lazy.models.limix import LimiXBarDistribution
 from lazy.models.registry import ESTIMATORS
@@ -48,6 +50,8 @@ __all__ = [
     "ContextSizeWarning",
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
+    "EnsembleSizeWarning",
+    "LazyEnsembleModel",
     "LazyModel",
     "LimiXBarDistribution",
     "PerformanceWarning",

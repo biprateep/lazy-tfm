@@ -7,6 +7,17 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `lazy.LazyEnsembleModel` fits several models on the same context and pools
+  their densities with equal weights: `pooling="geometric"` (the default, a
+  renormalized product), `"linear"` (a mixture) or `"quantile"` (averaged
+  quantile functions), on a fine internal grid (`native_grid_`, `pool_bins`).
+  Members are backend names or configured models, tunable as
+  `<member>__<parameter>`; `lazy.EnsembleSizeWarning` is raised when two or
+  more members are fitted on fewer than 3,000 context rows. The User guide
+  gains "Ensembles of models", and the tutorials an ensemble example.
+
 ## [0.2.0] - 2026-10-05
 
 Every backend now takes one set of parameters with one set of defaults, and no
