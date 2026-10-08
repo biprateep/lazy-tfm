@@ -157,15 +157,6 @@ _NATIVE_TYPES: dict[str, tuple[type[distributions.Distribution], ...]] = {
 }
 
 
-#: What the CPU warning adds for a backend with more to say about the CPU.
-_CPU_NOTES: dict[str, str] = {
-    "tabpfn": (
-        " and refuses more than 5,000 context rows there (1,000 before v3)"
-        " unless ignore_pretraining_limits=True"
-    ),
-}
-
-
 class ContextSizeWarning(UserWarning):
     """The context is larger than the model was pretrained for."""
 
@@ -212,6 +203,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
     does not support.
 
+    Shared code never names a backend. What a backend needs beyond the
+    contract above is a hook the package calls on every registered class:
+    :meth:`prefetch` for downloads beside the weights,
+    :meth:`clear_upstream_caches` for upstream's own caches, :meth:`setup`
+    for ``lazy setup``, and ``cpu_note`` for the CPU warning. Each defaults
+    to doing nothing.
+
     Attributes:
         display_name: The model's name in progress bars and warnings.
         extra: The pip extra that installs the model.
@@ -251,6 +249,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         cpu_friendly_versions: Versions that run at a usable speed on a CPU
             although the model as a whole does not (a smaller checkpoint,
             say); they fit on a CPU without the warning, which suggests them.
+        cpu_note: What the CPU warning adds after "runs slowly on CPU", as a
+            clause starting with a space; empty for nothing.
     """
 
     display_name: ClassVar[str] = ""
@@ -271,6 +271,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     native_outlier_clipping: ClassVar[bool] = False
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
+    cpu_note: ClassVar[str] = ""
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
@@ -424,6 +425,58 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             KeyError: If the backend pins no recipe for ``version``.
         """
         raise KeyError(f"{cls.__name__} pins no recipe for {version!r}")
+
+    # -- hooks the rest of the package calls on every registered backend ----
+
+    @classmethod
+    def prefetch(cls, version: str, *, download: bool = True) -> None:
+        """Fetches what the model needs beside its checkpoint's weights.
+
+        :func:`lazy.download_checkpoint` calls it before fetching the
+        weights, and :func:`lazy.is_cached` with ``download=False``, so that
+        a model with more to fetch (source code that is not on PyPI, say)
+        can be warmed up before going offline. The default fetches nothing.
+
+        Args:
+            version: The model version whose weights are being fetched.
+            download: Whether to fetch what is missing; if False, only check
+                that it is already there.
+
+        Raises:
+            ImportError: If something the model needs is missing and
+                ``download`` is False, or cannot be fetched.
+        """
+        del version, download  # Unused: nothing to fetch.
+
+    @classmethod
+    def clear_upstream_caches(cls) -> None:
+        """Empties the caches the upstream package keeps of its own.
+
+        :func:`lazy.clear_model_cache` calls it, so that the memory held by
+        an upstream cache of checkpoints or networks comes back with the
+        package's own. The default has nothing to empty.
+        """
+        return
+
+    @classmethod
+    def setup(cls, *, dry_run: bool) -> bool:
+        """Finishes installing the model where its pip extra cannot.
+
+        ``lazy setup`` calls it on every registered backend. It installs or
+        fetches what PyPI cannot provide, prints a line saying what it did,
+        and does nothing when the extra is not installed or the install is
+        already complete, so that it is safe to run again. The default has
+        nothing to do and prints nothing.
+
+        Args:
+            dry_run: Say what would be done, and change nothing.
+
+        Returns:
+            Whether the model is complete, or would be after a dry run;
+            True for a model whose extra is not installed.
+        """
+        del dry_run  # Unused: nothing to do.
+        return True
 
     # -- fitting -----------------------------------------------------------
 
@@ -634,7 +687,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         warnings.warn(
             f"PyTorch sees no GPU, so device='auto' runs {self.display_name} "
             f"on the CPU. {self.display_name} runs slowly on CPU"
-            f"{_CPU_NOTES.get(self.backend or '', '')}. {suggestion}Pass "
+            f"{self.cpu_note}. {suggestion}Pass "
             "device='cpu' to run it there anyway without this warning; see "
             "'Supported models' in the documentation.",
             PerformanceWarning,

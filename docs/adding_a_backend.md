@@ -66,6 +66,25 @@ on `device_`, in float32 unless `mixed_precision_` is set, and raises a clear
 error on a device its model does not support. No current backend is tested on
 `"mps"`.
 
+## Hooks for the rest of the package
+
+Code shared by every backend never names one. Where a backend needs more than
+the contract above from the rest of the package, it overrides a hook that the
+package calls on every registered class, and each hook does nothing by
+default. The class attribute `cpu_note` is a clause that the warning about
+running on a CPU appends after "runs slowly on CPU" (TabPFN's says how many
+context rows it accepts there). The classmethod `prefetch` fetches what the
+model needs beside its weights, and {func}`~lazy.models.download_checkpoint` and
+{func}`~lazy.models.is_cached` call it, so that a job on a cluster can find
+everything in the cache (LimiX downloads its source, which is not on PyPI).
+`clear_upstream_caches` empties the caches the upstream package keeps of its
+own, and {func}`~lazy.models.clear_model_cache` calls it (TabPFN keeps the last
+checkpoint it read in memory). `setup` completes an install that the pip extra
+cannot, and `lazy setup` runs it for every backend: it prints a line saying
+what it did, skips a backend whose extra is not installed, and returns whether
+the backend is complete (TabFM installs its repository build, and LimiX
+downloads its source).
+
 ## A skeleton
 
 The module below is a starting point for a model called MyModel, whose

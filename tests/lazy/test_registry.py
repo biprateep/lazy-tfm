@@ -6,9 +6,12 @@ import re
 
 import huggingface_hub
 import pytest
+import standins
 
 import lazy
+from lazy import _cli
 from lazy.models import _hub
+from lazy.models import registry
 
 
 def _explode(*args, **kwargs):
@@ -167,3 +170,34 @@ def test_offline_lookup_stays_offline(monkeypatch):
     calls = _recording_hub(monkeypatch, cached=False)
     assert not lazy.is_cached("tabicl")
     assert calls == [True]
+
+
+def test_shared_code_reaches_a_backend_through_its_hooks(monkeypatch):
+    calls = []
+
+    class Hooked(standins.HistogramStandIn):
+        @classmethod
+        def prefetch(cls, version, *, download=True):
+            calls.append(("prefetch", version, download))
+
+        @classmethod
+        def clear_upstream_caches(cls):
+            calls.append(("clear_upstream_caches",))
+
+        @classmethod
+        def setup(cls, *, dry_run):
+            calls.append(("setup", dry_run))
+            return False
+
+    monkeypatch.setattr(registry, "ESTIMATORS", {"tabicl": Hooked})
+    _recording_hub(monkeypatch, cached=True)
+    lazy.download_checkpoint("tabicl")
+    assert lazy.is_cached("tabicl")
+    lazy.clear_model_cache()
+    assert _cli.main(["setup", "--dry-run"]) == 1
+    assert calls == [
+        ("prefetch", "v2", True),
+        ("prefetch", "v2", False),
+        ("clear_upstream_caches",),
+        ("setup", True),
+    ]

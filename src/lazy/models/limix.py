@@ -48,6 +48,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 import dataclasses
 import functools
+from importlib import util
 import os
 import pathlib
 import types
@@ -264,6 +265,59 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
                 raise  # torch is there but broken: its own error says how.
             raise _limix_source.missing_dependency("torch") from error
         return _limix_source.load().loading
+
+    @classmethod
+    def prefetch(cls, version: str, *, download: bool = True) -> None:
+        """Fetches LimiX's source, which is not on PyPI, beside the weights.
+
+        Args:
+            version: The model version; every version runs the same source.
+            download: Whether to download the source when nothing else has
+                it (:func:`lazy.models._limix_source.locate`).
+
+        Raises:
+            ImportError: If no source is found or can be downloaded.
+        """
+        del version  # Unused: one source serves every version.
+        _limix_source.locate(download=download)
+
+    @classmethod
+    def setup(cls, *, dry_run: bool) -> bool:
+        """Downloads LimiX's source into the cache, if nothing else has it.
+
+        The source is not on PyPI, so this downloads it
+        (:func:`lazy.models._limix_source.fetch`), which a model otherwise
+        does on first use; running it ahead warms the cache before going
+        offline.
+
+        Args:
+            dry_run: Say what would be downloaded, and download nothing.
+
+        Returns:
+            Whether the source is there, or would be after a dry run.
+        """
+        if any(
+            util.find_spec(name) is None for name in ("einops", "kditransform")
+        ):
+            print(
+                "LimiX-2: not installed, skipped ('lazy-tfm[limix]' adds it)."
+            )
+            return True
+        try:
+            source = _limix_source.locate(download=False)
+        except ImportError:
+            print(
+                f"LimiX-2: downloading its source from {_limix_source.ARCHIVE}"
+            )
+            if dry_run:
+                return True
+            try:
+                source = _limix_source.locate()
+            except ImportError as error:
+                print(f"LimiX-2: {error}")
+                return False
+        print(f"LimiX-2: source at {source.root} ({source.origin}).")
+        return True
 
     def _auto_softmax_temperature(self) -> float:
         # LimiXPredictor's default, the value LimiX-2 was released with.

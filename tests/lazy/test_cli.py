@@ -2,13 +2,16 @@
 # Copyright (c) 2025 Biprateep Dey
 """``lazy setup``: TabFM's repository build and LimiX's source."""
 
+from importlib import util
 import pathlib
+import shutil
 import subprocess
 import sys
 
 import pytest
 
 from lazy import _cli
+from lazy.models import _icl_stream
 from lazy.models import _limix_source
 from lazy.models import tabfm
 
@@ -17,11 +20,9 @@ from lazy.models import tabfm
 def backends(monkeypatch, tmp_path):
     """Both extras installed, the TabFM release, and no LimiX source yet."""
     monkeypatch.chdir(tmp_path)  # outside any uv project
-    monkeypatch.setattr(_cli.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(
-        _cli.shutil, "which", lambda name: None
-    )  # no uv on PATH
-    monkeypatch.setattr(_cli._icl_stream, "streaming_available", lambda: False)
+    monkeypatch.setattr(util, "find_spec", lambda name: object())
+    monkeypatch.setattr(shutil, "which", lambda name: None)  # no uv on PATH
+    monkeypatch.setattr(_icl_stream, "streaming_available", lambda: False)
     runs = []
 
     def run(command, check=False):
@@ -29,7 +30,7 @@ def backends(monkeypatch, tmp_path):
         runs.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     fetched = []
 
     def locate(*, download=True):
@@ -40,7 +41,7 @@ def backends(monkeypatch, tmp_path):
             tmp_path, _limix_source.LIMIX_COMMIT, _limix_source.CACHE_ORIGIN
         )
 
-    monkeypatch.setattr(_cli._limix_source, "locate", locate)
+    monkeypatch.setattr(_limix_source, "locate", locate)
     return monkeypatch, runs, fetched
 
 
@@ -71,9 +72,9 @@ def test_a_dry_run_changes_nothing(backends):
 
 def test_complete_backends_are_left_alone(backends, capsys):
     monkeypatch, runs, fetched = backends
-    monkeypatch.setattr(_cli._icl_stream, "streaming_available", lambda: True)
+    monkeypatch.setattr(_icl_stream, "streaming_available", lambda: True)
     monkeypatch.setattr(
-        _cli._limix_source,
+        _limix_source,
         "locate",
         lambda download=True: _limix_source.Source(
             pathlib.Path("/src"), None, "$LAZY_LIMIX_SRC"
@@ -86,7 +87,7 @@ def test_complete_backends_are_left_alone(backends, capsys):
 
 def test_missing_extras_are_skipped(backends, capsys):
     monkeypatch, runs, fetched = backends
-    monkeypatch.setattr(_cli.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(util, "find_spec", lambda name: None)
     assert _cli.main(["setup"]) == 0
     assert not runs
     assert not fetched
@@ -98,11 +99,11 @@ def test_missing_extras_are_skipped(backends, capsys):
 def test_without_pip_uv_installs_into_this_interpreter(backends, tmp_path):
     monkeypatch, runs, _ = backends
     monkeypatch.setattr(
-        _cli.util,
+        util,
         "find_spec",
         lambda name: None if name == "pip" else object(),
     )
-    monkeypatch.setattr(_cli.shutil, "which", lambda name: "/bin/uv")
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/uv")
     assert _cli.main(["setup"]) == 0
     assert runs[0][:5] == [
         "/bin/uv",
@@ -129,7 +130,7 @@ def test_in_a_uv_project_setup_prints_the_uv_add_instead(
 def test_a_failed_install_fails_the_command(backends):
     monkeypatch, runs, _ = backends
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         lambda command, check=False: subprocess.CompletedProcess(command, 1),
     )

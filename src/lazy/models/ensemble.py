@@ -540,11 +540,10 @@ def _warn_if_small(n_rows: int, n_members: int) -> None:
         return
     warnings.warn(
         f"The context has {n_rows:,} rows. On small contexts an equal pool "
-        "can be dragged down by one weak member: on 1,000 rows of DC1, the "
-        "equal geometric pool of TabPFN-3.5, LimiX-2 and TabFM gained only "
-        "0.06 in CDE loss over the best single model, and the TabPFN-3.5 + "
-        "TabFM pair lost 0.07. Consider fewer members, or the best single "
-        "model; see 'Ensembles of models' in the documentation.",
+        "can be dragged down by one weak member, and do no better than the "
+        "best single model, or worse; 'Ensembles of models' in the "
+        "documentation gives the measurements. Consider fewer members, or "
+        "the best single model.",
         EnsembleSizeWarning,
         skip_file_prefixes=(_PACKAGE_PREFIX,),
     )

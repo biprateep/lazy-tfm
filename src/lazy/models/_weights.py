@@ -91,9 +91,10 @@ def clear_model_cache() -> int:
     """Lets go of every loaded network the package holds.
 
     A fitted model keeps the network it ran on, so the memory is returned
-    only once no fitted model refers to it either. The copy of the last
-    checkpoint TabPFN keeps in memory goes too, and freed GPU memory is
-    handed back to the driver.
+    only once no fitted model refers to it either. The caches an upstream
+    package keeps of its own go too (each backend's
+    ``clear_upstream_caches``), and freed GPU memory is handed back to the
+    driver.
 
     Returns:
         How many networks were dropped.
@@ -111,21 +112,15 @@ def clear_model_cache() -> int:
 
 
 def _clear_upstream_caches() -> None:
-    """Empties the checkpoint caches TabPFN keeps of its own.
+    """Runs every registered backend's ``clear_upstream_caches`` hook."""
+    # Imported here: the registry imports every backend, and they import
+    # this module.
+    from lazy.models import _ensemble  # noqa: PLC0415
+    from lazy.models import registry  # noqa: PLC0415
 
-    TabPFN holds the last checkpoint it read in memory, beside the network
-    built from it, and, when ``$TABPFN_MODEL_CACHE_SIZE`` asks, the built
-    networks too. Both are private, so each is emptied only if it is there.
-    """
-    model_loading = sys.modules.get("tabpfn.model_loading")
-    if model_loading is None:
-        return
-    raw = getattr(model_loading, "_load_checkpoint_cached", None)
-    if raw is not None and hasattr(raw, "cache_clear"):
-        raw.cache_clear()
-    built = getattr(model_loading, "clear_built_model_cache", None)
-    if built is not None:
-        built()
+    for cls in registry.ESTIMATORS.values():
+        if issubclass(cls, _ensemble.ContextEnsembleEstimator):
+            cls.clear_upstream_caches()
 
 
 def key(

@@ -11,6 +11,14 @@ change the API.
 
 - The documentation gains "Adding a backend", a contributor's page with the
   contract a new backend meets, a skeleton module and a checklist.
+- Backends gain class hooks for what shared code used to do by name:
+  `cpu_note`, `prefetch`, `clear_upstream_caches` and `setup`, which
+  `lazy setup` now runs for every registered backend.
+
+### Changed
+
+- The `EnsembleSizeWarning` message no longer quotes measured losses; it
+  points to "Ensembles of models" in the documentation, which gives them.
 
 ## [0.3.0] - 2026-10-08
 

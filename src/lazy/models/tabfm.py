@@ -62,10 +62,16 @@ import collections
 from collections.abc import Callable, Mapping
 import copy
 import functools
+from importlib import util
 import inspect
 import math
 import numbers
 import os
+import pathlib
+import shlex
+import shutil
+import subprocess
+import sys
 import types
 from typing import Any
 import warnings
@@ -180,10 +186,18 @@ _RECIPE_VERSIONS: tuple[str, ...] = ("v1.0",)
 
 #: The repository build of TabFM, with the KV-cache API, at the commit lazy
 #: was validated on. PyPI refuses direct URLs in an extra, so ``lazy setup``
-#: installs it (see :mod:`lazy._cli`); pyproject.toml pins the same commit.
+#: installs it (:meth:`TabFMHistogram.setup`); pyproject.toml pins the same
+#: commit.
 REPOSITORY_BUILD = (
     "tabfm[pytorch] @ git+https://github.com/google-research/tabfm"
     "@fbb665569425fd2f490c6576b3af967876fe11ff"
+)
+
+# What `lazy setup` runs in a fresh interpreter to check the TabFM it just
+# installed: the running process has already imported the old one.
+_CHECK_BUILD = (
+    "from lazy.models import _icl_stream; "
+    "raise SystemExit(not _icl_stream.streaming_available())"
 )
 
 _SLOW_PATH_WARNING = (
@@ -596,6 +610,64 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ) from error
         return tabfm
 
+    @classmethod
+    def setup(cls, *, dry_run: bool) -> bool:
+        """Installs TabFM's repository build over the release, if need be.
+
+        The extra brings the PyPI release, which has no KV-cache API, and
+        PyPI refuses a git URL in an extra, so this installs
+        :data:`REPOSITORY_BUILD` over it, with pip or uv. In a uv project it
+        prints the ``uv add`` that keeps the build instead, since ``uv sync``
+        would put the release back.
+
+        Args:
+            dry_run: Say what would be installed, and install nothing.
+
+        Returns:
+            Whether the repository build is installed, or would be after a
+            dry run.
+        """
+        if util.find_spec("tabfm") is None:
+            print("TabFM: not installed, skipped ('lazy-tfm[tabfm]' adds it).")
+            return True
+        if _icl_stream.streaming_available():
+            print("TabFM: the repository build is installed.")
+            return True
+        if _in_uv_project():
+            # uv sync and uv run would put the release back from uv.lock, so
+            # the build has to be a requirement of the project itself.
+            print(
+                "TabFM: in a uv project, add the repository build to the "
+                "project, so that uv sync keeps it:\n"
+                f"  uv add {shlex.quote(REPOSITORY_BUILD)}"
+            )
+            return False
+        command = _install_command(REPOSITORY_BUILD)
+        if command is None:
+            print(
+                "TabFM: found neither pip nor uv to install the repository "
+                "build with. Install it by hand:\n"
+                "  pip install --force-reinstall --no-deps "
+                f"{shlex.quote(REPOSITORY_BUILD)}"
+            )
+            return False
+        print(
+            f"TabFM: installing the repository build:\n  {shlex.join(command)}"
+        )
+        if dry_run:
+            return True
+        if subprocess.run(command, check=False).returncode != 0:
+            print("TabFM: the install failed; see the output above.")
+            return False
+        check = subprocess.run(
+            [sys.executable, "-c", _CHECK_BUILD], check=False
+        )
+        if check.returncode != 0:
+            print("TabFM: installed, but the KV-cache API is still missing.")
+            return False
+        print("TabFM: the repository build is installed.")
+        return True
+
     def _auto_softmax_temperature(self) -> float:
         return AUTO_SOFTMAX_TEMPERATURE
 
@@ -676,7 +748,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # The backbone is several gigabytes and loads lazily on the first
         # prediction (see _backbone); fit only records what it will load.
         self.provenance_ = _hub.get_checkpoint(
-            "tabfm", self.version
+            self.backend, self.version
         ).provenance(device=self.device_)
 
     def _fit_group(
@@ -1200,14 +1272,14 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             import torch  # noqa: PLC0415 - optional backend, imported at use.
 
             self.checkpoint_ = _hub.get_checkpoint(
-                "tabfm", self.version
+                self.backend, self.version
             ).download()
             # None keeps the stored float32 weights.
             dtype = torch.bfloat16 if self.mixed_precision_ else None
             load = tabfm_v1.load
             model = _weights.network(
                 _weights.key(
-                    "tabfm",
+                    self.backend,
                     self.version,
                     self.checkpoint_,
                     self.device_,
@@ -1244,6 +1316,50 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return {
             k: v for k, v in self.__dict__.items() if k != "_backbone_cache"
         }
+
+
+def _install_command(requirement: str) -> list[str] | None:
+    """The command replacing an installed package with ``requirement``.
+
+    pip when this interpreter has it, else uv, whose environments have no
+    pip; both reinstall even though the build and the release share a
+    version number, and leave the dependencies alone.
+
+    Args:
+        requirement: A PEP 508 requirement, such as a ``name @ git+URL``.
+
+    Returns:
+        The command, or ``None`` when neither installer is available.
+    """
+    if util.find_spec("pip") is not None:
+        return [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--force-reinstall",
+            "--no-deps",
+            requirement,
+        ]
+    uv = shutil.which("uv")
+    if uv is None:
+        return None
+    return [
+        uv,
+        "pip",
+        "install",
+        "--python",
+        sys.executable,
+        "--reinstall",
+        "--no-deps",
+        requirement,
+    ]
+
+
+def _in_uv_project() -> bool:
+    """Whether the working directory is inside a project uv has locked."""
+    here = pathlib.Path.cwd()
+    return any((d / "uv.lock").is_file() for d in (here, *here.parents))
 
 
 def _level_rows(

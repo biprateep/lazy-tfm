@@ -46,6 +46,7 @@ import functools
 import itertools
 import os
 import pathlib
+import sys
 import types
 from typing import Any
 
@@ -459,6 +460,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # about 11 s with eight members (TabPFN-3.5 26 s, TabICL 7 s), within the
     # 5,000 context rows upstream allows on a CPU.
     cpu_friendly_versions = ("v3.5-fast",)
+    cpu_note = (
+        " and refuses more than 5,000 context rows there (1,000 before v3)"
+        " unless ignore_pretraining_limits=True"
+    )
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
 
@@ -512,6 +517,25 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 "pip install 'lazy-tfm[tabpfn]'"
             ) from error
         return tabpfn
+
+    @classmethod
+    def clear_upstream_caches(cls) -> None:
+        """Empties the checkpoint caches TabPFN keeps of its own.
+
+        TabPFN holds the last checkpoint it read in memory, beside the network
+        built from it, and, when ``$TABPFN_MODEL_CACHE_SIZE`` asks, the built
+        networks too. Both are private, so each is emptied only if it is
+        there.
+        """
+        model_loading = sys.modules.get("tabpfn.model_loading")
+        if model_loading is None:
+            return
+        raw = getattr(model_loading, "_load_checkpoint_cached", None)
+        if raw is not None and hasattr(raw, "cache_clear"):
+            raw.cache_clear()
+        built = getattr(model_loading, "clear_built_model_cache", None)
+        if built is not None:
+            built()
 
     def _check_backend_params(self) -> None:
         if (
