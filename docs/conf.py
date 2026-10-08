@@ -132,6 +132,7 @@ TUTORIAL_ORDER = [
     "discrete_targets",
     "messy_inputs",
     "choosing_a_model",
+    "ensembles",
     "tuning",
     "large_data",
     "distribution_shift",
