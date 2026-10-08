@@ -7,10 +7,16 @@ look a backend up without :mod:`lazy.models` having to import it first.
 
 Adding a backend means writing a
 :class:`lazy.models.ContextEnsembleEstimator` subclass, pinning its
-checkpoint in :mod:`lazy.models._hub`, and calling :func:`register`, which
-refuses a class that does not support the uniform features
-(:mod:`lazy.models._conformance`); the conformance tests then run it
-automatically. Nothing else in the library needs to know it exists.
+checkpoint in :mod:`lazy.models._hub` and its recipe for every version
+(``_pinned_recipe``), and calling :func:`register`, which refuses a class
+that does not support the uniform features
+(:mod:`lazy.models._conformance`). Registering is what puts it in
+:class:`~lazy.models.lazy_model.LazyModel`,
+:class:`~lazy.models.ensemble.LazyEnsembleModel`, :func:`list_estimators`
+and the conformance tests. What else it needs (a pip extra, a docs page,
+golden densities, test fakes) is listed for every registered backend by
+tests/lazy/test_backend_completeness.py, which fails until each one is
+there.
 """
 
 from __future__ import annotations

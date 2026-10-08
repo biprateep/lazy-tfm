@@ -7,6 +7,7 @@ they run on a CPU with nothing downloaded. The checkpoint tests check what
 the stubs cannot: that a shared network answers bit for bit as a fresh one.
 """
 
+import importlib.util
 import os
 import pathlib
 import pickle
@@ -387,6 +388,13 @@ _REAL = [
         {},
         marks=pytest.mark.skipif(not _has_limix(), reason="needs LimiX"),
     ),
+    pytest.param(
+        tabfm.TabFMHistogram,
+        {"n_coarse_bins": 2, "n_fine_bins": 2},
+        marks=pytest.mark.skipif(
+            importlib.util.find_spec("tabfm") is None, reason="needs TabFM"
+        ),
+    ),
 ]
 
 
@@ -402,6 +410,8 @@ def test_a_shared_network_answers_bit_for_bit(cls, params, data):
     fresh = model().fit(X, z).predict_proba(X_test)
     _weights.set_model_cache(True)
     first = model().fit(X, z)
+    # TabFM loads its backbone at the first prediction, not at fit.
+    np.testing.assert_array_equal(first.predict_proba(X_test), fresh)
     assert len(_weights.cached_keys()) == 1
     # Another context in between must leave no trace on the network.
     model().fit(X[:120], np.sin(z[:120])).predict_proba(X_test)

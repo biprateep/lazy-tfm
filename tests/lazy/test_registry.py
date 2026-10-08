@@ -15,10 +15,12 @@ def _explode(*args, **kwargs):
 
 
 def test_registered_names():
-    assert lazy.list_estimators() == ["limix", "tabfm", "tabicl", "tabpfn"]
+    assert lazy.list_estimators() == sorted(lazy.ESTIMATORS)
+    # The shipped backends stay registered, whatever joins them.
+    assert {"limix", "tabfm", "tabicl", "tabpfn"} <= set(lazy.ESTIMATORS)
 
 
-@pytest.mark.parametrize("name", ["limix", "tabfm", "tabicl", "tabpfn"])
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_get_estimator_builds_a_photoz_estimator(name):
     est = lazy.get_estimator(name)
     assert isinstance(est, lazy.BaseDensityRegressor)

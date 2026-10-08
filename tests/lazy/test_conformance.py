@@ -8,6 +8,7 @@ here needs a GPU or a checkpoint.
 """
 
 import inspect
+import re
 import warnings
 
 import numpy as np
@@ -148,15 +149,25 @@ def test_an_explicit_cpu_or_a_cpu_friendly_model_does_not_warn(data, no_gpu):
         standins.HistogramStandIn().fit(X, z)
 
 
-def test_only_tabicl_and_tabpfns_fast_checkpoint_are_cpu_friendly():
-    friendly = [n for n, c in lazy.ESTIMATORS.items() if c.cpu_friendly]
-    assert friendly == ["tabicl"]
-    versions = {
-        n: c.cpu_friendly_versions
-        for n, c in lazy.ESTIMATORS.items()
-        if c.cpu_friendly_versions
-    }
-    assert versions == {"tabpfn": ("v3.5-fast",)}
+def test_the_cpu_warning_suggests_every_cpu_friendly_declaration(data, no_gpu):
+    expected = set()
+    for name, cls in lazy.ESTIMATORS.items():
+        if cls.cpu_friendly:
+            expected.add(f"LazyModel({name!r})")
+        expected.update(
+            f"LazyModel({name!r}, version={version!r})"
+            for version in cls.cpu_friendly_versions
+        )
+    X, z, _ = data
+    with pytest.warns(lazy.PerformanceWarning, match="sees no GPU") as info:
+        _SlowOnCPU().fit(X, z)
+    suggested = re.findall(r"LazyModel\([^)]*\)", str(info[0].message))
+    assert sorted(suggested) == sorted(expected)
+    # The shipped ones: TabICL, and TabPFN's fast checkpoint.
+    assert {
+        "LazyModel('tabicl')",
+        "LazyModel('tabpfn', version='v3.5-fast')",
+    } <= expected
 
 
 def test_a_cpu_friendly_version_does_not_warn():

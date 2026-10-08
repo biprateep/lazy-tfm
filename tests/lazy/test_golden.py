@@ -12,6 +12,8 @@ import golden_data
 import numpy as np
 import pytest
 
+import lazy
+
 needs_checkpoint = pytest.mark.skipif(
     os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
     reason=(
@@ -22,21 +24,24 @@ needs_checkpoint = pytest.mark.skipif(
 #: Relative tolerance per backend; 0 means bit-identical. The files were
 #: recorded by this code on one machine's CPU; another machine's BLAS may
 #: round float32 differently, which TabICL's narrowly spaced quantiles
-#: amplify most.
-RTOL = {"tabpfn": 1e-4, "tabicl": 1e-3, "tabfm": 1e-12}
+#: amplify most. LimiX moves by 4e-6 with the thread count alone.
+RTOL = {"tabpfn": 1e-4, "tabicl": 1e-3, "tabfm": 1e-12, "limix": 1e-4}
 
 #: Absolute tolerance per backend, as a fraction of the peak density.
 #: TabFM's is float64 rounding: rebinning onto the grid takes differences
 #: of cumulative masses, whose rounding is absolute (about 1e-16 of the
 #: peak), so a far-tail density of 1e-9 can move by 1e-6 of itself when
 #: the masses are scaled first (as on_grid has done since ee67572).
-ATOL = {"tabpfn": 1e-6, "tabfm": 1e-12}
+ATOL = {"tabpfn": 1e-6, "tabfm": 1e-12, "limix": 1e-6}
 
 
 @needs_checkpoint
 @pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
 def test_the_default_path_reproduces_the_golden_densities(name):
-    pytest.importorskip(name)
+    try:
+        lazy.ESTIMATORS[name]()._import_backend()
+    except ImportError as error:
+        pytest.skip(f"{name} is not installed: {error}")
     reference = np.load(golden_data.GOLDEN_DIR / f"{name}.npz")
     _, _, X_test = golden_data.problem()
     pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)

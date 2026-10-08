@@ -667,6 +667,12 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _auto_outlier_threshold(self) -> float | None:
         return _AUTO_RECIPES[self.version]["OUTLIER_REMOVAL_STD"]
 
+    @classmethod
+    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
+        if version not in _AUTO_RECIPES:
+            return super()._pinned_recipe(version)
+        return types.MappingProxyType(_AUTO_RECIPES[version])
+
     def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
         """The ``inference_config`` a group hands TabPFN, ready to pass."""
         import tabpfn.preprocessing.configs  # noqa: PLC0415 - optional extra.

@@ -305,6 +305,28 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """
         return None
 
+    @classmethod
+    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
+        """The model's own recipe at ``version``, as the backend pins it.
+
+        Every upstream setting the backend fixes for that version rather than
+        leaving to the installed package: what ``transforms="auto"`` runs,
+        and the settings it passes under any ``transforms``. A recipe is read
+        from upstream for one checkpoint, so a version gains one only when
+        someone has checked it; tests/lazy/test_backend_completeness.py
+        reports a pinned checkpoint without one.
+
+        Args:
+            version: A model version with a pinned checkpoint.
+
+        Returns:
+            The recipe's settings by name.
+
+        Raises:
+            KeyError: If the backend pins no recipe for ``version``.
+        """
+        raise KeyError(f"{cls.__name__} pins no recipe for {version!r}")
+
     # -- fitting -----------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:

@@ -28,6 +28,8 @@ GRID = datasets.DC1_GRID
 #: Settings the files were recorded with, per backend. They keep the seeds
 #: and paths of the first recording (no key/value cache on TabPFN and
 #: TabICL, seed 42 there and 1 on TabFM, whose bins span the DC1 grid).
+#: LimiX joined later, with its defaults but for two members (one of each
+#: of its recipe's pipelines).
 RECORDED_PARAMS: dict[str, dict[str, Any]] = {
     "tabpfn": {
         "version": "v3",
@@ -54,6 +56,12 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
         "kv_cache": True,
         "y_grid": GRID,
         "random_state": 1,
+        "device": "cpu",
+        "progress": False,
+    },
+    "limix": {
+        "n_estimators": 2,
+        "random_state": 42,
         "device": "cpu",
         "progress": False,
     },

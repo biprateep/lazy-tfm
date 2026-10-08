@@ -45,7 +45,7 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import dataclasses
 import functools
 import os
@@ -77,6 +77,11 @@ __all__ = ["LimiXBarDistribution"]
 _CACHE_MEMORY_FRACTION = 0.6
 # Frames in this package, skipped to point warnings at the caller's code.
 _PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: The versions :data:`lazy.models._limix_preprocess.RECIPE` was read from
+#: upstream for. A new version joins once its recipe is checked against
+#: upstream's.
+_RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
 
 
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
@@ -269,6 +274,18 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         # and never reads it, and the checkpoint's encoder has
         # remove_outliers off.
         return None
+
+    @classmethod
+    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
+        if version not in _RECIPE_VERSIONS:
+            return super()._pinned_recipe(version)
+        recipe = _limix_preprocess.RECIPE
+        return types.MappingProxyType(
+            {
+                field.name: getattr(recipe, field.name)
+                for field in dataclasses.fields(recipe)
+            }
+        )
 
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()

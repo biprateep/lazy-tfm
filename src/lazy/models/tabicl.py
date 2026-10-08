@@ -39,7 +39,7 @@ than by the data.
 from __future__ import annotations
 
 import collections
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 import contextlib
 import dataclasses
 import functools
@@ -126,6 +126,10 @@ _PINNED_REGRESSOR_ARGS: dict[str, Any] = {
     "inference_config": None,
     "verbose": False,
 }
+
+#: The versions the recipe above was read from upstream for. A new version
+#: joins once its recipe is checked against upstream's.
+_RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -329,6 +333,19 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
 
     def _auto_outlier_threshold(self) -> float | None:
         return AUTO_OUTLIER_THRESHOLD
+
+    @classmethod
+    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
+        if version not in _RECIPE_VERSIONS:
+            return super()._pinned_recipe(version)
+        return types.MappingProxyType(
+            {
+                "norm_methods": AUTO_NORM_METHODS,
+                "feat_shuffle_method": AUTO_FEAT_SHUFFLE_METHOD,
+                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+                **_PINNED_REGRESSOR_ARGS,
+            }
+        )
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         # The native grid spans every context target, not only those some

@@ -59,7 +59,7 @@ than the output bin cannot change a density tabulated on it.
 from __future__ import annotations
 
 import collections
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import copy
 import functools
 import inspect
@@ -144,6 +144,10 @@ AUTO_OUTLIER_THRESHOLD = 4.0
 #: Columns each member sees under the recipe; a wider table is subsampled.
 AUTO_MAX_NUM_FEATURES = 500
 
+#: The softmax temperature of the recipe: TabFMClassifier's default, the
+#: value TabFM v1.0 was released with.
+AUTO_SOFTMAX_TEMPERATURE = 0.9
+
 #: Every other TabFMClassifier argument, pinned to the recipe's value.
 _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
     # Each member sees the class labels cyclically shifted, undone on its
@@ -168,6 +172,10 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
     "min_rows_for_single_val_split": 2000,
     "verbose": False,
 }
+
+#: The versions the recipe above was read from upstream for. A new version
+#: joins once its recipe is checked against upstream's.
+_RECIPE_VERSIONS: tuple[str, ...] = ("v1.0",)
 
 
 #: The repository build of TabFM, with the KV-cache API, at the commit lazy
@@ -589,11 +597,24 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         return tabfm
 
     def _auto_softmax_temperature(self) -> float:
-        # TabFMClassifier's default, the value TabFM v1.0 was released with.
-        return 0.9
+        return AUTO_SOFTMAX_TEMPERATURE
 
     def _auto_outlier_threshold(self) -> float:
         return AUTO_OUTLIER_THRESHOLD
+
+    @classmethod
+    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
+        if version not in _RECIPE_VERSIONS:
+            return super()._pinned_recipe(version)
+        return types.MappingProxyType(
+            {
+                "norm_methods": AUTO_NORM_METHODS,
+                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+                "max_num_features": AUTO_MAX_NUM_FEATURES,
+                "softmax_temperature": AUTO_SOFTMAX_TEMPERATURE,
+                **_PINNED_CLASSIFIER_ARGS,
+            }
+        )
 
     def _check_backend_params(self) -> None:
         for name in ("n_coarse_bins", "n_fine_bins"):
