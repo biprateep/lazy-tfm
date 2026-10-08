@@ -1,6 +1,6 @@
 [project]
 name = "lazy-tfm"
-version = "0.3.0.dev0"
+version = "0.3.0"
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"

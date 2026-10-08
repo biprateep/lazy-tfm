@@ -7,6 +7,11 @@ change the API.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
+A cross-model ensemble, `LazyEnsembleModel`, pools the densities of several
+models fitted on the same context.
+
 ### Added
 
 - `lazy.LazyEnsembleModel` fits several models on the same context and pools
@@ -17,6 +22,11 @@ change the API.
   `<member>__<parameter>`; `lazy.EnsembleSizeWarning` is raised when two or
   more members are fitted on fewer than 3,000 context rows. The User guide
   gains "Ensembles of models", and the tutorials an ensemble example.
+
+### Changed
+
+- The figures of "What are Tabular Foundation Models?" are drawn as SVG, and
+  the page's overview is revised.
 
 ## [0.2.0] - 2026-10-05
 
@@ -467,7 +477,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/biprateep/lazy-tfm/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/biprateep/lazy-tfm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/biprateep/lazy-tfm/releases/tag/v0.1.0
