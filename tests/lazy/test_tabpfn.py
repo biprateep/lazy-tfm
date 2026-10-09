@@ -11,6 +11,7 @@ import dataclasses
 import json
 import os
 import threading
+import types
 import warnings
 
 import fakes
@@ -259,6 +260,31 @@ def test_concurrent_fits_share_the_network_and_restore_the_loader(
     assert len(fitted) == 4
     assert len(recorder.loads) == 1
     assert base.initialize_tabpfn_model is upstream
+
+
+def test_bucket_masses_returns_float64_borders():
+    """float32 borders cannot resolve 0.01 of spread about 1e4."""
+    torch = pytest.importorskip("torch")
+
+    znorm = torch.linspace(-3.0, 3.0, 5001)
+    regressor = types.SimpleNamespace(
+        znorm_space_bardist_=types.SimpleNamespace(borders=znorm),
+        y_train_mean_=1e4,
+        y_train_std_=0.01,
+    )
+    output = {
+        # What upstream's raw_space_bardist_ holds: the same, in float32.
+        "criterion": types.SimpleNamespace(
+            borders=(znorm.double() * 0.01 + 1e4).float()
+        ),
+        "logits": torch.zeros((2, 5000)),
+    }
+    borders, masses = tabpfn.bucket_masses(output, regressor)
+    np.testing.assert_array_equal(borders, tabpfn._bucket_borders(regressor))
+    assert np.all(np.diff(borders) > 0)
+    assert masses.shape == (2, 5000)
+    with pytest.warns(RuntimeWarning, match="zero width"):
+        tabpfn.bucket_masses(output)
 
 
 def _fit(X, y, **params):

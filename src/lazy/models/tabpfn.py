@@ -51,6 +51,7 @@ import sys
 import threading
 import types
 from typing import Any
+import warnings
 
 import numpy as np
 
@@ -722,10 +723,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.HistogramDistribution:
-        _, masses = bucket_masses(handle.predict(X, output_type="full"))
-        return distributions.HistogramDistribution(
-            _bucket_borders(handle), masses
+        borders, masses = bucket_masses(
+            handle.predict(X, output_type="full"), handle
         )
+        return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
         # Every member group's buckets: under bagging each member places
@@ -1004,7 +1005,7 @@ def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:
 
 
 def bucket_masses(
-    output: Mapping[str, Any],
+    output: Mapping[str, Any], regressor: Any = None
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Returns the bucket borders and masses of a TabPFN full prediction.
 
@@ -1015,9 +1016,19 @@ def bucket_masses(
     integrates over too, so this is the model's own density and not a reading
     of it.
 
+    Upstream keeps those borders in float32, which cannot resolve a narrow
+    spread about a large offset (for targets ``1e4 + 0.01 * noise`` most
+    buckets come out zero-width, holding most of the mass). Given the
+    regressor, the borders are the same buckets rebuilt in float64, as
+    :class:`TabPFNBarDistribution` uses them; without it, upstream's are
+    returned, with a warning when some have collapsed.
+
     Args:
         output: What ``TabPFNRegressor.predict(..., output_type="full")``
             returns; only its ``"criterion"`` and ``"logits"`` are read.
+        regressor: The fitted ``tabpfn.TabPFNRegressor`` that returned
+            ``output``, to rebuild the borders from; ``None`` for
+            upstream's float32 borders.
 
     Returns:
         A tuple ``(borders, masses)``: the bucket borders in the target's
@@ -1031,9 +1042,22 @@ def bucket_masses(
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
     criterion, logits = output["criterion"], output["logits"]
-    borders = np.maximum.accumulate(
-        np.asarray(criterion.borders.detach().cpu().numpy(), dtype=np.float64)
-    )
+    if regressor is not None:
+        borders = _bucket_borders(regressor)
+    else:
+        borders = np.maximum.accumulate(
+            np.asarray(
+                criterion.borders.detach().cpu().numpy(), dtype=np.float64
+            )
+        )
+        if borders.size > 1 and np.any(np.diff(borders) == 0):
+            warnings.warn(
+                "some of TabPFN's float32 bucket borders coincide, so those "
+                "buckets have zero width; pass the fitted regressor, "
+                "bucket_masses(output, regressor), for float64 borders",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     masses = torch.softmax(logits.detach().double(), dim=-1).cpu().numpy()
     if masses.ndim != 2 or masses.shape[1] != borders.size - 1:
         raise RuntimeError(
