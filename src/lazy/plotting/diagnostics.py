@@ -201,6 +201,19 @@ def _finite_pairs(
     return y_true[finite], y_pred[finite]
 
 
+def _finite_pit(pit: npt.ArrayLike) -> npt.NDArray[np.float64]:
+    """The finite PIT values, shape (n_finite,).
+
+    Raises:
+        ValueError: If none is finite.
+    """
+    pit = np.asarray(pit, dtype=float).ravel()
+    pit = pit[np.isfinite(pit)]
+    if not pit.size:
+        raise ValueError("no object has a finite PIT value")
+    return pit
+
+
 def plot_actual_vs_predicted(
     y_true: npt.ArrayLike,
     y_pred: npt.ArrayLike,
@@ -368,7 +381,7 @@ def plot_pit(
 
     Args:
         pit: Probability integral transform of each object, in [0, 1],
-            shape (n_objects,).
+            shape (n_objects,). Values that are not finite are dropped.
         ax: The axes to draw into; a new column-width figure if None.
         n_bins: Number of histogram bins on [0, 1].
         label: Legend label.
@@ -376,8 +389,11 @@ def plot_pit(
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If no PIT value is finite.
     """
-    pit = np.asarray(pit, dtype=float)
+    pit = _finite_pit(pit)
     ax = _axes(ax, width="column", aspect="golden")
     ax.hist(
         pit,
@@ -417,15 +433,18 @@ def plot_pit_qq(
 
     Args:
         pit: Probability integral transform of each object, in [0, 1],
-            shape (n_objects,).
+            shape (n_objects,). Values that are not finite are dropped.
         ax: The axes to draw into; a new column-width square figure if None.
         label: Legend label.
         **kwargs: Passed to ``ax.plot``.
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If no PIT value is finite.
     """
-    pit = np.asarray(pit, dtype=float)
+    pit = _finite_pit(pit)
     ax = _axes(ax, width="column", aspect="square")
     ordered = np.sort(pit)
     uniform = (np.arange(1, ordered.size + 1) - 0.5) / ordered.size
@@ -454,15 +473,18 @@ def plot_coverage(
 
     Args:
         pit: Probability integral transform of each object, in [0, 1],
-            shape (n_objects,).
+            shape (n_objects,). Values that are not finite are dropped.
         ax: The axes to draw into; a new column-width square figure if None.
         label: Legend label.
         **kwargs: Passed to ``ax.plot``.
 
     Returns:
         The axes drawn into.
+
+    Raises:
+        ValueError: If no PIT value is finite.
     """
-    pit = np.asarray(pit, dtype=float)
+    pit = _finite_pit(pit)
     ax = _axes(ax, width="column", aspect="square")
     nominal = np.linspace(0.0, 1.0, 101)
     empirical = np.array(

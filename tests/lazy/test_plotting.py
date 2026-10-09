@@ -97,6 +97,40 @@ def test_coverage_is_monotone_and_ends_at_one(predictions):
     assert empirical[-1] == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("plot", [plotting.plot_pit_qq, plotting.plot_coverage])
+def test_calibration_plots_ignore_nan_pit_values(predictions, plot):
+    """A NaN PIT is an object with no answer, not one at the top of [0, 1]."""
+    _, _, pit = predictions
+    clean = plot(pit).lines[0].get_xydata()
+    with_nan = plot(np.r_[pit, np.full(100, np.nan)]).lines[0].get_xydata()
+    np.testing.assert_array_equal(with_nan, clean)
+
+
+@pytest.mark.parametrize(
+    "plot", [plotting.plot_pit, plotting.plot_pit_qq, plotting.plot_coverage]
+)
+def test_calibration_plots_refuse_a_pit_with_nothing_finite(plot):
+    with pytest.raises(ValueError, match="no object has a finite PIT"):
+        plot(np.full(5, np.nan))
+
+
+def test_binned_quantiles_drops_points_outside_explicit_bins():
+    x = np.array([-100.0, 0.5, 1.5, 2.0, 100.0])
+    y = np.array([-50.0, 1.0, 2.0, 3.0, 50.0])
+    edges, values = plotting.style.binned_quantiles(
+        x, y, bins=[0, 1, 2], percentiles=(0, 100)
+    )
+    np.testing.assert_array_equal(edges, [0.0, 1.0, 2.0])
+    np.testing.assert_array_equal(values, [[1.0, 2.0], [1.0, 3.0]])
+
+
+@pytest.mark.parametrize("bins", [None, [1.0], [0.0, np.nan]])
+def test_binned_quantiles_refuses_what_it_cannot_bin(bins):
+    x = [] if bins is None else [0.5]
+    with pytest.raises(ValueError):
+        plotting.style.binned_quantiles(x, x, bins=bins)
+
+
 @pytest.fixture
 def native():
     """Histogram PDFs on a wide, non-uniform grid, like a model's native one."""

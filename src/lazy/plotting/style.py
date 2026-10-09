@@ -627,7 +627,8 @@ def binned_quantiles(
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Returns percentiles of ``y_values`` in bins of ``x_values``.
 
-    Points where either value is not finite are dropped first.
+    Points where either value is not finite are dropped first, and so are
+    points outside explicit ``bins``.
 
     Args:
         x_values: The binned coordinate, shape (n,).
@@ -636,13 +637,19 @@ def binned_quantiles(
         equal_count: Put an equal number of points in each bin (the
             ``pd.qcut`` behaviour) so the scatter band is equally well
             determined everywhere; set it False for equal-width bins.
-        bins: Explicit bin edges, overriding ``nbins`` and ``equal_count``.
+        bins: Explicit bin edges, overriding ``nbins`` and ``equal_count``;
+            at least two distinct finite values. Each bin holds its left
+            edge, and the last its right edge too.
         percentiles: The percentiles to compute, between 0 and 100.
 
     Returns:
         A tuple ``(edges, values)``: the unique bin edges, and the
         percentiles of shape ``(len(percentiles), len(edges) - 1)``. Empty
         bins come back as NaN.
+
+    Raises:
+        ValueError: If ``bins`` are not at least two distinct finite edges,
+            or, without ``bins``, no point is finite.
     """
     x_array = np.asarray(x_values, dtype=float)
     y_array = np.asarray(y_values, dtype=float)
@@ -650,13 +657,23 @@ def binned_quantiles(
     x_array, y_array = x_array[good], y_array[good]
 
     if bins is not None:
-        edges = np.asarray(bins, dtype=float)
+        edges = np.unique(np.asarray(bins, dtype=float))
+        if edges.size < 2 or not np.isfinite(edges).all():
+            raise ValueError(
+                f"bins must be at least two distinct finite edges: {bins}"
+            )
+        inside = (x_array >= edges[0]) & (x_array <= edges[-1])
+        x_array, y_array = x_array[inside], y_array[inside]
+    elif not x_array.size:
+        raise ValueError("no point has a finite x and y value to bin")
     elif equal_count:
-        edges = np.quantile(x_array, np.linspace(0.0, 1.0, nbins + 1))
+        edges = np.unique(
+            np.quantile(x_array, np.linspace(0.0, 1.0, nbins + 1))
+        )
     else:
-        edges = np.linspace(x_array.min(), x_array.max(), nbins + 1)
-    edges = np.unique(edges)
+        edges = np.unique(np.linspace(x_array.min(), x_array.max(), nbins + 1))
 
+    # The clip puts a point on the last edge into the last bin.
     idx = np.clip(np.digitize(x_array, edges) - 1, 0, len(edges) - 2)
     values = np.full((len(percentiles), len(edges) - 1), np.nan)
     for b in range(len(edges) - 1):
