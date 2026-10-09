@@ -44,10 +44,8 @@ from importlib import metadata
 from importlib import util
 import json
 import pathlib
-import threading
 import types
 from typing import Any, TypeAlias
-import weakref
 
 import numpy as np
 import numpy.typing as npt
@@ -59,6 +57,7 @@ from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _install
+from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _quantile_head
@@ -633,15 +632,6 @@ class _KumoGroup:
     context: tuple[_typing.FloatArray, _Array] | None = None
 
 
-# Upstream keeps the fitted context of its last fit on the network, and the
-# network is shared, so whatever fits on it or predicts from a fitted context
-# holds that network's lock.
-_LOCKS: weakref.WeakKeyDictionary[Any, threading.Lock] = (
-    weakref.WeakKeyDictionary()
-)
-_LOCKS_GUARD = threading.Lock()
-
-
 @contextlib.contextmanager
 def _lending(network: Any, cache: Any = None) -> Iterator[None]:
     """Holds the shared network for one fit or one prediction.
@@ -657,9 +647,7 @@ def _lending(network: Any, cache: Any = None) -> Iterator[None]:
     Yields:
         Nothing; the network holds no context on exit.
     """
-    with _LOCKS_GUARD:
-        lock = _LOCKS.setdefault(network, threading.Lock())
-    with lock:
+    with _locks.network_lock(network):
         network._cache = cache  # noqa: SLF001 - upstream's cache.
         try:
             yield

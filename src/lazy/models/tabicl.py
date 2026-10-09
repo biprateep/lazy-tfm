@@ -53,6 +53,7 @@ from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
+from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _quantile_head
@@ -452,13 +453,17 @@ class TabICLQuantile(
         """Has a regressor's fit load its network through the shared cache.
 
         Upstream's ``fit`` builds a fresh ``TabICL`` from the checkpoint
-        every time. Its network holds nothing between calls (the key/value
-        caches are the regressor's ``model_kv_cache_``), so every fit with
-        the same checkpoint and device runs on one, through
+        every time. Its network holds nothing a fit needs to keep (the
+        key/value caches are the regressor's ``model_kv_cache_``), so every
+        fit with the same checkpoint and device runs on one, through
         :mod:`lazy.models._weights`. The loader is swapped on this one
         regressor, for the duration of its fit, so a pickled regressor
         reloads from the checkpoint as upstream's own does. The weights
         stay in float32: ``use_amp`` autocasts and casts nothing.
+
+        Upstream does keep the cache it records last on the network, so the
+        fit holds the network's lock (:func:`lazy.models._locks.
+        network_lock`) throughout.
 
         Args:
             regressor: An unfitted ``TabICLRegressor``.
@@ -478,18 +483,19 @@ class TabICLQuantile(
             "float32",
             load,
         )
+        network, config, path = _weights.network(
+            cache_key, functools.partial(_load_network, regressor, load)
+        )
 
         def shared() -> None:
-            network, config, path = _weights.network(
-                cache_key, functools.partial(_load_network, regressor, load)
-            )
             regressor.model_ = network
             regressor.model_config_ = dict(config)
             regressor.model_path_ = path
 
         regressor._load_model = shared  # noqa: SLF001 - upstream's loader.
         try:
-            yield
+            with _locks.network_lock(network):
+                yield
         finally:
             del regressor._load_model  # noqa: SLF001 - upstream's loader.
 
@@ -500,18 +506,19 @@ class TabICLQuantile(
         total = sum(handle.weights)
         # Upstream averages its members' quantiles; across regressors, each
         # average counts for the members it stands for.
-        quantiles = sum(
-            (weight / total)
-            * np.asarray(
-                regressor.predict(X, output_type="raw_quantiles"),
-                dtype=np.float64,
-            )
-            for regressor, weight in zip(
-                handle.regressors, handle.weights, strict=True
-            )
-        )
+        answers = []
         for regressor in handle.regressors:
-            _release_network_cache(regressor)
+            with _lending(regressor):
+                answers.append(
+                    np.asarray(
+                        regressor.predict(X, output_type="raw_quantiles"),
+                        dtype=np.float64,
+                    )
+                )
+        quantiles = sum(
+            (weight / total) * answer
+            for answer, weight in zip(answers, handle.weights, strict=True)
+        )
         quantiles = np.asarray(quantiles) * scale + offset
         self.n_quantiles_ = int(quantiles.shape[1])
         return distributions.QuantileDistribution(
@@ -596,6 +603,32 @@ def _load_network(
     """
     load(regressor)
     return regressor.model_, regressor.model_config_, regressor.model_path_
+
+
+@contextlib.contextmanager
+def _lending(regressor: Any) -> Iterator[None]:
+    """Holds a fitted regressor's network for one prediction.
+
+    Upstream hands the network the regressor's cache and reads it back from
+    the network; on a network other models share, a prediction holds the
+    network's lock, so that two threads never answer from each other's
+    context, and leaves no cache behind.
+
+    Args:
+        regressor: A fitted ``TabICLRegressor``.
+
+    Yields:
+        Nothing; the network holds no cache on exit.
+    """
+    network = getattr(regressor, "model_", None)
+    if network is None:  # Not upstream's regressor: nothing shared.
+        yield
+        return
+    with _locks.network_lock(network):
+        try:
+            yield
+        finally:
+            _release_network_cache(regressor)
 
 
 def _release_network_cache(regressor: Any) -> None:
