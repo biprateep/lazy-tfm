@@ -897,6 +897,26 @@ def test_soft_clip_keeps_order_and_ignores_missing_values():
     assert out[3, 0] < 3.5 + np.log1p(50.0)  # pulled back to the bound
 
 
+def test_soft_clip_passes_a_column_without_spread_through():
+    rng = np.random.default_rng(0)
+    context = np.full((50, 4), np.nan)
+    context[:, 0] = rng.normal(size=50)  # an ordinary column
+    context[7, 1] = 2.0  # one observed value
+    # Three values, of which the second pass keeps only the middle one.
+    context[:3, 3] = [-1.0, 0.01, 1.0]
+    clip = _transforms.SoftClip(0.1).fit(context)
+    queries = np.array([[0.0, -40.0, 3.0, 25.0], [np.nan, np.nan, np.nan, 0.5]])
+    for values in (context, queries):
+        out = clip.transform(values)
+        np.testing.assert_array_equal(out[:, 1:], values[:, 1:])
+        np.testing.assert_array_equal(
+            out[:, 0],
+            _transforms.SoftClip(0.1)
+            .fit(context[:, :1])
+            .transform(values[:, :1])[:, 0],
+        )
+
+
 def test_soft_clip_is_the_upstream_models_clip():
     preprocessing = pytest.importorskip("tabicl._sklearn.preprocessing")
     rng = np.random.default_rng(1)

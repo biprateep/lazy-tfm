@@ -238,7 +238,9 @@ class SoftClip:
     beyond a bound is pulled back to it plus the logarithm of its magnitude,
     ``min(x, upper + log1p(|x|))`` (and its mirror below), so extreme values
     keep their order but lose their leverage. Missing values are ignored when
-    fitting and stay missing.
+    fitting and stay missing. A column with no standard deviation to bound it
+    by, in either pass (no observed value, or one in a context of several
+    rows), passes through unchanged.
 
     This is TabICL's and TabFM's ``OutlierRemover`` and TabPFN's
     ``TorchSoftClipOutliers`` (the standard deviation with ``ddof=1``, floored
@@ -273,13 +275,19 @@ class SoftClip:
         self, features: _typing.FloatArray, ddof: int
     ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
         """``mean -+ threshold * std`` of each column, ignoring NaN."""
-        # An all-missing column has no bounds; numpy warns, and the NaN
-        # bounds leave its (missing) values alone.
+        # A column with too few observed values has no standard deviation;
+        # numpy warns and gives NaN, which would turn every value the clip
+        # sees into NaN. Its bounds are infinite instead: no clip at all.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             mean = np.nanmean(features, axis=0)
             std = np.maximum(np.nanstd(features, axis=0, ddof=ddof), 1e-6)
-        return mean - self.threshold * std, mean + self.threshold * std
+        lower = mean - self.threshold * std
+        upper = mean + self.threshold * std
+        return (
+            np.where(np.isnan(lower), -np.inf, lower),
+            np.where(np.isnan(upper), np.inf, upper),
+        )
 
     def transform(self, features: _typing.FloatArray) -> _typing.FloatArray:
         """Applies the clip, shape (n_rows, n_features)."""
