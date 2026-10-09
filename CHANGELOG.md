@@ -37,6 +37,43 @@ change the API.
 
 - The `EnsembleSizeWarning` message no longer quotes measured losses; it
   points to "Ensembles of models" in the documentation, which gives them.
+- `lazy-tfm` now requires NumPy 2.0, which the metrics already needed.
+- A fit that fails, or whose inputs are refused, leaves the model unfitted
+  rather than keeping a half-updated earlier fit.
+- TabICL and Kumo Tabular no longer claim bit-for-bit chunking: a one-row
+  chunk differs from a longer one by float rounding (about 1e-6 on a CPU).
+- `datasets.load_trainz` returns both files on the DC1 grid, as densities.
+- `SelectionSplit` keeps its parent catalog, so that `summary` can describe it
+  in any band and depth.
+
+### Fixed
+
+- Distributions: a CDF rounding just above 1 made `histogramize`, the
+  mixtures' quantiles and mode, and the ensemble's pooling raise, and PIT
+  could exceed 1; a value on a histogram's last edge counted as outside it
+  (density and NLL); concatenating mixtures with different weights gave
+  wrong answers; variances lost their precision far from zero.
+- Threads: fits and predictions sharing a TabICL network could answer from
+  each other's context, and overlapping threaded fits could deadlock on the
+  network cache or leave TabPFN's loader replaced.
+- TabICL pickles no longer carry the network or a fixed checkpoint path, so
+  they load on another machine and a bagged model shares one network.
+- Masked astropy columns and arrays are read with their masked entries as
+  missing, instead of their raw values (a -99 placeholder became a target).
+- The soft outlier clip no longer turns a column with one observed context
+  value into missing values.
+- LimiX drops a column that is constant on the context apart from missing
+  values, which made a query's answer depend on the rest of its chunk.
+- Bagged TabFM keeps the probability of a coarse bin that no bag reaches.
+- A partly downloaded snapshot checkpoint (TabFM's) no longer counts as
+  cached.
+- TabPFN's `bucket_masses` returns the float64 bucket borders the backend
+  uses, given the regressor.
+- Datasets: downloaded files are readable by other users of a shared data
+  directory; `holdout_rows` are validated and a biased training set is never
+  empty; the PIT plots and `binned_quantiles` drop non-finite and
+  out-of-range values; `SelectionSplit.summary` uses the band and depth it is
+  given for the catalog row.
 
 ## [0.3.0] - 2026-10-08
 
