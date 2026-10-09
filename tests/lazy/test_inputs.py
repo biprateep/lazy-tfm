@@ -94,6 +94,54 @@ def test_masked_astropy_entries_become_nan():
     assert np.isnan(frame["a"].iloc[1]) and frame["a"].iloc[2] == 3.0
 
 
+def _astropy_masked(values, mask, unit=None):
+    """An astropy Masked array, or quantity with a unit; the -99 is masked."""
+    masked = pytest.importorskip("astropy.utils.masked")
+    if unit is not None:
+        units = pytest.importorskip("astropy.units")
+        values = values * getattr(units, unit)
+    return masked.Masked(values, mask=mask)
+
+
+@pytest.mark.parametrize("unit", [None, "mag"], ids=["array", "quantity"])
+def test_astropy_masked_features_become_nan(unit):
+    values = np.array([[1.0, -99.0], [3.0, 4.0]])
+    features = _astropy_masked(values, values == -99.0, unit)
+    frame, named = _inputs.as_feature_frame(features)
+    assert not named
+    np.testing.assert_array_equal(frame.to_numpy(), [[1.0, np.nan], [3.0, 4.0]])
+
+
+@pytest.mark.parametrize("unit", [None, "mag"], ids=["array", "quantity"])
+def test_a_masked_qtable_column_becomes_nan(unit):
+    astropy_table = pytest.importorskip("astropy.table")
+    values = np.array([1.0, -99.0, 3.0])
+    column = _astropy_masked(values, values == -99.0, unit)
+    frame, _ = _inputs.as_feature_frame(astropy_table.QTable({"m": column}))
+    np.testing.assert_array_equal(frame["m"], [1.0, np.nan, 3.0])
+    np.testing.assert_array_equal(
+        _inputs.as_target(astropy_table.QTable({"z": column})["z"]),
+        [1.0, np.nan, 3.0],
+    )
+
+
+@pytest.mark.parametrize("unit", [None, "dimensionless_unscaled"])
+def test_astropy_masked_targets_are_rejected(table, unit):
+    frame, z = table
+    z = z.copy()
+    z[0] = -99.0  # a sentinel, masked: never a training target
+    target = _astropy_masked(z, z == -99.0, unit)
+    np.testing.assert_array_equal(_inputs.as_target(target)[1:], z[1:])
+    assert np.isnan(_inputs.as_target(target)[0])
+    with pytest.raises(ValueError, match="non-finite"):
+        _Echo().fit(frame, target)
+
+
+def test_a_series_is_not_taken_for_a_masked_array(table):
+    _, z = table
+    np.testing.assert_array_equal(_inputs.as_target(pd.Series(z)), z)
+
+
 def test_missing_values_pass_through_as_nan(table):
     frame, z = table
     frame = frame.copy()

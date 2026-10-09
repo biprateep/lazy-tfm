@@ -9,13 +9,17 @@ following scikit-learn's conventions:
 * a NumPy structured array or record array, one field per column;
 * a pandas DataFrame;
 * an astropy ``Table`` or ``QTable`` (read by duck typing, so astropy is not
-  a dependency): quantities give their values, masked entries become NaN;
+  a dependency): quantities give their values;
 * any other object with a ``to_pandas()`` method (polars, for example).
 
-They all become one float64 DataFrame. Missing values are NaN and pass
-through untouched, for each model to handle in its own way; infinities are
-rejected. Column names are kept when the input has them (all strings), and
-then enforced at predict time, as ``feature_names_in_`` is in scikit-learn.
+They all become one float64 DataFrame. Anything with a ``mask`` -- a NumPy
+masked array, an astropy ``MaskedColumn``, an astropy ``Masked`` array or
+quantity (a masked ``QTable`` column) -- has its masked entries read as NaN,
+in features and targets alike, never as the values underneath. Missing
+values are NaN and pass through untouched, for each model to handle in its
+own way; infinities are rejected. Column names are kept when the input has
+them (all strings), and then enforced at predict time, as
+``feature_names_in_`` is in scikit-learn.
 
 Typical usage example:
 
@@ -80,16 +84,17 @@ def as_target(target: Any) -> _typing.FloatArray:
 
     Args:
         target: Target values, shape (n_samples,): an array, list, pandas
-            Series, astropy Column or Quantity, or masked array.
+            Series, astropy Column or Quantity, or masked array (NumPy's or
+            astropy's).
 
     Returns:
         The values, shape (n_samples,).
     """
-    values = getattr(target, "value", target)  # astropy Quantity
-    if np.ma.isMaskedArray(values):
-        filled = np.ma.filled(np.ma.asarray(values, dtype=np.float64), np.nan)
-        return np.asarray(filled).ravel()
-    return np.asarray(values, dtype=np.float64).ravel()
+    data, mask = _unmask(target)
+    values = np.asarray(data, dtype=np.float64)
+    if mask is not None:
+        values = np.where(mask, np.nan, values)
+    return values.ravel()
 
 
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
@@ -104,10 +109,9 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         return frame, _all_strings(frame.columns)
     if isinstance(features, np.ndarray) and features.dtype.names is not None:
         return _from_structured(features), True
-    array = features
-    if np.ma.isMaskedArray(array):
-        array = np.ma.filled(np.ma.asarray(array, dtype=np.float64), np.nan)
-    array = np.asarray(array)
+    array, mask = _unmask(features)
+    if mask is not None:
+        array = np.where(mask, np.nan, array.astype(np.float64))
     if array.ndim == 1:
         raise ValueError(
             f"X must be 2D, got a 1D array of shape {array.shape}. Reshape "
@@ -151,13 +155,40 @@ def _from_structured(array: npt.NDArray[Any]) -> pd.DataFrame:
 
 def _column_values(column: Any) -> npt.NDArray[Any]:
     """One column's values, units dropped and masked entries as NaN."""
-    values = getattr(column, "value", column)  # astropy Quantity
-    if np.ma.isMaskedArray(values) or hasattr(column, "mask"):
-        masked = np.ma.asarray(values)
-        if masked.dtype.kind in "biuf":
-            return np.ma.filled(masked.astype(np.float64), np.nan)
-        return np.asarray(masked)
-    return np.asarray(values)
+    values, mask = _unmask(column)
+    if mask is None or values.dtype.kind not in "biuf":
+        return values
+    filled = values.astype(np.float64)
+    filled[mask] = np.nan
+    return filled
+
+
+def _unmask(
+    values: Any,
+) -> tuple[npt.NDArray[Any], npt.NDArray[np.bool_] | None]:
+    """Splits values into their data, units dropped, and their mask.
+
+    Anything with an array-valued ``mask`` attribute counts as masked: a
+    NumPy masked array, an astropy ``MaskedColumn``, and an astropy
+    ``Masked`` array or quantity, whose ``value`` is itself masked.
+
+    Args:
+        values: An array-like of any shape.
+
+    Returns:
+        A tuple (data, mask): the values underneath as an array, and the
+        mask as a boolean array of the same shape, or ``None`` if the
+        values carry no mask.
+    """
+    mask = getattr(values, "mask", None)
+    if callable(mask):  # pandas' Series.mask, a method.
+        mask = None
+    data = getattr(values, "unmasked", values)  # astropy Masked
+    data = getattr(data, "value", data)  # astropy Quantity
+    data = np.asarray(np.ma.getdata(data))
+    if mask is None:
+        return data, None
+    return data, np.broadcast_to(np.asarray(mask, dtype=bool), data.shape)
 
 
 def _all_strings(columns: pd.Index) -> bool:
