@@ -44,13 +44,10 @@ import contextlib
 import dataclasses
 import functools
 import math
-import os
 import types
 from typing import Any
-import warnings
 
 import numpy as np
-import pandas as pd
 
 from lazy import _typing
 from lazy import distributions
@@ -58,6 +55,7 @@ from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
+from lazy.models import _quantile_head
 from lazy.models import _weights
 
 __all__ = [
@@ -70,23 +68,16 @@ __all__ = [
     "quantile_levels",
 ]
 
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package (or LazyModel) they are raised.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
-
 #: Bins of the native grid across the training targets' range: as fine as
 #: the 999 quantiles resolve. The padding adds bins of the same width.
-NATIVE_QUANTILE_BINS = 1000
+NATIVE_QUANTILE_BINS = _quantile_head.NATIVE_QUANTILE_BINS
 
 #: How far the native grid extends beyond the training targets on each
 #: side, as a fraction of their range: TabICL's quantiles extrapolate.
-NATIVE_PAD = 0.25
+NATIVE_PAD = _quantile_head.NATIVE_PAD
 
-#: The probability a row may put outside the native grid before
-#: tabulating it there warns.
-_OUTSIDE_TOLERANCE = 0.01
+#: The cumulative probabilities TabICL's quantile outputs sit at.
+quantile_levels = _quantile_head.quantile_levels
 
 # TabICLv2's own recipe, ``transforms="auto"``, written out here so that the
 # installed upstream version cannot change it: the values TabICLRegressor
@@ -132,26 +123,9 @@ _PINNED_REGRESSOR_ARGS: dict[str, Any] = {
 _RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
 
 
-def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
-    """Returns the cumulative probabilities TabICL's quantile outputs sit at.
-
-    The levels are interior points of ``[0, 1]``: the model never claims to
-    know where the 0th or 100th percentile is.
-
-    Args:
-        n_quantiles: How many quantiles the model returns per row.
-
-    Returns:
-        The evenly spaced levels, shape ``(n_quantiles,)``.
-
-    Examples:
-        >>> quantile_levels(3).tolist()
-        [0.25, 0.5, 0.75]
-    """
-    return np.linspace(0.0, 1.0, int(n_quantiles) + 2)[1:-1]
-
-
-class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
+class TabICLQuantile(
+    _quantile_head.QuantileHead, _ensemble.ContextEnsembleEstimator
+):
     """Target distributions from the quantiles TabICLv2's regressor predicts.
 
     Args:
@@ -280,9 +254,6 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
     exact_chunking = True
     cpu_friendly = True
 
-    # The whole context's target range, recorded at fit for the grid.
-    _support: tuple[float, float]
-
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
         *,
@@ -339,12 +310,6 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             }
         )
 
-    def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        del X  # Unused: the native grid depends on the targets alone.
-        # The native grid spans every context target, not only those some
-        # bag happened to draw.
-        self._support = (float(np.min(y)), float(np.max(y)))
-
     def _after_fit(self) -> None:
         # The base class keeps the one group's handle; regressor_ is the
         # TabICLRegressor itself, when one serves the whole ensemble.
@@ -361,7 +326,7 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
         # TabICL works in float32, which cannot resolve a narrow spread about
         # a large offset; standardising in float64 first keeps it. Each
         # group is standardised on its own rows, a bagged member on its bag.
-        offset, scale = _target_scaling(y)
+        offset, scale = _quantile_head.target_scaling(y)
         handle = self._fit_members(
             # The features stay float64: upstream fits its scaling and power
             # transform in float64, and casts to float32 only for the model.
@@ -570,53 +535,6 @@ class TabICLQuantile(_ensemble.ContextEnsembleEstimator):
             },
         }
 
-    def _native_grid(self) -> grid_lib.Grid:
-        low, high = self._support
-        if high > low:
-            pad = NATIVE_PAD * (high - low)
-            n_bins = round(NATIVE_QUANTILE_BINS * (1.0 + 2.0 * NATIVE_PAD))
-        else:
-            pad = 0.01 * max(abs(high), 1.0)
-            n_bins = NATIVE_QUANTILE_BINS
-        return grid_lib.Grid.linear(
-            low - pad, high + pad, n_bins, normalization="histogram"
-        )
-
-    def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.Grid
-    ) -> _typing.FloatArray:
-        if X.shape[0] == 0:
-            return np.empty((0, grid.n_bins))
-        blocks = []
-        outside = 0
-        for dist in self._chunks(X):
-            blocks.append(dist.on_grid(grid))
-            if grid == self.native_grid_ and isinstance(
-                dist, distributions.QuantileDistribution
-            ):
-                outside += int(
-                    np.count_nonzero(
-                        _mass_outside(dist, grid) > _OUTSIDE_TOLERANCE
-                    )
-                )
-        if outside:
-            warnings.warn(
-                f"{outside} of {len(X)} rows put more than "
-                f"{_OUTSIDE_TOLERANCE:.0%} of their probability outside the "
-                f"native grid [{grid.y_min:g}, {grid.y_max:g}], and their "
-                "densities there are renormalised. Pass a wider y_grid, or "
-                "use predict_distribution, which has full support.",
-                UserWarning,
-                skip_file_prefixes=(_PACKAGE_PREFIX,),
-            )
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
-
-    def _progress_postfix(
-        self, dist: distributions.Distribution
-    ) -> dict[str, Any]:
-        del dist  # Unused: the count is recorded when predicting.
-        return {"quantiles": getattr(self, "n_quantiles_", None)}
-
 
 @dataclasses.dataclass(frozen=True)
 class _RegressorGroup:
@@ -783,37 +701,3 @@ def _norm_methods(tokens: tuple[str, ...]) -> list[str]:
             "each transform once in transforms"
         )
     return methods
-
-
-def _target_scaling(y: _typing.FloatArray) -> tuple[float, float]:
-    """The (offset, scale) that standardise the targets: mean and std.
-
-    Args:
-        y: The context targets, shape ``(n,)``.
-
-    Returns:
-        A tuple ``(offset, scale)``; the scale is 1 for a constant target.
-    """
-    scale = float(np.std(y))
-    return float(np.mean(y)), scale if scale > 0 else 1.0
-
-
-def _mass_outside(
-    dist: distributions.QuantileDistribution, grid: grid_lib.Grid
-) -> _typing.FloatArray:
-    """Each row's probability outside the grid, to one quantile level.
-
-    Args:
-        dist: The predicted quantiles.
-        grid: The grid they are tabulated on.
-
-    Returns:
-        The probability below ``grid.y_min`` plus that above ``grid.y_max``,
-        shape ``(n_rows,)``: a lower bound, short by at most one quantile
-        level on each side.
-    """
-    levels = np.r_[0.0, dist.quants, 1.0]
-    n_levels = dist.quants.size
-    below = np.count_nonzero(dist.locs < grid.y_min, axis=1)
-    above = np.count_nonzero(dist.locs > grid.y_max, axis=1)
-    return levels[below] + (1.0 - levels[n_levels + 1 - above])

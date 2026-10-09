@@ -28,6 +28,7 @@ import lazy
 from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import _members
+from lazy.models import _quantile_head
 from lazy.models import _transforms
 from lazy.models import tabfm
 from lazy.models import tabicl
@@ -1056,7 +1057,7 @@ class TestTabICL:
         est = tabicl.TabICLQuantile()
         est._support = (0.0, 1.0)
         est.native_grid_ = est._native_grid()
-        outside = tabicl._mass_outside(dist, est.native_grid_)
+        outside = _quantile_head.mass_outside(dist, est.native_grid_)
         assert outside[0] == 0.0
         assert outside[1] == pytest.approx(3 / 16, abs=0.011)
 
@@ -1071,13 +1072,13 @@ class TestTabICL:
     def test_targets_are_standardised_in_float64(self):
         """float32 cannot resolve 0.01 of spread about 1e4; float64 can."""
         y = 1e4 + 0.01 * np.random.default_rng(0).normal(size=100)
-        offset, scale = tabicl._target_scaling(y)
+        offset, scale = _quantile_head.target_scaling(y)
         standardised = ((y - offset) / scale).astype(np.float32)
         assert np.unique(standardised).size == y.size
         np.testing.assert_allclose(
             standardised.astype(np.float64) * scale + offset, y, atol=1e-8
         )
-        assert tabicl._target_scaling(np.full(5, 3.0)) == (3.0, 1.0)
+        assert _quantile_head.target_scaling(np.full(5, 3.0)) == (3.0, 1.0)
 
     @needs_checkpoint
     def test_a_large_offset_keeps_its_resolution(self):
