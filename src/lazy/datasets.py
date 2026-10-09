@@ -81,6 +81,7 @@ import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
 import warnings
+import zipfile
 
 import numpy as np
 import numpy.typing as npt
@@ -590,9 +591,22 @@ def load_trainz(
     """Loads the DC1 ``trainZ`` baseline PDFs.
 
     Every row is the same training-set N(z): the challenge's deliberately
-    trivial estimator, and the floor any real method must clear. The stored
-    array is a per-bin probability on a 0.01-wide grid, so normalise it as a
-    density (:meth:`lazy.grid.Grid.normalize`) before scoring.
+    trivial estimator, and the floor any real method must clear. The two
+    files store it differently: the test file as per-bin probabilities in
+    the 200 bins of :data:`DC1_GRID`, the train file as a density sampled
+    every 0.002 on ``0 <= z <= 2``. Both come back on :data:`DC1_GRID`, as
+    densities at its bin centres that integrate to one as a histogram,
+    ``sum(pdf * 0.01) == 1``: the test file's probabilities divided by the
+    bin width, and the train file's density integrated over each bin (exact,
+    as its edges fall on the train file's samples) and rescaled to unit mass.
+    The two are different estimates of N(z), so their rows differ: the train
+    file's is smooth, the test file's (the one the challenge scored) a
+    histogram. Pass them through :meth:`lazy.grid.Grid.normalize` to score
+    them under the grid's trapezoid convention, as the challenge did.
+
+    Only one row of each file is read. With ``split`` true each array is a
+    read-only view of that row repeated, so it costs no memory; copy it with
+    ``np.array`` to write to it. The stacked array is a copy (0.7 GB).
 
     Args:
         split: Follows :func:`fetch_dc1`: ``False`` stacks the two files in
@@ -604,8 +618,9 @@ def load_trainz(
 
     Returns:
         A tuple (z_grid, pdfs), or (z_grid, train_pdfs, test_pdfs) when
-        ``split`` is true. ``z_grid`` has shape (n_z,); each PDF array has
-        shape (n_galaxies, n_z).
+        ``split`` is true. ``z_grid`` holds the 200 bin centres of
+        :data:`DC1_GRID`, shape (200,); each PDF array has shape
+        (n_galaxies, 200).
 
     Raises:
         FileNotFoundError: If a file is not cached and
@@ -614,15 +629,20 @@ def load_trainz(
             cached file is incomplete and ``download_if_missing`` is
             ``False``.
     """
-    z_grid, train = _load_trainz_split(
+    train, n_train = _load_trainz_split(
         "train", root=data_home, download_if_missing=download_if_missing
     )
-    _, test = _load_trainz_split(
+    test, n_test = _load_trainz_split(
         "test", root=data_home, download_if_missing=download_if_missing
     )
+    z_grid = DC1_GRID.centers
     if split:
-        return z_grid, train, test
-    return z_grid, np.concatenate([train, test])
+        return (
+            z_grid,
+            np.broadcast_to(train, (n_train, train.size)),
+            np.broadcast_to(test, (n_test, test.size)),
+        )
+    return z_grid, np.repeat(np.stack([train, test]), [n_train, n_test], axis=0)
 
 
 def _load_split(
@@ -647,16 +667,53 @@ def _load_split(
 
 def _load_trainz_split(
     name: str, *, root: str | pathlib.Path | None, download_if_missing: bool
-) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-    """Loads the ``z_grid`` and ``trainZ`` PDFs stored in one DC1 file."""
+) -> tuple[_typing.FloatArray, int]:
+    """Loads one DC1 file's ``trainZ`` N(z) as a density on :data:`DC1_GRID`.
+
+    Returns:
+        The density at the bin centres, shape (200,), with
+        ``sum(pdf * DC1_GRID.widths) == 1``, and the file's number of rows.
+    """
     path = _cached_path(
         name, root=root, download_if_missing=download_if_missing
     )
     with np.load(path, allow_pickle=True) as saved:
-        return (
-            np.asarray(saved["z_grid"], dtype=float),
-            np.asarray(saved[_CDE_KEYS[name]], dtype=float),
+        z_grid = np.asarray(saved["z_grid"], dtype=float)
+    row, n_rows = _first_row(path, _CDE_KEYS[name])
+    edges = DC1_GRID.edges
+    if z_grid.size == DC1_GRID.n_bins:  # Per-bin probabilities.
+        if not np.allclose(z_grid, DC1_GRID.centers):
+            raise OSError(f"{path} is not on the DC1 grid")
+        mass = row
+    else:  # A density sampled at z_grid, linear between the samples.
+        cumulative = np.concatenate(
+            [[0.0], np.cumsum(0.5 * (row[1:] + row[:-1]) * np.diff(z_grid))]
         )
+        mass = np.diff(np.interp(edges, z_grid, cumulative))
+    return mass / mass.sum() / np.diff(edges), n_rows
+
+
+def _first_row(path: pathlib.Path, key: str) -> tuple[_typing.FloatArray, int]:
+    """Reads the first row of a 2-D array in an ``.npz``, and its row count.
+
+    Every ``trainZ`` row is the same, so this reads a few kB rather than the
+    whole array (up to 0.6 GB).
+    """
+    with (
+        zipfile.ZipFile(path) as archive,
+        archive.open(f"{key}.npy") as member,
+    ):
+        version = np.lib.format.read_magic(member)
+        if version == (1, 0):
+            header = np.lib.format.read_array_header_1_0(member)
+        else:
+            header = np.lib.format.read_array_header_2_0(member)
+        (n_rows, n_columns), fortran_order, dtype = header
+        if fortran_order:  # The first row is not contiguous: read it all.
+            with np.load(path) as saved:
+                return np.asarray(saved[key][0], dtype=float), n_rows
+        buffer = member.read(n_columns * dtype.itemsize)
+    return np.frombuffer(buffer, dtype=dtype).astype(float), n_rows
 
 
 def _cached_path(

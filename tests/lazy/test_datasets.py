@@ -83,6 +83,57 @@ def test_a_missing_cache_is_reported_rather_than_downloaded(isolated_home):
         datasets.fetch_dc1(data_home=isolated_home, download_if_missing=False)
 
 
+@pytest.fixture
+def trainz_files(tmp_path, monkeypatch):
+    """Small stand-ins for the two DC1 files, in their two storage formats.
+
+    The train file holds the density ``z / 2`` sampled every 0.002 on
+    ``0 <= z <= 2``; the test file per-bin probabilities on the DC1 grid.
+    """
+    nodes = np.linspace(0.0, 2.0, 1001)
+    np.savez(
+        tmp_path / "train.npz",
+        z_grid=nodes,
+        cde_train=np.tile(nodes / 2, (3, 1)),
+    )
+    probabilities = np.arange(1.0, 201.0)
+    probabilities /= probabilities.sum()
+    np.savez(
+        tmp_path / "test.npz",
+        z_grid=datasets.DC1_GRID.centers,
+        cde_test=np.tile(probabilities, (5, 1)),
+    )
+    monkeypatch.setattr(
+        datasets,
+        "_cached_path",
+        lambda name, **kwargs: tmp_path / f"{name}.npz",
+    )
+    return probabilities
+
+
+def test_trainz_puts_both_files_on_the_dc1_grid_as_densities(trainz_files):
+    """The files store N(z) on two grids, in two conventions; one comes back.
+
+    The train file's density, averaged over each 0.01 bin, is its value at
+    the bin centre, as it is linear.
+    """
+    z_grid, train, test = datasets.load_trainz(split=True)
+    centers = datasets.DC1_GRID.centers
+    assert np.array_equal(z_grid, centers)
+    assert train.shape == (3, 200) and test.shape == (5, 200)
+    np.testing.assert_allclose(train, np.tile(centers / 2, (3, 1)))
+    np.testing.assert_allclose(test, np.tile(trainz_files / 0.01, (5, 1)))
+    for pdfs in (train, test):
+        np.testing.assert_allclose(pdfs.sum(axis=1) * 0.01, 1.0)
+
+
+def test_trainz_stacks_the_two_files_like_fetch_dc1(trainz_files):
+    _, train, test = datasets.load_trainz(split=True)
+    z_grid, pdfs = datasets.load_trainz()
+    assert z_grid.shape == (200,)
+    assert np.array_equal(pdfs, np.concatenate([train, test]))
+
+
 def test_catalog_repr_summarises_without_dumping_the_frame():
     catalog = datasets.Catalog(
         split="train",
