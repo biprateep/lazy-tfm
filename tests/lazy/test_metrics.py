@@ -480,3 +480,14 @@ def test_the_summary_table_adds_crps_and_nll():
         metrics.summarize_scores(
             y_true, y_pred, cde_terms, pit, crps_terms=np.zeros(3)
         )
+
+
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+def test_pit_never_exceeds_one_by_rounding(normalization):
+    grid = grid_lib.Grid.linear(0.0, 1.0, 50, normalization=normalization)
+    pdfs = np.random.default_rng(0).random((2000, 50))
+    # Just below the last node of the CDF, where the cumulative sum ends.
+    last = grid.y_max if normalization == "histogram" else grid.centers[-1]
+    y_true = np.full(2000, np.nextafter(last, 0.0))
+    pit = metrics.evaluate_grid_at_truth(y_true, grid, pdfs)[3]
+    assert pit.max() <= 1.0

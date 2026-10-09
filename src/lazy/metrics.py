@@ -605,7 +605,8 @@ def evaluate_grid_at_truth(
     )
     pit = cdf[rows, left] + frac * (cdf[rows, right] - cdf[rows, left])
     pit = np.where(truth <= grid[0], 0.0, np.where(truth >= grid[-1], 1.0, pit))
-    return grid, density, pdf_at_truth, pit
+    # A cumulative sum of unit mass can round to just above one.
+    return grid, density, pdf_at_truth, np.clip(pit, 0.0, 1.0)
 
 
 def cde_loss(
@@ -1401,7 +1402,8 @@ def _histogram_at_truth(
     pit = np.where(
         truth < edges[0], 0.0, np.where(truth >= edges[-1], 1.0, pit)
     )
-    return pdf_at_truth, pit
+    # A cumulative sum of unit mass can round to just above one.
+    return pdf_at_truth, np.clip(pit, 0.0, 1.0)
 
 
 def _histogram_point_estimates(

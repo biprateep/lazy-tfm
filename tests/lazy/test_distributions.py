@@ -421,3 +421,56 @@ def test_histogram_ppf_ends_at_the_support_despite_empty_edge_buckets():
     np.testing.assert_array_equal(dist.ppf([0.0, 0.5, 1.0]), [[2.0, 7.0, 12.0]])
     samples = dist.rvs(2000, random_state=0)
     assert samples.min() >= 2.0 and samples.max() <= 12.0
+
+
+# -- rounding ----------------------------------------------------------------
+
+
+def _rounding_histogram():
+    """0.3 + 0.6 + 0.1 rounds to just above one, then an empty bucket."""
+    return distributions.HistogramDistribution(
+        np.arange(5.0), [[0.3, 0.6, 0.1, 0.0]]
+    )
+
+
+def test_a_cumulative_sum_rounding_above_one_stays_a_probability():
+    dist = _rounding_histogram()
+    assert np.cumsum(dist.probabilities)[-1] > 1.0  # the rounding at issue
+    cdf = dist.cdf(dist.bins)
+    assert cdf.max() == 1.0 and (np.diff(cdf) >= 0).all()
+    assert dist.pit(np.array([3.5]))[0] == 1.0
+    np.testing.assert_allclose(cdf, [[0.0, 0.3, 0.9, 1.0, 1.0]])
+
+
+def test_histogramize_on_its_own_edges_survives_rounding():
+    dist = _rounding_histogram()
+    masses = dist.histogramize(dist.bins).masses
+    assert (masses >= 0).all()
+    np.testing.assert_allclose(masses, dist.probabilities)
+    # Random rows with an empty last bucket round about a quarter of the time.
+    rng = np.random.default_rng(0)
+    rows = rng.random((200, 30)) ** 3
+    rows[:, -1] = 0.0
+    dist = distributions.HistogramDistribution(np.linspace(0, 1, 31), rows)
+    np.testing.assert_allclose(
+        dist.histogramize(dist.bins).masses, dist.probabilities, atol=1e-15
+    )
+    shifted = rng.random((200, 20)) ** 3
+    shifted[:, 15:] = 0.0
+    other = distributions.HistogramDistribution(
+        np.linspace(0.05, 1.5, 21), shifted
+    )
+    mixture = distributions.MixtureDistribution.equal([dist, other])
+    union = mixture.to_histogram()
+    np.testing.assert_allclose(union.masses.sum(axis=1), 1.0, atol=1e-12)
+
+
+def test_a_mixture_of_rounding_histograms_has_quantiles_and_a_mode():
+    dist = _rounding_histogram()
+    mixture = distributions.MixtureDistribution.equal([dist, dist])
+    np.testing.assert_allclose(mixture.median(), dist.median())
+    np.testing.assert_allclose(mixture.mode(), dist.mode())
+    np.testing.assert_allclose(
+        mixture.to_histogram().probabilities[:, :4], dist.probabilities
+    )
+    assert mixture.rvs(10, random_state=0).shape == (1, 10)

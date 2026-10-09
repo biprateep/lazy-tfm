@@ -105,6 +105,17 @@ def _as_row_values(values: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
     return out
 
 
+def _unit(values: _typing.FloatArray) -> _typing.FloatArray:
+    """Cumulative probabilities clipped to [0, 1].
+
+    A cumulative sum of masses that add to one can round to just above one
+    (or a weighted sum of CDFs to just outside [0, 1]); clipping keeps every
+    CDF a probability and non-decreasing, so differences between its values
+    are never negative masses.
+    """
+    return np.clip(values, 0.0, 1.0)
+
+
 def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
     """Probability levels as a 1-D array inside [0, 1]."""
     out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
@@ -215,6 +226,21 @@ class _Base:
         """
         rng = np.random.default_rng(random_state)
         return self._ppf_rows(rng.uniform(size=(self.npdf, size)))
+
+    def histogramize(self, bins: npt.ArrayLike) -> HistogramDistribution:
+        """The masses this distribution puts in ``bins``, exactly.
+
+        Probability outside ``bins`` is dropped and each row renormalised.
+
+        Args:
+            bins: The bucket edges, shape (n_buckets + 1,), non-decreasing.
+
+        Returns:
+            The distribution's masses in those buckets, with its ``ancil``.
+        """
+        target = np.asarray(bins, dtype=np.float64)
+        masses = np.maximum(np.diff(self.cdf(target), axis=1), 0.0)
+        return HistogramDistribution(target, masses, self.ancil)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -339,7 +365,7 @@ class HistogramDistribution(_Base):
         index, fraction = self._locate(y)
         value = cumulative[:, index] + probabilities[:, index] * fraction
         value = np.where(y < self.bins[0], 0.0, value)
-        return np.where(y >= self.bins[-1], 1.0, value)
+        return _unit(np.where(y >= self.bins[-1], 1.0, value))
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
@@ -348,7 +374,7 @@ class HistogramDistribution(_Base):
         rows = np.arange(self.npdf)
         value = cumulative[rows, index] + probabilities[rows, index] * fraction
         value = np.where(values < self.bins[0], 0.0, value)
-        return np.where(values >= self.bins[-1], 1.0, value)
+        return _unit(np.where(values >= self.bins[-1], 1.0, value))
 
     def _locate(
         self, values: _typing.FloatArray
@@ -422,15 +448,6 @@ class HistogramDistribution(_Base):
             density = np.where(widths > 0, self.probabilities / widths, -np.inf)
         best = np.argmax(density, axis=1)
         return 0.5 * (self.bins[best] + self.bins[best + 1])
-
-    def histogramize(self, bins: npt.ArrayLike) -> HistogramDistribution:
-        """The same distribution's masses over other bucket edges, exactly.
-
-        Probability outside ``bins`` is dropped and each row renormalised.
-        """
-        target = np.asarray(bins, dtype=np.float64)
-        cdf = self.cdf(target)
-        return HistogramDistribution(target, np.diff(cdf, axis=1), self.ancil)
 
     def to_qp(self) -> Any:
         """This distribution as a ``qp.Ensemble`` (``hist``); needs qp.
@@ -598,7 +615,7 @@ class QuantileDistribution(_Base):
             out[row] = np.interp(
                 y, self.locs[row], self.quants, left=0.0, right=1.0
             )
-        return out
+        return _unit(out)
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
         out = np.empty(self.npdf)
@@ -606,7 +623,7 @@ class QuantileDistribution(_Base):
             out[row] = np.interp(
                 values[row], self.locs[row], self.quants, left=0.0, right=1.0
             )
-        return out
+        return _unit(out)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
@@ -668,12 +685,6 @@ class QuantileDistribution(_Base):
         best = np.argmax(density, axis=1)
         rows = np.arange(self.npdf)
         return 0.5 * (self.locs[rows, best] + self.locs[rows, best + 1])
-
-    def histogramize(self, bins: npt.ArrayLike) -> HistogramDistribution:
-        """The masses this distribution puts in ``bins``, exactly."""
-        target = np.asarray(bins, dtype=np.float64)
-        cdf = self.cdf(target)
-        return HistogramDistribution(target, np.diff(cdf, axis=1), self.ancil)
 
     def to_qp(self) -> Any:
         """This distribution as a ``qp.Ensemble`` (``quant``); needs qp.
@@ -762,9 +773,7 @@ class MixtureDistribution(_Base):
 
     def to_histogram(self) -> HistogramDistribution:
         """The mixture as one histogram on the union of edges; exact."""
-        bins = self.bins
-        cdf = self.cdf(bins)
-        return HistogramDistribution(bins, np.diff(cdf, axis=1), self.ancil)
+        return self.histogramize(self.bins)
 
     def _weighted(self, values: Sequence[_typing.FloatArray]) -> Any:
         """The weighted sum of one array per component."""
@@ -801,11 +810,13 @@ class MixtureDistribution(_Base):
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
-        return self._weighted([c.cdf(values) for c in self.components])
+        return _unit(self._weighted([c.cdf(values) for c in self.components]))
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
-        return self._weighted(
-            [c._cdf_rows(values) for c in self.components]  # noqa: SLF001 - same module.
+        return _unit(
+            self._weighted(
+                [c._cdf_rows(values) for c in self.components]  # noqa: SLF001 - same module.
+            )
         )
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
@@ -827,12 +838,6 @@ class MixtureDistribution(_Base):
     def mode(self) -> _typing.FloatArray:
         """The centre of each row's densest union bucket, shape (n_rows,)."""
         return self.to_histogram().mode()
-
-    def histogramize(self, bins: npt.ArrayLike) -> HistogramDistribution:
-        """The masses the mixture puts in ``bins``, exactly."""
-        target = np.asarray(bins, dtype=np.float64)
-        cdf = self.cdf(target)
-        return HistogramDistribution(target, np.diff(cdf, axis=1), self.ancil)
 
     def to_qp(self) -> Any:
         """The mixture as a ``qp.Ensemble`` (``hist`` on the union edges)."""
