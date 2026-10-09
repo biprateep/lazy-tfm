@@ -3,6 +3,7 @@
 """LimiX's member preprocessing: upstream's seeds, fitted on context only."""
 
 import ast
+import importlib
 import json
 import random
 
@@ -209,6 +210,49 @@ def test_a_context_with_nothing_to_learn_from_is_refused():
         _limix_preprocess.MemberPipeline("none", (1, 2), shuffle=True).fit(
             np.ones((10, 3))
         )
+
+
+@needs_limix
+def test_a_column_constant_apart_from_missing_values_is_dropped():
+    """Else a query's input to the network depends on its chunk.
+
+    The network fills a missing value with the context mean, so the column is
+    constant on the context; upstream's ``ValidFeatureEncoder`` decides which
+    columns are valid over the context and queries together and rescales
+    them by how many are, so a query (and the cached context) would see other
+    queries in the chunk.
+    """
+    torch = pytest.importorskip("torch")
+    _limix_source.load()
+    encoders = importlib.import_module("lazy.models._limix_ext.model.encoders")
+    rng = np.random.default_rng(0)
+    context = np.c_[rng.normal(size=50), np.full(50, 5.0)]
+    context[7, 1] = np.nan
+    queries = np.array([[0.1, 5.0], [0.2, 7.0]])
+    pipeline = _limix_preprocess.MemberPipeline(
+        "none", (1, 2), shuffle=False
+    ).fit(context)
+    group = 4  # the network's features per group, padded with zeros
+    network_input = encoders.PreprocessPipeline(
+        num_features=group,
+        nan_handling_enabled=True,
+        normalize_on_train_only=True,
+        normalize_x=True,
+        remove_outliers=False,
+        normalize_by_used_features=True,
+    )
+
+    def encode(rows):
+        x = pipeline.transform(np.concatenate([context, rows]))
+        x = np.pad(x, ((0, 0), (0, group - x.shape[1])))
+        data = torch.tensor(x, dtype=torch.float32).reshape(1, len(x), 1, -1)
+        out = network_input({"data": data, "eval_pos": len(context)})
+        return out["data"][0, :, 0].numpy()
+
+    alone, together = encode(queries[:1]), encode(queries)
+    np.testing.assert_array_equal(alone, together[: len(alone)])
+    np.testing.assert_array_equal(encode(queries[:0]), together[: len(context)])
+    assert pipeline.keep_.tolist() == [True, False]
 
 
 @needs_limix

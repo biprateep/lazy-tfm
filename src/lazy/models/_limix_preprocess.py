@@ -14,8 +14,8 @@ their ordinal encoding. Here every step is fitted on the context alone and
 then applied to any rows, so a query's features never depend on which other
 queries share its chunk. The distribution and shuffle steps are upstream's
 own classes, seeded exactly as upstream seeds them; the column filter is
-upstream's rule restricted to the context; there is no categorical
-detection or encoding, as every feature is numeric.
+upstream's rule restricted to the context, with missing values ignored;
+there is no categorical detection or encoding, as every feature is numeric.
 
 Each member is described by a *token* naming its rebalancing step (see
 :data:`PIPELINES`). :data:`RECIPE` pins upstream's recommended regression
@@ -256,10 +256,17 @@ class MemberPipeline:
                 context.
         """
         preprocess = _limix_source.load().preprocess
-        # Upstream's rule -- drop a column equal to its first row everywhere
-        # -- plus its drop of all-missing columns, on the context alone.
-        constant = (context[:1] == context).mean(axis=0) == 1.0
-        self.keep_ = ~constant & ~np.isnan(context).all(axis=0)
+        # Upstream's rule -- drop a constant column, and an all-missing one
+        # -- on the context alone, with missing values ignored: the network
+        # fills them with the context mean, so a column constant apart from
+        # them is constant on the context, and the network would decide its
+        # validity over the context and queries together (rescaling every
+        # column of its group by how many are valid), making a query's input
+        # depend on the other queries in its chunk.
+        missing = np.isnan(context)
+        lowest = np.where(missing, np.inf, context).min(axis=0)
+        highest = np.where(missing, -np.inf, context).max(axis=0)
+        self.keep_ = lowest < highest
         if not self.keep_.any():
             raise ValueError(
                 "every feature is constant or missing on the context"
