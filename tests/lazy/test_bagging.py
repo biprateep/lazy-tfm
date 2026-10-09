@@ -85,7 +85,7 @@ def _member_calls(recorder):
 # -- every member sees the same rows on every backend ------------------------
 
 
-@pytest.mark.parametrize("name", ["tabpfn", "tabicl", "limix"])
+@pytest.mark.parametrize("name", ["tabpfn", "tabicl", "limix", "kumo"])
 def test_each_member_is_handed_exactly_its_bag(name, monkeypatch, data):
     X, y = data
     _, recorder = _fit(name, monkeypatch, X, y)
@@ -181,7 +181,7 @@ def test_tabfm_members_refit_their_preprocessing_on_their_rows(
         )  # its own rows, each once
 
 
-@pytest.mark.parametrize("name", ["tabicl", "limix"])
+@pytest.mark.parametrize("name", ["tabicl", "limix", "kumo"])
 def test_the_target_is_standardised_on_each_members_bag(
     name, monkeypatch, data
 ):

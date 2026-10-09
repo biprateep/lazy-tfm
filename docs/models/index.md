@@ -28,4 +28,5 @@ tabpfn
 tabicl
 tabfm
 limix
+kumo
 ```

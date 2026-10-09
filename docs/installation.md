@@ -10,6 +10,7 @@ pip install 'lazy-tfm[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
 pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend's dependencies
+pip install 'lazy-tfm[kumo]'      # + the Kumo Tabular backend's dependencies
 pip install 'lazy-tfm[qp]'        # + qp interoperability (to_qp / from_qp, for RAIL)
 pip install 'lazy-tfm[all]'       # + everything above
 ```
@@ -37,7 +38,7 @@ explicitly on a machine without CUDA will raise an error.
 
 ## Specific backend installation notes
 
-PyPI cannot install everything two of the backends need. After installing
+PyPI cannot install everything three of the backends need. After installing
 their extras, one command completes them, and is safe to run again:
 
 ```console
@@ -66,6 +67,10 @@ lazy setup
   {doc}`guide/clusters`). To use your own checkout instead, set
   `LAZY_LIMIX_SRC` to it. The backend is Linux-only, because LimiX needs
   `triton`.
+- **Kumo Tabular.** NVIDIA's `structured-data-models` package, which holds
+  the model, is not on PyPI, so the extra installs only its dependencies and
+  `lazy setup` installs the package from GitHub, at the validated commit. In
+  a uv project, `lazy setup` prints the `uv add` command to run instead.
 
 ## Installation from source
 
@@ -76,5 +81,7 @@ uv sync --extra all
 ```
 
 This installs the package in editable mode with every dependency pinned by
-`uv.lock`, the repository build of TabFM included. See {doc}`contributing`
+`uv.lock`, the repository build of TabFM included. Kumo Tabular's package is
+not in the lockfile, so run `lazy setup` (which prints the `uv add` command in
+a uv project) to add it. See {doc}`contributing`
 for the development workflow.

@@ -218,11 +218,68 @@ def _package_version(distribution: str) -> str:
         return f"{distribution} (not installed)"
 
 
+# One license covers every Kumo Tabular size.
+_KUMO_LICENSE = (
+    "Kumo Tabular weights are released by NVIDIA under the OpenMDW License "
+    "1.1, which permits commercial use; see "
+    "https://huggingface.co/nvidia/Kumo-Tabular."
+)
+
 #: Every pinned checkpoint, keyed ``"<backend>:<version>"``. Built from the
 #: records themselves so a key can never disagree with what it points at.
 CHECKPOINTS: dict[str, Checkpoint] = {
     checkpoint.key: checkpoint
     for checkpoint in (
+        # Kumo Tabular's three sizes live in one repository, tagged v1.0.1 at
+        # this commit; each has a classifier and a regressor.
+        Checkpoint(
+            backend="kumo",
+            version="v1-large",
+            repo_id="nvidia/Kumo-Tabular",
+            package="structured-data-models",
+            filename="large/regressor.pt",
+            revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
+            license_note=_KUMO_LICENSE,
+            size_note="~860 MB. Pretrained on tables of up to 60,000 rows.",
+            display_name="Kumo Tabular Large",
+            parameters=215_683_543,
+            size_bytes=862_909_259,
+            license_name="OpenMDW-1.1",
+            gpu="recommended",
+            cpu="no",
+        ),
+        Checkpoint(
+            backend="kumo",
+            version="v1-medium",
+            repo_id="nvidia/Kumo-Tabular",
+            package="structured-data-models",
+            filename="medium/regressor.pt",
+            revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
+            license_note=_KUMO_LICENSE,
+            size_note="~250 MB. Pretrained on tables of up to 60,000 rows.",
+            display_name="Kumo Tabular Medium",
+            parameters=62_492_439,
+            size_bytes=250_144_651,
+            license_name="OpenMDW-1.1",
+            gpu="recommended",
+            cpu="no",
+        ),
+        Checkpoint(
+            backend="kumo",
+            version="v1-small",
+            repo_id="nvidia/Kumo-Tabular",
+            package="structured-data-models",
+            filename="small/regressor.pt",
+            revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
+            license_note=_KUMO_LICENSE,
+            size_note="~110 MB. Pretrained on tables of up to 60,000 rows.",
+            display_name="Kumo Tabular Small",
+            parameters=28_466_343,
+            size_bytes=113_968_523,
+            license_name="OpenMDW-1.1",
+            gpu="optional",
+            cpu="yes",
+        ),
         Checkpoint(
             backend="tabfm",
             version="v1.0",
@@ -426,6 +483,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
 #: The version each backend loads when none is asked for. Changing one of these
 #: changes what every unversioned call returns, so they move only deliberately.
 DEFAULT_VERSIONS: dict[str, str] = {
+    "kumo": "v1-large",
     "limix": "v2",
     "tabfm": "v1.0",
     "tabicl": "v2",
@@ -519,8 +577,9 @@ def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
 
     Examples:
         >>> sorted(CHECKPOINTS)  # doctest: +NORMALIZE_WHITESPACE
-        ['limix:v2', 'tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5',
-         'tabpfn:v2.6', 'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
+        ['kumo:v1-large', 'kumo:v1-medium', 'kumo:v1-small', 'limix:v2',
+         'tabfm:v1.0', 'tabicl:v2', 'tabpfn:v2', 'tabpfn:v2.5', 'tabpfn:v2.6',
+         'tabpfn:v3', 'tabpfn:v3.5', 'tabpfn:v3.5-fast']
     """
     checkpoint = get_checkpoint(name, version)
     _prefetch(checkpoint, download=True)

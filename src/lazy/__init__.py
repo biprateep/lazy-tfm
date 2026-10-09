@@ -78,6 +78,7 @@ from lazy.models import ESTIMATORS
 from lazy.models import get_checkpoint
 from lazy.models import get_estimator
 from lazy.models import is_cached
+from lazy.models import KumoQuantile
 from lazy.models import LazyEnsembleModel
 from lazy.models import LazyModel
 from lazy.models import LimiXBarDistribution
@@ -105,6 +106,7 @@ __all__ = [
     "ESTIMATORS",
     "EnsembleSizeWarning",
     "Grid",
+    "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
     "LimiXBarDistribution",

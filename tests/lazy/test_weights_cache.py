@@ -22,6 +22,7 @@ from sklearn import base as sklearn_base
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _weights
+from lazy.models import kumo
 from lazy.models import limix
 from lazy.models import tabfm
 from lazy.models import tabicl
@@ -381,6 +382,13 @@ def _has_limix():
 
 
 _REAL = [
+    pytest.param(
+        kumo.KumoQuantile,
+        {"version": "v1-small"},
+        marks=pytest.mark.skipif(
+            importlib.util.find_spec("sdm") is None, reason="needs sdm"
+        ),
+    ),
     pytest.param(tabpfn.TabPFNBarDistribution, {"version": "v3.5-fast"}),
     pytest.param(tabicl.TabICLQuantile, {}),
     pytest.param(

@@ -14,7 +14,8 @@ registry: see the "Tables of the models" section there. -->
 ({class}`~lazy.models.tabpfn.TabPFNBarDistribution`,
 {class}`~lazy.models.limix.LimiXBarDistribution`,
 {class}`~lazy.models.tabicl.TabICLQuantile`,
-{class}`~lazy.models.tabfm.TabFMHistogram`) are the same models, and the class
+{class}`~lazy.models.tabfm.TabFMHistogram`,
+{class}`~lazy.models.kumo.KumoQuantile`) are the same models, and the class
 pages document every parameter. We recommend `LazyModel` when the backend is a
 configuration value, as in a benchmark loop. All backends write onto
 any requested {class}`~lazy.grid.Grid`, and each has a native grid on which it

@@ -29,8 +29,17 @@ GRID = datasets.DC1_GRID
 #: and paths of the first recording (no key/value cache on TabPFN and
 #: TabICL, seed 42 there and 1 on TabFM, whose bins span the DC1 grid).
 #: LimiX joined later, with its defaults but for two members (one of each
-#: of its recipe's pipelines).
+#: of its recipe's pipelines), and Kumo Tabular later still, at its small
+#: size with five members, the fewest its trimmed mean drops one from each
+#: tail of.
 RECORDED_PARAMS: dict[str, dict[str, Any]] = {
+    "kumo": {
+        "version": "v1-small",
+        "n_estimators": 5,
+        "random_state": 42,
+        "device": "cpu",
+        "progress": False,
+    },
     "tabpfn": {
         "version": "v3",
         "n_estimators": 2,

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""``lazy setup``: TabFM's repository build and LimiX's source."""
+"""``lazy setup``: TabFM's repository build, LimiX's source and Kumo's sdm."""
 
 from importlib import util
 import pathlib
@@ -13,6 +13,7 @@ import pytest
 from lazy import _cli
 from lazy.models import _icl_stream
 from lazy.models import _limix_source
+from lazy.models import kumo
 from lazy.models import tabfm
 
 
@@ -94,6 +95,7 @@ def test_missing_extras_are_skipped(backends, capsys):
     out = capsys.readouterr().out
     assert "'lazy-tfm[tabfm]'" in out
     assert "'lazy-tfm[limix]'" in out
+    assert "'lazy-tfm[kumo]'" in out
 
 
 def test_without_pip_uv_installs_into_this_interpreter(backends, tmp_path):
@@ -135,3 +137,26 @@ def test_a_failed_install_fails_the_command(backends):
         lambda command, check=False: subprocess.CompletedProcess(command, 1),
     )
     assert _cli.main(["setup"]) == 1
+
+
+def test_kumos_package_is_installed_from_github(backends, capsys):
+    """The kumo extra brings sdm's dependencies, and setup brings sdm."""
+    monkeypatch, runs, _ = backends
+    monkeypatch.setattr(
+        util, "find_spec", lambda name: None if name == "sdm" else object()
+    )
+    assert _cli.main(["setup"]) == 0
+    installs = [run[-1] for run in runs if run[1:3] == ["-m", "pip"]]
+    assert kumo.REPOSITORY_BUILD in installs
+    assert "Kumo Tabular: structured-data-models is installed." in (
+        capsys.readouterr().out
+    )
+
+
+def test_an_installed_sdm_is_left_alone(backends, capsys):
+    _, runs, _ = backends
+    assert _cli.main(["setup"]) == 0
+    assert all(kumo.REPOSITORY_BUILD not in run for run in runs)
+    assert "Kumo Tabular: structured-data-models is installed." in (
+        capsys.readouterr().out
+    )

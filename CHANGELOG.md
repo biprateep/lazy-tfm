@@ -9,6 +9,13 @@ change the API.
 
 ### Added
 
+- NVIDIA's Kumo Tabular joins as a backend: `LazyModel("kumo")`, or
+  `lazy.KumoQuantile`, in three sizes (`version="v1-large"`, the default,
+  `"v1-medium"` and `"v1-small"`), with its weights under the OpenMDW License
+  1.1, which permits commercial use. `pip install 'lazy-tfm[kumo]'` installs
+  its dependencies and `lazy setup` installs NVIDIA's `structured-data-models`
+  from GitHub, since it is not on PyPI. Its own recipe, its trimmed mean of
+  the members' quantiles included, is pinned as `transforms="auto"`.
 - The documentation gains "Adding a backend", a contributor's page with the
   contract a new backend meets, a skeleton module and a checklist.
 - Backends gain class hooks for what shared code used to do by name:

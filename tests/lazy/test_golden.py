@@ -23,9 +23,15 @@ needs_checkpoint = pytest.mark.skipif(
 
 #: Relative tolerance per backend; 0 means bit-identical. The files were
 #: recorded by this code on one machine's CPU; another machine's BLAS may
-#: round float32 differently, which TabICL's narrowly spaced quantiles
-#: amplify most. LimiX moves by 4e-6 with the thread count alone.
-RTOL = {"tabpfn": 1e-4, "tabicl": 1e-3, "tabfm": 1e-12, "limix": 1e-4}
+#: round float32 differently, which the narrowly spaced quantiles of TabICL
+#: and Kumo amplify most. LimiX moves by 4e-6 with the thread count alone.
+RTOL = {
+    "kumo": 1e-3,
+    "tabpfn": 1e-4,
+    "tabicl": 1e-3,
+    "tabfm": 1e-12,
+    "limix": 1e-4,
+}
 
 #: Absolute tolerance per backend, as a fraction of the peak density.
 #: TabFM's is float64 rounding: rebinning onto the grid takes differences

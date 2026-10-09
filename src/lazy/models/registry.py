@@ -25,6 +25,7 @@ from typing import Any
 
 from lazy import base
 from lazy.models import _conformance
+from lazy.models import kumo
 from lazy.models import limix
 from lazy.models import tabfm
 from lazy.models import tabicl
@@ -53,6 +54,7 @@ def register(name: str, cls: type[base.BaseDensityRegressor]) -> None:
     ESTIMATORS[name] = cls
 
 
+register("kumo", kumo.KumoQuantile)
 register("limix", limix.LimiXBarDistribution)
 register("tabfm", tabfm.TabFMHistogram)
 register("tabicl", tabicl.TabICLQuantile)
@@ -64,7 +66,7 @@ def list_estimators() -> list[str]:
 
     Examples:
         >>> list_estimators()
-        ['limix', 'tabfm', 'tabicl', 'tabpfn']
+        ['kumo', 'limix', 'tabfm', 'tabicl', 'tabpfn']
     """
     return sorted(ESTIMATORS)
 

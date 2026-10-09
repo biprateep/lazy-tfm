@@ -18,7 +18,7 @@ redshift, a metallicity, a mass or a yield.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/biprateep/lazy-tfm/blob/main/LICENSE)
 
 LAZY is a unified, scikit-learn-compatible wrapper around several pretrained
-tabular foundation models (TabPFN, TabICL, TabFM and LimiX-2). The models are
+tabular foundation models (TabPFN, TabICL, TabFM, LimiX-2 and Kumo Tabular). The models are
 pretrained and never fine-tuned: we hand them labeled rows as *context*, and
 they answer queries in one forward pass, with no training loop, no
 hyperparameter search and no per-dataset retraining. This is the sense in
@@ -41,6 +41,7 @@ pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
 pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-tfm[tabpfn]'    # + the TabPFN backend (v2 to v3.5)
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend (its code installs separately)
+pip install 'lazy-tfm[kumo]'      # + the Kumo Tabular backend (its package installs separately)
 pip install 'lazy-tfm[qp]'        # + qp interoperability, for RAIL
 pip install 'lazy-tfm[all]'       # + everything above
 ```
@@ -52,7 +53,8 @@ from Google, and TabICLv2's is ~100 MB (BSD-3-Clause). The TabPFN checkpoints
 run from ~41 MB to ~880 MB and are **non-commercial** from Prior Labs, except
 `v2`, which is Apache-2.0 with an attribution clause. LimiX-2's is ~1.6 GB and
 **non-commercial** from Stable AI, with the attribution "Built with StableAI
-LimiX". Every license is quoted in `lazy.CHECKPOINTS`, and
+LimiX". Kumo Tabular's run from ~110 MB to ~860 MB and are released by NVIDIA
+under the OpenMDW License 1.1, which permits commercial use. Every license is quoted in `lazy.CHECKPOINTS`, and
 `lazy.download_checkpoint("tabfm")` warms the cache ahead of time.
 
 ## Use
@@ -88,7 +90,7 @@ page compares them all.
 
 `LazyModel(name, ...)` picks the backend by name, so switching between models
 is a change of string. The concrete classes (`TabPFNBarDistribution`,
-`LimiXBarDistribution`, `TabICLQuantile`, `TabFMHistogram`) are importable and
+`LimiXBarDistribution`, `TabICLQuantile`, `TabFMHistogram`, `KumoQuantile`) are importable and
 identical. The API is scikit-learn's, except that `predict_proba` returns a
 density on a grid of the target rather than class probabilities, which is the
 natural output of a model that knows its own uncertainty. Since
@@ -140,13 +142,13 @@ Memory is bounded by `chunk_size` on every backend, and chunking is exact: a
 query row's answer never depends on which other query rows share its chunk
 (bit for bit on TabPFN and TabICL, to float rounding on LimiX-2).
 
-### Finishing the TabFM and LimiX-2 installs
+### Finishing the TabFM, LimiX-2 and Kumo Tabular installs
 
-PyPI cannot install everything these two backends need, so after their
+PyPI cannot install everything these three backends need, so after their
 extras, one command completes them:
 
 ```bash
-pip install 'lazy-tfm[tabfm,limix]'
+pip install 'lazy-tfm[tabfm,limix,kumo]'
 lazy setup
 ```
 
@@ -158,7 +160,9 @@ the release, `fit` warns with a `TabFMPerformanceWarning` rather than silently
 taking 26× longer, and `kv_cache=False` accepts the slow path and silences
 it. LimiX's code is not on PyPI, so `lazy` downloads it at the commit it was
 validated on, into its cache, the first time a LimiX-2 model is fitted;
-`lazy setup` does it ahead of time. A checkout of this repository
+`lazy setup` does it ahead of time. Kumo Tabular's package, NVIDIA's
+`structured-data-models`, is not on PyPI either, so `lazy setup` installs it
+from GitHub at the commit it was validated on. A checkout of this repository
 (`uv sync --extra all`) gets the TabFM build automatically. In your own uv
 project, add the build in the same command instead, so that `uv sync` keeps
 it:
@@ -363,7 +367,8 @@ Built from the
 
 MIT, for this code. The pretrained checkpoints carry their own licenses.
 TabFM's and LimiX-2's are non-commercial, and LimiX-2's requires the
-attribution "Built with StableAI LimiX". The HSC selection grid is
+attribution "Built with StableAI LimiX". Kumo Tabular's are under the OpenMDW
+License 1.1, which permits commercial use. The HSC selection grid is
 redistributed by DESC's
 [rail_astro_tools](https://github.com/LSSTDESC/rail_astro_tools) (MIT) and
 derives from HSC PDR2 (Aihara et al. 2019); `lazy.selection` downloads it from

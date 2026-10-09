@@ -67,6 +67,17 @@ tabicl = [
 tabpfn = [
     "tabpfn>=9.0.0", # TabPFN-3; its checkpoint is fetched from Hugging Face on first use
 ]
+kumo = [
+    # NVIDIA's structured-data-models, which holds Kumo Tabular, has only a
+    # placeholder on PyPI, and PyPI refuses metadata with direct URLs, so
+    # `lazy setup` installs it from GitHub (lazy.models.kumo.REPOSITORY_BUILD).
+    # These are its dependencies at that commit.
+    "torch>=2.7",
+    "pyarrow",
+    "safetensors",
+    "huggingface_hub",
+    "typing_extensions",
+]
 limix = [
     # LimiX itself is not on PyPI, and PyPI refuses metadata with direct URLs,
     # so it is installed separately (see lazy.models._limix_source). These are
@@ -83,7 +94,7 @@ qp = [
 # Everything: every backend and every interoperability extra. A new extra
 # joins this list too (tests/lazy/test_packaging.py checks it).
 all = [
-    "lazy-tfm[limix,qp,tabfm,tabicl,tabpfn]",
+    "lazy-tfm[kumo,limix,qp,tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.
@@ -243,14 +254,14 @@ check_untyped_defs = true
 no_implicit_optional = true  # §3.19.5
 warn_unused_ignores = true  # §2.1
 warn_redundant_casts = true
-# Several dependencies (h5py, tabfm, tabicl, tabpfn) ship no type information;
+# Several dependencies (h5py, sdm, tabfm, tabicl, tabpfn) ship no type information;
 # importing them is not an error, but a misspelled module still is.
 disable_error_code = ["import-untyped"]
 
 # The optional backends: CI type-checks without the extras installed, so these
 # may be absent. Where they are installed, mypy still reads their types.
 [[tool.mypy.overrides]]
-module = ["qp", "qp.*", "tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*"]
+module = ["qp", "qp.*", "sdm", "sdm.*", "tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
