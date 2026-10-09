@@ -184,4 +184,30 @@ class QuantileStandIn(_KNNStandIn):
         return {"quantiles": dist.locs.shape[1]}
 
 
-STANDINS = (HistogramStandIn, ScaffoldedHistogramStandIn, QuantileStandIn)
+class TrimmedQuantileStandIn(QuantileStandIn):
+    """The same, its members combined by a trimmed average, as Kumo's are."""
+
+    member_combination = "quantile_trimmed_average"
+    member_trim_fraction = 0.2
+
+    def _predict_members(self, handle, X):
+        return [
+            distributions.QuantileDistribution(
+                self.levels,
+                np.quantile(self._neighbours(m, X), self.levels, axis=1).T,
+            )
+            for m in handle["members"]
+        ]
+
+    def _predict_group(self, handle, X):
+        return distributions.QuantileDistribution.trimmed_average(
+            self._predict_members(handle, X), self.member_trim_fraction
+        )
+
+
+STANDINS = (
+    HistogramStandIn,
+    ScaffoldedHistogramStandIn,
+    QuantileStandIn,
+    TrimmedQuantileStandIn,
+)

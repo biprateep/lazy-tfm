@@ -528,6 +528,53 @@ class QuantileDistribution(_Base):
         locs = np.tensordot(weight, np.stack([p.locs for p in parts]), axes=1)
         return cls(quants, locs, parts[0].ancil)
 
+    @classmethod
+    def trimmed_average(
+        cls,
+        parts: Sequence[QuantileDistribution],
+        trim_fraction: float,
+    ) -> QuantileDistribution:
+        """The trimmed mean of quantile functions at shared levels.
+
+        At every row and level, the parts' values are sorted, the lowest and
+        the highest ``int(trim_fraction * len(parts))`` are dropped, and the
+        rest are averaged. This is how Kumo Tabular combines its ensemble
+        members, so that one member far from the rest moves the answer less.
+
+        Args:
+            parts: One distribution per member, at the same levels and with
+                the same rows.
+            trim_fraction: The fraction of parts dropped from each tail, in
+                [0, 0.5); 0 is :meth:`average` with equal weights.
+
+        Returns:
+            The trimmed mean, with the first part's ``ancil``.
+
+        Raises:
+            ValueError: If the parts' levels differ or ``trim_fraction`` is
+                outside [0, 0.5).
+
+        Examples:
+            >>> parts = [
+            ...     QuantileDistribution([0.25, 0.75], [[value, value + 1]])
+            ...     for value in (0.0, 1.0, 9.0)
+            ... ]
+            >>> QuantileDistribution.trimmed_average(parts, 0.34).locs
+            array([[1., 2.]])
+        """
+        if not 0.0 <= trim_fraction < 0.5:
+            raise ValueError(
+                f"trim_fraction must be in [0, 0.5): {trim_fraction=}"
+            )
+        quants = parts[0].quants
+        if any(not np.array_equal(p.quants, quants) for p in parts):
+            raise ValueError("every part must share the same levels")
+        locs = np.stack([p.locs for p in parts])
+        cut = int(trim_fraction * len(parts))
+        if cut > 0:
+            locs = np.sort(locs, axis=0)[cut : len(parts) - cut]
+        return cls(quants, locs.mean(axis=0), parts[0].ancil)
+
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 

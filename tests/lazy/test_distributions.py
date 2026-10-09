@@ -179,6 +179,41 @@ def test_quantile_average_averages_the_quantile_functions(quantiles):
     np.testing.assert_allclose(both.locs, quantiles.locs + 0.1)
 
 
+def test_a_trimmed_average_drops_each_tail_per_level():
+    """int(fraction * n) parts from each tail, at every row and level."""
+    levels = [0.25, 0.5, 0.75]
+    rng = np.random.default_rng(3)
+    locs = np.sort(rng.normal(size=(8, 4, 3)), axis=-1)
+    parts = [distributions.QuantileDistribution(levels, part) for part in locs]
+    trimmed = distributions.QuantileDistribution.trimmed_average(parts, 0.2)
+    expected = np.sort(locs, axis=0)[1:7].mean(axis=0)
+    np.testing.assert_allclose(trimmed.locs, expected, rtol=0, atol=1e-15)
+
+
+def test_an_untrimmed_average_is_the_equal_weight_average(quantiles):
+    shifted = distributions.QuantileDistribution(
+        quantiles.quants, quantiles.locs + 0.2
+    )
+    parts = [quantiles, shifted, quantiles]
+    np.testing.assert_allclose(
+        distributions.QuantileDistribution.trimmed_average(parts, 0.0).locs,
+        distributions.QuantileDistribution.average(parts).locs,
+    )
+    # 0.2 of three parts rounds down to none trimmed.
+    np.testing.assert_allclose(
+        distributions.QuantileDistribution.trimmed_average(parts, 0.2).locs,
+        distributions.QuantileDistribution.average(parts).locs,
+    )
+
+
+@pytest.mark.parametrize("fraction", [-0.1, 0.5])
+def test_a_trim_fraction_outside_its_range_raises(quantiles, fraction):
+    with pytest.raises(ValueError, match="trim_fraction"):
+        distributions.QuantileDistribution.trimmed_average(
+            [quantiles, quantiles], fraction
+        )
+
+
 def test_crossing_quantiles_are_sorted():
     dist = distributions.QuantileDistribution([0.25, 0.5, 0.75], [[1, 0.5, 2]])
     np.testing.assert_array_equal(dist.locs, [[1.0, 1.0, 2.0]])

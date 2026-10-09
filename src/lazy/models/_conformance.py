@@ -97,14 +97,7 @@ def _declaration_problems(
         found.append("display_name and extra must be set")
     if cls.native_output not in ("histogram", "quantiles"):
         found.append(f"native_output {cls.native_output!r} is not known")
-    if cls.member_combination not in ("mixture", "quantile_average"):
-        found.append(
-            f"member_combination {cls.member_combination!r} is not known"
-        )
-    if cls.member_combination == "quantile_average" and cls.native_output != (
-        "quantiles"
-    ):
-        found.append("quantile_average needs native_output='quantiles'")
+    found.extend(_combination_problems(cls))
     for flag in (
         "supports_native_bagging",
         "exact_chunking",
@@ -130,4 +123,42 @@ def _declaration_problems(
         found.append(f"native_transforms has unknown names {unknown}")
     if cls.native_transforms and "none" not in cls.native_transforms:
         found.append("native_transforms must include 'none' (for scaffolds)")
+    return found
+
+
+def _combination_problems(
+    cls: type[_ensemble.ContextEnsembleEstimator],
+) -> list[str]:
+    """A member combination the model's outputs and hooks support."""
+    found = []
+    if cls.member_combination not in (
+        "mixture",
+        "quantile_average",
+        "quantile_trimmed_average",
+    ):
+        found.append(
+            f"member_combination {cls.member_combination!r} is not known"
+        )
+    if cls.member_combination.startswith("quantile") and (
+        cls.native_output != "quantiles"
+    ):
+        found.append(
+            f"{cls.member_combination} needs native_output='quantiles'"
+        )
+    if not 0.0 <= cls.member_trim_fraction < 0.5:
+        found.append("member_trim_fraction must be in [0, 0.5)")
+    if cls.member_trim_fraction and (
+        cls.member_combination != "quantile_trimmed_average"
+    ):
+        found.append(
+            "member_trim_fraction needs "
+            "member_combination='quantile_trimmed_average'"
+        )
+    # The default _predict_members only raises.
+    inherited = vars(_ensemble.ContextEnsembleEstimator)["_predict_members"]
+    if (
+        cls.member_combination == "quantile_trimmed_average"
+        and cls._predict_members is inherited
+    ):
+        found.append("quantile_trimmed_average needs _predict_members")
     return found

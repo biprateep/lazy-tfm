@@ -551,6 +551,65 @@ def test_bagged_quantile_members_average_their_quantiles(data):
     )
 
 
+@pytest.mark.parametrize(
+    "params",
+    [{"bag_size": 0.5}, {"transforms": ("none", "power")}],
+    ids=["bagged", "two-groups"],
+)
+def test_a_trimmed_average_trims_every_member_at_once(data, params):
+    """Not each group on its own: the ensemble's trim is the members'."""
+    X, z, X_test = data
+    model = standins.TrimmedQuantileStandIn(n_estimators=5, **params)
+    model.fit(X, z)
+    assert len(model.member_groups_) > 1
+    members = []
+    for handle, group, fitted in zip(
+        model.handles_,
+        model.member_groups_,
+        model.transformers_,
+        strict=True,
+    ):
+        prepared = model._prepare(X_test, group, fitted)
+        members.extend(model._predict_members(handle, prepared))
+    expected = lazy.distributions.QuantileDistribution.trimmed_average(
+        members, 0.2
+    )
+    np.testing.assert_array_equal(
+        model.predict_distribution(X_test).locs, expected.locs
+    )
+
+
+def test_a_trimmed_average_needs_every_member_of_a_group(data, monkeypatch):
+    X, z, X_test = data
+    model = standins.TrimmedQuantileStandIn(n_estimators=3).fit(X, z)
+    monkeypatch.setattr(
+        model, "_predict_members", lambda handle, X: [], raising=False
+    )
+    with pytest.raises(RuntimeError, match="0 members for a group of 3"):
+        model.predict_distribution(X_test)
+
+
+def test_a_trimmed_combination_needs_its_hook_and_quantiles(monkeypatch):
+    cls = standins.TrimmedQuantileStandIn
+    monkeypatch.setattr(
+        cls,
+        "_predict_members",
+        vars(_ensemble.ContextEnsembleEstimator)["_predict_members"],
+    )
+    monkeypatch.setattr(cls, "native_output", "histogram")
+    monkeypatch.setattr(cls, "member_trim_fraction", 0.5)
+    problems = "\n".join(_conformance.problems(cls, "trimmed"))
+    assert "needs _predict_members" in problems
+    assert "needs native_output='quantiles'" in problems
+    assert "member_trim_fraction must be in [0, 0.5)" in problems
+
+
+def test_a_trim_fraction_needs_the_trimmed_combination(monkeypatch):
+    monkeypatch.setattr(standins.QuantileStandIn, "member_trim_fraction", 0.2)
+    problems = _conformance.problems(standins.QuantileStandIn, "quantile")
+    assert any("member_trim_fraction needs" in p for p in problems)
+
+
 def test_the_recipe_is_recorded_in_provenance(data):
     X, z, _ = data
     model = standins.HistogramStandIn(

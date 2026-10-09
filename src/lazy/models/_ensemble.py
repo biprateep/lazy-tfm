@@ -193,9 +193,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     Every answer of :meth:`_predict_group` is checked to be a distribution of
     the kind ``native_output`` declares with one row per query, and each row
     must depend on its own query alone; a prediction leaves the handle as it
-    found it. After ``_fit``, ``provenance_`` holds every key in
-    :data:`REQUIRED_PROVENANCE`, which is checked: :meth:`_load_checkpoint`
-    records the checkpoint's and :meth:`_recipe` the ensemble's.
+    found it. A backend whose members combine by a trimmed average
+    (``member_combination="quantile_trimmed_average"``) also implements
+    :meth:`_predict_members`, which answers for each member of a group
+    separately, so that the trim spans the whole ensemble. After ``_fit``,
+    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`, which is
+    checked: :meth:`_load_checkpoint` records the checkpoint's and
+    :meth:`_recipe` the ensemble's.
 
     A fitted estimator pickles and predicts the same after unpickling; a network
     shared through :mod:`lazy.models._weights` is kept through
@@ -225,8 +229,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             members on different rows in one call, given each member's bag
             (``MemberGroup.member_rows``); the rows are always lazy's, and
             a member with a scaffolded transform is a group of its own.
-        member_combination: How groups combine: ``"mixture"`` of densities
-            or ``"quantile_average"`` of quantile functions.
+        member_combination: How the members combine: ``"mixture"`` of
+            groups' densities, ``"quantile_average"`` of groups' quantile
+            functions weighted by their members, or
+            ``"quantile_trimmed_average"`` of every member's quantile
+            function, trimmed by ``member_trim_fraction`` (the members come
+            from :meth:`_predict_members`).
+        member_trim_fraction: The fraction of members dropped from each tail
+            under ``"quantile_trimmed_average"``, in [0, 0.5).
         kv_cache_modes: The accepted ``kv_cache`` values.
         kv_cache_rtol: How closely cached and uncached outputs agree on a
             CPU; under mixed precision on a GPU they agree to that
@@ -264,9 +274,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     native_transforms: ClassVar[Mapping[str, Any]] = {}
     auto_tokens: ClassVar[tuple[Any, ...] | None] = None
     supports_native_bagging: ClassVar[bool] = False
-    member_combination: ClassVar[Literal["mixture", "quantile_average"]] = (
-        "mixture"
-    )
+    member_combination: ClassVar[
+        Literal["mixture", "quantile_average", "quantile_trimmed_average"]
+    ] = "mixture"
+    member_trim_fraction: ClassVar[float] = 0.0
     kv_cache_modes: ClassVar[tuple[bool | str, ...]] = (True, False)
     kv_cache_rtol: ClassVar[float] = 1e-5
     recommended_max_context: ClassVar[int | None] = None
@@ -380,6 +391,33 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             ``"quantiles"``. The base class checks both and raises
             otherwise. A prediction leaves the handle as it found it.
         """
+
+    def _predict_members(
+        self, handle: Any, X: _typing.FloatArray
+    ) -> list[distributions.QuantileDistribution]:
+        """Predicts each member of one group on its own.
+
+        Needed only under ``member_combination="quantile_trimmed_average"``,
+        where the base class calls it instead of :meth:`_predict_group`, so
+        that the trim spans every member of the ensemble rather than each
+        group's. The answers are checked as :meth:`_predict_group`'s are.
+
+        Args:
+            handle: What :meth:`_fit_group` returned for the group.
+            X: Query features prepared as the group's context was, shape
+                (n_queries, n_features').
+
+        Returns:
+            One distribution per member of the group, in member order.
+
+        Raises:
+            NotImplementedError: Unless the backend implements it.
+        """
+        del handle, X  # Unused: a backend that trims implements this.
+        raise NotImplementedError(
+            f"{type(self).__name__} combines its members by a trimmed "
+            "average, so it must implement _predict_members"
+        )
 
     @abc.abstractmethod
     def _native_grid(self) -> grid_lib.Grid:
@@ -813,6 +851,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         clippers = getattr(self, "clippers_", None) or [None] * len(
             self.handles_
         )
+        if self.member_combination == "quantile_trimmed_average":
+            return self._predict_trimmed(features, clippers)
         parts = [
             self._check_group_output(
                 self._predict_group(
@@ -829,6 +869,37 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         ]
         return self._combine(parts)
+
+    def _predict_trimmed(
+        self,
+        features: _typing.FloatArray,
+        clippers: list[_transforms.SoftClip | None],
+    ) -> distributions.QuantileDistribution:
+        """Every member's prediction, combined by a trimmed average."""
+        members: list[distributions.QuantileDistribution] = []
+        for handle, group, fitted, clipper in zip(
+            self.handles_,
+            self.member_groups_,
+            self.transformers_,
+            clippers,
+            strict=True,
+        ):
+            answers = self._predict_members(
+                handle, self._prepare(features, group, fitted, clipper)
+            )
+            if len(answers) != group.n_members:
+                raise RuntimeError(
+                    f"{type(self).__name__}._predict_members returned "
+                    f"{len(answers)} members for a group of {group.n_members}"
+                )
+            for answer in answers:
+                self._check_group_output(answer, len(features))
+                if not isinstance(answer, distributions.QuantileDistribution):
+                    raise TypeError("a trimmed average needs quantiles")
+                members.append(answer)
+        return distributions.QuantileDistribution.trimmed_average(
+            members, self.member_trim_fraction
+        )
 
     def _check_group_output(
         self, part: object, n_rows: int

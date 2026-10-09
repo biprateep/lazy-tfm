@@ -18,6 +18,11 @@ change the API.
   `size_bytes`, `license_name`, `gpu`, `cpu`), and each backend its method
   (`method_note`). The documentation's tables of the models are written from
   them at every build.
+- `QuantileDistribution.trimmed_average` combines quantile functions by a
+  trimmed mean, and a backend can combine its members that way
+  (`member_combination="quantile_trimmed_average"`, with
+  `member_trim_fraction` and a `_predict_members` hook), with the trim taken
+  over every member of the ensemble at once.
 
 ### Changed
 

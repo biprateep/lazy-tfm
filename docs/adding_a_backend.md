@@ -50,7 +50,13 @@ than in an override of `_fit`.
 every call and raises a `TypeError` or `RuntimeError` naming the backend
 otherwise. A query's answer must not depend on the other queries in its
 chunk, and a prediction must leave the handle as it found it, so that the
-cache and chunking tests can compare answers bit for bit.
+cache and chunking tests can compare answers bit for bit. A model that
+combines its members by a trimmed mean of their quantiles
+(`member_combination="quantile_trimmed_average"`, with
+`member_trim_fraction`) also implements `_predict_members`, which returns
+each member's answer separately. The base class then trims over every member
+of the ensemble at once, so that a bagged ensemble, where every member is a
+group of its own, is trimmed the same way as one that runs in a single call.
 
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
