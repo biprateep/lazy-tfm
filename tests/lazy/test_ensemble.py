@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 from sklearn import base as sklearn_base
+from sklearn import exceptions
 from sklearn import model_selection
 from sklearn.utils import estimator_checks
 import standins
@@ -460,6 +461,20 @@ def test_a_large_context_does_not_warn(gaussian_data):
     with warnings.catch_warnings():
         warnings.simplefilter("error", lazy.EnsembleSizeWarning)
         lazy.LazyEnsembleModel([Gaussian(), Gaussian(0.1)]).fit(X, y)
+
+
+def test_a_failed_refit_leaves_the_ensemble_unfitted(standin_backends, data):
+    X, y = data
+    model = lazy.LazyEnsembleModel(["tabpfn", "tabicl"]).fit(X, y)
+    wider = np.column_stack([X, X[:, :2]])
+    # The first member refits, the second refuses its parameters.
+    model.set_params(tabicl__n_estimators=0)
+    with pytest.raises(ValueError, match="positive int"):
+        model.fit(wider, y)
+    assert not [name for name in vars(model) if name.endswith("_")]
+    for features in (X, wider):
+        with pytest.raises(exceptions.NotFittedError):
+            model.predict(features)
 
 
 # -- features and persistence ------------------------------------------------

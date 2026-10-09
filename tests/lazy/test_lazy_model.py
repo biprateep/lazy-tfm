@@ -10,6 +10,7 @@ import pickle
 import numpy as np
 import pytest
 from sklearn import base as sklearn_base
+from sklearn import exceptions
 
 import lazy
 from lazy.models import registry
@@ -280,3 +281,28 @@ def test_the_wrapper_forwards_distributions_and_quantiles(registered):
     np.testing.assert_allclose(
         model.predict_quantiles(X, [0.5])[:, 0], 1.0, atol=0.02
     )
+
+
+class _FailsWhenNegative(_Uniform):
+    """The flat backend, its fit failing for a negative width."""
+
+    def _fit(self, X, y):
+        super()._fit(X, y)
+        if self.width < 0:
+            raise RuntimeError("the backend failed")
+
+
+def test_a_failed_refit_leaves_the_wrapper_unfitted(monkeypatch):
+    monkeypatch.setitem(registry.ESTIMATORS, "failing", _FailsWhenNegative)
+    X = np.random.default_rng(0).normal(size=(10, 3))
+    z = np.random.default_rng(1).uniform(0.2, 1.8, 10)
+    model = lazy.LazyModel("failing").fit(X, z)
+    wider = np.column_stack([X, X[:, :2]])
+    with pytest.raises(RuntimeError, match="the backend failed"):
+        model.set_params(width=-1.0).fit(wider, z)
+    assert not [name for name in vars(model) if name.endswith("_")]
+    for features in (X, wider):
+        with pytest.raises(exceptions.NotFittedError):
+            model.predict(features)
+    with pytest.raises(AttributeError):
+        model.n_context_  # noqa: B018 - nothing left to delegate to.

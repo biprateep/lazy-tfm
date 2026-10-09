@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn import base as sklearn_base
+from sklearn import exceptions
 import standins
 
 import lazy
@@ -930,6 +931,28 @@ def test_a_refit_into_several_groups_drops_the_single_regressor(data):
     model.set_params(bag_size=40).fit(X, z)
     assert len(model.handles_) == 3
     assert not hasattr(model, "regressor_")
+
+
+class _FailsInSecondGroup(standins.ScaffoldedHistogramStandIn):
+    """A stand-in whose fit fails partway through its groups."""
+
+    def _fit_group(self, X, y, group):
+        if group.index == 1 and X.shape[1] > 3:
+            raise RuntimeError("the backend failed")
+        return super()._fit_group(X, y, group)
+
+
+def test_a_refit_failing_partway_leaves_the_model_unfitted(data):
+    X, z, _ = data
+    model = _FailsInSecondGroup(n_estimators=3, bag_size=40).fit(X, z)
+    assert len(model.handles_) == 3
+    wider = np.column_stack([X, X[:, :2]])
+    with pytest.raises(RuntimeError, match="the backend failed"):
+        model.fit(wider, z)
+    assert not [name for name in vars(model) if name.endswith("_")]
+    for features in (X, wider):
+        with pytest.raises(exceptions.NotFittedError):
+            model.predict(features)
 
 
 def test_a_scaffold_is_fitted_on_its_members_bag(cls, data):

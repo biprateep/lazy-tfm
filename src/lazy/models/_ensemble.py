@@ -563,9 +563,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     # -- fitting -----------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        # Set below only when one group serves the whole ensemble, so a
-        # refit into several groups must not keep the previous fit's.
-        self.__dict__.pop("regressor_", None)
         # A missing backend package is the likeliest reason a first fit
         # fails, so it is reported before any parameter complaint.
         self._import_backend()

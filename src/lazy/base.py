@@ -216,6 +216,11 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     def fit(self, X: _Features, y: npt.ArrayLike) -> BaseDensityRegressor:  # noqa: GS030 - scikit-learn's X, y.
         """Fits on labelled rows.
 
+        A fit either succeeds or leaves the estimator unfitted: every fitted
+        attribute of an earlier fit is dropped before this one starts, the
+        inputs are validated in full before anything is recorded, and a fit
+        that raises drops whatever it had set.
+
         Args:
             X: Features, shape (n_samples, n_features): a NumPy array, a
                 structured or record array, a pandas DataFrame, an astropy
@@ -228,13 +233,22 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         Returns:
             The fitted estimator itself.
         """
-        X = self._check_features(X, reset=True)
+        self._clear_fitted()
+        X, named = _inputs.as_feature_frame(X)
+        self._check_not_empty(X)
         y = _check_target(y, len(X))
-        self.y_range_ = (float(np.min(y)), float(np.max(y)))
-        self._fit(X, y)
-        # After _fit: a model's native grid is known only once it has seen
-        # its context.
-        self.grid_ = self._default_grid()
+        try:
+            self.n_features_in_ = int(X.shape[1])
+            if named:
+                self.feature_names_in_ = np.asarray(X.columns, dtype=object)
+            self.y_range_ = (float(np.min(y)), float(np.max(y)))
+            self._fit(X, y)
+            # After _fit: a model's native grid is known only once it has
+            # seen its context.
+            self.grid_ = self._default_grid()
+        except BaseException:
+            self._clear_fitted()
+            raise
         self.is_fitted_ = True
         return self
 
@@ -266,7 +280,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
-        return self._densities(self._check_features(X, reset=False), grid)
+        return self._densities(self._check_features(X), grid)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
         """The model's native per-row distributions, on no grid at all.
@@ -289,7 +303,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             default grid, without running the model.
         """
         validation.check_is_fitted(self)
-        X = self._check_features(X, reset=False)
+        X = self._check_features(X)
         if X.empty:
             return distributions.HistogramDistribution(
                 self.grid_.edges, np.zeros((0, self.grid_.n_bins))
@@ -364,7 +378,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
             The PIT values, within [0, 1], shape (n_samples,).
         """
         validation.check_is_fitted(self)
-        X = self._check_features(X, reset=False)
+        X = self._check_features(X)
         y = _check_target(y, len(X))
         if X.empty:
             return np.zeros(0)
@@ -438,7 +452,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         validation.check_is_fitted(self)
         method = _check_method(method)
         grid = self._resolve_grid(y_grid)
-        X = self._check_features(X, reset=False)
+        X = self._check_features(X)
         return np.concatenate(
             [
                 metrics.grid_point_estimates(grid, density)[method]
@@ -467,7 +481,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
-        X = self._check_features(X, reset=False)
+        X = self._check_features(X)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
         terms = [
@@ -515,7 +529,7 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         if scale not in metrics.SCALES:
             raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
         grid = self._resolve_grid(y_grid)
-        X = self._check_features(X, reset=False)
+        X = self._check_features(X)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
         y_pred, cde_terms, pit, crps_terms, nll_terms = [], [], [], [], []
@@ -648,36 +662,35 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
         default = getattr(self, "grid_", None)
         return default if default is not None else self._default_grid()
 
-    def _check_features(self, X: _Features, *, reset: bool) -> pd.DataFrame:
+    def _clear_fitted(self) -> None:
+        """Drops every fitted attribute, leaving the estimator unfitted.
+
+        Fitted attributes are those scikit-learn's ``check_is_fitted`` looks
+        for: names ending in an underscore, not starting with two.
+        """
+        for name in [
+            name
+            for name in vars(self)
+            if name.endswith("_") and not name.startswith("__")
+        ]:
+            delattr(self, name)
+
+    def _check_features(self, X: _Features) -> pd.DataFrame:
         """Coerces features to a DataFrame, consistent with those of ``fit``.
 
-        Feature names follow scikit-learn: they are recorded as
-        ``feature_names_in_`` only when the input carries string column
-        names, a predict-time table with the same names in another order is
-        reordered, and a named table meeting an unnamed fit (or the reverse)
-        is used by position, with a warning.
+        Feature names follow scikit-learn: a predict-time table with the
+        same names in another order is reordered, and a named table meeting
+        an unnamed fit (or the reverse) is used by position, with a warning.
 
         Args:
             X: Features, shape (n_samples, n_features), in any form
                 :func:`lazy._inputs.as_feature_frame` accepts.
-            reset: Whether to record the columns (at fit time) rather than
-                enforce them (at predict time).
 
         Returns:
             The features as a float64 DataFrame with a fresh index, columns
             labelled and ordered as at fit time.
         """
         frame, named = _inputs.as_feature_frame(X)
-        if reset:
-            # Before anything is recorded, so that a refused fit leaves an
-            # unfitted estimator unfitted.
-            self._check_not_empty(frame)
-            self.n_features_in_ = int(frame.shape[1])
-            if named:
-                self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
-            else:
-                self.__dict__.pop("feature_names_in_", None)
-            return frame
         if frame.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {frame.shape[1]} features, but this "

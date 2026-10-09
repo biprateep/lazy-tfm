@@ -397,6 +397,43 @@ def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
     assert getattr(est, "calls_", 0) == 0
 
 
+class _FailingDummy(GaussianDummy):
+    """The stand-in, its fit failing after it has set attributes."""
+
+    def __init__(self, *, sigma=0.1, fail=False, y_grid=None):
+        super().__init__(sigma=sigma, y_grid=y_grid)
+        self.fail = fail
+
+    def _fit(self, X, y):
+        super()._fit(X, y)
+        if self.fail:
+            raise RuntimeError("the backend failed")
+
+
+def _fitted_attributes(est):
+    return [name for name in vars(est) if name.endswith("_")]
+
+
+@pytest.mark.parametrize(
+    ("params", "target", "error"),
+    [
+        ({}, lambda y: np.where(np.arange(y.size) == 0, np.nan, y), ValueError),
+        ({"fail": True}, lambda y: y, RuntimeError),
+    ],
+    ids=["refused", "failed"],
+)
+def test_a_failed_refit_leaves_the_model_unfitted(data, params, target, error):
+    X, y = data
+    est = _FailingDummy().fit(X, y)
+    wider = np.column_stack([X, X, X.iloc[:, 0]])  # five unnamed columns
+    with pytest.raises(error):
+        est.set_params(**params).fit(wider, target(y))
+    assert not _fitted_attributes(est)
+    for features in (X, wider):
+        with pytest.raises(exceptions.NotFittedError):
+            est.predict(features)
+
+
 def test_fitting_no_rows_is_refused_like_scikit_learn(data):
     X, y = data
     est = GaussianDummy()

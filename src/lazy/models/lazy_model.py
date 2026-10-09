@@ -140,11 +140,14 @@ class LazyModel(base.BaseDensityRegressor):
     # -- delegation --------------------------------------------------------
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
-        self.estimator_ = self._build()
+        estimator = self._build()
         # Unnamed features reach the backend unnamed, so that its fitted
         # attributes (and hence this wrapper's) keep scikit-learn's meaning.
         named = "feature_names_in_" in vars(self)
-        self.estimator_.fit(X if named else X.to_numpy(), y)
+        estimator.fit(X if named else X.to_numpy(), y)
+        # Only once it is fitted, so that a failed fit never leaves an
+        # unfitted backend to delegate to.
+        self.estimator_ = estimator
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
