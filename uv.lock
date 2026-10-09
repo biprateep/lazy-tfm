@@ -2004,7 +2004,7 @@ requires-dist = [
     { name = "kditransform", marker = "extra == 'limix'", specifier = ">=1.0" },
     { name = "lazy-tfm", extras = ["kumo", "limix", "qp", "tabfm", "tabicl", "tabpfn"], marker = "extra == 'all'" },
     { name = "matplotlib", specifier = ">=3.8" },
-    { name = "numpy", specifier = ">=1.26" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "nvtx", marker = "extra == 'limix'", specifier = ">=0.2" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pyarrow", marker = "extra == 'kumo'" },

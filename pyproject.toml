@@ -21,7 +21,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.0", # np.trapezoid, which the metrics use, arrived in NumPy 2.0
     "scipy>=1.11",
     "scikit-learn>=1.4",
     "pandas>=2.1",
