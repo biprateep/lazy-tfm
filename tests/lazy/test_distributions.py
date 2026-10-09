@@ -474,3 +474,27 @@ def test_a_mixture_of_rounding_histograms_has_quantiles_and_a_mode():
         mixture.to_histogram().probabilities[:, :4], dist.probabilities
     )
     assert mixture.rvs(10, random_state=0).shape == (1, 10)
+
+
+# -- the last edge -----------------------------------------------------------
+
+
+def test_the_last_edge_belongs_to_the_last_bucket():
+    """As in np.histogram, so a value on the last edge has a density."""
+    dist = distributions.HistogramDistribution([0.0, 1.0, 3.0], [[1.0, 1.0]])
+    np.testing.assert_array_equal(
+        dist.pdf([0.0, 1.0, 3.0, np.nextafter(3.0, 4.0)]),
+        [[0.5, 0.25, 0.25, 0.0]],
+    )
+    # Behind a trailing zero-width bucket, the last bucket with a width.
+    padded = distributions.HistogramDistribution(
+        [0.0, 1.0, 3.0, 3.0], [[1.0, 1.0, 0.0]]
+    )
+    np.testing.assert_array_equal(padded.pdf([3.0]), [[0.25]])
+
+
+def test_the_outermost_quantiles_belong_to_their_segments():
+    dist = distributions.QuantileDistribution([0.1, 0.5, 0.9], [[0, 1, 3]])
+    np.testing.assert_allclose(
+        dist.pdf([-1.0, 0.0, 3.0, 4.0]), [[0.0, 0.4, 0.2, 0.0]]
+    )

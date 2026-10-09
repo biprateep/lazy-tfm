@@ -1384,7 +1384,8 @@ def _histogram_at_truth(
     """Returns a tuple (density at the truth, PIT) for a histogram grid.
 
     The density is that of the bin holding the truth, zero outside the
-    edges; the PIT is the mass below the truth, linear within its bin. This
+    edges (the last edge belongs to the last bin, as in ``np.histogram``);
+    the PIT is the mass below the truth, linear within its bin. This
     is the exact scoring of a bar distribution.
     """
     edges = np.asarray(bin_edges, dtype=float)
@@ -1395,7 +1396,7 @@ def _histogram_at_truth(
     index = np.clip(
         np.searchsorted(edges, truth, side="right") - 1, 0, widths.size - 1
     )
-    inside = (truth >= edges[0]) & (truth < edges[-1])
+    inside = (truth >= edges[0]) & (truth <= edges[-1])
     pdf_at_truth = np.where(inside, density[rows, index], 0.0)
     fraction = np.clip((truth - edges[index]) / widths[index], 0.0, 1.0)
     pit = below[rows, index] + mass[rows, index] * fraction

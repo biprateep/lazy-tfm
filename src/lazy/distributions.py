@@ -116,6 +116,20 @@ def _unit(values: _typing.FloatArray) -> _typing.FloatArray:
     return np.clip(values, 0.0, 1.0)
 
 
+def _closed_bucket(
+    edges: _typing.FloatArray, values: _typing.FloatArray
+) -> _typing.IntArray:
+    """The bucket holding each value, ``edges[i] <= value < edges[i + 1]``.
+
+    As in ``np.histogram``, the last edge closes the last bucket of non-zero
+    width, so a value on it is inside. Values outside the edges give -1 or
+    ``edges.size - 1``.
+    """
+    index = np.searchsorted(edges, values, side="right") - 1
+    last = np.searchsorted(edges, edges[-1], side="left") - 1
+    return np.where(values == edges[-1], last, index)
+
+
 def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
     """Probability levels as a 1-D array inside [0, 1]."""
     out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
@@ -342,11 +356,12 @@ class HistogramDistribution(_Base):
         """The density at ``values``, shape (n_rows, len(values)).
 
         The density inside a bucket is its mass over its width; zero outside
-        the buckets and in zero-width buckets.
+        the buckets and in zero-width buckets. The last edge belongs to the
+        last bucket, as in ``np.histogram``.
         """
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         widths = self.widths
-        index = np.searchsorted(self.bins, y, side="right") - 1
+        index = _closed_bucket(self.bins, y)
         inside = (index >= 0) & (index < widths.size)
         index = np.clip(index, 0, widths.size - 1)
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -629,14 +644,15 @@ class QuantileDistribution(_Base):
         """The density at ``values``, shape (n_rows, len(values)).
 
         Constant between knots; zero outside the outermost values (where the
-        tails sit as point masses) and on zero-width segments.
+        tails sit as point masses) and on zero-width segments. The outermost
+        values belong to the segments they end.
         """
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         step = np.diff(self.quants)
         out = np.zeros((self.npdf, y.size))
         for row in range(self.npdf):
             locs = self.locs[row]
-            segment = np.searchsorted(locs, y, side="right") - 1
+            segment = _closed_bucket(locs, y)
             inside = (segment >= 0) & (segment < step.size)
             segment = np.clip(segment, 0, step.size - 1)
             width = locs[segment + 1] - locs[segment]

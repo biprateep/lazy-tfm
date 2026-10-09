@@ -491,3 +491,17 @@ def test_pit_never_exceeds_one_by_rounding(normalization):
     y_true = np.full(2000, np.nextafter(last, 0.0))
     pit = metrics.evaluate_grid_at_truth(y_true, grid, pdfs)[3]
     assert pit.max() <= 1.0
+
+
+def test_a_truth_on_the_last_edge_of_a_histogram_grid_is_inside():
+    """As in np.histogram, the last edge closes the last bin."""
+    grid = grid_lib.Grid.linear(0.0, 3.0, 30, normalization="histogram")
+    pdfs = np.ones((3, 30))
+    y_true = np.array([0.0, 1.5, 3.0])
+    np.testing.assert_allclose(
+        metrics.per_object_nll(y_true, grid, pdfs), np.log(3.0)
+    )
+    density = metrics.evaluate_grid_at_truth(y_true, grid, pdfs)[2]
+    np.testing.assert_allclose(density, 1.0 / 3.0)
+    scores = metrics.per_object_scores(y_true, grid, pdfs)[0]
+    np.testing.assert_allclose(scores, scores[1])
