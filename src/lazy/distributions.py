@@ -451,10 +451,18 @@ class HistogramDistribution(_Base):
         return self.probabilities @ centres
 
     def var(self) -> _typing.FloatArray:
-        """The variance of each row, shape (n_rows,); buckets are uniform."""
-        low, high = self.bins[:-1], self.bins[1:]
-        second = (low**2 + low * high + high**2) / 3.0
-        return self.probabilities @ second - self.mean() ** 2
+        """The variance of each row, shape (n_rows,); buckets are uniform.
+
+        About each row's mean, not as E[x^2] - mean^2, which cancels when
+        the values sit far from zero: a bucket centred ``d`` from the mean
+        and ``w`` wide contributes ``d^2 + w^2 / 12``.
+        """
+        probabilities = self.probabilities
+        centres = 0.5 * (self.bins[:-1] + self.bins[1:])
+        offset = centres - self.mean()[:, None]
+        offset **= 2
+        spread = probabilities @ (self.widths**2 / 12.0)
+        return np.einsum("ij,ij->i", probabilities, offset) + spread
 
     def mode(self) -> _typing.FloatArray:
         """The centre of each row's densest bucket, shape (n_rows,)."""
@@ -667,31 +675,32 @@ class QuantileDistribution(_Base):
             out[row] = np.interp(levels[row], self.quants, self.locs[row])
         return out
 
-    def _segment_moments(self) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-        """Returns a tuple (mean, second raw moment) per row."""
+    def mean(self) -> _typing.FloatArray:
+        """The mean of each row, shape (n_rows,)."""
         low, high = self.locs[:, :-1], self.locs[:, 1:]
         step = np.diff(self.quants)
         head, tail = self.quants[0], 1.0 - self.quants[-1]
-        first = (
+        return (
             head * self.locs[:, 0]
             + (step * 0.5 * (low + high)).sum(axis=1)
             + tail * self.locs[:, -1]
         )
-        second = (
-            head * self.locs[:, 0] ** 2
-            + (step * (low**2 + low * high + high**2) / 3.0).sum(axis=1)
-            + tail * self.locs[:, -1] ** 2
-        )
-        return first, second
-
-    def mean(self) -> _typing.FloatArray:
-        """The mean of each row, shape (n_rows,)."""
-        return self._segment_moments()[0]
 
     def var(self) -> _typing.FloatArray:
-        """The variance of each row, shape (n_rows,)."""
-        first, second = self._segment_moments()
-        return second - first**2
+        """The variance of each row, shape (n_rows,).
+
+        About each row's mean, not as E[x^2] - mean^2, which cancels when
+        the values sit far from zero.
+        """
+        locs = self.locs - self.mean()[:, None]
+        low, high = locs[:, :-1], locs[:, 1:]
+        step = np.diff(self.quants)
+        head, tail = self.quants[0], 1.0 - self.quants[-1]
+        return (
+            head * locs[:, 0] ** 2
+            + (step * (low**2 + low * high + high**2) / 3.0).sum(axis=1)
+            + tail * locs[:, -1] ** 2
+        )
 
     def mode(self) -> _typing.FloatArray:
         """The centre of each row's densest segment, shape (n_rows,)."""
@@ -845,11 +854,19 @@ class MixtureDistribution(_Base):
         return self._weighted([c.mean() for c in self.components])
 
     def var(self) -> _typing.FloatArray:
-        """The variance of each row, shape (n_rows,)."""
-        second = self._weighted(
-            [c.var() + c.mean() ** 2 for c in self.components]
+        """The variance of each row, shape (n_rows,).
+
+        Each component's variance plus its mean's squared distance from the
+        mixture's, which does not cancel when the values sit far from zero.
+        """
+        means = [c.mean() for c in self.components]
+        mean = self._weighted(means)
+        return self._weighted(
+            [
+                c.var() + (m - mean) ** 2
+                for c, m in zip(self.components, means, strict=True)
+            ]
         )
-        return second - self.mean() ** 2
 
     def mode(self) -> _typing.FloatArray:
         """The centre of each row's densest union bucket, shape (n_rows,)."""

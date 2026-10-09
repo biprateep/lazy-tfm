@@ -514,3 +514,29 @@ def test_concatenating_mixtures_of_other_sizes_raises(mixture, reverse):
     parts = [three, mixture] if reverse else [mixture, three]
     with pytest.raises(ValueError, match="number of components: [23] != "):
         distributions.concatenate(parts)
+
+
+# -- moments far from zero ---------------------------------------------------
+
+
+def _narrow_gaussians(offset):
+    """A histogram, quantiles and a mixture of sigma 0.01 at ``offset``."""
+    edges = offset + np.linspace(-0.05, 0.05, 101)
+    centres = np.linspace(-0.0495, 0.0495, 100)
+    masses = np.exp(-0.5 * (centres / 0.01) ** 2)[None]
+    histogram = distributions.HistogramDistribution(edges, masses)
+    shifted = distributions.HistogramDistribution(edges + 0.01, masses)
+    quantiles = distributions.QuantileDistribution(
+        [0.1, 0.5, 0.9], [[offset - 0.0128, offset, offset + 0.0128]]
+    )
+    mixture = distributions.MixtureDistribution.equal([histogram, shifted])
+    return histogram, quantiles, mixture
+
+
+@pytest.mark.parametrize("offset", [1e6, 1e8])
+def test_variance_does_not_cancel_far_from_zero(offset):
+    for far, near in zip(
+        _narrow_gaussians(offset), _narrow_gaussians(0.0), strict=True
+    ):
+        assert near.std()[0] > 0.008
+        np.testing.assert_allclose(far.var(), near.var(), rtol=1e-4)
