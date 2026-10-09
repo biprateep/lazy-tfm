@@ -11,6 +11,7 @@ import concurrent.futures
 import hashlib
 import io
 import os
+import stat
 import time
 import warnings
 
@@ -607,6 +608,20 @@ def test_parallel_downloads_to_one_cache_do_not_collide(
     assert paths[0].read_bytes() == payload
     assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
     assert timeouts and all(t is not None and t > 0 for t in timeouts)
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o027])
+def test_a_downloaded_file_is_as_readable_as_any_new_file(
+    isolated_home, monkeypatch, umask
+):
+    """A shared cache directory must be readable by the other users."""
+    _serve(monkeypatch, b"the whole file")
+    previous = os.umask(umask)
+    try:
+        path = _fetch_fake(isolated_home / "shared")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o666 & ~umask
 
 
 def test_a_corrupted_download_leaves_nothing_behind(isolated_home, monkeypatch):

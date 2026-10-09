@@ -814,6 +814,9 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
                 f"  want {sha256}"
             )
         if not _is_complete(dest, size):  # Else another process was first.
+            # mkstemp makes the file private (0600); give it the mode any new
+            # file would get, so that a shared cache is readable by others.
+            os.chmod(tmp, 0o666 & ~_umask())
             os.replace(tmp, dest)
     finally:
         tmp.unlink(missing_ok=True)
@@ -821,6 +824,24 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
         f"lazy.datasets: cached {dest} ({dest.stat().st_size / 1e6:.0f} MB)",
         flush=True,
     )
+
+
+def _umask() -> int:
+    """The process's file-mode creation mask.
+
+    Read from ``/proc`` where there is one, as setting the mask to read it
+    back would change it for every thread in the meantime.
+    """
+    try:
+        with open("/proc/self/status", encoding="ascii") as status:
+            for line in status:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8)
+    except OSError:
+        pass
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
 
 
 # -- the spectroscopically selected split ----------------------------------
