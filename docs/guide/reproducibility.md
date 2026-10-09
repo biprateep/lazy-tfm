@@ -83,9 +83,10 @@ The version, the context, `random_state`, `n_estimators`, `transforms`,
 `feature_shuffle`, `bag_size`, `softmax_temperature` and `outlier_threshold`
 all change a prediction, which is why they are recorded. Chunking does not. A
 row's answer never depends on which other rows share its chunk: on a CPU it is
-the same bit for bit on TabPFN and TabICL and to float rounding on LimiX-2 and
-TabFM, and under mixed precision on a GPU it is the same to the rounding of
-that precision.
+the same bit for bit on TabPFN and to float rounding on TabICL, Kumo Tabular,
+LimiX-2 and TabFM (a chunk of a single row takes a different matrix-multiply
+path in TabICL and Kumo, about $10^{-6}$ apart), and under mixed precision on a
+GPU it is the same to the rounding of that precision.
 
 The key/value cache changes a prediction only by rounding. Since queries only
 ever attend to the context and never to each other, the answer is the uncached

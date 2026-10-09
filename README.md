@@ -140,7 +140,7 @@ when a larger context arrives without `bag_size`.
 
 Memory is bounded by `chunk_size` on every backend, and chunking is exact: a
 query row's answer never depends on which other query rows share its chunk
-(bit for bit on TabPFN and TabICL, to float rounding on LimiX-2).
+(bit for bit on TabPFN, to float rounding on the others).
 
 ### Finishing the TabFM, LimiX-2 and Kumo Tabular installs
 
