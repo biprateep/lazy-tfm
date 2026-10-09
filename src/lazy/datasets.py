@@ -882,6 +882,8 @@ class SelectionSplit:
             cut from.
         meta: How it was built: sizes, seeds, selection arguments, solver
             history.
+        catalog: The catalogue the split was cut from, for
+            :meth:`summary`; ``None`` if it was not kept.
     """
 
     biased: Catalog
@@ -890,6 +892,9 @@ class SelectionSplit:
     unbiased: Catalog | None
     rows: dict[str, _typing.IntArray]
     meta: dict[str, Any]
+    catalog: Catalog | None = dataclasses.field(
+        default=None, repr=False, compare=False
+    )
 
     def __repr__(self) -> str:
         sizes = ", ".join(
@@ -928,12 +933,25 @@ class SelectionSplit:
             One row per subset, indexed by ``set``: the count, the median
             magnitude and redshift, the maximum redshift and the faint
             fraction.
+
+        Raises:
+            ValueError: If :attr:`catalog` was not kept and ``magnitude`` and
+                ``faint`` are not the defaults, which :attr:`meta` records.
         """
         rows = [
             _describe(cat, magnitude=magnitude, faint=faint) | {"set": name}
             for name, cat in self.catalogs.items()
         ]
-        rows.append(self.meta["catalog"] | {"set": "catalog"})
+        if self.catalog is not None:
+            whole = _describe(self.catalog, magnitude=magnitude, faint=faint)
+        elif (magnitude, faint) == ("I", 24.0):
+            whole = self.meta["catalog"]
+        else:
+            raise ValueError(
+                "this split did not keep the catalogue it was cut from, so "
+                "only magnitude='I' and faint=24 can be summarised for it"
+            )
+        rows.append(whole | {"set": "catalog"})
         return pd.DataFrame(rows).set_index("set")
 
 
@@ -1161,6 +1179,7 @@ def make_selection_split(
         unbiased=subsets.get("unbiased"),
         rows=rows,
         meta=meta,
+        catalog=catalog,
     )
 
 

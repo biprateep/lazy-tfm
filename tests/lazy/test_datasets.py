@@ -8,6 +8,7 @@ is hardcoded.
 """
 
 import concurrent.futures
+import dataclasses
 import hashlib
 import io
 import os
@@ -567,6 +568,26 @@ def test_the_summary_puts_every_subset_next_to_the_catalogue_it_came_from(
     assert summary.loc["test", "median_z"] == pytest.approx(
         summary.loc["catalog", "median_z"], abs=0.05
     )
+
+
+def test_the_catalogue_row_is_summarised_in_the_band_asked_for(
+    split, biasable_catalog
+):
+    """Not always in I at 24, which leaves the row NaN in any other band."""
+    summary = split.summary(magnitude="R", faint=20.5)
+    whole = summary.loc["catalog"]
+    assert whole["median_R"] == pytest.approx(
+        np.median(biasable_catalog.raw["R"])
+    )
+    assert whole["frac_R_gt_20.5"] == 1.0
+    assert not summary.isna().any().any()
+
+
+def test_a_split_without_its_catalogue_summarises_only_the_default(split):
+    bare = dataclasses.replace(split, catalog=None)
+    pd.testing.assert_frame_equal(bare.summary(), split.summary())
+    with pytest.raises(ValueError, match="did not keep the catalogue"):
+        bare.summary(magnitude="R")
 
 
 def test_the_repr_says_how_big_each_piece_is(split):
