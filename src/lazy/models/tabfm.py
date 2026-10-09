@@ -67,11 +67,6 @@ import inspect
 import math
 import numbers
 import os
-import pathlib
-import shlex
-import shutil
-import subprocess
-import sys
 import types
 from typing import Any
 import warnings
@@ -86,6 +81,7 @@ from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _icl_stream
+from lazy.models import _install
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _weights
@@ -609,9 +605,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         The extra brings the PyPI release, which has no KV-cache API, and
         PyPI refuses a git URL in an extra, so this installs
-        :data:`REPOSITORY_BUILD` over it, with pip or uv. In a uv project it
-        prints the ``uv add`` that keeps the build instead, since ``uv sync``
-        would put the release back.
+        :data:`REPOSITORY_BUILD` over it (:func:`lazy.models._install.install`,
+        with pip or uv). In a uv project it prints the ``uv add`` that keeps
+        the build instead, since ``uv sync`` would put the release back.
 
         Args:
             dry_run: Say what would be installed, and install nothing.
@@ -626,40 +622,14 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         if _icl_stream.streaming_available():
             print("TabFM: the repository build is installed.")
             return True
-        if _in_uv_project():
-            # uv sync and uv run would put the release back from uv.lock, so
-            # the build has to be a requirement of the project itself.
-            print(
-                "TabFM: in a uv project, add the repository build to the "
-                "project, so that uv sync keeps it:\n"
-                f"  uv add {shlex.quote(REPOSITORY_BUILD)}"
-            )
-            return False
-        command = _install_command(REPOSITORY_BUILD)
-        if command is None:
-            print(
-                "TabFM: found neither pip nor uv to install the repository "
-                "build with. Install it by hand:\n"
-                "  pip install --force-reinstall --no-deps "
-                f"{shlex.quote(REPOSITORY_BUILD)}"
-            )
-            return False
-        print(
-            f"TabFM: installing the repository build:\n  {shlex.join(command)}"
+        return _install.install(
+            "TabFM",
+            REPOSITORY_BUILD,
+            what="the repository build",
+            check=_CHECK_BUILD,
+            missing="the KV-cache API",
+            dry_run=dry_run,
         )
-        if dry_run:
-            return True
-        if subprocess.run(command, check=False).returncode != 0:
-            print("TabFM: the install failed; see the output above.")
-            return False
-        check = subprocess.run(
-            [sys.executable, "-c", _CHECK_BUILD], check=False
-        )
-        if check.returncode != 0:
-            print("TabFM: installed, but the KV-cache API is still missing.")
-            return False
-        print("TabFM: the repository build is installed.")
-        return True
 
     def _auto_softmax_temperature(self) -> float:
         return AUTO_SOFTMAX_TEMPERATURE
@@ -1305,50 +1275,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             dtype=dtype,
             **options,
         )
-
-
-def _install_command(requirement: str) -> list[str] | None:
-    """The command replacing an installed package with ``requirement``.
-
-    pip when this interpreter has it, else uv, whose environments have no
-    pip; both reinstall even though the build and the release share a
-    version number, and leave the dependencies alone.
-
-    Args:
-        requirement: A PEP 508 requirement, such as a ``name @ git+URL``.
-
-    Returns:
-        The command, or ``None`` when neither installer is available.
-    """
-    if util.find_spec("pip") is not None:
-        return [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--force-reinstall",
-            "--no-deps",
-            requirement,
-        ]
-    uv = shutil.which("uv")
-    if uv is None:
-        return None
-    return [
-        uv,
-        "pip",
-        "install",
-        "--python",
-        sys.executable,
-        "--reinstall",
-        "--no-deps",
-        requirement,
-    ]
-
-
-def _in_uv_project() -> bool:
-    """Whether the working directory is inside a project uv has locked."""
-    here = pathlib.Path.cwd()
-    return any((d / "uv.lock").is_file() for d in (here, *here.parents))
 
 
 def _level_rows(
