@@ -55,7 +55,8 @@ backend](docs/adding_a_backend.md) describes the contract it must meet, gives
 a skeleton module, and lists everything else it needs (a pinned checkpoint and
 recipe for every version, a pip extra, a docs page, golden densities and test
 fakes). `tests/lazy/test_backend_completeness.py` checks every registered
-backend for all of them.
+backend for all of them. [Worked example: Kumo
+Tabular](docs/adding_a_backend_kumo.md) follows one backend through every step.
 
 ## Changing dependencies
 

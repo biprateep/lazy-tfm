@@ -10,7 +10,8 @@ combines the members' answers. The subclass declares what its model does
 natively, as class attributes, and implements four methods. This page
 describes the contract those methods must meet, gives a skeleton module, and
 lists everything else a new backend needs, all of which the test suite
-checks.
+checks. {doc}`adding_a_backend_kumo` follows one backend, NVIDIA's Kumo
+Tabular, through every step.
 
 ## The contract
 

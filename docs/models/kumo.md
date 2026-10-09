@@ -1,16 +1,17 @@
 # Kumo Tabular
 
-Kumo Tabular, from NVIDIA, is a tabular foundation model pretrained only on
-synthetic tables drawn from structural causal models. It works in two stages.
+Kumo Tabular, from NVIDIA, is a tabular foundation model which, according to
+NVIDIA's announcement, is pretrained only on synthetic tables drawn from
+structural causal models. It works in two stages.
 It first turns each row into a fixed-size vector with an encoder that
 alternates attention across the rows of each column (an induced set attention,
 in which the query rows see only the context rows) with attention across the
 columns of each row, and then passes the rows to a transformer that does
 in-context learning, in which the query rows attend to the context rows. Each
 cell enters the encoder through learned Fourier features of its value, with a
-learned embedding for a missing value, and the attention scales with the
-logarithm of the table size, which keeps it sharp from small tables to large
-ones. For regression it predicts 999 quantiles of the target, at levels 0.001
+learned embedding for a missing value, and the attention logits are scaled by
+the logarithm of the table size, which NVIDIA introduced so that the attention
+stays as concentrated on large tables as on small ones. For regression it predicts 999 quantiles of the target, at levels 0.001
 to 0.999, from which LAZY builds the distribution. It comes in three sizes,
 from 28 million to 216 million parameters, which LAZY loads as versions
 `v1-small`, `v1-medium` and `v1-large` (the default), and its weights are
@@ -33,7 +34,7 @@ Face](https://huggingface.co/nvidia/Kumo-Tabular), under the OpenMDW License
 
 ## Installation
 
-Kumo Tabular lives in NVIDIA's `structured-data-models` package (imported as
+Kumo Tabular is part of NVIDIA's `structured-data-models` package (imported as
 `sdm`), which is not on PyPI yet. The extra installs its dependencies, and
 `lazy setup` installs the package itself from GitHub, at the commit LAZY was
 validated on:
@@ -86,9 +87,10 @@ a narrow spread about a large offset that single precision would round away.
 The members' quantiles are combined by the creators' trimmed mean, but over
 every member of the ensemble at once, so that a bagged ensemble, whose members
 run one at a time, is combined the same way as one that runs in a single call.
-On a CPU, LAZY's answer matches the creators' own call to about $3\times
-10^{-7}$ in the units of the target (float rounding), and on a GPU the
-cached and uncached answers agree to float16 rounding. The checkpoint is read
+On a CPU, LAZY's answer with the small size matches the creators' own call to
+about $3\times 10^{-7}$ in the units of the target on our test problem, and
+on a GPU the cached and uncached answers of the large size agree to about
+$1.3\times 10^{-3}$, which is of the size we expect from float16 rounding. The checkpoint is read
 from a pinned revision of the Hugging Face repository rather than through
 upstream's download. The distribution itself is the piecewise-linear
 cumulative distribution through the 999 quantiles, so the 0.1% of probability

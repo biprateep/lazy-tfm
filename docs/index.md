@@ -92,6 +92,7 @@ API reference <autoapi/lazy/index>
 
 contributing
 adding_a_backend
+adding_a_backend_kumo
 citing
 ```
 

@@ -17,7 +17,8 @@ change the API.
   from GitHub, since it is not on PyPI. Its own recipe, its trimmed mean of
   the members' quantiles included, is pinned as `transforms="auto"`.
 - The documentation gains "Adding a backend", a contributor's page with the
-  contract a new backend meets, a skeleton module and a checklist.
+  contract a new backend meets, a skeleton module and a checklist, and
+  "Worked example: Kumo Tabular", which follows the Kumo backend through it.
 - Backends gain class hooks for what shared code used to do by name:
   `cpu_note`, `prefetch`, `clear_upstream_caches` and `setup`, which
   `lazy setup` now runs for every registered backend.
