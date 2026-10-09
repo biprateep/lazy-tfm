@@ -884,6 +884,11 @@ def concatenate(parts: Sequence[Distribution]) -> Distribution:
 
     Returns:
         One distribution holding every row, in order.
+
+    Raises:
+        TypeError: If the parts are of different kinds.
+        ValueError: If their bins, levels, weights or numbers of
+            components differ.
     """
     first = parts[0]
     ancil = _concatenate_ancil([p.ancil for p in parts])
@@ -900,6 +905,17 @@ def concatenate(parts: Sequence[Distribution]) -> Distribution:
         locs = np.concatenate([p.locs for p in pieces_q])
         return QuantileDistribution(first.quants, locs, ancil)
     pieces_m = [_same_kind(p, MixtureDistribution) for p in parts]
+    for part in pieces_m:
+        if len(part.components) != len(first.components):
+            raise ValueError(
+                "mixtures must have the same number of components: "
+                f"{len(part.components)} != {len(first.components)}"
+            )
+        if not np.array_equal(part.weights, first.weights):
+            raise ValueError(
+                "mixtures must share their weights: "
+                f"{part.weights} != {first.weights}"
+            )
     components = tuple(
         concatenate([p.components[k] for p in pieces_m])
         for k in range(len(first.components))

@@ -498,3 +498,19 @@ def test_the_outermost_quantiles_belong_to_their_segments():
     np.testing.assert_allclose(
         dist.pdf([-1.0, 0.0, 3.0, 4.0]), [[0.0, 0.4, 0.2, 0.0]]
     )
+
+
+def test_concatenating_mixtures_with_other_weights_raises(mixture):
+    other = distributions.MixtureDistribution(mixture.components, [0.5, 0.5])
+    with pytest.raises(ValueError, match="share their weights"):
+        distributions.concatenate([mixture, other])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_concatenating_mixtures_of_other_sizes_raises(mixture, reverse):
+    three = distributions.MixtureDistribution.equal(
+        [*mixture.components, mixture.components[0]]
+    )
+    parts = [three, mixture] if reverse else [mixture, three]
+    with pytest.raises(ValueError, match="number of components: [23] != "):
+        distributions.concatenate(parts)
