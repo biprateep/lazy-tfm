@@ -149,10 +149,17 @@ def _recording_hub(monkeypatch, cached):
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fetch)
     monkeypatch.setattr(huggingface_hub, "snapshot_download", fetch)
+    # A fetched snapshot is confirmed against the repository's file list.
+    monkeypatch.setattr(
+        huggingface_hub.HfApi, "list_repo_files", lambda *a, **k: []
+    )
     return calls
 
 
-@pytest.mark.parametrize("key", ["tabicl:v2", "tabfm:v1.0"])
+# A single file is cached only once whole. A snapshot (TabFM's) must also be
+# confirmed complete before the network is skipped; tests/lazy/test_hub.py
+# covers that.
+@pytest.mark.parametrize("key", ["tabicl:v2"])
 def test_a_cached_pinned_checkpoint_never_touches_the_network(monkeypatch, key):
     calls = _recording_hub(monkeypatch, cached=True)
     assert str(lazy.CHECKPOINTS[key].download()) == "/cache/weights"

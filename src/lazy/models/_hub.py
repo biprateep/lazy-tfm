@@ -32,6 +32,7 @@ from __future__ import annotations
 import dataclasses
 from importlib import metadata
 import pathlib
+import warnings
 
 __all__ = [
     "CHECKPOINTS",
@@ -130,6 +131,14 @@ class Checkpoint:
         and the Hub is contacted only when the weights are not there: a
         cached checkpoint loads with no network traffic at all.
 
+        A single file appears in the cache only once it is whole, but a
+        snapshot directory appears with its first file, so an interrupted
+        download leaves one that looks cached. A snapshot is taken from the
+        cache only once it is known to be complete (:meth:`_complete`);
+        otherwise the Hub completes it, and confirms it against the
+        repository's file list. Without a network connection an
+        unconfirmed snapshot is returned with a warning.
+
         Args:
             local_files_only: Only look in the local Hugging Face cache, never
                 on the network.
@@ -138,14 +147,32 @@ class Checkpoint:
             The checkpoint file, or the snapshot directory when the
             checkpoint is a filtered snapshot rather than one file.
         """
-        if self.revision is not None and not local_files_only:
-            try:
-                return self._fetch(local_files_only=True)
-            except FileNotFoundError:
-                # Not cached (huggingface_hub's LocalEntryNotFoundError is a
-                # FileNotFoundError): fall through to the network.
-                pass
-        return self._fetch(local_files_only=local_files_only)
+        if self.revision is None:
+            return self._fetch(local_files_only=local_files_only)
+        try:
+            cached: pathlib.Path | None = self._fetch(local_files_only=True)
+        except FileNotFoundError:
+            # Not cached (huggingface_hub's LocalEntryNotFoundError is a
+            # FileNotFoundError): fall through to the network.
+            if local_files_only:
+                raise
+            cached = None
+        if cached is not None and self._complete(cached):
+            return cached
+        if cached is not None and local_files_only:
+            self._warn_unconfirmed(cached)
+            return cached
+        try:
+            path = self._fetch(local_files_only=False)
+        except Exception:
+            if cached is None:
+                raise
+            # The Hub cannot be reached: what is cached may yet be whole.
+            self._warn_unconfirmed(cached)
+            return cached
+        if self.filename is None and not self._confirm(path):
+            self._warn_unconfirmed(path)
+        return path
 
     def _fetch(self, *, local_files_only: bool) -> pathlib.Path:
         """One ``huggingface_hub`` download call; see :meth:`download`."""
@@ -164,12 +191,108 @@ class Checkpoint:
             huggingface_hub.snapshot_download(
                 repo_id=self.repo_id,
                 revision=self.revision,
-                allow_patterns=list(self.allow_patterns)
-                if self.allow_patterns
-                else None,
+                allow_patterns=self._patterns(),
                 local_files_only=local_files_only,
             )
         )
+
+    def _complete(self, path: pathlib.Path) -> bool:
+        """Whether the cached weights at ``path`` are all there.
+
+        A single file always is. A snapshot is when a completed download
+        marked it (:meth:`_confirm`), or when the files it should hold add
+        up to :attr:`size_bytes`, which tells a snapshot cached before the
+        marker existed, offline.
+
+        Args:
+            path: What :meth:`_fetch` returned from the cache.
+
+        Returns:
+            Whether the checkpoint can be loaded from ``path``.
+        """
+        if self.filename is not None:
+            return True
+        marker = self._marker(path)
+        try:
+            if marker.read_text() == self._marker_text():
+                return True
+        except OSError:
+            pass
+        return bool(self.size_bytes) and self._bytes(path) == self.size_bytes
+
+    def _confirm(self, path: pathlib.Path) -> bool:
+        """Checks a snapshot against the repository, and marks it if whole.
+
+        Args:
+            path: The snapshot directory, just fetched.
+
+        Returns:
+            Whether every file the repository holds under
+            :attr:`allow_patterns`, at :attr:`revision`, is in ``path``;
+            ``False`` too when the Hub cannot be reached to say.
+        """
+        import huggingface_hub  # noqa: PLC0415 - kept out of `import lazy`.
+        from huggingface_hub import utils  # noqa: PLC0415
+
+        try:
+            listed = huggingface_hub.HfApi().list_repo_files(
+                self.repo_id, revision=self.revision
+            )
+        except Exception:  # noqa: BLE001 - offline, or the Hub is down.
+            return False
+        expected = utils.filter_repo_objects(
+            listed, allow_patterns=self._patterns()
+        )
+        if not all((path / name).is_file() for name in expected):
+            return False
+        marker = self._marker(path)
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(self._marker_text())
+        except OSError:
+            # A read-only cache: the snapshot is whole all the same, and
+            # the next download confirms it again.
+            pass
+        return True
+
+    def _warn_unconfirmed(self, path: pathlib.Path) -> None:
+        """Warns that a cached snapshot may be missing files."""
+        warnings.warn(
+            f"the cached snapshot of {self.repo_id} at {path} could not be "
+            "confirmed complete, and may be what an interrupted download "
+            "left behind. Run lazy.download_checkpoint("
+            f"{self.key!r}) with a network connection to complete it.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+    def _patterns(self) -> list[str] | None:
+        """:attr:`allow_patterns` as ``huggingface_hub`` takes them."""
+        return list(self.allow_patterns) if self.allow_patterns else None
+
+    def _marker(self, path: pathlib.Path) -> pathlib.Path:
+        """Where a snapshot's completed download is recorded.
+
+        Beside the snapshots in the repository's cache entry
+        (``<entry>/snapshots/<revision>``), so deleting the model from the
+        cache takes it too.
+        """
+        return path.parent.parent / "lazy-complete" / path.name
+
+    def _marker_text(self) -> str:
+        """What a marker holds: the patterns the snapshot was fetched with."""
+        return "\n".join(self._patterns() or ["*"])
+
+    def _bytes(self, path: pathlib.Path) -> int:
+        """The bytes in the files of ``path`` the patterns select."""
+        from huggingface_hub import utils  # noqa: PLC0415
+
+        files = [p for p in path.rglob("*") if p.is_file()]
+        names = {p.relative_to(path).as_posix(): p for p in files}
+        selected = utils.filter_repo_objects(
+            names, allow_patterns=self._patterns()
+        )
+        return sum(names[name].stat().st_size for name in selected)
 
     def provenance(self, *, device: str | None = None) -> dict[str, str | None]:
         """Returns which weights, and which code, produced a set of numbers.
@@ -599,15 +722,18 @@ def is_cached(name: str, version: str | None = None) -> bool:
 
     Returns:
         ``True`` if the weights, and whatever else the backend fetches
-        beside them, can be loaded without a network connection.
+        beside them, can be loaded without a network connection. A snapshot
+        an interrupted download left behind is not cached.
     """
     try:
         checkpoint = get_checkpoint(name, version)
         _prefetch(checkpoint, download=False)
-        checkpoint.download(local_files_only=True)
+        # This module's own class: the local lookup, without the warning
+        # download() gives an unconfirmed snapshot.
+        path = checkpoint._fetch(local_files_only=True)  # noqa: SLF001
     except Exception:  # noqa: BLE001 - any failure to load offline is a miss.
         return False
-    return True
+    return checkpoint._complete(path)  # noqa: SLF001
 
 
 def _prefetch(checkpoint: Checkpoint, *, download: bool) -> None:
