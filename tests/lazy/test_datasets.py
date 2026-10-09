@@ -482,6 +482,82 @@ def test_a_hold_out_too_small_for_the_calibration_sample_is_reported(
         )
 
 
+@pytest.mark.parametrize(
+    ("rows", "match"),
+    [
+        (np.repeat(np.arange(100, 2_000), 2), "repeats rows"),
+        (np.arange(-1_000, 0), r"in \[0, 2,000\)"),
+        (np.arange(100, 2_000) + 0.5, "integer"),
+        (np.ones(2_000, dtype=bool), "integer"),
+    ],
+)
+def test_hold_out_rows_must_be_unique_positions_in_the_catalogue(
+    biasable_catalog, hsc_grid, rows, match
+):
+    """A repeated row would land in both the calibration and the test set."""
+    with pytest.raises(ValueError, match=match):
+        datasets.make_selection_split(
+            biasable_catalog,
+            grid=hsc_grid,
+            n_train=100,
+            n_calibration=50,
+            holdout_rows=rows,
+            color_redshift_cut=False,
+        )
+
+
+def test_a_small_training_set_is_held_to_a_matching_tolerance(
+    biasable_catalog, hsc_grid
+):
+    """The absolute tolerance of 50 would accept 58 for 10."""
+    split = datasets.make_selection_split(
+        biasable_catalog,
+        grid=hsc_grid,
+        n_train=10,
+        n_calibration=10,
+        color_redshift_cut=False,
+    )
+    assert abs(len(split.biased) - 10) <= 1
+
+
+def test_an_empty_training_set_is_never_returned(biasable_catalog, hsc_grid):
+    """Every galaxy moved to the grid's off-limits colour row.
+
+    Nothing is kept, which is only 10 away from n_train.
+    """
+    raw = biasable_catalog.raw.copy()
+    raw["G"] = np.float32(22.5)
+    untargetable = datasets.Catalog(
+        split="untargetable",
+        raw=raw,
+        redshift=biasable_catalog.redshift,
+        object_id=biasable_catalog.object_id,
+    )
+    with pytest.raises(RuntimeError, match="kept none"):
+        datasets.make_selection_split(
+            untargetable,
+            grid=hsc_grid,
+            n_train=10,
+            n_calibration=10,
+            color_redshift_cut=False,
+        )
+
+
+def test_hold_out_rows_that_leave_too_big_a_pool_are_blamed(
+    biasable_catalog, hsc_grid
+):
+    """Not the catalogue: it could supply far fewer than are asked for."""
+    with pytest.raises(RuntimeError, match="Allow more rows to be held out"):
+        datasets.make_selection_split(
+            biasable_catalog,
+            grid=hsc_grid,
+            n_train=100,
+            n_calibration=50,
+            holdout_rows=np.arange(1_000, 2_000),
+            color_redshift_cut=False,
+        )
+
+
 def test_the_summary_puts_every_subset_next_to_the_catalogue_it_came_from(
     split,
 ):

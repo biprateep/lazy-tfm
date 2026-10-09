@@ -1058,7 +1058,8 @@ def make_selection_split(
             different question -- whether a result is the selection or merely
             the smaller sample -- and costs a second set of runs. It is drawn
             last, so turning it on leaves every other subset unchanged.
-        holdout_rows: Restrict the hold-out to these rows. The default
+        holdout_rows: Restrict the hold-out to these rows: integer
+            positions in the catalogue, each at most once. The default
             shuffles the whole catalogue, as above. Passing the rows of one
             source file keeps a model trained on the other file scorable on
             this test set without leakage.
@@ -1071,7 +1072,8 @@ def make_selection_split(
             were held back from it -- can be re-rolled independently. RAIL's
             default is kept.
         tolerance: For the hold-out solver: how close to ``n_train`` is close
-            enough.
+            enough. Capped at a tenth of ``n_train`` (but at least 1), so that
+            a small training set is held to a matching precision.
         max_iterations: How many passes the hold-out solver may take.
         initial_rate: The selection rate the hold-out solver starts from
             (0.0864 is HSC's on a representative LSST-depth sample).
@@ -1084,9 +1086,13 @@ def make_selection_split(
         The split.
 
     Raises:
+        ValueError: If a size is out of range, ``holdout_rows`` are not
+            unique positions in the catalogue, or they leave nothing to test
+            on.
         RuntimeError: If the hold-out solver cannot reach ``n_train``, which
-            means the catalogue is too small for a training set that size, or
-            the selection keeps too little of it.
+            means the catalogue is too small for a training set that size,
+            the selection keeps too little of it, or ``holdout_rows`` leave
+            too much of the catalogue to select from.
     """
     if grid is None:
         grid = fetch_hsc_grid()
@@ -1094,7 +1100,7 @@ def make_selection_split(
     holdout_rows = (
         np.arange(n)
         if holdout_rows is None
-        else np.asarray(holdout_rows, np.int64).ravel()
+        else _check_rows(holdout_rows, n, name="holdout_rows")
     )
     if n_calibration < 0 or n_train < 1:
         raise ValueError(
@@ -1158,6 +1164,29 @@ def make_selection_split(
     )
 
 
+def _check_rows(rows: npt.ArrayLike, n: int, *, name: str) -> _typing.IntArray:
+    """Returns ``rows`` as int64 positions, each in ``[0, n)`` and unique.
+
+    Raises:
+        ValueError: If they are not integers, are out of range, or repeat.
+    """
+    rows = np.asarray(rows).ravel()
+    if not rows.size:
+        return rows.astype(np.int64)
+    if not np.issubdtype(rows.dtype, np.integer):
+        raise ValueError(
+            f"{name} must be integer row positions, not {rows.dtype}"
+        )
+    if rows.min() < 0 or rows.max() >= n:
+        raise ValueError(
+            f"{name} must be row positions in [0, {n:,}); got "
+            f"{rows.min():,} to {rows.max():,}"
+        )
+    if np.unique(rows).size != rows.size:
+        raise ValueError(f"{name} repeats rows; give each row once")
+    return rows.astype(np.int64)
+
+
 def _solve_holdout(
     catalog: Catalog,
     candidates: _typing.IntArray,
@@ -1195,10 +1224,12 @@ def _solve_holdout(
         selection kept; and one record per pass.
 
     Raises:
-        RuntimeError: If no pass lands within ``tolerance`` of ``n_train``.
+        RuntimeError: If no pass lands within ``tolerance`` of ``n_train``,
+            or the selection keeps nothing.
     """
     n = len(catalog)
     everything = np.arange(n)
+    tolerance = min(tolerance, max(1, n_train // 10))
     rate = float(initial_rate)
     history: list[dict[str, Any]] = []
     for iteration in range(max_iterations):
@@ -1226,22 +1257,54 @@ def _solve_holdout(
                 "rate": float(n_selected / len(pool)),
             }
         )
-        if abs(n_selected - n_train) <= tolerance:
-            return holdout, pool, biased_rows, history
         if n_selected == 0:
             raise RuntimeError(
-                "the selection kept nothing; check that the magnitude and "
-                "colour columns are the ones the grid was built for"
+                f"the selection kept none of the {len(pool):,} galaxies it was "
+                "shown; check that the magnitude and colour columns are the "
+                "ones the grid was built for, or ask for a larger training set"
             )
+        if abs(n_selected - n_train) <= tolerance:
+            return holdout, pool, biased_rows, history
         rate = n_selected / len(pool)
-    best = max(row["n_biased"] for row in history)
-    raise RuntimeError(
+    raise _unsolved(history, n_train=n_train, n=n, n_candidates=len(candidates))
+
+
+def _unsolved(
+    history: list[dict[str, Any]], *, n_train: int, n: int, n_candidates: int
+) -> RuntimeError:
+    """Says why the hold-out solver could not reach ``n_train``.
+
+    Args:
+        history: The solver's record of its passes.
+        n_train: The training-set size asked for.
+        n: The catalogue's size.
+        n_candidates: How many rows may be held out.
+
+    Returns:
+        The error to raise.
+    """
+    best = min(
+        (row["n_biased"] for row in history),
+        key=lambda n_biased: abs(n_biased - n_train),
+    )
+    last = history[-1]
+    message = (
         f"could not size a training set of {n_train:,} within "
-        f"{max_iterations} passes; the best was {best:,}. The selection keeps "
-        f"about {history[-1]['rate']:.2%} of what it is shown, so this "
-        f"catalogue cannot supply more than "
-        f"~{int(history[-1]['rate'] * n):,} however it is cut, and a training "
-        "set that size would leave nothing to test on."
+        f"{len(history)} passes; the best was {best:,}. The selection keeps "
+        f"about {last['rate']:.2%} of what it is shown, so "
+    )
+    if last["n_holdout"] == n_candidates and last["n_biased"] > n_train:
+        n_min = n - n_candidates
+        return RuntimeError(
+            f"{message}the {n_min:,} galaxies that holdout_rows keeps from "
+            f"being held out yield at least about "
+            f"{int(last['rate'] * n_min):,}. Allow more rows to be held out, "
+            "or ask for a larger training set."
+        )
+    return RuntimeError(
+        f"{message}this catalogue cannot supply more than "
+        f"~{int(last['rate'] * n):,} however it is cut, and a training set "
+        "that size would leave nothing to test on."
     )
 
 
