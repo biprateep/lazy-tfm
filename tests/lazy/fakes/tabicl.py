@@ -6,7 +6,9 @@ The members are planned by upstream's own ``EnsembleGenerator``, which the
 backend reads to check that the members it asked for ran, so this fake needs
 the tabicl package. The rest follows upstream's contract where the backend
 depends on it: the regressor loads its network from ``model_path`` in
-``_load_model``, and the network keeps the cache of its last call on itself.
+``_load_model``, the network keeps the cache of its last call on itself, and
+a pickle leaves the network out and reloads it eagerly on unpickling, from
+the pickled path and on the pickled device.
 """
 
 import pathlib
@@ -127,6 +129,27 @@ class Regressor:
             context = self.model_.cached_context()
         signal = fakes.response(X, context)
         return (signal[:, None] + SPREAD).astype(np.float32)
+
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        for name in (
+            "model_",
+            "model_config_",
+            "model_path_",
+            "device_",
+            "inference_config_",
+        ):
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if "context_" in state:  # Fitted: upstream reloads at once.
+            self._resolve_device()
+            self._load_model()
+            self.model_.to(self.device_)
+            self._build_inference_config()
+            self._move_cache_to_device()
 
 
 def install(monkeypatch, recorder):

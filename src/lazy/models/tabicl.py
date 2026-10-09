@@ -52,7 +52,9 @@ import numpy as np
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _device
 from lazy.models import _ensemble
+from lazy.models import _hub
 from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
@@ -499,6 +501,30 @@ class TabICLQuantile(
         finally:
             del regressor._load_model  # noqa: SLF001 - upstream's loader.
 
+    def _attach_network(self, regressor: Any) -> None:
+        """Hands an unpickled regressor the shared network, on first use.
+
+        A pickle leaves the network out (:meth:`__getstate__`), and the
+        checkpoint is found again through the hub, where it is on this
+        machine, rather than at the pickled path. A fitted regressor that
+        holds its network already is left as it is.
+
+        Args:
+            regressor: A fitted ``TabICLRegressor``.
+        """
+        if hasattr(regressor, "model_") or not hasattr(
+            type(regressor), "_load_model"
+        ):
+            return
+        if self.__dict__.pop("_relocate_checkpoint", False):
+            spec = _hub.get_checkpoint(self.backend, self.version)
+            self.checkpoint_ = spec.download()
+        regressor.model_path = str(self.checkpoint_)
+        with self._shared_network(regressor):
+            regressor._load_model()  # noqa: SLF001 - the shared loader.
+            # As upstream's fit does: a network just loaded is on the CPU.
+            regressor.model_.to(regressor.device_)
+
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
@@ -508,6 +534,7 @@ class TabICLQuantile(
         # average counts for the members it stands for.
         answers = []
         for regressor in handle.regressors:
+            self._attach_network(regressor)
             with _lending(regressor):
                 answers.append(
                     np.asarray(
@@ -541,6 +568,119 @@ class TabICLQuantile(
                 "groups": [handle.provenance() for handle in self.handles_],
             },
         }
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickles the regressors without their network.
+
+        Upstream's own pickle of a regressor leaves the network out but
+        reloads it as soon as it is unpickled, from the absolute checkpoint
+        path and on the device it was fitted on, one network per regressor.
+        Each regressor is pickled as the state upstream's pickle holds (its
+        key/value cache, on the CPU, and its context included) and restored
+        by :meth:`__setstate__` without a network, which the first
+        prediction attaches, shared (:meth:`_attach_network`).
+        """
+        state = super().__getstate__()
+        if "handles_" in state:
+            state["handles_"] = [
+                dataclasses.replace(
+                    handle,
+                    regressors=tuple(
+                        _PickledRegressor.of(regressor)
+                        for regressor in handle.regressors
+                    ),
+                )
+                for handle in state["handles_"]
+            ]
+            state.pop("regressor_", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle on this machine, not the one it was made on.
+
+        ``device="auto"`` is resolved again, so a model fitted on a GPU
+        predicts on the CPU where there is none, and the checkpoint is found
+        again through the hub on next use rather than at the pickled path.
+        """
+        super().__setstate__(state)
+        if "device_" in state and str(self.device).strip().lower() == "auto":
+            self.device_ = _device.resolve_device(self.device)
+            self.mixed_precision_ = bool(
+                self.mixed_precision
+            ) and self.device_.startswith("cuda")
+            moved: dict[str, Any] = {
+                "device": self.device_,
+                "mixed_precision": self.mixed_precision_,
+            }
+            recipe = self.provenance_.get("tabicl")
+            if isinstance(recipe, dict):
+                moved["tabicl"] = {**recipe, "use_amp": self.mixed_precision_}
+            self.provenance_ = {**self.provenance_, **moved}
+        if "checkpoint_" in state:
+            self._relocate_checkpoint = True
+        if "handles_" in state:
+            self.handles_ = [
+                dataclasses.replace(
+                    handle,
+                    regressors=tuple(
+                        self._unpickled_regressor(pickled)
+                        for pickled in handle.regressors
+                    ),
+                )
+                for handle in self.handles_
+            ]
+            if (
+                len(self.handles_) == 1
+                and len(self.handles_[0].regressors) == 1
+            ):
+                self.regressor_ = self.handles_[0].regressors[0]
+
+    def _unpickled_regressor(self, pickled: _PickledRegressor) -> Any:
+        """A pickled regressor, restored as upstream restores one, but lazily.
+
+        Everything upstream's unpickling does but load the network: the
+        device is this model's, and the inference config and the key/value
+        cache follow it.
+
+        Args:
+            pickled: The regressor as :meth:`__getstate__` left it.
+
+        Returns:
+            The fitted ``TabICLRegressor``, without a network.
+        """
+        cls: Any = pickled.cls
+        regressor = cls.__new__(cls)
+        state = dict(pickled.state)
+        # Upstream's record of the versions it was pickled with; lazy's own
+        # is in provenance_.
+        state.pop("_persistence_metadata", None)
+        regressor.__dict__.update(state)
+        regressor.device = self.device_
+        regressor.use_amp = self.mixed_precision_
+        # Upstream's own steps of unpickling, in its order.
+        regressor._resolve_device()  # noqa: SLF001 - upstream's.
+        regressor._build_inference_config()  # noqa: SLF001 - upstream's.
+        regressor._move_cache_to_device()  # noqa: SLF001 - upstream's.
+        return regressor
+
+
+@dataclasses.dataclass(frozen=True)
+class _PickledRegressor:
+    """A fitted ``TabICLRegressor`` as a pickle holds it.
+
+    Attributes:
+        cls: The regressor's class.
+        state: What upstream's ``__getstate__`` returns: everything but the
+            network, the device and the checkpoint path.
+    """
+
+    cls: type[Any]
+    state: dict[str, Any]
+
+    @classmethod
+    def of(cls, regressor: Any) -> _PickledRegressor:
+        """The pickled form of a fitted regressor."""
+        return cls(type(regressor), regressor.__getstate__())
 
 
 @dataclasses.dataclass(frozen=True)
