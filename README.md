@@ -145,11 +145,12 @@ query row's answer never depends on which other query rows share its chunk
 ### Finishing the TabFM, LimiX-2 and Kumo Tabular installs
 
 PyPI cannot install everything these three backends need, so after their
-extras, one command completes them:
+extras, `lazy setup` completes them (Kumo Tabular's only when it is named,
+since its extra cannot be detected):
 
 ```bash
 pip install 'lazy-tfm[tabfm,limix,kumo]'
-lazy setup
+lazy setup tabfm limix kumo
 ```
 
 TabFM's PyPI release has no KV-cache API, so every chunk of query rows
@@ -161,7 +162,7 @@ taking 26× longer, and `kv_cache=False` accepts the slow path and silences
 it. LimiX's code is not on PyPI, so `lazy` downloads it at the commit it was
 validated on, into its cache, the first time a LimiX-2 model is fitted;
 `lazy setup` does it ahead of time. Kumo Tabular's package, NVIDIA's
-`structured-data-models`, is not on PyPI either, so `lazy setup` installs it
+`structured-data-models`, is not on PyPI either, so `lazy setup kumo` installs it
 from GitHub at the commit it was validated on. A checkout of this repository
 (`uv sync --extra all`) gets the TabFM build automatically. In your own uv
 project, add the build in the same command instead, so that `uv sync` keeps

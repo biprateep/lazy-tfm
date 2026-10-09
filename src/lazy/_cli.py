@@ -3,18 +3,21 @@
 """The ``lazy`` command: finishing the installs PyPI cannot do.
 
 ``lazy setup`` runs every registered backend's ``setup`` hook
-(:meth:`lazy.models.ContextEnsembleEstimator.setup`), which does what PyPI
-cannot for a backend whose extra is installed: install a repository build
-that PyPI refuses in an extra, say, or download source code that is not on
-PyPI, which a model would otherwise do on first use, so that running it
-warms the cache before going offline. A backend whose extra is not installed
-is skipped, and one already complete is left alone, so the command is safe to
-run again.
+(:meth:`lazy.models.ContextEnsembleEstimator.setup`), or those of the
+backends it names, which does what PyPI cannot for a backend whose extra is
+installed: install a repository build that PyPI refuses in an extra, say, or
+download source code that is not on PyPI, which a model would otherwise do on
+first use, so that running it warms the cache before going offline. A backend
+whose extra is not installed is skipped, and one already complete is left
+alone, so the command is safe to run again. Kumo Tabular's extra cannot be
+told from the packages it installs, so its package is installed only when
+the backend is named.
 
 Typical usage example:
 
   pip install 'lazy-tfm[all]'
   lazy setup
+  lazy setup kumo
 """
 
 from __future__ import annotations
@@ -54,11 +57,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="say what would be done, and change nothing",
     )
+    setup.add_argument(
+        "backends",
+        nargs="*",
+        metavar="BACKEND",
+        help=(
+            "set up only these backends, and install those whose extra "
+            "cannot be detected (kumo); all of them when none is named"
+        ),
+    )
     args = parser.parse_args(argv)
+    unknown = sorted(set(args.backends) - set(registry.ESTIMATORS))
+    if unknown:
+        parser.error(
+            f"unknown backends {unknown}; known: {sorted(registry.ESTIMATORS)}"
+        )
     complete = [
-        cls.setup(dry_run=args.dry_run)
-        for _, cls in sorted(registry.ESTIMATORS.items())
+        cls.setup(dry_run=args.dry_run, requested=name in args.backends)
+        for name, cls in sorted(registry.ESTIMATORS.items())
         if issubclass(cls, _ensemble.ContextEnsembleEstimator)
+        and (not args.backends or name in args.backends)
     ]
     return 0 if all(complete) else 1
 

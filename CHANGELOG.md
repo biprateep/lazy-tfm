@@ -13,15 +13,16 @@ change the API.
   `lazy.KumoQuantile`, in three sizes (`version="v1-large"`, the default,
   `"v1-medium"` and `"v1-small"`), with its weights under the OpenMDW License
   1.1, which permits commercial use. `pip install 'lazy-tfm[kumo]'` installs
-  its dependencies and `lazy setup` installs NVIDIA's `structured-data-models`
-  from GitHub, since it is not on PyPI. Its own recipe, its trimmed mean of
+  its dependencies and `lazy setup kumo` installs NVIDIA's
+  `structured-data-models` from GitHub, since it is not on PyPI. Its own recipe, its trimmed mean of
   the members' quantiles included, is pinned as `transforms="auto"`.
 - The documentation gains "Adding a backend", a contributor's page with the
   contract a new backend meets, a skeleton module and a checklist, and
   "Worked example: Kumo Tabular", which follows the Kumo backend through it.
 - Backends gain class hooks for what shared code used to do by name:
   `cpu_note`, `prefetch`, `clear_upstream_caches` and `setup`, which
-  `lazy setup` now runs for every registered backend.
+  `lazy setup` now runs for every registered backend, or for the backends it
+  names (`lazy setup kumo`).
 - Each pinned checkpoint describes its model (`display_name`, `parameters`,
   `size_bytes`, `license_name`, `gpu`, `cpu`), and each backend its method
   (`method_note`). The documentation's tables of the models are written from

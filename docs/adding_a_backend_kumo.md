@@ -123,10 +123,11 @@ upstream fails.
 The base class splits the ensemble into groups of members that one call of the
 model serves, and `_fit_group` fits one of them. We standardize the target in
 double precision first, because the network reads it in single precision,
-which would round away a narrow spread about a large offset. With the cache
-on, the group is fitted on the shared network, and the context upstream
-records is moved from the network into the group's handle, since other fits
-use the same network:
+which would round away a narrow spread about a large offset. The group keeps
+its prepared context, and with the cache on it is fitted on the shared
+network, under that network's lock (`_lending`), and the context upstream
+records there is moved into the group's handle, since other fits use the same
+network:
 
 ```python
 offset, scale = _quantile_head.target_scaling(y)
@@ -137,13 +138,18 @@ handle = _KumoGroup(
     offset=offset,
     scale=scale,
 )
-context = (X, ((y - offset) / scale).astype(np.float32))
-if not self.kv_cache:
-    handle.context = context
-    return handle
+handle.context = (X, ((y - offset) / scale).astype(np.float32))
+if self.kv_cache:
+    handle.cache = self._record(handle)
+return handle
+```
+
+where `_record` runs upstream's `fit`:
+
+```python
 network = self._network()
-x, target = self._tensors(*context)
-with self._autocast():
+x, target = self._tensors(*handle.context)
+with _lending(network), self._autocast():
     network.fit(
         x=x,
         y=target,
@@ -152,8 +158,7 @@ with self._autocast():
         estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
         generator=self._generator(handle.seed),
     )
-handle.cache, network._cache = network._cache, None
-return handle
+    return network._cache
 ```
 
 The group's seed, which the base class draws for its first member, seeds a
@@ -167,10 +172,14 @@ seeded the same way, so that the members are the same in every chunk.
 Because the members combine by a trimmed mean, the base class calls
 `_predict_members` rather than `_predict_group`, and the backend returns one
 distribution per member. The fitted context is lent to the shared network for
-the duration of one prediction (`_replaying`), and the quantiles are mapped
+the duration of one prediction (`_lending`), and the quantiles are mapped
 back to the units of the target:
 
 ```python
+if self.kv_cache and handle.cache is None:
+    handle.cache = self._record(handle)  # unpickled: record it again
+network = self._network()
+(queries,) = self._tensors(X)
 with self._autocast():
     if handle.cache is None:
         x, target = self._tensors(*handle.context)
@@ -184,7 +193,7 @@ with self._autocast():
             generator=self._generator(handle.seed),
         )
     else:
-        with _replaying(network, handle.cache):
+        with _lending(network, handle.cache):
             out = network.predict(queries)
 quantiles = out.numerical.double().cpu().numpy()
 levels = _quantile_head.quantile_levels(quantiles.shape[-1])
@@ -209,7 +218,13 @@ the pinned checkpoint file to it, as upstream does for its own download. The
 network is held in `lazy.models._weights` under a key of the backend, version,
 file, revision, device and precision, so every fit with the same weights runs
 on one network, and the estimator keeps its reference through
-`_memoized_network`, which pickling drops. The weights stay in single
+`_memoized_network`, which pickling drops. Since upstream keeps the context of
+its last fit on the network, every fit on the shared network and every
+prediction from a group's cache holds a lock on that network, so that two
+threads never see each other's context. A pickle also leaves out each group's
+cache, which can run to gigabytes and lives on the device it was fitted on,
+and keeps the group's context instead, from which the first prediction after
+unpickling records the same cache again on the device then in use. The weights stay in single
 precision, and `mixed_precision` only switches on upstream's float16 autocast,
 as NVIDIA runs the model.
 
@@ -217,9 +232,14 @@ as NVIDIA runs the model.
 
 The `kumo` extra in `pyproject.toml` lists the dependencies of
 `structured-data-models` (PyPI refuses a git URL in an extra), and joins the
-`all` extra. The `setup` hook skips the backend when the extra is missing,
-does nothing when `sdm` is already installed, and otherwise installs the
-pinned commit from GitHub through `lazy.models._install.install`. Since `sdm`
+`all` extra. Those dependencies (`torch`, `pyarrow` and the Hugging Face
+packages) are common enough that their presence does not show the extra was
+asked for, so the `setup` hook installs `structured-data-models` only when the
+backend is named, `lazy setup kumo`, through `lazy.models._install.install`.
+Without a name, it checks that an installed package is the pinned commit,
+which it reads from the package's install record. `_import_backend` likewise
+tells a user without `sdm` to run `lazy setup kumo` after the extra, and
+refuses a package called `sdm` that has no `KumoTabular`. Since `sdm`
 ships no type information and is absent from CI, it also joins the modules
 mypy may miss.
 

@@ -9,12 +9,19 @@ with upstream's own default path.
 """
 
 import os
+import pickle
 import re
+import sys
+import threading
+import time
+import types
 
+import fakes
 import numpy as np
 import pytest
 
 import lazy
+from lazy.models import _device
 from lazy.models import kumo
 
 needs_checkpoint = pytest.mark.skipif(
@@ -98,6 +105,113 @@ def test_every_version_is_a_size_with_a_pinned_checkpoint():
         checkpoint = lazy.get_checkpoint("kumo", version)
         assert checkpoint.filename == f"{size}/regressor.pt"
         assert kumo.KumoQuantile._pinned_recipe(version)["size"] == size
+
+
+@pytest.fixture
+def data():
+    rng = np.random.default_rng(8)
+    X = rng.normal(size=(80, 3))
+    return X[:60], X[:60, 0] + 0.1 * rng.normal(size=60), X[60:]
+
+
+def test_a_pickle_leaves_the_caches_out_and_records_them_again(
+    monkeypatch, data
+):
+    X, y, X_test = data
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=3).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    restored = pickle.loads(pickle.dumps(model))
+    assert all(handle.cache is None for handle in restored.handles_)
+    assert restored.regressor_ is restored.handles_[0]
+    assert all(handle.cache is not None for handle in model.handles_)
+    np.testing.assert_array_equal(
+        restored.predict_distribution(X_test).locs, expected
+    )
+    assert restored.handles_[0].cache is not None
+
+
+def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
+    X, y, _ = data
+    model = fakes.Backend("kumo", monkeypatch)().fit(X, y)
+    model.device, model.device_ = "auto", "cuda:7"  # as if fitted there
+    restored = pickle.loads(pickle.dumps(model))
+    assert restored.device_ == _device.resolve_device("auto")
+    assert restored.provenance_["device"] == restored.device_
+    assert restored.mixed_precision_ == restored.device_.startswith("cuda")
+
+
+def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):
+    """Two models on one network, predicting from two threads."""
+    X, y, X_test = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    models = [backend().fit(X, y), backend().fit(X, -y)]
+    expected = [m.predict_distribution(X_test).locs for m in models]
+    network = models[0]._network()
+    assert models[1]._network() is network
+    predict = type(network).predict
+    active = []
+
+    def slow_predict(self, x, **kwargs):
+        active.append(1)
+        assert len(active) == 1, "two contexts on the network at once"
+        time.sleep(0.01)
+        try:
+            return predict(self, x, **kwargs)
+        finally:
+            active.pop()
+
+    monkeypatch.setattr(type(network), "predict", slow_predict)
+    answers = [None, None]
+    errors = []
+
+    def run(i):
+        try:
+            answers[i] = models[i].predict_distribution(X_test).locs
+        except BaseException as error:  # noqa: BLE001 - reported below.
+            errors.append(error)
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in (0, 1)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    for answer, reference in zip(answers, expected, strict=True):
+        np.testing.assert_array_equal(answer, reference)
+
+
+def test_a_missing_sdm_names_lazy_setup(monkeypatch):
+    monkeypatch.setitem(sys.modules, "sdm", None)
+    with pytest.raises(ImportError, match="then lazy setup kumo"):
+        kumo.KumoQuantile()._import_backend()
+
+
+def test_another_package_called_sdm_is_refused(monkeypatch):
+    monkeypatch.setitem(sys.modules, "sdm", types.ModuleType("sdm"))
+    with pytest.raises(ImportError, match="has no models.KumoTabular"):
+        kumo.KumoQuantile()._import_backend()
+
+
+def test_the_trim_follows_the_versions_recipe(monkeypatch, data):
+    X, y, X_test = data
+    cls = fakes.install("kumo", monkeypatch)
+    pinned = cls._pinned_recipe
+
+    def recipe(version):
+        return {**pinned(version), "trim_fraction": 0.4}
+
+    monkeypatch.setattr(cls, "_pinned_recipe", staticmethod(recipe))
+    settings = {**fakes.settings("kumo"), "n_estimators": 5}
+    model = cls(**settings, device="cpu", progress=False).fit(X, y)
+    (handle,) = model.handles_
+    members = model._predict_members(handle, X_test)
+    np.testing.assert_array_equal(
+        model.predict_distribution(X_test).locs,
+        lazy.distributions.QuantileDistribution.trimmed_average(
+            members, 0.4
+        ).locs,
+    )
+    assert model.provenance_["kumo"]["trim_fraction"] == 0.4
 
 
 @needs_checkpoint

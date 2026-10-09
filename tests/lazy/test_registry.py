@@ -185,8 +185,8 @@ def test_shared_code_reaches_a_backend_through_its_hooks(monkeypatch):
             calls.append(("clear_upstream_caches",))
 
         @classmethod
-        def setup(cls, *, dry_run):
-            calls.append(("setup", dry_run))
+        def setup(cls, *, dry_run, requested=False):
+            calls.append(("setup", dry_run, requested))
             return False
 
     monkeypatch.setattr(registry, "ESTIMATORS", {"tabicl": Hooked})
@@ -199,5 +199,5 @@ def test_shared_code_reaches_a_backend_through_its_hooks(monkeypatch):
         ("prefetch", "v2", True),
         ("prefetch", "v2", False),
         ("clear_upstream_caches",),
-        ("setup", True),
+        ("setup", True, False),
     ]

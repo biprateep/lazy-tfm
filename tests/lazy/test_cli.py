@@ -43,6 +43,7 @@ def backends(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(_limix_source, "locate", locate)
+    monkeypatch.setattr(kumo, "_installed_build", lambda: None)
     return monkeypatch, runs, fetched
 
 
@@ -139,24 +140,51 @@ def test_a_failed_install_fails_the_command(backends):
     assert _cli.main(["setup"]) == 1
 
 
-def test_kumos_package_is_installed_from_github(backends, capsys):
-    """The kumo extra brings sdm's dependencies, and setup brings sdm."""
-    monkeypatch, runs, _ = backends
-    monkeypatch.setattr(
-        util, "find_spec", lambda name: None if name == "sdm" else object()
-    )
-    assert _cli.main(["setup"]) == 0
-    installs = [run[-1] for run in runs if run[1:3] == ["-m", "pip"]]
-    assert kumo.REPOSITORY_BUILD in installs
-    assert "Kumo Tabular: structured-data-models is installed." in (
-        capsys.readouterr().out
-    )
-
-
-def test_an_installed_sdm_is_left_alone(backends, capsys):
-    _, runs, _ = backends
+def test_kumos_package_is_installed_only_when_named(backends, capsys):
+    """Its extra holds only common packages, so it cannot be detected."""
+    _, runs, fetched = backends
     assert _cli.main(["setup"]) == 0
     assert all(kumo.REPOSITORY_BUILD not in run for run in runs)
-    assert "Kumo Tabular: structured-data-models is installed." in (
-        capsys.readouterr().out
+    assert "lazy setup kumo" in capsys.readouterr().out
+    runs.clear()
+    fetched.clear()
+    assert _cli.main(["setup", "kumo"]) == 0
+    install, check = runs  # Kumo's alone: TabFM and LimiX were not named.
+    assert install[-1] == kumo.REPOSITORY_BUILD
+    assert check[:2] == [sys.executable, "-c"]
+    assert not fetched
+
+
+def test_kumo_named_without_its_dependencies_fails(backends, capsys):
+    monkeypatch, runs, _ = backends
+    monkeypatch.setattr(
+        util, "find_spec", lambda name: None if name == "pyarrow" else object()
     )
+    assert _cli.main(["setup", "kumo"]) == 1
+    assert not runs
+    assert "pip install 'lazy-tfm[kumo]'" in capsys.readouterr().out
+
+
+def test_the_validated_build_is_left_alone(backends, capsys):
+    monkeypatch, runs, _ = backends
+    monkeypatch.setattr(
+        kumo, "_installed_build", lambda: ("0.2.0", kumo.REPOSITORY_COMMIT)
+    )
+    assert _cli.main(["setup", "kumo"]) == 0
+    assert not runs
+    assert "structured-data-models is installed" in capsys.readouterr().out
+
+
+def test_another_build_fails_until_it_is_replaced(backends, capsys):
+    monkeypatch, runs, _ = backends
+    monkeypatch.setattr(kumo, "_installed_build", lambda: ("0.3.0", None))
+    assert _cli.main(["setup"]) == 1
+    assert "not the validated" in capsys.readouterr().out
+    assert all(kumo.REPOSITORY_BUILD not in run for run in runs)
+    assert _cli.main(["setup", "kumo"]) == 0
+    assert runs[-2][-1] == kumo.REPOSITORY_BUILD
+
+
+def test_an_unknown_backend_is_an_error(backends):
+    with pytest.raises(SystemExit):
+        _cli.main(["setup", "kumoo"])

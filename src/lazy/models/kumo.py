@@ -36,14 +36,18 @@ which embeds them itself.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 import contextlib
 import dataclasses
 import functools
+from importlib import metadata
 from importlib import util
+import json
 import pathlib
+import threading
 import types
 from typing import Any, TypeAlias
+import weakref
 
 import numpy as np
 import numpy.typing as npt
@@ -51,7 +55,9 @@ import numpy.typing as npt
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _device
 from lazy.models import _ensemble
+from lazy.models import _hub
 from lazy.models import _install
 from lazy.models import _members
 from lazy.models import _progress
@@ -64,15 +70,20 @@ __all__ = [
     "AUTO_TRANSFORMS",
     "AUTO_TRIM_FRACTION",
     "REPOSITORY_BUILD",
+    "REPOSITORY_COMMIT",
     "SIZES",
     "KumoQuantile",
 ]
 
-#: The structured-data-models commit ``lazy setup`` installs. PyPI holds only
-#: a placeholder of the package, and refuses a git URL in an extra.
+#: The structured-data-models commit LAZY's recipe was read from and tested
+#: on.
+REPOSITORY_COMMIT = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298"
+
+#: What ``lazy setup kumo`` installs. PyPI holds only a placeholder of the
+#: package, and refuses a git URL in an extra.
 REPOSITORY_BUILD = (
     "structured-data-models @ git+https://github.com/NVIDIA/"
-    "structured-data-models@2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298"
+    f"structured-data-models@{REPOSITORY_COMMIT}"
 )
 
 #: The model size each version loads; the sizes share one recipe.
@@ -270,34 +281,69 @@ class KumoQuantile(
         self.verbose = verbose
 
     def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "sdm", needed_by=type(self).__name__, extra=self.extra
+        sdm = _ensemble.import_extra(
+            "sdm",
+            needed_by=type(self).__name__,
+            extra=self.extra,
+            # The extra holds only the package's dependencies.
+            then="lazy setup kumo",
         )
+        if not hasattr(getattr(sdm, "models", None), "KumoTabular"):
+            raise ImportError(
+                f"{type(self).__name__} needs NVIDIA's structured-data-models, "
+                f"but the 'sdm' installed at {getattr(sdm, '__file__', '?')} "
+                "has no models.KumoTabular; `lazy setup kumo` installs it"
+            )
+        return sdm
 
     @classmethod
-    def setup(cls, *, dry_run: bool) -> bool:
-        """Installs structured-data-models from GitHub, if need be.
+    def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
+        """Installs structured-data-models from GitHub, when asked to.
 
-        The ``kumo`` extra brings the package's dependencies; the package
-        itself is on GitHub alone, so this installs :data:`REPOSITORY_BUILD`
-        (:func:`lazy.models._install.install`, with pip or uv). In a uv
-        project it prints the ``uv add`` that keeps it instead.
+        The ``kumo`` extra brings the package's dependencies, which are
+        common enough that they do not tell whether the extra was asked for,
+        so the package itself is installed only when the backend is named,
+        ``lazy setup kumo``. Then :data:`REPOSITORY_BUILD` is installed
+        (:func:`lazy.models._install.install`, with pip or uv), or, in a uv
+        project, the ``uv add`` that keeps it is printed instead. Without a
+        name, an installed package is checked against
+        :data:`REPOSITORY_COMMIT`.
 
         Args:
             dry_run: Say what would be installed, and install nothing.
+            requested: Whether the backend was named on the command line.
 
         Returns:
-            Whether the package is installed, or would be after a dry run.
+            Whether the validated build is installed, or would be after a
+            dry run; True when it is absent and was not asked for.
         """
-        if util.find_spec("pyarrow") is None:
-            print(
-                "Kumo Tabular: not installed, skipped ('lazy-tfm[kumo]' "
-                "adds it)."
-            )
-            return True
-        if util.find_spec("sdm") is not None:
+        installed = _installed_build()
+        if installed is not None and installed[1] == REPOSITORY_COMMIT:
             print("Kumo Tabular: structured-data-models is installed.")
             return True
+        if installed is None and not requested:
+            print(
+                "Kumo Tabular: not installed, skipped (pip install "
+                "'lazy-tfm[kumo]', then lazy setup kumo, adds it)."
+            )
+            return True
+        if installed is not None:
+            version, commit = installed
+            print(
+                f"Kumo Tabular: structured-data-models {version} is "
+                f"installed (commit {commit or 'unknown'}), not the "
+                f"validated {REPOSITORY_COMMIT[:9]}."
+            )
+            if not requested:
+                print("  lazy setup kumo replaces it.")
+                return False
+        if util.find_spec("pyarrow") is None:
+            # The install leaves dependencies to the extra.
+            print(
+                "Kumo Tabular: install its dependencies first: pip install "
+                "'lazy-tfm[kumo]'."
+            )
+            return False
         return _install.install(
             "Kumo Tabular",
             REPOSITORY_BUILD,
@@ -324,6 +370,9 @@ class KumoQuantile(
     def _auto_outlier_threshold(self) -> float:
         return AUTO_OUTLIER_THRESHOLD
 
+    def _member_trim_fraction(self) -> float:
+        return float(self._pinned_recipe(self.version)["trim_fraction"])
+
     def _fit_group(
         self,
         X: _typing.FloatArray,
@@ -342,13 +391,32 @@ class KumoQuantile(
             offset=offset,
             scale=scale,
         )
-        context = (X, ((y - offset) / scale).astype(np.float32))
-        if not self.kv_cache:
-            handle.context = context
-            return handle
+        # The context is kept under either cache setting, so that a pickle,
+        # which leaves the cache out, can record it again.
+        handle.context = (X, ((y - offset) / scale).astype(np.float32))
+        if self.kv_cache:
+            handle.cache = self._record(handle)
+        return handle
+
+    def _record(self, handle: _KumoGroup) -> Any:
+        """Fits upstream on a group's context; returns its recorded cache.
+
+        Args:
+            handle: The group, with its context.
+
+        Returns:
+            Upstream's fitted context: its fitted recipe and the members'
+            keys and values. The shared network is left holding none.
+
+        Raises:
+            RuntimeError: If the group kept no context, which _fit_group
+                always sets.
+        """
+        if handle.context is None:
+            raise RuntimeError("the group kept no context to record from")
         network = self._network()
-        x, target = self._tensors(*context)
-        with self._autocast():
+        x, target = self._tensors(*handle.context)
+        with _lending(network), self._autocast():
             network.fit(
                 x=x,
                 y=target,
@@ -357,18 +425,20 @@ class KumoQuantile(
                 estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
                 generator=self._generator(handle.seed),
             )
-        # The cache is the group's, not the shared network's.
-        handle.cache, network._cache = network._cache, None  # noqa: SLF001 - upstream's cache.
-        return handle
+            return network._cache  # noqa: SLF001 - upstream's cache.
 
     def _predict_members(
         self, handle: _KumoGroup, X: _typing.FloatArray
     ) -> list[distributions.QuantileDistribution]:
+        if self.kv_cache and handle.cache is None:
+            # Unpickled: the cache was left out, and the same context and
+            # seed record the same one again.
+            handle.cache = self._record(handle)
         network = self._network()
         (queries,) = self._tensors(X)
         with self._autocast():
             if handle.cache is None:
-                assert handle.context is not None  # Kept when not cached.
+                assert handle.context is not None  # Set by _fit_group.
                 x, target = self._tensors(*handle.context)
                 out = network(
                     x_context=x,
@@ -380,7 +450,7 @@ class KumoQuantile(
                     generator=self._generator(handle.seed),
                 )
             else:
-                with _replaying(network, handle.cache):
+                with _lending(network, handle.cache):
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
         quantiles = out.numerical.double().cpu().numpy()
@@ -397,7 +467,7 @@ class KumoQuantile(
         self, handle: _KumoGroup, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
         return distributions.QuantileDistribution.trimmed_average(
-            self._predict_members(handle, X), self.member_trim_fraction
+            self._predict_members(handle, X), self._member_trim_fraction()
         )
 
     def _upstream_recipe(self, group: _members.MemberGroup) -> Any:
@@ -423,6 +493,9 @@ class KumoQuantile(
         duration of a prediction. The weights are float32 whatever
         ``mixed_precision`` says, which only autocasts.
         """
+        if self.__dict__.pop("_relocate_checkpoint", False):
+            spec = _hub.get_checkpoint(self.backend, self.version)
+            self.checkpoint_ = spec.download()
         return self._memoized_network(
             (self.version, self.device_), self._shared_network
         )
@@ -488,13 +561,51 @@ class KumoQuantile(
                     if self.mixed_precision_
                     else None
                 ),
-                "trim_fraction": self.member_trim_fraction,
+                "trim_fraction": self._member_trim_fraction(),
                 "groups": [
                     {"seed": int(handle.seed), "members": handle.n_members}
                     for handle in self.handles_
                 ],
             },
         }
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickles without the members' keys and values, which re-record.
+
+        The cache can run to gigabytes and lives on the device it was fitted
+        on, so a pickle keeps each group's context instead, and the first
+        prediction records the cache again, on the device then in use.
+        """
+        state = super().__getstate__()
+        if "handles_" in state:
+            state["handles_"] = [
+                dataclasses.replace(handle, cache=None)
+                for handle in state["handles_"]
+            ]
+            if "regressor_" in state:
+                state["regressor_"] = state["handles_"][0]
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle on this machine, not the one it was made on.
+
+        ``device="auto"`` is resolved again, so a model fitted on a GPU
+        predicts on the CPU where there is none, and the checkpoint is found
+        again through the hub on next use rather than at the pickled path.
+        """
+        super().__setstate__(state)
+        if "device_" in state and str(self.device).strip().lower() == "auto":
+            self.device_ = _device.resolve_device(self.device)
+            self.mixed_precision_ = bool(
+                self.mixed_precision
+            ) and self.device_.startswith("cuda")
+            moved: dict[str, Any] = {
+                "device": self.device_,
+                "mixed_precision": self.mixed_precision_,
+            }
+            self.provenance_ = {**self.provenance_, **moved}
+        if "checkpoint_" in state:
+            self._relocate_checkpoint = True
 
 
 @dataclasses.dataclass
@@ -522,25 +633,38 @@ class _KumoGroup:
     context: tuple[_typing.FloatArray, _Array] | None = None
 
 
+# Upstream keeps the fitted context of its last fit on the network, and the
+# network is shared, so whatever fits on it or predicts from a fitted context
+# holds that network's lock.
+_LOCKS: weakref.WeakKeyDictionary[Any, threading.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+_LOCKS_GUARD = threading.Lock()
+
+
 @contextlib.contextmanager
-def _replaying(network: Any, cache: Any) -> Any:
-    """Hands a group's fitted context to the shared network, and takes it back.
+def _lending(network: Any, cache: Any = None) -> Iterator[None]:
+    """Holds the shared network for one fit or one prediction.
 
     Upstream keeps the context of its last ``fit`` on the network itself; on
-    a network that other fits share, it is lent for one prediction.
+    a network that other fits share, it is lent for one call, under the
+    network's lock, so that two threads never see each other's context.
 
     Args:
         network: The shared ``sdm.models.KumoTabular``.
-        cache: The group's fitted context.
+        cache: A group's fitted context to lend, or None for a fit.
 
     Yields:
         Nothing; the network holds no context on exit.
     """
-    network._cache = cache  # noqa: SLF001 - upstream's cache.
-    try:
-        yield
-    finally:
-        network._cache = None  # noqa: SLF001 - upstream's cache.
+    with _LOCKS_GUARD:
+        lock = _LOCKS.setdefault(network, threading.Lock())
+    with lock:
+        network._cache = cache  # noqa: SLF001 - upstream's cache.
+        try:
+            yield
+        finally:
+            network._cache = None  # noqa: SLF001 - upstream's cache.
 
 
 def _recipe(
@@ -667,6 +791,21 @@ def _cycle(tokens: tuple[str, ...]) -> tuple[str, ...]:
             f"cannot run {tuple(tokens)}"
         )
     return distinct
+
+
+def _installed_build() -> tuple[str, str | None] | None:
+    """The installed structured-data-models: its version and git commit.
+
+    Returns:
+        A tuple ``(version, commit)``, where the commit is None when the
+        package was not installed from a git URL; None when it is absent.
+    """
+    try:
+        distribution = metadata.distribution("structured-data-models")
+    except metadata.PackageNotFoundError:
+        return None
+    direct = json.loads(distribution.read_text("direct_url.json") or "{}")
+    return distribution.version, direct.get("vcs_info", {}).get("commit_id")
 
 
 def _load_network(

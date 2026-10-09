@@ -39,10 +39,12 @@ explicitly on a machine without CUDA will raise an error.
 ## Specific backend installation notes
 
 PyPI cannot install everything three of the backends need. After installing
-their extras, one command completes them, and is safe to run again:
+their extras, `lazy setup` completes them, and is safe to run again. Kumo
+Tabular is set up only when it is named:
 
 ```console
 lazy setup
+lazy setup kumo
 ```
 
 - **TabFM.** The extra installs TabFM's PyPI release, which has no KV-cache
@@ -69,8 +71,10 @@ lazy setup
   `triton`.
 - **Kumo Tabular.** NVIDIA's `structured-data-models` package, which holds
   the model, is not on PyPI, so the extra installs only its dependencies and
-  `lazy setup` installs the package from GitHub, at the validated commit. In
-  a uv project, `lazy setup` prints the `uv add` command to run instead.
+  `lazy setup kumo` installs the package from GitHub, at the validated
+  commit. The backend has to be named, because its dependencies are common
+  enough that they do not show the extra was asked for. In a uv project,
+  `lazy setup kumo` prints the `uv add` command to run instead.
 
 ## Installation from source
 
@@ -82,6 +86,6 @@ uv sync --extra all
 
 This installs the package in editable mode with every dependency pinned by
 `uv.lock`, the repository build of TabFM included. Kumo Tabular's package is
-not in the lockfile, so run `lazy setup` (which prints the `uv add` command in
-a uv project) to add it. See {doc}`contributing`
+not in the lockfile, so run `lazy setup kumo` (which prints the `uv add`
+command in a uv project) to add it. See {doc}`contributing`
 for the development workflow.

@@ -336,6 +336,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """
         return
 
+    def _member_trim_fraction(self) -> float:
+        """The fraction of members a trimmed average drops from each tail.
+
+        Read at every prediction under
+        ``member_combination="quantile_trimmed_average"`` and recorded in
+        ``provenance_``. The default is the class's ``member_trim_fraction``;
+        a backend whose recipe sets it per version reads it from there.
+        """
+        return self.member_trim_fraction
+
     def _check_backend_params(self) -> None:
         """Validates the backend's own parameters; raises ValueError.
 
@@ -527,23 +537,27 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return
 
     @classmethod
-    def setup(cls, *, dry_run: bool) -> bool:
+    def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
         """Finishes installing the model where its pip extra cannot.
 
-        ``lazy setup`` calls it on every registered backend. It installs or
-        fetches what PyPI cannot provide, prints a line saying what it did,
-        and does nothing when the extra is not installed or the install is
-        already complete, so that it is safe to run again. The default has
-        nothing to do and prints nothing.
+        ``lazy setup`` calls it on every registered backend, or on those
+        named on its command line. It installs or fetches what PyPI cannot
+        provide, prints a line saying what it did, and does nothing when the
+        extra is not installed or the install is already complete, so that
+        it is safe to run again. A backend whose extra holds nothing that
+        tells it apart (Kumo Tabular's lists only common packages) installs
+        only when ``requested``. The default has nothing to do and prints
+        nothing.
 
         Args:
             dry_run: Say what would be done, and change nothing.
+            requested: Whether the backend was named on the command line.
 
         Returns:
             Whether the model is complete, or would be after a dry run;
             True for a model whose extra is not installed.
         """
-        del dry_run  # Unused: nothing to do.
+        del dry_run, requested  # Unused: nothing to do.
         return True
 
     # -- fitting -----------------------------------------------------------
@@ -898,7 +912,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                     raise TypeError("a trimmed average needs quantiles")
                 members.append(answer)
         return distributions.QuantileDistribution.trimmed_average(
-            members, self.member_trim_fraction
+            members, self._member_trim_fraction()
         )
 
     def _check_group_output(
@@ -1050,7 +1064,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
 
 def import_extra(
-    module: str, *, needed_by: str, extra: str
+    module: str, *, needed_by: str, extra: str, then: str = ""
 ) -> types.ModuleType:
     """Imports a backend's optional package, naming the extra if it is missing.
 
@@ -1061,6 +1075,8 @@ def import_extra(
         module: The package to import, such as ``"tabicl"``.
         needed_by: The class that needs it, for the message.
         extra: The pip extra of lazy-tfm that installs it.
+        then: What to run after the extra, for a package the extra cannot
+            install itself (``"lazy setup kumo"``); empty for nothing.
 
     Returns:
         The imported package.
@@ -1075,9 +1091,10 @@ def import_extra(
     except ImportError as error:
         if (error.name or "").partition(".")[0] != module.partition(".")[0]:
             raise
+        after = f", then {then}" if then else ""
         raise ImportError(
             f"{needed_by} needs the {module} backend: "
-            f"pip install 'lazy-tfm[{extra}]'"
+            f"pip install 'lazy-tfm[{extra}]'{after}"
         ) from error
     return sys.modules[module]
 

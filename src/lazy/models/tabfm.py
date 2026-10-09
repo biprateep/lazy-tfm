@@ -600,7 +600,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         )
 
     @classmethod
-    def setup(cls, *, dry_run: bool) -> bool:
+    def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
         """Installs TabFM's repository build over the release, if need be.
 
         The extra brings the PyPI release, which has no KV-cache API, and
@@ -611,11 +611,13 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         Args:
             dry_run: Say what would be installed, and install nothing.
+            requested: Unused: the installed extra decides.
 
         Returns:
             Whether the repository build is installed, or would be after a
             dry run.
         """
+        del requested  # Unused: the installed extra decides.
         if util.find_spec("tabfm") is None:
             print("TabFM: not installed, skipped ('lazy-tfm[tabfm]' adds it).")
             return True

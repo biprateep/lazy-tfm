@@ -283,7 +283,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         _limix_source.locate(download=download)
 
     @classmethod
-    def setup(cls, *, dry_run: bool) -> bool:
+    def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
         """Downloads LimiX's source into the cache, if nothing else has it.
 
         The source is not on PyPI, so this downloads it
@@ -293,10 +293,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
 
         Args:
             dry_run: Say what would be downloaded, and download nothing.
+            requested: Unused: the installed extra decides.
 
         Returns:
             Whether the source is there, or would be after a dry run.
         """
+        del requested  # Unused: the installed extra decides.
         if any(
             util.find_spec(name) is None for name in ("einops", "kditransform")
         ):

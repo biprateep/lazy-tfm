@@ -93,10 +93,12 @@ everything in the cache (LimiX downloads its source, which is not on PyPI).
 `clear_upstream_caches` empties the caches the upstream package keeps of its
 own, and {func}`~lazy.models.clear_model_cache` calls it (TabPFN keeps the last
 checkpoint it read in memory). `setup` completes an install that the pip extra
-cannot, and `lazy setup` runs it for every backend: it prints a line saying
-what it did, skips a backend whose extra is not installed, and returns whether
-the backend is complete (TabFM installs its repository build, and LimiX
-downloads its source).
+cannot, and `lazy setup` runs it for every backend, or for those named on its
+command line: it prints a line saying what it did, skips a backend whose extra
+is not installed, and returns whether the backend is complete (TabFM installs
+its repository build, and LimiX downloads its source). A backend whose extra
+lists only packages common enough not to show it was asked for (Kumo Tabular's)
+acts only when it is named, which the hook is told by `requested=True`.
 
 ## A skeleton
 
