@@ -42,11 +42,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
 import os
 import pathlib
 import sys
+import threading
 import types
 from typing import Any
 
@@ -602,24 +604,23 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         the checkpoint again. Upstream's networks hold no state between
         calls (the key/value cache lives in the inference engine, and the
         architectures ignore ``cache_trainset_representation``), so the
-        regressors share one: upstream's loader is wrapped, for the duration
-        of a fit, to hand back the network loaded first for the same
-        arguments, in this fit or, through :mod:`lazy.models._weights`, an
-        earlier one. Upstream moves the network to the device, and casts it
-        to a forced precision, in place, so both are part of the key. The
-        bar distribution and the configs, which a fit may move and rescale,
-        are copied.
+        regressors share one: while the fit runs, upstream's loader hands
+        this thread the network loaded first for the same arguments, in
+        this fit or, through :mod:`lazy.models._weights`, an earlier one
+        (see :func:`_redirected_loader`). Upstream moves the network to the
+        device, and casts it to a forced precision, in place, so both are
+        part of the key. The bar distribution and the configs, which a fit
+        may move and rescale, are copied.
 
         Args:
             tabpfn: The imported ``tabpfn`` package.
 
         Yields:
-            Nothing; the loader is restored on exit.
+            Nothing; the loader is restored once no fit needs it.
         """
-        base = tabpfn.base
-        load = base.initialize_tabpfn_model
         networks = self.__dict__.setdefault("_networks", {})
         precision = self._inference_precision()
+        load: Callable[..., Any]
 
         def shared(**kwargs: Any) -> Any:
             local = tuple(sorted((k, str(v)) for k, v in kwargs.items()))
@@ -628,11 +629,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             models, configs, bardist, config = networks[local]
             return list(models), *copy.deepcopy((configs, bardist, config))
 
-        base.initialize_tabpfn_model = shared
-        try:
+        with _redirected_loader(tabpfn.base, shared) as load:
             yield
-        finally:
-            base.initialize_tabpfn_model = load
 
     def _load_network(
         self,
@@ -746,6 +744,107 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+@dataclasses.dataclass
+class _Redirection:
+    """Upstream's loader, and the stand-in installed over it.
+
+    Attributes:
+        upstream: What ``initialize_tabpfn_model`` was before any fit.
+        dispatch: The stand-in, which routes each call to its thread's fit.
+        fits: How many fits, in any thread, are using the stand-in.
+    """
+
+    upstream: Callable[..., Any]
+    dispatch: Callable[..., Any]
+    fits: int = 0
+
+
+# Upstream's loader is module state, shared by every thread, so it is
+# replaced once, by a stand-in that routes each call to the fit running in
+# the calling thread (or to upstream's loader outside one), and put back
+# when the last fit is done. _REDIRECTIONS is keyed by id() of the module
+# holding the loader; _ROUTES holds each thread's fits, per module, innermost
+# last. Every access to _REDIRECTIONS holds _REDIRECTION_LOCK.
+_REDIRECTIONS: dict[int, _Redirection] = {}
+_REDIRECTION_LOCK = threading.Lock()
+_ROUTES = threading.local()
+
+
+@contextlib.contextmanager
+def _redirected_loader(
+    base: Any, shared: Callable[..., Any]
+) -> Iterator[Callable[..., Any]]:
+    """Sends this thread's calls to upstream's loader to ``shared``.
+
+    Fits in other threads keep their own routes, and code outside any fit
+    reaches upstream's loader, so overlapping fits in several threads
+    neither see each other's networks nor leave the stand-in installed.
+    Upstream's loader is taken once, by the first of a run of overlapping
+    fits, and restored by the last; a loader someone else installed in
+    between is left alone.
+
+    Args:
+        base: The module holding ``initialize_tabpfn_model``
+            (``tabpfn.base``).
+        shared: What this thread's calls are answered by.
+
+    Yields:
+        Upstream's own loader, for ``shared`` to load with.
+    """
+    with _REDIRECTION_LOCK:
+        redirection = _REDIRECTIONS.get(id(base))
+        if redirection is None:
+            upstream = base.initialize_tabpfn_model
+            redirection = _Redirection(
+                upstream, _dispatcher(id(base), upstream)
+            )
+            _REDIRECTIONS[id(base)] = redirection
+            base.initialize_tabpfn_model = redirection.dispatch
+        redirection.fits += 1
+    routes = _thread_routes().setdefault(id(base), [])
+    routes.append(shared)
+    try:
+        yield redirection.upstream
+    finally:
+        routes.pop()
+        with _REDIRECTION_LOCK:
+            redirection.fits -= 1
+            if redirection.fits == 0:
+                del _REDIRECTIONS[id(base)]
+                if base.initialize_tabpfn_model is redirection.dispatch:
+                    base.initialize_tabpfn_model = redirection.upstream
+
+
+def _thread_routes() -> dict[int, list[Callable[..., Any]]]:
+    """The calling thread's running fits, per loader module."""
+    routes = getattr(_ROUTES, "fits", None)
+    if routes is None:
+        routes = _ROUTES.fits = {}
+    return routes
+
+
+def _dispatcher(
+    module_id: int, upstream: Callable[..., Any]
+) -> Callable[..., Any]:
+    """The stand-in for upstream's loader; see :func:`_redirected_loader`.
+
+    Args:
+        module_id: ``id()`` of the module the stand-in is installed in.
+        upstream: Upstream's loader, for calls from outside a fit.
+
+    Returns:
+        A loader taking upstream's keyword arguments.
+    """
+
+    def dispatch(**kwargs: Any) -> Any:
+        routes = _thread_routes().get(module_id)
+        if routes:
+            return routes[-1](**kwargs)
+        return upstream(**kwargs)
+
+    return dispatch
 
 
 def _with_bagging_remedy(

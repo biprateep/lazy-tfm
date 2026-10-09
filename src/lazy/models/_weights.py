@@ -52,8 +52,14 @@ _OFF = frozenset({"0", "false", "no", "off"})
 _T = TypeVar("_T")
 
 # The process-wide store. It is mutable global state by design: sharing
-# across estimators is its purpose. Every access holds _LOCK.
+# across estimators is its purpose. Every access holds _LOCK, which is never
+# held while a network loads: a load holds only its own key's lock in
+# _LOADING, so different networks load at once, and clearing or listing the
+# cache never waits for one. _GENERATION counts the clears, so that a load
+# a clear overtook is handed back but not filed.
 _NETWORKS: dict[tuple[Hashable, ...], Any] = {}
+_LOADING: dict[tuple[Hashable, ...], threading.RLock] = {}
+_GENERATION = [0]
 _LOCK = threading.Lock()
 # The switch: None defers to $LAZY_MODEL_CACHE, and set_model_cache
 # overrides it.
@@ -102,6 +108,7 @@ def clear_model_cache() -> int:
     with _LOCK:
         dropped = len(_NETWORKS)
         _NETWORKS.clear()
+        _GENERATION[0] += 1
     _clear_upstream_caches()
     if dropped:
         gc.collect()
@@ -162,8 +169,11 @@ def key(
 def network(cache_key: tuple[Hashable, ...], load: Callable[[], _T]) -> _T:
     """Returns the network filed under ``cache_key``, loading it if need be.
 
-    The lock is held while loading, so two threads asking for the same
-    network load it once.
+    Two threads asking for the same network load it once: the second waits
+    for the first. Only that key waits, so other networks load meanwhile,
+    and :func:`clear_model_cache` and :func:`cached_keys` never wait for a
+    load. A load still running when the cache is cleared is returned to
+    its caller but not kept.
 
     Args:
         cache_key: What :func:`key` returned for the network.
@@ -176,9 +186,46 @@ def network(cache_key: tuple[Hashable, ...], load: Callable[[], _T]) -> _T:
     if not model_cache_enabled():
         return load()
     with _LOCK:
-        if cache_key not in _NETWORKS:
-            _NETWORKS[cache_key] = load()
-        return _NETWORKS[cache_key]
+        if cache_key in _NETWORKS:
+            return _NETWORKS[cache_key]
+        loading = _LOADING.setdefault(cache_key, threading.RLock())
+    with loading:
+        with _LOCK:
+            if cache_key in _NETWORKS:
+                return _NETWORKS[cache_key]
+            generation = _GENERATION[0]
+        try:
+            loaded = load()
+        except BaseException:
+            _done_loading(cache_key, loading)
+            raise
+        _done_loading(cache_key, loading, loaded, generation)
+        return loaded
+
+
+def _done_loading(
+    cache_key: tuple[Hashable, ...],
+    loading: threading.RLock,
+    loaded: Any = None,
+    generation: int | None = None,
+) -> None:
+    """Files a loaded network and retires the lock its load held.
+
+    Both happen at once, so a caller arriving in between neither misses the
+    network nor starts a second load.
+
+    Args:
+        cache_key: The network's key.
+        loading: The key's lock in ``_LOADING``.
+        loaded: The network, when the load succeeded.
+        generation: ``_GENERATION`` when the load began, or ``None`` when it
+            failed; a clear since then leaves the network unfiled.
+    """
+    with _LOCK:
+        if _LOADING.get(cache_key) is loading:
+            del _LOADING[cache_key]
+        if generation is not None and generation == _GENERATION[0]:
+            _NETWORKS[cache_key] = loaded
 
 
 def cached_keys() -> list[tuple[Hashable, ...]]:

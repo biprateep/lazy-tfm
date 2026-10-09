@@ -10,8 +10,11 @@ marked ``needs_checkpoint`` load one, on the CPU, and run only with
 import dataclasses
 import json
 import os
+import threading
 import warnings
 
+import fakes
+from fakes import tabpfn as fake_tabpfn
 import numpy as np
 import pytest
 
@@ -214,6 +217,48 @@ def test_the_pinned_recipes_are_what_the_checkpoints_store(version):
     stored = _upstream_fields(regressor.get_inference_config())
     recipe = tabpfn._AUTO_RECIPES[version]
     assert {k: stored[k] for k in recipe} == recipe
+
+
+def test_concurrent_fits_share_the_network_and_restore_the_loader(
+    monkeypatch,
+):
+    """Four fits in four threads, all inside upstream's fit at once."""
+    from tabpfn import base  # noqa: PLC0415 - optional extra.
+
+    recorder = fakes.Recorder()
+    cls = fakes.install("tabpfn", monkeypatch, recorder)
+    upstream = base.initialize_tabpfn_model
+    together = threading.Barrier(4, timeout=10)
+    fit = fake_tabpfn.Regressor.fit
+
+    def fit_together(self, X, y):
+        together.wait()
+        return fit(self, X, y)
+
+    monkeypatch.setattr(fake_tabpfn.Regressor, "fit", fit_together)
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    y = X[:, 0]
+    fitted, errors = [], []
+
+    def run():
+        try:
+            fitted.append(
+                cls(n_estimators=1, device="cpu", progress=False).fit(X, y)
+            )
+        except Exception as error:  # noqa: BLE001 - reported below.
+            errors.append(error)
+
+    threads = [threading.Thread(target=run, daemon=True) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(20)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert len(fitted) == 4
+    assert len(recorder.loads) == 1
+    assert base.initialize_tabpfn_model is upstream
 
 
 def _fit(X, y, **params):

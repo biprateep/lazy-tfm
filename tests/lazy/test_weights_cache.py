@@ -166,6 +166,70 @@ def test_threads_asking_at_once_load_once():
     assert all(result is results[0] for result in results)
 
 
+def _run(*targets, timeout=10.0):
+    """Runs each target in a thread; returns whether all of them finished."""
+    errors = []
+
+    def wrap(target):
+        try:
+            target()
+        except Exception as error:  # noqa: BLE001 - reported below.
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=wrap, args=(target,), daemon=True)
+        for target in targets
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout)
+    if errors:
+        raise errors[0]
+    return not any(thread.is_alive() for thread in threads)
+
+
+def test_a_slow_load_holds_up_no_other_network():
+    """Other keys load, and the cache is listed and cleared, meanwhile."""
+    loading, release = threading.Event(), threading.Event()
+
+    def slow():
+        loading.set()
+        assert release.wait(10)
+        return _Network()
+
+    slow_key = _weights.key("tabfm", "v1.0", "/big", "cpu", "float32")
+    fast_key = _weights.key("tabicl", "v2", "/small", "cpu", "float32")
+    seen = {}
+
+    def others():
+        assert loading.wait(10)
+        seen["fast"] = _weights.network(fast_key, _Loader())
+        seen["keys"] = _weights.cached_keys()
+        seen["dropped"] = _weights.clear_model_cache()
+        release.set()
+
+    assert _run(lambda: _weights.network(slow_key, slow), others)
+    assert seen["keys"] == [fast_key]
+    assert seen["dropped"] == 1
+    # The clear overtook the slow load, so it was handed back, not filed.
+    assert not _weights.cached_keys()
+
+
+def _broken():
+    raise OSError("disk")
+
+
+def test_a_failed_load_lets_the_next_caller_load():
+    key = _weights.key("tabicl", "v2", "/w.ckpt", "cpu", "float32")
+    with pytest.raises(OSError, match="disk"):
+        _weights.network(key, _broken)
+    load = _Loader()
+    assert _weights.network(key, load) is _weights.network(key, load)
+    assert len(load.calls) == 1
+    assert not _weights._LOADING
+
+
 # -- each backend, with its loader stubbed -------------------------------------
 
 
@@ -242,6 +306,67 @@ def test_tabpfn_hands_out_copies_of_what_a_fit_may_change():
     for left, right in zip(first[1:], second[1:], strict=True):
         assert left == right
         assert left is not right
+
+
+def _overlapping_tabpfn_fits(first_out):
+    """Two TabPFN fits in two threads, the second starting inside the first.
+
+    Args:
+        first_out: Whether the first fit to start is the first to finish.
+
+    Returns:
+        The stand-in upstream module, its loader, the loader's calls and
+        whether both fits finished.
+    """
+    load, calls = _tabpfn_loader()
+    upstream = types.SimpleNamespace(
+        base=types.SimpleNamespace(initialize_tabpfn_model=load)
+    )
+    a_in, b_in, a_out, b_out = (threading.Event() for _ in range(4))
+    networks = []
+
+    def fit(est, entered, wait_for, leave, then):
+        with est._shared_network(upstream):
+            entered.set()
+            assert wait_for.wait(10)
+            (models, *_) = upstream.base.initialize_tabpfn_model(
+                model_path=est.checkpoint_, which="regressor"
+            )
+            networks.append(models[0])
+            if leave is not None:
+                assert leave.wait(10)
+        then.set()
+
+    finished = _run(
+        lambda: fit(_tabpfn(), a_in, b_in, None if first_out else b_out, a_out),
+        lambda: fit(_tabpfn(), b_in, a_in, a_out if first_out else None, b_out),
+    )
+    assert networks[0] is networks[1]
+    return upstream, load, calls, finished
+
+
+@pytest.mark.parametrize("first_out", [True, False])
+def test_overlapping_tabpfn_fits_in_threads_finish(first_out):
+    """Each thread reaches upstream's loader, never the other fit's."""
+    upstream, load, calls, finished = _overlapping_tabpfn_fits(first_out)
+    assert finished
+    assert len(calls) == 1
+    assert upstream.base.initialize_tabpfn_model is load
+    assert not tabpfn._REDIRECTIONS
+
+
+def test_outside_a_fit_upstreams_loader_answers():
+    """Another thread's call, while a fit runs, is upstream's own."""
+    load, calls = _tabpfn_loader()
+    upstream = types.SimpleNamespace(
+        base=types.SimpleNamespace(initialize_tabpfn_model=load)
+    )
+    with _tabpfn()._shared_network(upstream):
+        assert _run(
+            lambda: upstream.base.initialize_tabpfn_model(model_path="/w")
+        )
+    assert calls == [{"model_path": "/w"}]
+    assert not _weights.cached_keys()
 
 
 class _TabICLRegressor:
