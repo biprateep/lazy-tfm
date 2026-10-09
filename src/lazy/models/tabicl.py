@@ -188,9 +188,11 @@ class TabICLQuantile(
             (999 quantiles per row is about 8 kB); ``0`` does them in one
             pass. TabICL builds its keys and values from the context rows
             alone, so a row's answer never depends on the other rows in its
-            chunk: bit for bit on a CPU, and to float16 rounding on a GPU
-            with ``mixed_precision=True``, where the batch shape changes the
-            kernels.
+            chunk beyond float rounding: the batch shape can change the
+            kernels (on a CPU, a one-row chunk differs by a few parts in a
+            million of the quantiles' spread), and with
+            ``mixed_precision=True`` on a GPU the answers agree to float16
+            rounding.
         softmax_temperature: Only ``"auto"``: TabICL's quantile head has no
             softmax for a temperature to divide, so any other value raises
             ValueError. Recorded in ``provenance_`` as None.
@@ -248,13 +250,15 @@ class TabICLQuantile(
     # A quantile head: there is no softmax for a temperature to divide.
     has_softmax = False
     native_outlier_clipping = True
-    # On a CPU, where the conformance tests run, chunking is bit for bit and
-    # the cache agrees to float32 rounding (about 1e-6 of the quantiles'
-    # spread). On a GPU with mixed_precision=True the cache is stored in
+    # On a CPU, where the conformance tests run, the cache agrees to float32
+    # rounding (about 1e-6 of the quantiles' spread), and so does chunking:
+    # most chunk sizes give the same bits, but a one-row chunk takes a
+    # different matrix-multiply path in the cached decode, about 6e-6 of the
+    # spread away. On a GPU with mixed_precision=True the cache is stored in
     # float16 and the batch shapes change the kernels: both then agree to
     # float16 rounding, about 1e-3 of the spread.
     kv_cache_rtol = 1e-4
-    exact_chunking = True
+    exact_chunking = False
     cpu_friendly = True
 
     def __init__(  # noqa: D107 - arguments documented on the class.

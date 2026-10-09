@@ -237,3 +237,22 @@ def test_a_pickle_predicts_bit_for_bit_on_a_cpu():
     )
     networks = {id(r.model_) for r in _regressors(restored)}
     assert networks == {id(model.handles_[0].regressors[0].model_)}
+
+
+@needs_checkpoint
+def test_one_row_chunks_change_the_answer_by_rounding_alone():
+    """A one-row chunk takes another matrix-multiply path: not bit for bit."""
+    pytest.importorskip("tabicl")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(112, 3))
+    y = 2.0 + X[:, 0] + 0.1 * rng.normal(size=112)
+    model = lazy.TabICLQuantile(
+        n_estimators=4, device="cpu", progress=False, chunk_size=0
+    ).fit(X[:100], y[:100])
+    whole = model.predict_distribution(X[100:]).locs
+    model.chunk_size = 1
+    single = model.predict_distribution(X[100:]).locs
+    if model.exact_chunking:
+        np.testing.assert_array_equal(single, whole)
+    spread = (whole[:, -1] - whole[:, 0]).min()
+    np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)

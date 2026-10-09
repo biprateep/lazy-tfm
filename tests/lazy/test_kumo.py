@@ -245,3 +245,28 @@ def test_the_default_path_is_upstreams_on_a_cpu():
         .numpy()
     )
     np.testing.assert_allclose(ours, theirs * scale + offset, atol=1e-5)
+
+
+@needs_checkpoint
+@pytest.mark.parametrize("kv_cache", [True, False])
+def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
+    """A one-row chunk takes another matrix-multiply path: not bit for bit."""
+    pytest.importorskip("sdm")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(112, 3))
+    y = 2.0 + X[:, 0] + 0.1 * rng.normal(size=112)
+    model = lazy.KumoQuantile(
+        version="v1-small",
+        n_estimators=4,
+        device="cpu",
+        progress=False,
+        chunk_size=0,
+        kv_cache=kv_cache,
+    ).fit(X[:100], y[:100])
+    whole = model.predict_distribution(X[100:]).locs
+    model.chunk_size = 1
+    single = model.predict_distribution(X[100:]).locs
+    if model.exact_chunking:
+        np.testing.assert_array_equal(single, whole)
+    spread = (whole[:, -1] - whole[:, 0]).min()
+    np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)

@@ -189,7 +189,9 @@ class KumoQuantile(
         chunk_size: Query rows predicted at a time, to bound peak memory;
             ``0`` does them in one pass. Every query attends to the context
             rows alone, so a row's answer never depends on the other rows in
-            its chunk.
+            its chunk beyond float rounding: the batch shape can change the
+            kernels (on a CPU, a one-row chunk differs by a few parts in a
+            million of the quantiles' spread).
         softmax_temperature: Only ``"auto"``: the quantile head has no
             softmax, so any other value raises ValueError. Recorded in
             ``provenance_`` as None.
@@ -241,7 +243,10 @@ class KumoQuantile(
     native_outlier_clipping = True
     # NVIDIA's training stopped at tables of 60,000 rows.
     recommended_max_context = 60_000
-    exact_chunking = True
+    # Not bit for bit on a CPU: a one-row chunk takes a different
+    # matrix-multiply path, cached or not, and lands about 6e-6 of the
+    # quantiles' spread away; other chunk sizes give the same bits.
+    exact_chunking = False
     cpu_friendly_versions = ("v1-small",)
 
     def __init__(  # noqa: D107 - arguments documented on the class.
