@@ -387,14 +387,15 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             one row), a float a fraction in (0, 1] (1.0 means all rows), and
             None all of them. Member ``i`` sees lazy's bag ``i``, as on every
             model: its coarse-level member that bag, its member of fine
-            level ``j`` the rows of the bag in coarse bin ``j``. A member of
-            TabFM's own transforms keeps its place in the classifier (its
-            column order, class shift and the logit average), with its
-            standardisation, norm method and clip fitted on those rows; a
-            member with a scaffolded transform is a hierarchy of its own on
-            its bag. Members are run one at a time, whatever
-            ``member_batch_size`` says, because their contexts differ in
-            length.
+            level ``j`` the rows of the bag in coarse bin ``j`` (a coarse
+            bin no bag reaches splits its probability over its fine bins as
+            the context's rows fall in them). A member of TabFM's own
+            transforms keeps its place in the classifier (its column order,
+            class shift and the logit average), with its standardisation,
+            norm method and clip fitted on those rows; a member with a
+            scaffolded transform is a hierarchy of its own on its bag.
+            Members are run one at a time, whatever ``member_batch_size``
+            says, because their contexts differ in length.
         kv_cache: Prefill each member's context once and decode the queries
             against the cache, chunk by chunk (``True``; needs TabFM's
             repository build, and falls back with a
@@ -1021,7 +1022,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
         A level with no context rows gives every class zero probability, and
         one whose rows all share a class gives that class all of it; neither
-        has anything for a classifier to learn, so none is run.
+        has anything for a classifier to learn, so none is run. Nor is one
+        when bagging leaves no member any of the level's rows (a fine level
+        whose coarse bin no bag reaches): rather than lose the coarse bin's
+        probability, each class gets its share of the level's context rows,
+        the neutral split -- equal masses for equal-mass fine bins, and zero
+        for an empty one.
 
         Args:
             model: The loaded TabFM backbone.
@@ -1043,6 +1049,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             full = np.zeros((len(X_query), n_classes))
             full[:, present.astype(int)] = 1.0
             return full
+        if member_rows is not None and not any(map(len, member_rows)):
+            share = np.bincount(labels, minlength=n_classes) / labels.size
+            return np.tile(share, (len(X_query), 1))
         classifier = self._classifier(model, group, seed)
         classifier.fit(X_context.reset_index(drop=True), labels)
         classes = np.asarray(classifier.classes_)
@@ -1055,12 +1064,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 self._member_logits(model, view, X_query)
                 for view in _member_views(classifier, member_rows)
             ]
-            probs = (
-                _icl_stream.softmax(
-                    np.mean(members, axis=0), self._temperature()
-                )
-                if members
-                else np.zeros((len(X_query), classes.size))
+            probs = _icl_stream.softmax(
+                np.mean(members, axis=0), self._temperature()
             )
         elif self.inference_ == "stream":
             logits = _icl_stream.classification_logits(

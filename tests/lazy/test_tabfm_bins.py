@@ -10,6 +10,7 @@ loads TabFM on the CPU, and runs only with ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 import os
 import warnings
 
+import fakes
 import numpy as np
 import pytest
 
@@ -363,3 +364,30 @@ def test_the_checkpoint_predicts_on_a_matched_grid():
     np.testing.assert_array_equal(dist.bins, grid.edges)
     np.testing.assert_allclose(dist.masses.sum(axis=1), 1.0)
     assert np.all(dist.masses[:, grid.centers > 1.6] == 0.0)
+
+
+def test_a_coarse_bin_no_bag_reaches_keeps_its_mass(monkeypatch):
+    """Split over its fine bins as its context rows are."""
+    cls = fakes.install("tabfm", monkeypatch)
+    X, z, X_query = _problem(400)
+    est = cls(
+        n_estimators=2,
+        bag_size=12,
+        n_coarse_bins=10,
+        n_fine_bins=2,
+        random_state=2,
+        device="cpu",
+        progress=False,
+    ).fit(X, z)
+    _, coarse_edges, _ = est._edges(est.y_context_, 0.0)
+    coarse = tabfm._bin_labels(coarse_edges, est.y_context_)
+    (group,) = est.member_groups_
+    reached = np.unique(np.concatenate([coarse[r] for r in group.member_rows]))
+    unreached = np.setdiff1d(np.arange(10), reached)
+    assert unreached.size  # the case under test
+    masses = est.predict_distribution(X_query).masses
+    np.testing.assert_allclose(masses.sum(axis=1), 1.0)
+    for j in unreached:
+        # Twenty context rows in each of the bin's two fine bins.
+        assert np.all(masses[:, 2 * j] > 0.0)
+        np.testing.assert_allclose(masses[:, 2 * j], masses[:, 2 * j + 1])
