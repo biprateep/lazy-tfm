@@ -27,34 +27,36 @@
 #
 # Every model in `lazy` takes the same parameters and gives the same outputs,
 # so comparing them takes a loop over names. In this tutorial, we run
-# TabPFN-3.5, TabPFN-3.5-fast, TabICLv2, LimiX-2 and TabFM on four regression
-# benchmarks from the literature on probabilistic deep learning, and compare
-# their cost and the quality of their predicted distributions. We then show
+# TabPFN-3.5, TabPFN-3.5-fast, TabICLv2, LimiX-2, TabFM and Kumo Tabular (Large
+# and Small) on four regression benchmarks from the literature on
+# probabilistic deep learning, and compare their cost and the quality of their
+# predicted distributions. We then show
 # how a model fits into scikit-learn's tools, and how a run is made
 # reproducible.
 
 # %% [markdown]
 # ## Setup
 #
-# On Google Colab, the cell below installs the package with all four
-# backends. The code of LimiX is not on PyPI, so the `limix` extra installs
-# only its dependencies, and the second line (commented out) installs the
-# code itself (see
+# On Google Colab, the cell below installs the package with all five
+# backends. The code of LimiX and the package of Kumo Tabular are not on PyPI,
+# so their extras install only their dependencies, and the second line
+# (commented out) installs them (see
 # [Installation](https://lazy-tfm.readthedocs.io/en/latest/installation.html)).
-# Without it, the loop below skips LimiX-2 with a printed note, as it does
-# for any other model whose package is missing.
+# Without it, the loop below skips LimiX-2 and Kumo Tabular with a printed
+# note, as it does for any other model whose package is missing.
 #
 # The licenses of the weights differ between the models. TabICLv2 is
-# BSD-licensed, while the weights of TabPFN-3.5, TabPFN-3.5-fast, LimiX-2 and
-# TabFM are for non-commercial use only (see
+# BSD-licensed and those of Kumo Tabular are under the OpenMDW License, which
+# permits commercial use, while the weights of TabPFN-3.5, TabPFN-3.5-fast,
+# LimiX-2 and TabFM are for non-commercial use only (see
 # [Supported models](https://lazy-tfm.readthedocs.io/en/latest/models/index.html)).
 
 # %%
 import sys
 
 if "google.colab" in sys.modules:
-    # %pip install -q 'lazy-tfm[tabpfn,tabicl,tabfm,limix]'
-    # !lazy setup
+    # %pip install -q 'lazy-tfm[tabpfn,tabicl,tabfm,limix,kumo]'
+    # !lazy setup && lazy setup kumo
     pass
 
 # %%
@@ -110,7 +112,7 @@ for name in NAMES:
 # %% [markdown]
 # ## The models
 #
-# The five models below differ only in the arguments to `lazy.LazyModel`.
+# The seven models below differ only in the arguments to `lazy.LazyModel`.
 # TabFM is by far the slowest of them, so we give it 4 ensemble members
 # instead of the default 8, which the other models keep. This should save
 # roughly half of its time, at the cost of a small disadvantage in accuracy.
@@ -122,6 +124,8 @@ MODELS = [
     lazy.LazyModel("tabicl", random_state=SEED),
     lazy.LazyModel("limix", random_state=SEED),
     lazy.LazyModel("tabfm", n_estimators=4, random_state=SEED),
+    lazy.LazyModel("kumo", random_state=SEED),
+    lazy.LazyModel("kumo", version="v1-small", random_state=SEED),
 ]
 
 # %% [markdown]
@@ -198,34 +202,39 @@ ax.legend(ncols=2, fontsize="small")
 plt.show()
 
 # %% [markdown]
-# The figure shows that no model is the best on every dataset. LimiX-2 has
-# the lowest CRPS on `yacht`, `energy` and `kin8nm`, and TabPFN-3.5 on
-# `concrete` (1.204 vs. 1.221 for LimiX-2). The margin is largest on `energy`,
-# where the other four models have between 1.7 and 2.2 times the CRPS of
-# LimiX-2 (e.g., 0.219 vs. 0.112 for TabPFN-3.5). On `concrete` and `kin8nm`,
-# all of the models lie within about 10% of the best, except TabFM on
-# `concrete`, and on `kin8nm` the CRPS of LimiX-2 and TabPFN-3.5 agree to the
-# three decimals of the table (0.044). TabFM is the worst on the three smaller
-# datasets, and the most so on `yacht`, where its CRPS is about three times
-# that of LimiX-2 (0.517 vs. 0.173). TabFM picks the number of its bins from
-# the size of the context, aiming at about five context rows per bin with at
-# most 10 by 10 bins, which gives 7 by 7 on the 277 rows of `yacht` and 10 by
-# 10 on the other datasets. Part of its gap might be because it runs with half
-# as many members as the others. The 68% coverage lies between 0.620 and 0.871
-# across the table. With 31 to 200 test rows per dataset, these fractions are
+# The figure shows that no model is the best on every dataset. Since these
+# numbers come from a single random split and a few hundred test rows at most,
+# the comparison is indicative only. Kumo Tabular Large has the lowest CRPS on
+# `concrete` (1.171 vs. 1.204 for TabPFN-3.5) and on `kin8nm`, and it ties
+# with Kumo Tabular Small for the lowest on `yacht`, where LimiX-2 is within
+# 0.002 of both. LimiX-2 has the lowest CRPS on `energy`, where the margin is
+# also the largest, and the other six models have between 1.6 and 2.2 times
+# its CRPS there (0.175 for Kumo Tabular Large, the closest of them, against
+# 0.112). On `concrete`, all of the models lie within about 10% of the best
+# except TabFM, and on `kin8nm` within about 17%. Kumo Tabular Large also has
+# the lowest NLL on every dataset but `energy`. TabFM is the worst on the three
+# smaller datasets, and the most so on `yacht`, where its CRPS of 0.517 is
+# about three times the best. TabFM picks the number of its bins from the size
+# of the context, aiming at about five context rows per bin with at most 10 by
+# 10 bins, which gives 7 by 7 on the 277 rows of `yacht` and 10 by 10 on the
+# other datasets. Part of its gap might be because it runs with half as many
+# members as the others. The 68% coverage lies between 0.620 and 0.903 across
+# the table. With 31 to 200 test rows per dataset, these fractions are
 # uncertain by several percentage points, and only LimiX-2 on `energy` (0.857
-# on 77 rows) stands clearly apart from 0.68.
+# on 77 rows) differs clearly from 0.68, with Kumo Tabular Small on `yacht`
+# (0.903 on 31 rows) less clearly so.
 #
 # The times are from this run, on an otherwise idle GPU, and they differ by
-# more than an order of magnitude between the models. TabICLv2 and
-# TabPFN-3.5-fast are the fastest. LimiX-2 takes longer than TabPFN-3.5 in
-# `predict_proba` on every dataset and in `fit` on all but `yacht`, where
-# TabPFN-3.5 is the first model to run and its time likely includes the
-# start-up of the GPU. TabFM does all of its work in `predict_proba`, where it
-# takes the longest of all (between 8.3 and 11.1 s). Since these numbers come
-# from a single random split and a few hundred test rows at most, the
-# comparison is indicative only. A choice for real work should rest on several
-# splits of the data at hand, and
+# more than an order of magnitude between the models. TabICLv2,
+# TabPFN-3.5-fast and Kumo Tabular Small are the fastest, and Kumo Tabular
+# Large takes about as long as TabPFN-3.5. LimiX-2 takes longer than
+# TabPFN-3.5 in `predict_proba` on every dataset and in `fit` on all but
+# `yacht`, where TabPFN-3.5 is the first model to run and its time likely
+# includes the start-up of the GPU, as Kumo Tabular Large's first fit likely
+# includes loading its network. TabFM does all of its work in
+# `predict_proba`, where it takes the longest of all (between 10.0 and
+# 12.8 s). A choice for real work should rest on several splits of the data at
+# hand, and
 # [Choosing a model](https://lazy-tfm.readthedocs.io/en/latest/guide/choosing.html)
 # gives our recommendations.
 
