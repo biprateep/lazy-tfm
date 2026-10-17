@@ -132,6 +132,11 @@ def test_in_a_uv_project_setup_prints_the_uv_add_instead(
     assert fetched == [True]  # LimiX is still set up
     out = capsys.readouterr().out
     assert f"uv add '{tabfm.REPOSITORY_BUILD}'" in out
+    assert _cli.main(["setup", "--dry-run"]) == 1  # as the real run
+    assert runs == []
+    assert (
+        "TabFM: not installing the repository build" in capsys.readouterr().out
+    )
 
 
 def test_a_failed_install_fails_the_command(backends):

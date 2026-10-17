@@ -150,7 +150,9 @@ def install(
     Returns:
         Whether ``requirement`` is installed, or would be after a dry run;
         False in a uv project's environment (:func:`uv_project`), where it
-        prints the ``uv add`` to run instead.
+        prints the ``uv add`` to run instead. A dry run there is False as
+        well, since the run it previews would not complete the install
+        either: the user has to.
     """
     project = uv_project()
     if project is not None:
@@ -160,9 +162,10 @@ def install(
         if not pathlib.Path.cwd().is_relative_to(project):
             add[2:2] = ["--project", str(project)]
         print(
-            f"{label}: this environment belongs to the uv project at "
-            f"{project}, so add {what} to the project, so that uv sync "
-            f"keeps it:\n  {shlex.join(add)}"
+            f"{label}: not installing {what}, since this environment "
+            f"belongs to the uv project at {project} and uv sync would "
+            "remove it again. Add it to the project instead, which "
+            f"completes the setup:\n  {shlex.join(add)}"
         )
         return False
     command = install_command(requirement)

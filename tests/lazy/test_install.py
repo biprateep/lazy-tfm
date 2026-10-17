@@ -134,3 +134,18 @@ def test_from_elsewhere_the_uv_add_names_the_project(
     out = capsys.readouterr().out
     add = shlex.join(["uv", "add", "--project", str(project), REQUIREMENT])
     assert add in out
+
+
+def test_a_dry_run_in_a_uv_project_says_the_user_must_add_it(
+    where, tmp_path, runs, capsys
+):
+    """It fails as the run it previews would, and says what to do."""
+    project = _project(tmp_path / "project")
+    where(project, project / ".venv")
+    assert not _install_it(dry_run=True)
+    assert not runs
+    out = capsys.readouterr().out
+    assert "Pkg: not installing the build" in out
+    assert f"uv add {shlex.quote(REQUIREMENT)}" in out
+    assert not _install_it(dry_run=False)
+    assert capsys.readouterr().out == out
