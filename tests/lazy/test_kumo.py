@@ -133,11 +133,18 @@ def test_a_pickle_leaves_the_caches_out_and_records_them_again(
 def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
     X, y, _ = data
     model = fakes.Backend("kumo", monkeypatch)().fit(X, y)
-    model.device, model.device_ = "auto", "cuda:7"  # as if fitted there
+    # As if fitted on a GPU, under float16 autocast.
+    model.device, model.device_ = "auto", "cuda:7"
+    model.mixed_precision_ = True
+    model.provenance_["kumo"]["autocast"] = "float16"
     restored = pickle.loads(pickle.dumps(model))
     assert restored.device_ == _device.resolve_device("auto")
     assert restored.provenance_["device"] == restored.device_
     assert restored.mixed_precision_ == restored.device_.startswith("cuda")
+    assert restored.provenance_["kumo"]["autocast"] == (
+        "float16" if restored.mixed_precision_ else None
+    )
+    assert model.provenance_["kumo"]["autocast"] == "float16"
 
 
 def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):

@@ -576,17 +576,19 @@ class KumoQuantile(
             "cuda", dtype=dtype, enabled=self.mixed_precision_
         )
 
+    def _autocast_dtype(self) -> str | None:
+        """The autocast dtype in force, for ``provenance_``; None for none."""
+        if not self.mixed_precision_:
+            return None
+        return str(_PINNED_RECIPE["autocast_dtype"])
+
     def _recipe(self) -> dict[str, Any]:
         return {
             **super()._recipe(),
             "kumo": {
                 "size": SIZES[self.version],
                 "outlier_threshold": self.outlier_threshold_,
-                "autocast": (
-                    _PINNED_RECIPE["autocast_dtype"]
-                    if self.mixed_precision_
-                    else None
-                ),
+                "autocast": self._autocast_dtype(),
                 "trim_fraction": self._member_trim_fraction(),
                 "groups": [
                     {"seed": int(handle.seed), "members": handle.n_members}
@@ -629,6 +631,9 @@ class KumoQuantile(
                 "device": self.device_,
                 "mixed_precision": self.mixed_precision_,
             }
+            recipe = self.provenance_.get("kumo")
+            if isinstance(recipe, dict):
+                moved["kumo"] = {**recipe, "autocast": self._autocast_dtype()}
             self.provenance_ = {**self.provenance_, **moved}
         if "checkpoint_" in state:
             self._relocate_checkpoint = True
