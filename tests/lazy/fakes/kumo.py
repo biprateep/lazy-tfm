@@ -118,4 +118,5 @@ def install(monkeypatch, recorder):
         return network().to(device).eval()
 
     monkeypatch.setattr(kumo, "_load_network", load)
+    monkeypatch.setattr(kumo, "_N_QUANTILES", SPREAD.size)
     return kumo.KumoQuantile

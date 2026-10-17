@@ -664,6 +664,12 @@ def _stub_classifier(est, monkeypatch):
     )
 
 
+class _MemberNetwork:
+    """The network upstream's fit loads: its head gives three quantiles."""
+
+    num_quantiles = 3
+
+
 class _MemberRegressor:
     """TabICLRegressor without a backbone: upstream's real member plan.
 
@@ -689,6 +695,7 @@ class _MemberRegressor:
             outlier_threshold=self.kwargs["outlier_threshold"],
             random_state=self.kwargs["random_state"],
         ).fit(X, y)
+        self.model_ = _MemberNetwork()
         return self
 
     def predict(self, X, output_type):

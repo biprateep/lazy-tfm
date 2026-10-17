@@ -40,6 +40,7 @@ class Network:
     def __init__(self):
         self._cache = None
         self.weights = np.zeros(N_WEIGHTS)
+        self.num_quantiles = SPREAD.size
 
     def to(self, device):
         del device  # Unused: it stays where it is.

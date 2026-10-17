@@ -223,7 +223,7 @@ class TabICLQuantile(
             the whole ensemble.
         handles_: Per member group, the fitted regressors that run it, with
             the members each stands for (also in ``provenance_``).
-        n_quantiles_: How many quantiles the backbone returned.
+        n_quantiles_: How many quantiles the backbone returns per row.
         n_context_: Context rows ``fit`` was given.
 
     Examples:
@@ -323,6 +323,10 @@ class TabICLQuantile(
         handle = self.__dict__.pop("regressor_", None)
         if handle is not None and len(handle.regressors) == 1:
             self.regressor_ = handle.regressors[0]
+        # Every regressor runs on the one shared network, whose head fixes
+        # how many quantiles a row gets.
+        network = self.handles_[0].regressors[0].model_
+        self.n_quantiles_ = int(network.num_quantiles)
 
     def _fit_group(
         self,
@@ -551,7 +555,11 @@ class TabICLQuantile(
             for answer, weight in zip(answers, handle.weights, strict=True)
         )
         quantiles = np.asarray(quantiles) * scale + offset
-        self.n_quantiles_ = int(quantiles.shape[1])
+        if quantiles.shape[1] != self.n_quantiles_:
+            raise RuntimeError(
+                f"{self.display_name} returned {quantiles.shape[1]} quantiles "
+                f"per row, not {self.n_quantiles_}"
+            )
         return distributions.QuantileDistribution(
             quantile_levels(self.n_quantiles_), quantiles
         )

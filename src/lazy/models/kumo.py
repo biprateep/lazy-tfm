@@ -142,6 +142,11 @@ _PINNED_RECIPE: dict[str, Any] = {
     "autocast_dtype": "float16",
 }
 
+#: The quantiles upstream's regression head returns per row, at the levels
+#: 0.001 to 0.999 (``num_quantiles`` of sdm.models.KumoTabular at
+#: REPOSITORY_COMMIT, the same for every size).
+_N_QUANTILES = 999
+
 # Features in float64 and targets in float32, as upstream is handed them.
 _Array: TypeAlias = npt.NDArray[np.floating[Any]]
 
@@ -229,7 +234,7 @@ class KumoQuantile(
         trim_fraction_: The fraction of members dropped from each tail of
             every quantile: 0.2 under ``transforms="auto"``, 0 under an
             explicit ``transforms``.
-        n_quantiles_: How many quantiles the backbone returned.
+        n_quantiles_: How many quantiles the backbone returns per row.
         n_context_: Context rows ``fit`` was given.
 
     Examples:
@@ -412,6 +417,9 @@ class KumoQuantile(
             )
         super()._load_checkpoint()
 
+    def _after_fit(self) -> None:
+        self.n_quantiles_ = _N_QUANTILES
+
     def _fit_group(
         self,
         X: _typing.FloatArray,
@@ -493,7 +501,11 @@ class KumoQuantile(
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
         quantiles = out.numerical.double().cpu().numpy()
-        self.n_quantiles_ = int(quantiles.shape[-1])
+        if quantiles.shape[-1] != self.n_quantiles_:
+            raise RuntimeError(
+                f"{self.display_name} returned {quantiles.shape[-1]} "
+                f"quantiles per row, not {self.n_quantiles_}"
+            )
         levels = _quantile_head.quantile_levels(self.n_quantiles_)
         return [
             distributions.QuantileDistribution(

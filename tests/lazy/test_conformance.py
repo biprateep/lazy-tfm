@@ -944,6 +944,35 @@ def test_no_query_rows_give_an_empty_answer(cls, data):
     assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            name,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="TabFM keeps the last prediction's bin_prior_",
+            ),
+        )
+        if name == "tabfm"
+        else name
+        for name in sorted(lazy.ESTIMATORS)
+    ],
+)
+def test_a_prediction_sets_no_attribute(name, data, monkeypatch):
+    """scikit-learn's rule: predict leaves the estimator's __dict__ alone."""
+    X, z, X_test = data
+    model = fakes.Backend(name, monkeypatch)(n_estimators=3).fit(X, z)
+    if model.native_output == "quantiles":
+        assert model.n_quantiles_ > 0
+    before = dict(vars(model))
+    model.predict_distribution(X_test)
+    model.predict_proba(X_test)
+    assert vars(model).keys() == before.keys()
+    changed = [name for name in before if vars(model)[name] is not before[name]]
+    assert not changed
+
+
 def test_a_refit_into_several_groups_drops_the_single_regressor(data):
     X, z, _ = data
     model = standins.ScaffoldedHistogramStandIn(n_estimators=3).fit(X, z)
