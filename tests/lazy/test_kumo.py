@@ -487,3 +487,40 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
         np.testing.assert_array_equal(single, whole)
     spread = (whole[:, -1] - whole[:, 0]).min()
     np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)
+
+
+@needs_checkpoint
+@pytest.mark.parametrize(
+    ("params", "exact"),
+    [
+        ({}, True),
+        ({"chunk_size": 1}, False),
+        # Each bag's columns permuted by lazy, with missing values.
+        ({"n_estimators": 5, "bag_size": 80}, False),
+        ({"n_estimators": 5, "bag_size": 80, "feature_shuffle": False}, True),
+    ],
+)
+def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, exact):
+    """Bit for bit in most cases, else within 2e-5 of the spread."""
+    pytest.importorskip("sdm")
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(150, 4))
+    X[::13, 1] = np.nan
+    y = 2.0 + np.sin(2.0 * X[:, 0]) + 0.1 * rng.normal(size=150)
+    cached, uncached = (
+        lazy.KumoQuantile(
+            version="v1-small",
+            device="cpu",
+            progress=False,
+            kv_cache=kv_cache,
+            **params,
+        )
+        .fit(X[:120], y[:120])
+        .predict_distribution(X[120:])
+        .locs
+        for kv_cache in (True, False)
+    )
+    if exact:
+        np.testing.assert_array_equal(cached, uncached)
+    spread = (uncached[:, -1] - uncached[:, 0]).min()
+    np.testing.assert_allclose(cached, uncached, rtol=0, atol=2e-5 * spread)

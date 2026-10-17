@@ -188,8 +188,11 @@ class KumoQuantile(
         kv_cache: Fit upstream's context cache (``fit`` then ``predict``),
             so each chunk of queries skips the context's forward pass; False
             runs the whole forward pass, recipe included, for every chunk.
-            The two agree bit for bit on a CPU, and to float16 rounding on a
-            GPU with ``mixed_precision=True``.
+            On a CPU the two agree bit for bit in most cases and otherwise
+            to float rounding, within 2e-5 of the quantiles' spread where
+            measured (a one-row chunk, or bagged members whose columns lazy
+            permutes, with missing values); on a GPU with
+            ``mixed_precision=True`` they agree to float16 rounding.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an array of
             bin centres, ``"native"``, or None for the native grid (1,000
             equal bins across the training targets' range, extended by a
