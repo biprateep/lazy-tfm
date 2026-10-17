@@ -440,10 +440,18 @@ class KumoQuantile(
         # large offset; standardizing in float64 first keeps it. Each group
         # is standardized on its own rows, a bagged member on its bag.
         offset, scale = _quantile_head.target_scaling(y)
+        tokens = _group_tokens(group)
         handle = _KumoGroup(
             n_members=group.n_members,
             seed=group.seed,
             recipe=self._upstream_recipe(group),
+            # Upstream's round robin: member k runs token k % len(tokens).
+            transforms=tuple(
+                tokens[k % len(tokens)] for k in range(group.n_members)
+            ),
+            feat_shuffle_method=(
+                AUTO_FEAT_SHUFFLE_METHOD if group.feature_shuffle else "none"
+            ),
             offset=offset,
             scale=scale,
         )
@@ -532,14 +540,9 @@ class KumoQuantile(
 
     def _upstream_recipe(self, group: _members.MemberGroup) -> Any:
         """The group's recipe, as upstream's preprocessing objects."""
-        tokens = (
-            AUTO_TRANSFORMS
-            if group.native_transforms is None
-            else _cycle(group.native_transforms)
-        )
         return _recipe(
             self._import_backend().processing,
-            tokens,
+            _group_tokens(group),
             feature_shuffle=group.feature_shuffle,
             outlier_threshold=self.outlier_threshold_,
         )
@@ -624,10 +627,7 @@ class KumoQuantile(
                 "outlier_threshold": self.outlier_threshold_,
                 "autocast": self._autocast_dtype(),
                 "trim_fraction": self._member_trim_fraction(),
-                "groups": [
-                    {"seed": int(handle.seed), "members": handle.n_members}
-                    for handle in self.handles_
-                ],
+                "groups": [handle.provenance() for handle in self.handles_],
             },
         }
 
@@ -681,6 +681,10 @@ class _KumoGroup:
         n_members: The members upstream runs for the group.
         seed: The seed of the group's ``torch.Generator``.
         recipe: The group's unfitted upstream recipe.
+        transforms: Upstream's transform token for each member, in member
+            order.
+        feat_shuffle_method: How upstream permutes the members' columns,
+            ``"latin"`` or ``"none"``.
         offset: The mean the group's targets were standardized by.
         scale: Their standard deviation, or 1 for a constant target.
         cache: Upstream's fitted context (its recipe and the members' keys
@@ -695,10 +699,21 @@ class _KumoGroup:
     n_members: int
     seed: int
     recipe: Any
+    transforms: tuple[str, ...] = ()
+    feat_shuffle_method: str = "none"
     offset: float = 0.0
     scale: float = 1.0
     cache: Any = None
     context: tuple[_typing.FloatArray, _Array] | None = None
+
+    def provenance(self) -> dict[str, Any]:
+        """What ran, for ``provenance_``."""
+        return {
+            "seed": int(self.seed),
+            "members": self.n_members,
+            "transforms": list(self.transforms),
+            "feat_shuffle_method": self.feat_shuffle_method,
+        }
 
 
 @contextlib.contextmanager
@@ -822,6 +837,13 @@ def _transform(sp: types.ModuleType, token: str) -> Any:
     if token == "rank_gaussian":
         return sp.RankGaussian(max_knots=_PINNED_RECIPE["rank_gaussian_knots"])
     raise ValueError(f"Kumo Tabular has no transform {token!r}")
+
+
+def _group_tokens(group: _members.MemberGroup) -> tuple[str, ...]:
+    """The distinct transforms a group's members cycle through, in order."""
+    if group.native_transforms is None:
+        return AUTO_TRANSFORMS
+    return _cycle(group.native_transforms)
 
 
 def _cycle(tokens: tuple[str, ...]) -> tuple[str, ...]:

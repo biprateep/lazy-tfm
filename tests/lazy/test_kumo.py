@@ -279,6 +279,36 @@ def test_an_explicit_recipe_drops_the_trim(monkeypatch, data, transforms, trim):
     assert model.provenance_["kumo"]["trim_fraction"] == trim
 
 
+@pytest.mark.parametrize(
+    ("params", "transforms", "shuffle"),
+    [
+        (
+            {},
+            ["identity", "power", "robust", "rank_gaussian", "identity"],
+            "latin",
+        ),
+        ({"feature_shuffle": False}, None, "none"),
+        ({"transforms": "none"}, ["identity"] * 5, "latin"),
+        ({"transforms": ("none", "power")}, ["identity"] * 3, "latin"),
+    ],
+)
+def test_each_group_records_its_transforms_and_shuffle(
+    monkeypatch, data, params, transforms, shuffle
+):
+    X, y, _ = data
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=5, **params)
+    model.fit(X, y)
+    first = model.provenance_["kumo"]["groups"][0]
+    assert first["feat_shuffle_method"] == shuffle
+    if transforms is not None:
+        assert first["transforms"] == transforms
+    groups = model.provenance_["kumo"]["groups"]
+    assert sum(len(group["transforms"]) for group in groups) == 5
+    assert [group["members"] for group in groups] == [
+        handle.n_members for handle in model.handles_
+    ]
+
+
 @needs_checkpoint
 def test_the_default_path_is_upstreams_on_a_cpu():
     """The trim is lazy's, in float64; upstream's runs in float32."""
