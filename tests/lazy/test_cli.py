@@ -197,3 +197,21 @@ def test_another_build_fails_until_it_is_replaced(backends, capsys):
 def test_an_unknown_backend_is_an_error(backends):
     with pytest.raises(SystemExit):
         _cli.main(["setup", "kumoo"])
+
+
+def _setup_help(capsys):
+    with pytest.raises(SystemExit):
+        _cli.main(["setup", "--help"])
+    return " ".join(capsys.readouterr().out.split())
+
+
+def test_the_help_names_the_backends_installed_only_when_named(
+    monkeypatch, capsys
+):
+    """Built from setup_needs_name, so the command never names a backend."""
+    assert "cannot be detected (kumo)" in _setup_help(capsys)
+    monkeypatch.setattr(tabfm.TabFMHistogram, "setup_needs_name", True)
+    assert "cannot be detected (kumo, tabfm)" in _setup_help(capsys)
+    monkeypatch.setattr(kumo.KumoQuantile, "setup_needs_name", False)
+    monkeypatch.setattr(tabfm.TabFMHistogram, "setup_needs_name", False)
+    assert "cannot be detected" not in _setup_help(capsys)

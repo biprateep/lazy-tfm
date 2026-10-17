@@ -274,6 +274,9 @@ class KumoQuantile(
     # quantiles' spread away; other chunk sizes give the same bits.
     exact_chunking = False
     cpu_friendly_versions = ("v1-small",)
+    # The extra lists only common packages, so it cannot tell whether Kumo
+    # was asked for.
+    setup_needs_name = True
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,

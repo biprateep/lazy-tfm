@@ -229,6 +229,12 @@ def test_cpu_friendly_versions_must_be_pinned(monkeypatch):
     assert any("cpu_friendly_versions" in p for p in problems)
 
 
+def test_setup_needs_name_must_be_a_bool(monkeypatch):
+    monkeypatch.setattr(lazy.TabPFNBarDistribution, "setup_needs_name", "yes")
+    problems = _conformance.problems(lazy.TabPFNBarDistribution, "tabpfn")
+    assert "setup_needs_name must be a bool" in problems
+
+
 def test_the_tabpfn_cpu_warning_names_its_context_limit():
     model = lazy.TabPFNBarDistribution()
     model.device_ = "cpu"

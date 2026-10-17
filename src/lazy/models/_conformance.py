@@ -105,6 +105,7 @@ def _declaration_problems(
         "has_softmax",
         "native_outlier_clipping",
         "cpu_friendly",
+        "setup_needs_name",
     ):
         if not isinstance(getattr(cls, flag), bool):
             found.append(f"{flag} must be a bool")
