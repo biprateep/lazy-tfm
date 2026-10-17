@@ -108,6 +108,13 @@ def test_every_version_is_a_size_with_a_pinned_checkpoint():
         assert kumo.KumoQuantile._pinned_recipe(version)["size"] == size
 
 
+def test_the_docstring_gives_each_sizes_parameters():
+    doc = " ".join(kumo.KumoQuantile.__doc__.split())
+    for version in kumo.SIZES:
+        millions = round(lazy.get_checkpoint("kumo", version).parameters / 1e6)
+        assert re.search(rf'"{version}"`` \({millions} million', doc), version
+
+
 @pytest.fixture
 def data():
     rng = np.random.default_rng(8)

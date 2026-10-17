@@ -160,9 +160,10 @@ class KumoQuantile(
     """Target distributions from the quantiles Kumo Tabular predicts.
 
     Args:
-        version: Which size to load: ``"v1-large"`` (215 million
-            parameters), ``"v1-medium"`` or ``"v1-small"`` (28 million); see
-            :func:`lazy.list_versions`. Recorded in ``provenance_``.
+        version: Which size to load: ``"v1-large"`` (216 million
+            parameters), ``"v1-medium"`` (62 million) or ``"v1-small"`` (28
+            million); see :func:`lazy.list_versions`. Recorded in
+            ``provenance_``.
         n_estimators: Ensemble members, exactly; costs scale linearly.
             NVIDIA's benchmarks run 8 with the small and medium sizes and 16
             with the large one; 8 is the package-wide default.
@@ -675,9 +676,12 @@ class _KumoGroup:
         offset: The mean the group's targets were standardized by.
         scale: Their standard deviation, or 1 for a constant target.
         cache: Upstream's fitted context (its recipe and the members' keys
-            and values) when ``kv_cache=True``, else None.
-        context: The prepared context features and standardized targets
-            when ``kv_cache=False``, else None.
+            and values) when ``kv_cache=True``, else None; a pickle leaves
+            it out.
+        context: The prepared context features and standardized targets,
+            kept under either ``kv_cache``: without the cache every
+            prediction runs on them, and with it an unpickled model records
+            the cache from them again.
     """
 
     n_members: int
