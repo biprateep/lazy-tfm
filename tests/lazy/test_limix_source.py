@@ -217,6 +217,10 @@ def test_the_checkpoint_helpers_cover_the_source(clean_env, tmp_path):
     clean_env.setattr(
         _hub.Checkpoint, "download", lambda self, **kwargs: tmp_path
     )
+    # is_cached looks the weights up without downloading, through _fetch.
+    clean_env.setattr(
+        _hub.Checkpoint, "_fetch", lambda self, **kwargs: tmp_path
+    )
     assert not _hub.is_cached("limix")  # the weights alone are not enough
     clean_env.setattr(
         _limix_source.urllib.request,

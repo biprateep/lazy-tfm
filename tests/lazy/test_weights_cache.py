@@ -318,6 +318,8 @@ def _overlapping_tabpfn_fits(first_out):
         The stand-in upstream module, its loader, the loader's calls and
         whether both fits finished.
     """
+    # Here, not in the threads: a skip raised in a thread is lost.
+    pytest.importorskip("torch")
     load, calls = _tabpfn_loader()
     upstream = types.SimpleNamespace(
         base=types.SimpleNamespace(initialize_tabpfn_model=load)
