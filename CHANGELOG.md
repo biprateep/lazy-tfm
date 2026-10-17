@@ -7,6 +7,8 @@ change the API.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Added
 
 - NVIDIA's Kumo Tabular joins as a backend: `LazyModel("kumo")`, or
@@ -587,7 +589,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/biprateep/lazy-tfm/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/biprateep/lazy-tfm/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/biprateep/lazy-tfm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/biprateep/lazy-tfm/compare/v0.1.0...v0.1.1
