@@ -1,0 +1,40 @@
+[project]
+name = "fm4pz"
+version = "0.1.0"
+description = "Experiments and figures for the paper on tabular foundation models as photometric redshift estimators"
+authors = [
+    { name = "Biprateep Dey", email = "biprateep@pitt.edu" }
+]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+# One environment holds everything. The foundation models run through lazy-tfm
+# and the baselines through RAIL; both sides import the same lazy.datasets,
+# lazy.grid and lazy.metrics, so the splits, the grid and the metric
+# definitions are one piece of code. Kumo Tabular's package
+# (structured-data-models) is not on PyPI, so it comes from GitHub at the
+# commit lazy-tfm validates.
+dependencies = [
+    "lazy-tfm[limix,tabpfn]",
+    "structured-data-models",
+    "pz-rail-base>=2.0.11",
+    "pz-rail-cmnn>=2.0.2",
+    "pz-rail-flexzboost>=2.0.3",
+    "pz-rail-gpz-v1>=2.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "ruff>=0.17.1",
+]
+
+# Both are pinned to a commit. To move the paper to a newer lazy-tfm, change
+# the rev and run `uv lock`.
+[tool.uv.sources]
+lazy-tfm = { git = "https://github.com/biprateep/lazy-tfm", rev = "74e2655374560e92f260c72eb863d493e26f689a" }
+structured-data-models = { git = "https://github.com/NVIDIA/structured-data-models", rev = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
