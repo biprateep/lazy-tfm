@@ -262,8 +262,13 @@ class KumoQuantile(
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
-    # NVIDIA's training stopped at tables of 60,000 rows.
+    # NVIDIA's training stopped at tables of 60,000 rows; unlike LimiX's
+    # limit, it is not where the model was seen to degrade.
     recommended_max_context = 60_000
+    context_limit_note = (
+        "was pretrained on tables of up to {limit:,} rows, beyond which its "
+        "accuracy has not been measured"
+    )
     # Not bit for bit on a CPU: a one-row chunk takes a different
     # matrix-multiply path, cached or not, and lands about 6e-6 of the
     # quantiles' spread away; other chunk sizes give the same bits.

@@ -110,8 +110,24 @@ class _Limited(standins.HistogramStandIn):
 
 def test_a_large_unbagged_context_warns(data):
     X, z, _ = data
-    with pytest.warns(lazy.ContextSizeWarning, match="bag_size=50"):
+    with pytest.warns(lazy.ContextSizeWarning, match="bag_size=50") as record:
         _Limited().fit(X, z)
+    assert "degrades on contexts larger than about 50 rows" in str(
+        record[0].message
+    )
+
+
+class _Pretrained(_Limited):
+    context_limit_note = "was pretrained on tables of up to {limit:,} rows"
+
+
+def test_the_warning_says_what_is_known_of_the_limit(data):
+    X, z, _ = data
+    with pytest.warns(lazy.ContextSizeWarning, match="bag_size=50") as record:
+        _Pretrained().fit(X, z)
+    message = str(record[0].message)
+    assert "was pretrained on tables of up to 50 rows, and this one" in message
+    assert "degrades" not in message
 
 
 def test_bagging_silences_the_warning(data):

@@ -210,6 +210,20 @@ def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):
         np.testing.assert_array_equal(answer, reference)
 
 
+def test_the_context_warning_says_kumo_was_pretrained_to_the_limit(
+    monkeypatch, data
+):
+    """60,000 rows is NVIDIA's pretraining table size, not a measured limit."""
+    X, y, _ = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    monkeypatch.setattr(backend.cls, "recommended_max_context", 50)
+    with pytest.warns(lazy.ContextSizeWarning, match="bag_size=50") as record:
+        backend().fit(X, y)
+    message = str(record[0].message)
+    assert "Kumo Tabular was pretrained on tables of up to 50 rows" in message
+    assert "degrades" not in message
+
+
 def test_a_missing_sdm_names_lazy_setup(monkeypatch):
     monkeypatch.setitem(sys.modules, "sdm", None)
     with pytest.raises(ImportError, match="then lazy setup kumo"):

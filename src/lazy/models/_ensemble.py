@@ -241,8 +241,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         kv_cache_rtol: How closely cached and uncached outputs agree on a
             CPU; under mixed precision on a GPU they agree to that
             precision's rounding instead.
-        recommended_max_context: The context size above which the model
-            degrades without bagging, or None.
+        recommended_max_context: The context size above which a member's
+            context warns and bagging is suggested, or None: where the
+            model was measured to degrade, say, or the largest table it was
+            pretrained on.
+        context_limit_note: What that warning says of the model after its
+            name, with ``{limit}`` standing for ``recommended_max_context``;
+            empty for "degrades on contexts larger than about {limit:,}
+            rows", which suits a limit that was measured.
         exact_chunking: Whether chunking the queries is exact bit for bit
             on a CPU; if not, a query's answer still does not depend on the
             others in its chunk, but differs from an unchunked one by float
@@ -281,6 +287,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     kv_cache_modes: ClassVar[tuple[bool | str, ...]] = (True, False)
     kv_cache_rtol: ClassVar[float] = 1e-5
     recommended_max_context: ClassVar[int | None] = None
+    context_limit_note: ClassVar[str] = ""
     exact_chunking: ClassVar[bool] = True
     chunks_queries: ClassVar[bool] = True
     has_softmax: ClassVar[bool] = True
@@ -799,9 +806,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             if self.bagging_
             else f"this one has {n_rows:,}"
         )
+        note = (
+            self.context_limit_note
+            or "degrades on contexts larger than about {limit:,} rows"
+        )
         warnings.warn(
-            f"{self.display_name} degrades on contexts larger than about "
-            f"{limit:,} rows, and {seen}. Bag the context in smaller pieces: "
+            f"{self.display_name} {note.format(limit=limit)}, and {seen}. "
+            "Bag the context in smaller pieces: "
             f"pass bag_size={limit} with n_estimators >= {needed} so the "
             "members together cover it.",
             ContextSizeWarning,
