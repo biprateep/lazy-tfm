@@ -4,8 +4,16 @@
 import pathlib
 import tomllib
 
+from packaging import requirements
+
 import lazy
+from lazy.models import _install
+from lazy.models import kumo
 from lazy.models import tabfm
+
+PYPROJECT = tomllib.loads(
+    (pathlib.Path(__file__).parents[2] / "pyproject.toml").read_text()
+)
 
 
 def test_version():
@@ -39,3 +47,37 @@ def test_lazy_setup_installs_the_tabfm_commit_uv_pins():
         f"git+{source['git']}@{source['rev']}"
     )
     assert config["project"]["scripts"]["lazy"] == "lazy._cli:main"
+
+
+def test_the_published_requirements_hold_no_direct_url():
+    """PyPI refuses an upload whose metadata has a direct URL in it.
+
+    The wheel's Requires-Dist lines are exactly these requirements; the
+    dependency groups and [tool.uv.sources] are never published.
+    """
+    project = PYPROJECT["project"]
+    published = list(project["dependencies"])
+    for extra in project["optional-dependencies"].values():
+        published.extend(extra)
+    for line in published:
+        assert requirements.Requirement(line).url is None, line
+
+
+def test_a_checkout_syncs_the_structured_data_models_lazy_setup_installs():
+    """``uv sync --group backends`` and ``lazy setup kumo`` agree."""
+    source = PYPROJECT["tool"]["uv"]["sources"]["structured-data-models"]
+    assert source["rev"] == kumo.REPOSITORY_COMMIT
+    assert kumo.REPOSITORY_BUILD.endswith(
+        f"git+{source['git']}@{source['rev']}"
+    )
+    group = _install.CHECKOUT_SYNC[_install.CHECKOUT_SYNC.index("--group") + 1]
+    assert PYPROJECT["dependency-groups"][group] == ["structured-data-models"]
+
+
+def test_a_plain_sync_installs_no_backend():
+    """CI runs ``uv sync``, which must not bring PyTorch with Kumo's package."""
+    defaults = PYPROJECT["tool"]["uv"].get("default-groups", ["dev"])
+    assert "backends" not in defaults
+    for group in defaults:
+        for line in PYPROJECT["dependency-groups"][group]:
+            assert "structured-data-models" not in line, group

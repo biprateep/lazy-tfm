@@ -149,3 +149,17 @@ def test_a_dry_run_in_a_uv_project_says_the_user_must_add_it(
     assert f"uv add {shlex.quote(REQUIREMENT)}" in out
     assert not _install_it(dry_run=False)
     assert capsys.readouterr().out == out
+
+
+def test_a_checkout_of_lazy_syncs_instead_of_adding_a_direct_url(
+    where, tmp_path, runs, capsys
+):
+    """PyPI refuses lazy-tfm's metadata with a direct URL in it."""
+    project = _project(tmp_path / "lazy")
+    (project / "pyproject.toml").write_text('[project]\nname = "lazy-tfm"\n')
+    where(project, project / ".venv")
+    assert not _install_it()
+    assert not runs
+    out = capsys.readouterr().out
+    assert "uv add" not in out
+    assert f"  {shlex.join(_install.CHECKOUT_SYNC)}\n" in out

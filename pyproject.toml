@@ -120,12 +120,22 @@ docs = [
     "myst-nb>=1.1", # MyST Markdown pages and the tutorial notebooks
     "sphinx-rtd-theme>=3",
 ]
+# The backend packages that PyPI cannot hold in an extra, from the sources
+# below: `uv sync --extra all --group backends` gives a checkout every backend.
+# Not a default group, since structured-data-models brings PyTorch, and CI
+# installs no backend.
+backends = [
+    "structured-data-models",
+]
 
 # Development-only source overrides: honoured by `uv sync` in a checkout, never
 # written into the published metadata. The repository build also calls itself
-# 1.0.1, so only the commit distinguishes it from the release.
+# 1.0.1, so only the commit distinguishes it from the release. The
+# structured-data-models commit is lazy.models.kumo.REPOSITORY_COMMIT, which
+# `lazy setup kumo` installs (tests/lazy/test_packaging.py checks both pins).
 [tool.uv.sources]
 tabfm = { git = "https://github.com/google-research/tabfm", rev = "fbb665569425fd2f490c6576b3af967876fe11ff" }
+structured-data-models = { git = "https://github.com/NVIDIA/structured-data-models", rev = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]

@@ -8,7 +8,8 @@ fast build of it) is on GitHub alone has ``lazy setup`` install it from there
 does it the same way for every such backend: with pip when this interpreter
 has it, else with uv, leaving the dependencies to the extra; when this
 interpreter runs a uv project's environment it prints the ``uv add`` that
-keeps the package instead, since ``uv sync`` would remove it again.
+keeps the package instead, since ``uv sync`` would remove it again (in a
+checkout of this repository, the ``uv sync`` whose sources hold it).
 
 Typical usage example:
 
@@ -30,8 +31,19 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 
-__all__ = ["in_uv_project", "install", "install_command", "uv_project"]
+__all__ = [
+    "CHECKOUT_SYNC",
+    "in_uv_project",
+    "install",
+    "install_command",
+    "uv_project",
+]
+
+#: What gives a checkout of this repository every backend: the extras, and
+#: the dependency group holding what PyPI cannot (pyproject.toml).
+CHECKOUT_SYNC = ("uv", "sync", "--extra", "all", "--group", "backends")
 
 
 def install_command(requirement: str) -> list[str] | None:
@@ -116,6 +128,23 @@ def uv_project() -> pathlib.Path | None:
     return None
 
 
+def _is_checkout(project: pathlib.Path) -> bool:
+    """Whether a uv project is a checkout of this repository, lazy-tfm.
+
+    Args:
+        project: The project's directory.
+
+    Returns:
+        Whether its pyproject.toml names the project ``lazy-tfm``.
+    """
+    try:
+        with open(project / "pyproject.toml", "rb") as f:
+            name = tomllib.load(f).get("project", {}).get("name")
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return name == "lazy-tfm"
+
+
 def in_uv_project() -> bool:
     """Whether this interpreter runs a uv project's environment.
 
@@ -150,22 +179,29 @@ def install(
     Returns:
         Whether ``requirement`` is installed, or would be after a dry run;
         False in a uv project's environment (:func:`uv_project`), where it
-        prints the ``uv add`` to run instead. A dry run there is False as
-        well, since the run it previews would not complete the install
-        either: the user has to.
+        prints the ``uv add`` to run instead, or in a checkout of this
+        repository the ``uv sync`` (:data:`CHECKOUT_SYNC`). A dry run there
+        is False as well, since the run it previews would not complete the
+        install either: the user has to.
     """
     project = uv_project()
     if project is not None:
         # uv sync and uv run would undo the install from uv.lock, so the
         # package has to be a requirement of the project itself.
-        add = ["uv", "add", requirement]
+        if _is_checkout(project):
+            # lazy-tfm's own requirements are published, and PyPI refuses a
+            # direct URL in them; the checkout's uv sources hold the build.
+            advised = list(CHECKOUT_SYNC)
+            advice = "In this checkout, sync the development environment:"
+        else:
+            advised = ["uv", "add", requirement]
+            advice = "Add it to the project, which completes the setup:"
         if not pathlib.Path.cwd().is_relative_to(project):
-            add[2:2] = ["--project", str(project)]
+            advised[2:2] = ["--project", str(project)]
         print(
             f"{label}: not installing {what}, since this environment "
             f"belongs to the uv project at {project} and uv sync would "
-            "remove it again. Add it to the project instead, which "
-            f"completes the setup:\n  {shlex.join(add)}"
+            f"remove it again. {advice}\n  {shlex.join(advised)}"
         )
         return False
     command = install_command(requirement)
