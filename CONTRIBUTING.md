@@ -12,9 +12,14 @@ pins every dependency, so everyone works in the same environment:
 git clone https://github.com/biprateep/lazy-tfm
 cd lazy-tfm
 uv sync                     # the package, editable, plus the dev tools
-uv sync --extra all         # ...and all four foundation-model backends' dependencies
+uv sync --extra all --group backends   # ...and every backend, Kumo's package included
 uv run pre-commit install   # lint and format on every commit
 ```
+
+The `backends` group holds what PyPI cannot install, NVIDIA's
+`structured-data-models` at the commit `lazy` was validated on. It is not a
+default group, since it brings PyTorch, so a plain `uv sync` and CI stay
+light.
 
 `uv sync` also removes packages that are not in the lockfile. If you keep
 extra packages in the environment, use `uv sync --inexact`.

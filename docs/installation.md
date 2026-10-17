@@ -50,18 +50,20 @@ lazy setup kumo
 - **TabFM.** The extra installs TabFM's PyPI release, which has no KV-cache
   API and takes about 26 times the compute for the same answers. `lazy setup`
   replaces it with the repository build, at the commit `lazy` was validated
-  on. Without it, `fit` warns with a `TabFMPerformanceWarning`. In a uv
-  project, `uv sync` would put the release back, so add the build to the
-  project instead, in the same command as `lazy-tfm`; `lazy setup` is then
-  not needed for TabFM:
+  on. Without it, `fit` warns with a `TabFMPerformanceWarning`. When the
+  environment is a uv project's own (its `.venv`), `uv sync` would put the
+  release back, so add the build to the project instead, in the same command
+  as `lazy-tfm`; `lazy setup` is then not needed for TabFM:
 
   ```console
   uv add 'lazy-tfm[tabfm]' 'tabfm[pytorch] @ git+https://github.com/google-research/tabfm@fbb665569425fd2f490c6576b3af967876fe11ff'
   ```
 
-  In a uv project that already has `lazy-tfm`, `lazy setup` prints the
-  `uv add` command to run rather than installing a build `uv sync` would
-  undo.
+  In the environment of a uv project that already has `lazy-tfm`,
+  `lazy setup` prints the `uv add` command to run rather than installing a
+  build `uv sync` would undo, and it exits with an error until the command
+  is run. In any other environment, including one used from inside a uv
+  project's directory, it installs the build.
 - **LimiX-2.** The code of LimiX is not on PyPI, so `lazy` downloads it
   (~10 MB) at the validated commit on first use, into its cache, without
   installing it. `lazy setup` or `lazy.download_checkpoint("limix")` does
@@ -73,19 +75,20 @@ lazy setup kumo
   the model, is not on PyPI, so the extra installs only its dependencies and
   `lazy setup kumo` installs the package from GitHub, at the validated
   commit. The backend has to be named, because its dependencies are common
-  enough that they do not show the extra was asked for. In a uv project,
-  `lazy setup kumo` prints the `uv add` command to run instead.
+  enough that they do not show the extra was asked for. When the environment
+  is a uv project's own, `lazy setup kumo` prints the `uv add` command to run
+  instead.
 
 ## Installation from source
 
 ```console
 git clone https://github.com/biprateep/lazy-tfm
 cd lazy-tfm
-uv sync --extra all
+uv sync --extra all --group backends
 ```
 
 This installs the package in editable mode with every dependency pinned by
-`uv.lock`, the repository build of TabFM included. Kumo Tabular's package is
-not in the lockfile, so run `lazy setup kumo` (which prints the `uv add`
-command in a uv project) to add it. See {doc}`contributing`
-for the development workflow.
+`uv.lock`, including the repository build of TabFM and Kumo Tabular's
+package, which the `backends` group holds at the validated commit. That group
+is left out of a plain `uv sync`, since it brings PyTorch. See
+{doc}`contributing` for the development workflow.

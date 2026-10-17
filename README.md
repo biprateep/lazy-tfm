@@ -164,7 +164,7 @@ validated on, into its cache, the first time a LimiX-2 model is fitted;
 `lazy setup` does it ahead of time. Kumo Tabular's package, NVIDIA's
 `structured-data-models`, is not on PyPI either, so `lazy setup kumo` installs it
 from GitHub at the commit it was validated on. A checkout of this repository
-(`uv sync --extra all`) gets the TabFM build automatically. In your own uv
+gets both automatically with `uv sync --extra all --group backends`. In your own uv
 project, add the build in the same command instead, so that `uv sync` keeps
 it:
 
@@ -339,6 +339,7 @@ the default costs nothing.
 git clone https://github.com/biprateep/lazy-tfm
 cd lazy-tfm
 uv sync                  # locked environment, including dev tooling
+uv sync --extra all --group backends   # ...and every backend, Kumo's package included
 uv run pre-commit install
 uv run pytest
 ```
