@@ -32,8 +32,37 @@ change the API.
   (`member_combination="quantile_trimmed_average"`, with
   `member_trim_fraction` and a `_predict_members` hook), with the trim taken
   over every member of the ensemble at once.
+- Backends gain two class attributes: `context_limit_note`, which says in the
+  `ContextSizeWarning` what is known of a model's context limit (LimiX-2
+  degrades beyond it, while Kumo Tabular was only pretrained up to it), and
+  `setup_needs_name`, from which `lazy setup --help` lists the backends it
+  installs only when they are named.
+- A `backends` dependency group gives a checkout of the repository Kumo
+  Tabular's `structured-data-models` at the validated commit
+  (`uv sync --extra all --group backends`). It is not a default group, since
+  it brings PyTorch, so a plain `uv sync` and CI stay light, and in a checkout
+  `lazy setup` prints that command instead of a `uv add`.
 
 ### Changed
+
+- The probability beyond the outermost quantile of a `QuantileDistribution`
+  (TabICL, Kumo Tabular) is spread evenly over one quantile spacing past it,
+  rather than sitting as a point mass on it, which made a one-bin spike on a
+  fine grid that could become the mode and raise the CDE loss. Tied
+  outermost quantiles use the nearest spacing that is not zero, and only a
+  constant row keeps its point mass. Densities between the outermost
+  quantiles are unchanged, `ppf` below the first level or above the last now
+  falls inside the tails, `to_qp` passes the tails' ends to qp, and the
+  TabICL and Kumo Tabular golden densities were recorded again.
+- Kumo Tabular combines its members by a plain mean under an explicit
+  `transforms`, which drops every model's recipe extras, and by the creators'
+  20% trimmed mean only under `transforms="auto"`; `trim_fraction_` and
+  `provenance_` record the trim used. Its random sign flips of the columns and
+  the target stay under any `transforms`.
+- TabICL and Kumo Tabular set `n_quantiles_` at `fit`, and a prediction no
+  longer changes any attribute of the estimator.
+- Kumo Tabular's `provenance_` records each group's transforms and column
+  shuffle, and an unpickled model's records follow the device it now runs on.
 
 - The `EnsembleSizeWarning` message no longer quotes measured losses; it
   points to "Ensembles of models" in the documentation, which gives them.
@@ -65,6 +94,19 @@ change the API.
 - LimiX drops a column that is constant on the context apart from missing
   values, which made a query's answer depend on the rest of its chunk.
 - Bagged TabFM keeps the probability of a coarse bin that no bag reaches.
+- A constant context target on TabICL or Kumo Tabular is scaled by one, found
+  by its exact range. Before, the rounding of its standard deviation decided
+  between a nearly point-like answer (a target of 0.1) and one of full width
+  (a target of 0.3).
+- The warning of TabICL and Kumo Tabular about probability outside the native
+  grid counts the exact probability there, tails included.
+- Kumo Tabular refuses `device="mps"`, which has no double precision, with a
+  clear error before it loads the weights.
+- `lazy setup` decides whether it runs in a uv project from the environment it
+  runs in, not from the working directory, so it installs into a pip or conda
+  environment used from inside a uv project's directory. In a uv project's
+  own environment it prints the `uv add` to run (with `--project` when run
+  from elsewhere) and says why it exits with an error, under `--dry-run` too.
 - A partly downloaded snapshot checkpoint (TabFM's) no longer counts as
   cached.
 - TabPFN's `bucket_masses` returns the float64 bucket borders the backend
