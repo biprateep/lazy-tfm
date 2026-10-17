@@ -6,6 +6,7 @@ import dataclasses
 
 import numpy as np
 import pytest
+from scipy import stats
 
 import lazy
 from lazy import distributions
@@ -137,11 +138,13 @@ def test_histogram_validation(bins, masses, match):
 # -- quantiles ---------------------------------------------------------------
 
 
-def test_quantile_on_grid_is_exactly_from_quantiles(quantiles):
+def test_quantile_on_grid_is_from_quantiles_on_the_knots(quantiles):
+    """The knots include the ends of the tails, at the levels 0 and 1."""
     grid = lazy.Grid.linear(0.0, 2.0, 80)
+    levels = np.r_[0.0, quantiles.quants, 1.0]
     np.testing.assert_array_equal(
         quantiles.on_grid(grid),
-        grid.from_quantiles(quantiles.locs, quantiles.quants),
+        grid.from_quantiles(quantiles.ppf(levels), levels),
     )
 
 
@@ -155,17 +158,132 @@ def test_quantile_ppf_returns_the_knots_and_inverts_the_cdf(quantiles):
         np.testing.assert_allclose(quantiles[row].cdf(z[row])[0], inner)
 
 
-def test_quantile_tails_are_point_masses_on_the_outer_knots(quantiles):
-    np.testing.assert_array_equal(
-        quantiles.ppf([0.0, 0.01, 0.99, 1.0]),
-        quantiles.locs[:, [0, 0, -1, -1]],
+def test_quantile_tails_spread_over_one_quantile_spacing(quantiles):
+    """Uniform over one spacing beyond the outermost values, no atoms."""
+    locs, head = quantiles.locs, quantiles.quants[0]
+    spacing = np.diff(locs[:, [0, 1, -2, -1]], axis=1)[:, [0, 2]]
+    ends = quantiles.ppf([0.0, 1.0])
+    np.testing.assert_allclose(ends[:, 0], locs[:, 0] - spacing[:, 0])
+    np.testing.assert_allclose(ends[:, 1], locs[:, -1] + spacing[:, 1])
+    # The CDF runs linearly from 0 at the end of each tail to the
+    # outermost level, and the density is the tail's mass over its width.
+    for row in range(len(quantiles)):
+        low, high = ends[row]
+        middle = [0.5 * (low + locs[row, 0]), 0.5 * (high + locs[row, -1])]
+        np.testing.assert_allclose(
+            quantiles[row].cdf([low, *middle, high])[0],
+            [0.0, 0.5 * head, 1.0 - 0.5 * head, 1.0],
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            quantiles[row].pdf(middle)[0], head / spacing[row], rtol=1e-12
+        )
+        assert quantiles[row].pdf([np.nextafter(low, -np.inf)])[0, 0] == 0.0
+    np.testing.assert_allclose(
+        quantiles.ppf([0.5 * head]), 0.5 * (ends[:, :1] + locs[:, :1])
     )
-    below = quantiles.cdf(quantiles.locs[:, 0] - 1e-9)
-    assert (np.diag(below) == 0).all()
+
+
+def test_quantile_tails_leave_the_density_between_the_quantiles_alone(
+    quantiles,
+):
+    """Bit for bit, the CDF, inverse and density of linear interpolation."""
+    rng = np.random.default_rng(13)
+    levels = np.sort(rng.uniform(quantiles.quants[0], quantiles.quants[-1], 50))
+    levels = np.r_[quantiles.quants[[0, -1]], levels]
+    ppf = quantiles.ppf(levels)
+    for row in range(len(quantiles)):
+        locs = quantiles.locs[row]
+        values = np.r_[locs, rng.uniform(locs[0], locs[-1], 200)]
+        np.testing.assert_array_equal(
+            quantiles[row].cdf(values)[0],
+            np.interp(values, locs, quantiles.quants),
+        )
+        np.testing.assert_array_equal(
+            ppf[row], np.interp(levels, quantiles.quants, locs)
+        )
+        segment = np.clip(
+            np.searchsorted(locs, values, side="right") - 1, 0, locs.size - 2
+        )
+        width = locs[segment + 1] - locs[segment]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            density = np.where(
+                width > 0, np.diff(quantiles.quants)[segment] / width, 0.0
+            )
+        np.testing.assert_array_equal(quantiles[row].pdf(values)[0], density)
+    # The masses in bins between the outermost values, before the grid
+    # renormalizes them.
+    edges = np.linspace(
+        quantiles.locs[:, 0].max(), quantiles.locs[:, -1].min(), 40
+    )
+    masses = quantiles.histogramize(edges).masses
+    for row in range(len(quantiles)):
+        np.testing.assert_array_equal(
+            masses[row],
+            np.diff(np.interp(edges, quantiles.locs[row], quantiles.quants)),
+        )
+
+
+def test_quantile_tails_add_no_spike_on_a_fine_grid():
+    """A point mass would be a one-bin spike of height mass / width."""
+    levels = np.linspace(0.001, 0.999, 999)
+    dist = distributions.QuantileDistribution(
+        levels, stats.norm.ppf(levels)[None]
+    )
+    grid = lazy.Grid.linear(-5.0, 5.0, 100_000, normalization="histogram")
+    pdf = dist.on_grid(grid)[0]
+    assert abs(grid.centers[np.argmax(pdf)]) < 0.01
+    assert pdf.max() == pytest.approx(stats.norm.pdf(0.0), rel=1e-3)
+    # The integral of p^2 (the CDE loss term) is the Gaussian's.
+    np.testing.assert_allclose(
+        np.sum(pdf**2 * grid.widths), 0.5 / np.sqrt(np.pi), rtol=1e-3
+    )
+
+
+def test_tied_outermost_quantiles_take_the_nearest_spacing():
+    dist = distributions.QuantileDistribution(
+        [0.1, 0.3, 0.5, 0.7, 0.9], [[0.0, 0.0, 1.0, 3.0, 3.0]]
+    )
+    np.testing.assert_array_equal(dist.ppf([0.0, 1.0]), [[-1.0, 5.0]])
+    np.testing.assert_allclose(
+        dist.pdf([-0.5, 0.5, 2.0, 4.0]), [[0.1, 0.2, 0.1, 0.05]]
+    )
+
+
+def test_a_constant_row_keeps_its_point_mass():
+    dist = distributions.QuantileDistribution([0.25, 0.5, 0.75], [[2.0] * 3])
+    np.testing.assert_array_equal(dist.ppf([0.0, 0.5, 1.0]), [[2.0] * 3])
+    np.testing.assert_array_equal(
+        dist.cdf([np.nextafter(2.0, 0.0), 2.0]), [[0.0, 1.0]]
+    )
+    assert dist.mean()[0] == 2.0 and dist.var()[0] == 0.0
+    assert dist.mode()[0] == 2.0
+    assert not dist.pdf([2.0]).any()
+
+
+def test_a_tail_is_the_mode_only_when_denser():
+    level_ties = distributions.QuantileDistribution(
+        [0.25, 0.5, 0.75], [[0.0, 1.0, 2.0]]
+    )
+    np.testing.assert_array_equal(level_ties.mode(), [0.5])
+    heavy = distributions.QuantileDistribution(
+        [0.4, 0.5, 0.6], [[0.0, 1.0, 2.0]]
+    )
+    np.testing.assert_array_equal(heavy.mode(), [-0.5])
+    # Evenly dense everywhere, to rounding: 1 / 14 rounds above the spacing
+    # between the levels.
+    levels = np.linspace(0.0, 1.0, 15)[1:-1]
+    rng = np.random.default_rng(14)
+    even = distributions.QuantileDistribution(
+        levels, 1e4 + rng.uniform(0.1, 1.0, (50, 1)) * levels
+    )
+    mode = even.mode()
+    assert ((mode >= even.locs[:, 0]) & (mode <= even.locs[:, -1])).all()
 
 
 def test_quantile_moments_match_integration(quantiles):
-    lo, hi = quantiles.locs.min() - 0.1, quantiles.locs.max() + 0.1
+    ends = quantiles.ppf([0.0, 1.0])
+    lo, hi = ends.min() - 0.1, ends.max() + 0.1
     mean, var = _integral_moments(quantiles, lo, hi)
     np.testing.assert_allclose(quantiles.mean(), mean, rtol=1e-6)
     np.testing.assert_allclose(quantiles.var(), var, rtol=1e-4)
@@ -400,6 +518,16 @@ def test_qp_agrees_at_the_quantile_levels(quantiles):
     )
 
 
+def test_quantiles_round_trip_through_qp(quantiles):
+    """The ensemble gets the knots, tails included; qp adds no tails."""
+    pytest.importorskip("qp")
+    back = distributions.from_qp(quantiles.to_qp())
+    np.testing.assert_array_equal(back.quants[[0, -1]], [0.0, 1.0])
+    values = np.linspace(-0.5, 2.5, 301)
+    np.testing.assert_allclose(back.cdf(values), quantiles.cdf(values))
+    np.testing.assert_allclose(back.mean(), quantiles.mean())
+
+
 @pytest.mark.parametrize("row", [3, -1, np.int64(2)])
 @pytest.mark.parametrize("name", ["histogram", "quantiles", "mixture"])
 def test_an_integer_row_keeps_its_ancil(request, name, row):
@@ -494,9 +622,11 @@ def test_the_last_edge_belongs_to_the_last_bucket():
 
 
 def test_the_outermost_quantiles_belong_to_their_segments():
+    """And the ends of the tails, one spacing beyond them, to the tails."""
     dist = distributions.QuantileDistribution([0.1, 0.5, 0.9], [[0, 1, 3]])
     np.testing.assert_allclose(
-        dist.pdf([-1.0, 0.0, 3.0, 4.0]), [[0.0, 0.4, 0.2, 0.0]]
+        dist.pdf([-1.5, -1.0, 0.0, 3.0, 5.0, 5.5]),
+        [[0.0, 0.1, 0.4, 0.2, 0.05, 0.0]],
     )
 
 

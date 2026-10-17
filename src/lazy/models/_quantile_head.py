@@ -97,7 +97,7 @@ def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
 def mass_outside(
     dist: distributions.QuantileDistribution, grid: grid_lib.Grid
 ) -> _typing.FloatArray:
-    """Each row's probability outside the grid, to one quantile level.
+    """Each row's probability outside the grid, exactly.
 
     Args:
         dist: The predicted quantiles.
@@ -105,14 +105,11 @@ def mass_outside(
 
     Returns:
         The probability below ``grid.y_min`` plus that above ``grid.y_max``,
-        shape ``(n_rows,)``: a lower bound, short by at most one quantile
-        level on each side.
+        tails included (they reach one quantile spacing beyond the outermost
+        quantiles), shape ``(n_rows,)``.
     """
-    levels = np.r_[0.0, dist.quants, 1.0]
-    n_levels = dist.quants.size
-    below = np.count_nonzero(dist.locs < grid.y_min, axis=1)
-    above = np.count_nonzero(dist.locs > grid.y_max, axis=1)
-    return levels[below] + (1.0 - levels[n_levels + 1 - above])
+    cdf = dist.cdf([grid.y_min, grid.y_max])
+    return cdf[:, 0] + (1.0 - cdf[:, 1])
 
 
 class QuantileHead:

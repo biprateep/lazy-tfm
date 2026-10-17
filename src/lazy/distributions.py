@@ -11,8 +11,8 @@ serves them all without approximation:
 * :class:`HistogramDistribution` -- masses in buckets shared by every row,
   uniform within each bucket (qp's ``hist`` parameterisation);
 * :class:`QuantileDistribution` -- values at fixed cumulative levels,
-  linear in between, the tails beyond the outermost levels sitting on the
-  outermost values (qp's ``quant``);
+  linear in between, each tail beyond the outermost levels spread evenly
+  over one quantile spacing (qp's ``quant``);
 * :class:`MixtureDistribution` -- a weighted mixture of histograms whose
   buckets may differ, as bagged members and TabFM's dithers produce.
 
@@ -53,6 +53,10 @@ __all__ = [
     "concatenate",
     "from_qp",
 ]
+
+# How much denser than every segment between the quantiles a quantile
+# distribution's tail must be to be its mode, relatively.
+_MODE_RTOL = 1e-9
 
 #: Optional per-object metadata carried alongside a distribution, as in qp:
 #: each value has one entry per row.
@@ -498,10 +502,18 @@ class QuantileDistribution(_Base):
 
     The CDF passes through each (``locs[i, j]``, ``quants[j]``) and is linear
     between consecutive knots, so the density is constant there. Beyond the
-    outermost levels the remaining probability sits on the outermost values:
-    ``quants[0]`` at ``locs[:, 0]`` and ``1 - quants[-1]`` at ``locs[:, -1]``.
-    This is the convention :meth:`lazy.grid.Grid.from_quantiles` has
-    always used, so densities on a grid are unchanged.
+    outermost levels, each tail is spread evenly over one quantile spacing:
+    the ``quants[0]`` below over ``[l_1 - (l_2 - l_1), l_1]`` and the
+    ``1 - quants[-1]`` above over ``[l_n, l_n + (l_n - l_{n-1})]``, where
+    ``l_j`` are the row's values. The CDF is therefore piecewise linear
+    through two more knots, at the levels 0 and 1, and has no point masses,
+    which on a fine grid would be one-bin spikes that a mode or a peak
+    picks. For levels evenly spaced from the spacing itself (TabICL's and
+    Kumo Tabular's 0.001, ..., 0.999), these are the knots qp's ``quant``
+    adds by extrapolating linearly to 0 and 1. Where the outermost values
+    are tied, a tail is spread over the nearest non-zero spacing in the
+    row instead; only a row whose values are all equal keeps its tails as
+    point masses on that value.
 
     Attributes:
         quants: The cumulative levels, shape (n_levels,), strictly
@@ -615,12 +627,48 @@ class QuantileDistribution(_Base):
             locs = np.sort(locs, axis=0)[cut : len(parts) - cut]
         return cls(quants, locs.mean(axis=0), parts[0].ancil)
 
+    def _tail_widths(self) -> _typing.FloatArray:
+        """How far each row's tails reach, shape (n_rows, 2): (below, above).
+
+        One quantile spacing, the outermost or, where the outermost values
+        are tied, the nearest non-zero one; zero for a row whose values are
+        all equal and for a tail that carries no probability (a level of 0
+        or 1).
+        """
+        gaps = np.diff(self.locs, axis=1)
+        wide = gaps > 0
+        rows = np.arange(self.npdf)
+        first = np.argmax(wide, axis=1)
+        last = gaps.shape[1] - 1 - np.argmax(wide[:, ::-1], axis=1)
+        # A constant row has no wide gap, and argmax lands on a zero one.
+        below = gaps[rows, first] * (self.quants[0] > 0)
+        above = gaps[rows, last] * (self.quants[-1] < 1)
+        return np.stack([below, above], axis=1)
+
+    def _knots(self) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """Returns a tuple (levels, locs): the CDF's knots, tails included.
+
+        The levels gain 0 below and 1 above unless they already reach them,
+        and each row's values gain the ends of its tails; shapes (n_knots,)
+        and (n_rows, n_knots).
+        """
+        levels, locs = self.quants, self.locs
+        below, above = self._tail_widths().T
+        if levels[0] > 0:
+            levels = np.concatenate([[0.0], levels])
+            locs = np.column_stack([locs[:, 0] - below, locs])
+        if levels[-1] < 1:
+            levels = np.concatenate([levels, [1.0]])
+            locs = np.column_stack([locs, locs[:, -1] + above])
+        return levels, locs
+
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        Exactly :meth:`lazy.grid.Grid.from_quantiles`: the mass in each bin
-        over its width, with the probability outside the grid dropped and
-        each row normalized by the grid's convention.
+        :meth:`lazy.grid.Grid.from_quantiles` on the knots, the ends of the
+        tails included: the mass in each bin over its width, with the
+        probability outside the grid dropped and each row normalized by the
+        grid's convention.
 
         Args:
             grid: The grid to put the densities on.
@@ -628,37 +676,40 @@ class QuantileDistribution(_Base):
         Returns:
             Normalized densities, shape (n_rows, grid.n_bins).
         """
-        return grid.from_quantiles(self.locs, self.quants)
+        levels, locs = self._knots()
+        return grid.from_quantiles(locs, levels)
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
+        levels, locs = self._knots()
         out = np.empty((self.npdf, y.size))
         for row in range(self.npdf):
-            out[row] = np.interp(
-                y, self.locs[row], self.quants, left=0.0, right=1.0
-            )
+            out[row] = np.interp(y, locs[row], levels, left=0.0, right=1.0)
         return _unit(out)
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
+        levels, locs = self._knots()
         out = np.empty(self.npdf)
         for row in range(self.npdf):
             out[row] = np.interp(
-                values[row], self.locs[row], self.quants, left=0.0, right=1.0
+                values[row], locs[row], levels, left=0.0, right=1.0
             )
         return _unit(out)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
 
-        Constant between knots; zero outside the outermost values (where the
-        tails sit as point masses) and on zero-width segments. The outermost
-        values belong to the segments they end.
+        Constant between knots: in each tail, its probability over its
+        width. Zero beyond the tails and on zero-width segments (a point
+        mass has no density). The outermost values belong to the segments
+        they end, and the ends of the tails to the tails.
         """
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
         step = np.diff(self.quants)
+        tail_mass = (self.quants[0], 1.0 - self.quants[-1])
         out = np.zeros((self.npdf, y.size))
-        for row in range(self.npdf):
+        for row, (below, above) in enumerate(self._tail_widths()):
             locs = self.locs[row]
             segment = _closed_bucket(locs, y)
             inside = (segment >= 0) & (segment < step.size)
@@ -667,24 +718,26 @@ class QuantileDistribution(_Base):
             with np.errstate(divide="ignore", invalid="ignore"):
                 density = np.where(width > 0, step[segment] / width, 0.0)
             out[row] = np.where(inside, density, 0.0)
+            if below > 0:
+                tail = (y >= locs[0] - below) & (y < locs[0])
+                out[row, tail] = tail_mass[0] / below
+            if above > 0:
+                tail = (y > locs[-1]) & (y <= locs[-1] + above)
+                out[row, tail] = tail_mass[1] / above
         return out
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
+        knot_levels, locs = self._knots()
         out = np.empty(levels.shape)
         for row in range(self.npdf):
-            out[row] = np.interp(levels[row], self.quants, self.locs[row])
+            out[row] = np.interp(levels[row], knot_levels, locs[row])
         return out
 
     def mean(self) -> _typing.FloatArray:
         """The mean of each row, shape (n_rows,)."""
-        low, high = self.locs[:, :-1], self.locs[:, 1:]
-        step = np.diff(self.quants)
-        head, tail = self.quants[0], 1.0 - self.quants[-1]
-        return (
-            head * self.locs[:, 0]
-            + (step * 0.5 * (low + high)).sum(axis=1)
-            + tail * self.locs[:, -1]
-        )
+        levels, locs = self._knots()
+        step = np.diff(levels)
+        return (step * 0.5 * (locs[:, :-1] + locs[:, 1:])).sum(axis=1)
 
     def var(self) -> _typing.FloatArray:
         """The variance of each row, shape (n_rows,).
@@ -692,38 +745,54 @@ class QuantileDistribution(_Base):
         About each row's mean, not as E[x^2] - mean^2, which cancels when
         the values sit far from zero.
         """
-        locs = self.locs - self.mean()[:, None]
+        levels, locs = self._knots()
+        locs = locs - self.mean()[:, None]
         low, high = locs[:, :-1], locs[:, 1:]
-        step = np.diff(self.quants)
-        head, tail = self.quants[0], 1.0 - self.quants[-1]
-        return (
-            head * locs[:, 0] ** 2
-            + (step * (low**2 + low * high + high**2) / 3.0).sum(axis=1)
-            + tail * locs[:, -1] ** 2
-        )
+        step = np.diff(levels)
+        return (step * (low**2 + low * high + high**2) / 3.0).sum(axis=1)
 
     def mode(self) -> _typing.FloatArray:
-        """The centre of each row's densest segment, shape (n_rows,)."""
+        """The centre of each row's densest segment, shape (n_rows,).
+
+        A tail is the mode only where it is denser than every segment
+        between the quantiles by more than rounding. With evenly spaced
+        levels, a tail is as dense, to rounding, as the segment it borrows
+        its width from, and the mode then stays between the quantiles.
+        """
+        rows = np.arange(self.npdf)
         width = np.diff(self.locs, axis=1)
         with np.errstate(divide="ignore", invalid="ignore"):
             density = np.where(width > 0, np.diff(self.quants) / width, -np.inf)
         best = np.argmax(density, axis=1)
-        rows = np.arange(self.npdf)
-        return 0.5 * (self.locs[rows, best] + self.locs[rows, best + 1])
+        peak = density[rows, best]
+        mode = 0.5 * (self.locs[rows, best] + self.locs[rows, best + 1])
+        widths = self._tail_widths()
+        masses = np.array([self.quants[0], 1.0 - self.quants[-1]])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tails = np.where(widths > 0, masses / widths, -np.inf)
+        centres = (
+            self.locs[:, 0] - 0.5 * widths[:, 0],
+            self.locs[:, -1] + 0.5 * widths[:, 1],
+        )
+        for side, centre in enumerate(centres):
+            denser = tails[:, side] > peak * (1.0 + _MODE_RTOL)
+            mode = np.where(denser, centre, mode)
+            peak = np.where(denser, tails[:, side], peak)
+        return mode
 
     def to_qp(self) -> Any:
         """This distribution as a ``qp.Ensemble`` (``quant``); needs qp.
 
-        The two agree exactly at the quantile levels. Between them qp
-        interpolates its quantile function its own way, and it extends the
-        outermost quantiles to its own support, so its values between the
-        levels and in the tails differ slightly from the piecewise-linear CDF
-        used here. For an exact copy, export ``histogramize(bins).to_qp()``.
+        The ensemble gets the knots, the ends of the tails at the levels 0
+        and 1 included, so that qp has no tails of its own to add. The two
+        then agree exactly at the knots; between them qp interpolates its
+        quantile function its own way, so its values there differ slightly
+        from the piecewise-linear CDF used here. For an exact copy, export
+        ``histogramize(bins).to_qp()``.
         """
         qp = _import_qp()
-        ensemble = qp.Ensemble(
-            qp.quant, data={"quants": self.quants, "locs": self.locs}
-        )
+        levels, locs = self._knots()
+        ensemble = qp.Ensemble(qp.quant, data={"quants": levels, "locs": locs})
         if self.ancil is not None:
             ensemble.set_ancil(dict(self.ancil))
         return ensemble
