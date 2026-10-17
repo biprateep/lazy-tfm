@@ -444,7 +444,7 @@ name = "fm4pz"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "lazy-tfm", extra = ["limix", "tabpfn"] },
+    { name = "lazy-tfm", extra = ["kumo", "limix", "tabpfn"] },
     { name = "pz-rail-base" },
     { name = "pz-rail-cmnn" },
     { name = "pz-rail-flexzboost" },
@@ -460,7 +460,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lazy-tfm", extras = ["limix", "tabpfn"], git = "https://github.com/biprateep/lazy-tfm?rev=74e2655374560e92f260c72eb863d493e26f689a" },
+    { name = "lazy-tfm", extras = ["kumo", "limix", "tabpfn"], specifier = "==0.4.0" },
     { name = "pz-rail-base", specifier = ">=2.0.11" },
     { name = "pz-rail-cmnn", specifier = ">=2.0.2" },
     { name = "pz-rail-flexzboost", specifier = ">=2.0.3" },
@@ -872,8 +872,8 @@ wheels = [
 
 [[package]]
 name = "lazy-tfm"
-version = "0.4.0.dev0"
-source = { git = "https://github.com/biprateep/lazy-tfm?rev=74e2655374560e92f260c72eb863d493e26f689a#74e2655374560e92f260c72eb863d493e26f689a" }
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h5py" },
     { name = "huggingface-hub" },
@@ -884,8 +884,19 @@ dependencies = [
     { name = "scipy" },
     { name = "tqdm" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/3c/bf6c5cba569b3b730e6e54bd1566b7852e841d3a56b44e6061c39e44e4b5/lazy_tfm-0.4.0.tar.gz", hash = "sha256:ce7904178d2dea9dbc9d1c64130b526c9e56de4fb8a88fea26382b00f2af7369", size = 243784, upload-time = "2026-10-17T20:08:26.204Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/14/acb3b5c9a446652cfea8dce1e413a84a588b77794a9c5c65c452ad85df66/lazy_tfm-0.4.0-py3-none-any.whl", hash = "sha256:2fda9e71d7a1cd8bb3dd7e10c7e2bdfe42245583fefaefaa08472aee354d4485", size = 255874, upload-time = "2026-10-17T20:08:24.324Z" },
+]
 
 [package.optional-dependencies]
+kumo = [
+    { name = "huggingface-hub" },
+    { name = "pyarrow" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "typing-extensions" },
+]
 limix = [
     { name = "einops" },
     { name = "kditransform" },

@@ -11,11 +11,12 @@ requires-python = ">=3.12,<3.13"
 # One environment holds everything. The foundation models run through lazy-tfm
 # and the baselines through RAIL; both sides import the same lazy.datasets,
 # lazy.grid and lazy.metrics, so the splits, the grid and the metric
-# definitions are one piece of code. Kumo Tabular's package
-# (structured-data-models) is not on PyPI, so it comes from GitHub at the
-# commit lazy-tfm validates.
+# definitions are one piece of code. lazy-tfm is pinned to a release on PyPI.
+# Kumo Tabular's package (structured-data-models) is not on PyPI, so it comes
+# from GitHub at the commit that release validates
+# (lazy.models.kumo.REPOSITORY_COMMIT).
 dependencies = [
-    "lazy-tfm[limix,tabpfn]",
+    "lazy-tfm[kumo,limix,tabpfn]==0.4.0",
     "structured-data-models",
     "pz-rail-base>=2.0.11",
     "pz-rail-cmnn>=2.0.2",
@@ -29,10 +30,9 @@ dev = [
     "ruff>=0.17.1",
 ]
 
-# Both are pinned to a commit. To move the paper to a newer lazy-tfm, change
-# the rev and run `uv lock`.
+# To move the paper to a newer lazy-tfm, change its version above, set this
+# rev to that release's REPOSITORY_COMMIT, and run `uv lock`.
 [tool.uv.sources]
-lazy-tfm = { git = "https://github.com/biprateep/lazy-tfm", rev = "74e2655374560e92f260c72eb863d493e26f689a" }
 structured-data-models = { git = "https://github.com/NVIDIA/structured-data-models", rev = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }
 
 [build-system]

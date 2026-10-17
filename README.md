@@ -22,8 +22,9 @@ redshift grid and the metric definitions are the same code on both sides.
 ## Environment
 
 One [uv](https://docs.astral.sh/uv/) environment holds everything, on
-Python 3.12. `uv.lock` pins every package. lazy-tfm and NVIDIA's
-structured-data-models (Kumo Tabular) are pinned to a git commit in
+Python 3.12. `uv.lock` pins every package. lazy-tfm is a release from PyPI
+(0.4.0), and NVIDIA's structured-data-models (Kumo Tabular), which is not on
+PyPI, comes from GitHub at the commit that release validates, set in
 `[tool.uv.sources]`.
 
 ```bash
@@ -36,8 +37,10 @@ uv run lazy setup       # LimiX-2's source, at the commit lazy-tfm pins
 The model checkpoints download from Hugging Face on first use. The DC1
 catalogues download through `lazy.datasets` the same way.
 
-To move the paper to a newer lazy-tfm, change its `rev` in `pyproject.toml`,
-then run `uv lock` and `uv sync`, and commit both files.
+To move the paper to a newer lazy-tfm, change its version in
+`pyproject.toml`, and the structured-data-models `rev` to the commit that
+release validates (`lazy.models.kumo.REPOSITORY_COMMIT`), then run `uv lock`
+and `uv sync`, and commit both files.
 
 ## Layout
 
