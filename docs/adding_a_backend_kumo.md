@@ -14,6 +14,9 @@ contract was met, with excerpts from `src/lazy/models/kumo.py`.
 | [107aa27](https://github.com/biprateep/lazy-tfm/commit/107aa27) | Adds the trimmed mean of the members' quantiles to the base class |
 | [b07585c](https://github.com/biprateep/lazy-tfm/commit/b07585c) | Moves TabFM's repository install into `lazy.models._install` |
 | [bd0bb9e](https://github.com/biprateep/lazy-tfm/commit/bd0bb9e) | Adds the backend, its checkpoints, tests and documentation |
+| [b3c73d1](https://github.com/biprateep/lazy-tfm/commit/b3c73d1) | Fixes what a first review found: the shared network, pickles, `setup` and the trim |
+| [0d95e67](https://github.com/biprateep/lazy-tfm/commit/0d95e67) | Withdraws the claim of bit-for-bit chunking |
+| [5f17737](https://github.com/biprateep/lazy-tfm/commit/5f17737) to [aa2f8b1](https://github.com/biprateep/lazy-tfm/commit/aa2f8b1) | Follows a second review: no trim under an explicit `transforms`, MPS refused, `n_quantiles_` set at fit, and the new class attributes `context_limit_note` and `setup_needs_name` |
 
 ## Reading the upstream model
 
@@ -30,22 +33,28 @@ drops the highest and lowest fifth of the members at every level. The weights
 are three files in one Hugging Face repository,
 `{small,medium,large}/regressor.pt`, at a tagged commit, which upstream
 downloads itself. Since the column-wise attention lets each query see only the
-context rows, we expected a query's answer not to depend on the other queries,
-and on a CPU the cached and the uncached forward passes, and the queries
-predicted at once or seven at a time, gave bit-identical answers. This allows
-the backend to declare `exact_chunking = True`, which the conformance suite
-checks on a CPU (on a GPU under mixed precision every backend agrees only to
-float16 rounding). The package itself cannot come from PyPI, which holds only a
+context rows, we expected a query's answer not to depend on the other queries.
+On a CPU, the queries predicted at once or seven at a time gave bit-identical
+predictions. However, a query predicted on its own takes a different
+matrix-multiply path and differs by about $10^{-6}$ of the quantiles' spread,
+and the cached and uncached forward passes differ by up to about $10^{-5}$ of
+the spread for a bagged member with missing values whose columns LAZY
+permutes. The backend therefore declares `exact_chunking = False`, and the
+conformance suite checks its chunking to that tolerance on a CPU (on a GPU
+under mixed precision, the backends agree only to float16 rounding; see
+{doc}`guide/reproducibility`). The package itself cannot come from PyPI, which holds only a
 placeholder of the name, so the backend needs a `setup` hook, as TabFM and
 LimiX do.
 
-From this reading we decided that the three sizes become three versions
-(`v1-large`, the default as it is upstream, `v1-medium` and `v1-small`), since
-a version in LAZY is a pinned checkpoint and the sizes share one recipe, and
-that the trimmed mean stays, since it is part of the creators' recipe, but it is taken
-over every member of the ensemble rather than over each call to the model, so
-that a bagged ensemble, whose members run one at a time, is combined the same
-way as one that runs in a single call.
+From this reading we made two decisions. The three sizes become three
+versions (`v1-large`, the default as it is upstream, `v1-medium` and
+`v1-small`), because a version in LAZY is a pinned checkpoint and the sizes
+share one recipe. The trimmed mean, which is part of NVIDIA's recipe, stays
+under `transforms="auto"`, but we take it over every member of the ensemble
+instead of over each call to the model, so that a bagged ensemble, whose
+members run one at a time, is combined in the same way as one that runs in a
+single call. Under an explicit `transforms`, which drops every model's recipe
+extras, the members are combined by a plain mean.
 
 ## Sharing before adding
 
@@ -56,7 +65,8 @@ about probability outside that grid, its quantile levels and its
 double-precision target scaling became the `QuantileHead` mixin in
 `lazy.models._quantile_head`, which TabICL and Kumo both inherit. TabFM's
 install of a repository build became `lazy.models._install.install`, which
-installs with pip or uv, or prints the `uv add` to run in a uv project. The
+installs with pip or uv, or prints the `uv add` to run in a uv project's
+environment. The
 trimmed mean is new to the package, so it went into the base class as a third
 `member_combination`, `"quantile_trimmed_average"`, with a hook,
 `_predict_members`, that returns each member's quantiles separately so that
@@ -95,9 +105,19 @@ class KumoQuantile(
     has_softmax = False
     native_outlier_clipping = True
     recommended_max_context = 60_000
-    exact_chunking = True
+    context_limit_note = (
+        "was pretrained on tables of up to {limit:,} rows, beyond which its "
+        "accuracy has not been measured"
+    )
+    exact_chunking = False
     cpu_friendly_versions = ("v1-small",)
+    setup_needs_name = True
 ```
+
+The context limit is the size of the tables NVIDIA pretrained on, and since
+nobody has measured the model beyond it, `context_limit_note` makes the
+warning above that size say so rather than that the model degrades, as it
+says for LimiX-2.
 
 The constructor takes the uniform parameters with the shared defaults and
 stores them verbatim, as in the skeleton on {doc}`adding_a_backend`, with
@@ -196,7 +216,9 @@ with self._autocast():
         with _lending(network, handle.cache):
             out = network.predict(queries)
 quantiles = out.numerical.double().cpu().numpy()
-levels = _quantile_head.quantile_levels(quantiles.shape[-1])
+if quantiles.shape[-1] != self.n_quantiles_:
+    raise RuntimeError(...)
+levels = _quantile_head.quantile_levels(self.n_quantiles_)
 return [
     distributions.QuantileDistribution(
         levels, member * handle.scale + handle.offset
@@ -205,8 +227,11 @@ return [
 ]
 ```
 
-The base class checks every member's answer against the contract (a
-`QuantileDistribution` with one row per query) and trims over all of them.
+The number of quantiles, 999 at the pinned commit, is set as `n_quantiles_`
+at `fit`, since a prediction must not change the estimator, and a network that
+answers with another number raises. The base class checks every member's
+answer against the contract (a `QuantileDistribution` with one row per query)
+and trims over all of them.
 `_predict_group` is still implemented, as the contract requires, as the
 trimmed mean of the group's own members.
 
@@ -234,8 +259,11 @@ The `kumo` extra in `pyproject.toml` lists the dependencies of
 `structured-data-models` (PyPI refuses a git URL in an extra), and joins the
 `all` extra. Those dependencies (`torch`, `pyarrow` and the Hugging Face
 packages) are common enough that their presence does not show the extra was
-asked for, so the `setup` hook installs `structured-data-models` only when the
-backend is named, `lazy setup kumo`, through `lazy.models._install.install`.
+asked for, so the backend sets `setup_needs_name = True` and its `setup`
+hook installs `structured-data-models` only when the backend is named,
+`lazy setup kumo`, through `lazy.models._install.install`. A checkout of the
+repository gets the package from the `backends` dependency group instead,
+pinned to the same commit.
 Without a name, it checks that an installed package is the pinned commit,
 which it reads from the package's install record. `_import_backend` likewise
 tells a user without `sdm` to run `lazy setup kumo` after the extra, and
@@ -291,7 +319,10 @@ conformance suite (seeds, chunking, the cache, transforms, bagging, pickling)
 then runs on Kumo with no checkpoint. The fake needs `sdm` and skips without
 it. The golden file, `tests/lazy/golden/kumo.npz`, was recorded once on a CPU
 with `tests/lazy/record_golden.py kumo`, at the small size with five members,
-the fewest from which the trimmed mean drops one at each end. The CPU
+the fewest from which the trimmed mean drops one at each end. It was
+recorded again, once, when the tails of every quantile distribution were spread
+over one quantile spacing, which moved its densities only beyond the outermost
+quantiles. The CPU
 settings, the golden tolerance and the real-weights entry of the
 shared-network test are one line each. `tests/lazy/test_kumo.py` holds what is
 particular to Kumo: the pinned recipe against upstream's, and, with the
@@ -317,6 +348,7 @@ treated as errors. On a CPU, LAZY's answer with the small size matches
 upstream's own call to about $3\times 10^{-7}$ in the units of the target on
 our test problem, which we attribute to upstream taking its trimmed mean in
 single precision and LAZY in double precision. On a GPU with mixed precision,
-the cached and uncached answers of the large size agree to about $1.3\times
-10^{-3}$ on the same problem, which is of the size we expect from float16
+the cached and uncached quantiles of the large size differ by at most
+$5\times 10^{-4}$ in the units of the target (0.7% of a row's quantile spread)
+on the 50 test rows of the golden problem, which we attribute to float16
 rounding.
