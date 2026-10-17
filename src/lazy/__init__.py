@@ -20,13 +20,14 @@ and no per-dataset retraining -- hence lazy::
     model.score(X_test, z_test)                        # negative CDE loss
 
 The API is scikit-learn's, with ``predict_proba`` returning a density on a
-grid of the target rather than class probabilities. Four backends ship --
-``tabpfn`` and ``limix`` predict bucket masses natively, ``tabicl`` quantiles,
-``tabfm`` a hierarchy of in-context classifiers -- behind one set of
-parameters, and all of them write onto whatever :class:`~lazy.grid.Grid` you
-pass, at prediction time, without refitting. The package grew out of
-photometric redshifts, and its benchmark tools (the DC1 catalogue, the HSC
-selection function, the Data Challenge metrics) are photo-z's.
+grid of the target rather than class probabilities. Five backends ship --
+``tabpfn`` and ``limix`` predict bucket masses natively, ``tabicl`` and
+``kumo`` quantiles, ``tabfm`` a hierarchy of in-context classifiers -- behind
+one set of parameters, and all of them write onto whatever
+:class:`~lazy.grid.Grid` you pass, at prediction time, without refitting. The
+package grew out of photometric redshifts, and its benchmark tools (the DC1
+catalogue, the HSC selection function, the Data Challenge metrics) are
+photo-z's.
 
 The package is laid out as follows.
 

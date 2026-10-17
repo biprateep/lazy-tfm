@@ -954,6 +954,42 @@ def test_soft_clip_is_the_upstream_models_clip():
     np.testing.assert_allclose(ours, theirs, rtol=1e-12)
 
 
+def _table(sdm, torch, features):
+    """Features as an all-numerical sdm.TableTensor."""
+    names = [f"c{i}" for i in range(features.shape[1])]
+    return sdm.TableTensor(
+        columns={sdm.Stype.numerical: names},
+        numerical=torch.tensor(features),
+    )
+
+
+def test_soft_clip_is_kumos_clip():
+    """Kumo applies its own; the uniform clip must be the same one."""
+    sdm = pytest.importorskip("sdm")
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(1)
+    context = rng.standard_t(2, size=(400, 4))
+    queries = rng.standard_t(1, size=(60, 4)) * 5
+    # Kumo has no imputation: missing values reach the clip.
+    context[::7, 1] = np.nan
+    queries[::5, 2] = np.nan
+    ours = _transforms.SoftClip(4.0).fit(context).transform(queries)
+    clip = sdm.processing.ClipSigma(threshold=4.0)
+    clip.fit(_table(sdm, torch, context))
+    theirs = clip.transform(_table(sdm, torch, queries)).numerical.numpy()
+    np.testing.assert_allclose(ours, theirs, rtol=1e-12)
+    # A column with one observed value: no spread for ours to bound it by,
+    # and ClipSigma's floor of 1e-6 standard deviations.
+    context[1:, 3] = np.nan
+    ours = _transforms.SoftClip(4.0).fit(context).transform(queries)
+    clip.fit(_table(sdm, torch, context))
+    theirs = clip.transform(_table(sdm, torch, queries)).numerical.numpy()
+    np.testing.assert_array_equal(ours[:, 3], queries[:, 3])
+    bound = clip.upper_bound.numpy()[0, 3] - context[0, 3]
+    np.testing.assert_allclose(bound, 4e-6, rtol=1e-6)
+    assert not np.allclose(theirs[:, 3], queries[:, 3])
+
+
 def test_no_query_rows_give_an_empty_answer(cls, data):
     X, z, X_test = data
     model = cls(n_estimators=3, bag_size=40).fit(X, z)

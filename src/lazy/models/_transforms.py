@@ -230,7 +230,7 @@ class ScaffoldTransform:
 
 
 class SoftClip:
-    """The soft outlier clip TabPFN, TabICL and TabFM share, for any model.
+    """The soft outlier clip the backends' models share, for any model.
 
     Fitted on context features in two passes: the bounds
     ``mean +- threshold * std`` of each column, then the same bounds
@@ -242,9 +242,16 @@ class SoftClip:
     by, in either pass (no observed value, or one in a context of several
     rows), passes through unchanged.
 
-    This is TabICL's and TabFM's ``OutlierRemover`` and TabPFN's
-    ``TorchSoftClipOutliers`` (the standard deviation with ``ddof=1``, floored
-    at 1e-6); it is what ``outlier_threshold`` means on every backend.
+    This is TabICL's and TabFM's ``OutlierRemover``, TabPFN's
+    ``TorchSoftClipOutliers`` and Kumo Tabular's ``ClipSigma`` (the standard
+    deviation with ``ddof=1``, floored at 1e-6); it is what
+    ``outlier_threshold`` means on every backend. They differ only on a
+    column this clip passes through for want of a standard deviation:
+    ``ClipSigma`` bounds it within ``threshold * 1e-6`` of its one observed
+    value, or of 0 when it has none. TabICL and TabFM impute before they
+    clip, so no such column reaches their clip; Kumo drops a column with no
+    observed context value before its clip, but one with a single observed
+    value reaches it.
 
     Attributes:
         threshold: The bound, in standard deviations.

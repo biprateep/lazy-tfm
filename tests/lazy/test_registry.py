@@ -25,6 +25,22 @@ def test_registered_names():
 
 
 @pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
+def test_the_package_docstrings_name_every_backend(name):
+    cls = lazy.ESTIMATORS[name]
+    package = " ".join(lazy.__doc__.split())
+    entry = " ".join(lazy.models.lazy_model.__doc__.split())
+    model = " ".join(lazy.LazyModel.__doc__.split())
+    assert f"``{name}``" in package
+    assert f'LazyModel("{name}"' in entry
+    assert f"{cls.__module__}.{cls.__name__}" in entry
+    assert f"{cls.__module__}.{cls.__name__}" in model
+    for version in cls.cpu_friendly_versions:
+        assert f'``"{name}"`` at ``version="{version}"``' in model
+    if cls.cpu_friendly:
+        assert f'CPU-friendly (``"{name}"``)' in model
+
+
+@pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_get_estimator_builds_a_photoz_estimator(name):
     est = lazy.get_estimator(name)
     assert isinstance(est, lazy.BaseDensityRegressor)

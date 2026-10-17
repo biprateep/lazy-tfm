@@ -10,6 +10,7 @@ switching between them is a string change rather than an import change::
     model = LazyModel("tabicl", n_estimators=8)
     model = LazyModel("tabpfn", n_estimators=8)
     model = LazyModel("limix", n_estimators=8)
+    model = LazyModel("kumo", n_estimators=8)
 
     model.fit(X_train, z_train)
     pdfs = model.predict_proba(X_test, y_grid)
@@ -18,7 +19,8 @@ switching between them is a string change rather than an import change::
 The concrete classes (:class:`lazy.models.tabfm.TabFMHistogram`,
 :class:`lazy.models.tabicl.TabICLQuantile`,
 :class:`lazy.models.tabpfn.TabPFNBarDistribution`,
-:class:`lazy.models.limix.LimiXBarDistribution`) remain importable and behave
+:class:`lazy.models.limix.LimiXBarDistribution`,
+:class:`lazy.models.kumo.KumoQuantile`) remain importable and behave
 identically -- a fitted ``LazyModel`` holds one as ``estimator_`` and delegates
 to it. Use the concrete class when you want its parameters documented at your
 fingertips; use ``LazyModel`` when the backend is a configuration value, which
@@ -63,11 +65,13 @@ class LazyModel(base.BaseDensityRegressor):
             by default ``"tabpfn"`` (at its default version, TabPFN-3.5).
             Most backends want a GPU: on a machine where PyTorch sees none,
             ``device="auto"`` falls back to the CPU and ``fit`` warns unless
-            the backend is CPU-friendly (``"tabicl"``).
+            the backend is CPU-friendly (``"tabicl"``) or runs a CPU-friendly
+            version (``"kumo"`` at ``version="v1-small"``, ``"tabpfn"`` at
+            ``version="v3.5-fast"``).
             ``"tabfm"`` builds the density from a hierarchy of in-context
-            classifiers, ``"tabicl"`` from a quantile regression head,
-            ``"tabpfn"`` and ``"limix"`` from the bucket masses TabPFN and
-            LimiX-2 predict natively.
+            classifiers, ``"tabicl"`` and ``"kumo"`` from a quantile
+            regression head, ``"tabpfn"`` and ``"limix"`` from the bucket
+            masses TabPFN and LimiX-2 predict natively.
         y_grid: Default output grid for this model: a
             :class:`lazy.grid.Grid`, an array of bin centres, or ``None``
             for the backend's native grid (its ``native_grid_`` after fit).
@@ -76,9 +80,10 @@ class LazyModel(base.BaseDensityRegressor):
         **params: Passed straight to the backend's constructor. See
             :class:`lazy.models.tabfm.TabFMHistogram`,
             :class:`lazy.models.tabicl.TabICLQuantile`,
-            :class:`lazy.models.tabpfn.TabPFNBarDistribution` and
-            :class:`lazy.models.limix.LimiXBarDistribution` for what each
-            accepts; a name the backend does not take raises ``TypeError`` at
+            :class:`lazy.models.tabpfn.TabPFNBarDistribution`,
+            :class:`lazy.models.limix.LimiXBarDistribution` and
+            :class:`lazy.models.kumo.KumoQuantile` for what each accepts; a
+            name the backend does not take raises ``TypeError`` at
             :meth:`fit`, naming the class.
 
     Attributes:
