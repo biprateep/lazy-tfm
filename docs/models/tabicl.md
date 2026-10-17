@@ -42,7 +42,8 @@ LAZY's.
 ## Built-in standardizations
 
 TabICL z-scores the target with the mean and standard deviation of the context
-and maps the predicted quantiles back to the original units. The features go
+(a constant target is left unscaled) and maps the predicted quantiles back to
+the original units. The features go
 through a fixed pipeline before the network: missing values are imputed with
 the column mean, constant columns are dropped, every column is z-scored on the
 context and clipped at 100 standard deviations, then each member applies its
@@ -61,8 +62,10 @@ model rather than TabICL's 42, and we treat every column as numeric. LAZY also
 caches the context's keys and values and uses mixed precision on every GPU
 run rather than only for large tables, both of which change the predictions
 only by rounding. The distribution itself is the piecewise-linear cumulative
-distribution through the 999 quantiles, so the 0.1% of probability beyond each
-outermost quantile is placed at it, rather than in the exponential tails
-TabICL uses for its own sampling. Its native grid is 1,500 equal bins over the
+distribution through the 999 quantiles, with the 0.1% of probability beyond
+each outermost quantile spread evenly over one quantile spacing past it,
+rather than in the exponential tails TabICL uses for its own sampling. This
+keeps a fine grid free of a spike at the outermost quantile, and where the two
+outermost quantiles coincide, the nearest spacing that is not zero is used. Its native grid is 1,500 equal bins over the
 range of the context targets, padded by 25% on each side. Under an explicit
 `transforms`, the soft clip is off unless `outlier_threshold` is given.
