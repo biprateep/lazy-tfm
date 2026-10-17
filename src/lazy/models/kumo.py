@@ -20,18 +20,23 @@ four transforms, ``feature_shuffle`` is its Latin-square column shuffle,
 ``outlier_threshold`` its two-pass soft clip, ``kv_cache`` its fitted context
 cache and ``mixed_precision`` the float16 autocast NVIDIA runs it in. Of the
 uniform transforms only ``none`` is upstream's own; lazy applies the others.
-The members' quantiles combine as upstream combines them, by a mean that
-drops the highest and lowest fifth at every level, taken here over every
-member of the ensemble (``member_combination="quantile_trimmed_average"``),
-so that bagged members, which run one at a time, combine the same way.
+Under ``"auto"`` the members' quantiles combine as upstream combines them,
+by a mean that drops the highest and lowest fifth at every level, taken here
+over every member of the ensemble
+(``member_combination="quantile_trimmed_average"``), so that bagged members,
+which run one at a time, combine the same way. The trim belongs to the recipe
+as the clip does, so under an explicit ``transforms`` it is dropped with it,
+and the quantiles are a plain mean over every member.
 
 What upstream always does to the features, under any ``transforms``: columns
 constant in the context are dropped, every column is z-scored on the context
 and clipped at 100 standard deviations, each member flips the sign of a
 random half of the columns, and at most 500 columns are kept. The target is
 z-scored and its sign flipped at random per member, and the answers are
-mapped back. Kumo has no imputation step: missing values reach the network,
-which embeds them itself.
+mapped back. The random sign flips of the columns and of the target are part
+of how the network is run rather than of the recipe, so they stay under an
+explicit ``transforms``. Kumo has no imputation step: missing values reach
+the network, which embeds them itself.
 """
 
 from __future__ import annotations
@@ -61,6 +66,7 @@ from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _quantile_head
+from lazy.models import _transforms
 from lazy.models import _weights
 
 __all__ = [
@@ -112,7 +118,8 @@ AUTO_FEAT_SHUFFLE_METHOD = "latin"
 #: The two-pass soft outlier clip of the recipe, in standard deviations.
 AUTO_OUTLIER_THRESHOLD = 4.0
 
-#: The fraction of members dropped from each tail of every quantile.
+#: The fraction of members dropped from each tail of every quantile; an
+#: explicit ``transforms`` drops none.
 AUTO_TRIM_FRACTION = 0.2
 
 #: The rest of the recipe, and how upstream is run, pinned. ``max_columns``,
@@ -160,7 +167,10 @@ class KumoQuantile(
             a transform name or a sequence of them; see
             :mod:`lazy.models._transforms`. Only ``none`` is Kumo's own; lazy
             applies every other name, and Kumo then runs with no transform of
-            its own.
+            its own. An explicit ``transforms`` also drops the recipe's 20%
+            trim, so the members' quantiles are a plain mean; the random sign
+            flips of the columns and of the target stay under any
+            ``transforms``.
         feature_shuffle: Whether members see the columns in different orders
             (upstream's Latin-square shuffle). A bagged member, which runs on
             its own, has its columns permuted by lazy instead.
@@ -214,6 +224,9 @@ class KumoQuantile(
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         handles_: Per member group, its fitted context.
+        trim_fraction_: The fraction of members dropped from each tail of
+            every quantile: 0.2 under ``transforms="auto"``, 0 under an
+            explicit ``transforms``.
         n_quantiles_: How many quantiles the backbone returned.
         n_context_: Context rows ``fit`` was given.
 
@@ -374,8 +387,17 @@ class KumoQuantile(
     def _auto_outlier_threshold(self) -> float:
         return AUTO_OUTLIER_THRESHOLD
 
+    def _check_backend_params(self) -> None:
+        # The trim is part of Kumo's recipe, so it follows transforms as
+        # outlier_threshold="auto" does: an explicit recipe drops it.
+        self.trim_fraction_ = (
+            float(self._pinned_recipe(self.version)["trim_fraction"])
+            if _transforms.parse(self.transforms) is None
+            else 0.0
+        )
+
     def _member_trim_fraction(self) -> float:
-        return float(self._pinned_recipe(self.version)["trim_fraction"])
+        return self.trim_fraction_
 
     def _fit_group(
         self,

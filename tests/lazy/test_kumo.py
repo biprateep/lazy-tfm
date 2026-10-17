@@ -214,6 +214,27 @@ def test_the_trim_follows_the_versions_recipe(monkeypatch, data):
     assert model.provenance_["kumo"]["trim_fraction"] == 0.4
 
 
+@pytest.mark.parametrize(
+    ("transforms", "trim"), [("auto", kumo.AUTO_TRIM_FRACTION), ("none", 0.0)]
+)
+def test_an_explicit_recipe_drops_the_trim(monkeypatch, data, transforms, trim):
+    """The trim is the recipe's, so an explicit one takes a plain mean."""
+    X, y, X_test = data
+    model = fakes.Backend("kumo", monkeypatch)(
+        n_estimators=5, transforms=transforms
+    ).fit(X, y)
+    (handle,) = model.handles_
+    members = model._predict_members(handle, X_test)
+    expected = lazy.distributions.QuantileDistribution.trimmed_average(
+        members, trim
+    ).locs
+    np.testing.assert_array_equal(
+        model.predict_distribution(X_test).locs, expected
+    )
+    assert model.trim_fraction_ == trim
+    assert model.provenance_["kumo"]["trim_fraction"] == trim
+
+
 @needs_checkpoint
 def test_the_default_path_is_upstreams_on_a_cpu():
     """The trim is lazy's, in float64; upstream's runs in float32."""
