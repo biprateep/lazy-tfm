@@ -190,7 +190,9 @@ class KumoQuantile(
             quarter of that range on each side). Tabulating a row that puts
             more than 1% of its probability outside the native grid warns.
         device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``, or a ``torch.device``.
+            ``"cpu"``, or a ``torch.device``. Apple's MPS is not supported,
+            since the recipe works in float64, which MPS lacks: a fit on it
+            raises ValueError before the checkpoint loads.
         random_state: Seed for the ensemble. A group of members runs on a
             ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
@@ -398,6 +400,17 @@ class KumoQuantile(
 
     def _member_trim_fraction(self) -> float:
         return self.trim_fraction_
+
+    def _load_checkpoint(self) -> None:
+        # The recipe casts to float64 and the context goes to the device in
+        # float64, which MPS cannot hold; better said before any download.
+        if self.device_ == "mps":
+            raise ValueError(
+                f"{self.display_name} does not run on device='mps': its "
+                "preprocessing works in float64, which MPS does not "
+                "support. Use device='cpu' or a CUDA device."
+            )
+        super()._load_checkpoint()
 
     def _fit_group(
         self,

@@ -22,6 +22,7 @@ import pytest
 
 import lazy
 from lazy.models import _device
+from lazy.models import _hub
 from lazy.models import kumo
 
 needs_checkpoint = pytest.mark.skipif(
@@ -145,6 +146,21 @@ def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
         "float16" if restored.mixed_precision_ else None
     )
     assert model.provenance_["kumo"]["autocast"] == "float16"
+
+
+def _no_download(checkpoint, **kwargs):
+    del checkpoint, kwargs  # Unused.
+    raise AssertionError("the checkpoint was fetched")
+
+
+def test_mps_is_refused_before_the_checkpoint_loads(monkeypatch, data):
+    """The recipe works in float64, which MPS lacks."""
+    X, y, _ = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
+    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
+    with pytest.raises(ValueError, match="Kumo Tabular does not run on"):
+        backend(device="mps").fit(X, y)
 
 
 def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):
