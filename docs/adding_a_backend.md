@@ -76,8 +76,9 @@ pickle does not carry gigabytes of weights (TabFM and LimiX do this). The base
 class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
-and raises a clear error on a device its model does not support. No current
-backend is tested on `"mps"`.
+and raises a clear error on a device its model does not support, before the
+checkpoint is loaded (Kumo Tabular refuses `"mps"`, which has no double
+precision). No current backend is tested on `"mps"`.
 
 ## Hooks for the rest of the package
 
@@ -86,7 +87,11 @@ the contract above from the rest of the package, it overrides a hook that the
 package calls on every registered class, and each hook does nothing by
 default. The class attribute `cpu_note` is a clause that the warning about
 running on a CPU appends after "runs slowly on CPU" (TabPFN's says how many
-context rows it accepts there). The classmethod `prefetch` fetches what the
+context rows it accepts there), and `context_limit_note` says what is known
+of the model's context limit, `recommended_max_context`, in the warning about
+a larger context (LimiX-2 degrades beyond it, while Kumo Tabular was only
+pretrained up to it); without one, the warning says the model degrades. The
+classmethod `prefetch` fetches what the
 model needs beside its weights, and {func}`~lazy.models.download_checkpoint` and
 {func}`~lazy.models.is_cached` call it, so that a job on a cluster can find
 everything in the cache (LimiX downloads its source, which is not on PyPI).
@@ -98,7 +103,9 @@ command line: it prints a line saying what it did, skips a backend whose extra
 is not installed, and returns whether the backend is complete (TabFM installs
 its repository build, and LimiX downloads its source). A backend whose extra
 lists only packages common enough not to show it was asked for (Kumo Tabular's)
-acts only when it is named, which the hook is told by `requested=True`.
+sets `setup_needs_name = True` and acts only when it is named, which the hook
+is told by `requested=True`, and `lazy setup --help` lists such backends from
+that attribute.
 
 ## A skeleton
 
@@ -262,10 +269,12 @@ answers depend on each query and its member's context alone, so that the
 behavioral conformance tests in `tests/lazy/test_conformance.py` (seeds,
 chunking, the cache, transforms, bagging, pickling) run the backend's own code
 in the default suite, on a CPU and in seconds; `tests/lazy/fakes/__init__.py`
-describes what a fake provides, and the four existing ones are the models to
+describes what a fake provides, and the five existing ones are the models to
 follow. A fake that needs the upstream package skips without it.
 
-The golden file is recorded once, on a CPU, and never regenerated afterwards:
-it is the guard on the published numbers. The tests that load a checkpoint run
+The golden file is recorded once, on a CPU, and regenerated only for a change
+that is meant to move the densities and that the maintainers have approved (as
+when the tails of the quantile models were spread over one quantile spacing),
+since it is the guard on the published numbers. The tests that load a checkpoint run
 only with `LAZY_RUN_CHECKPOINT_TESTS=1`, so a new backend is finished when
 both the default suite and that run pass.
