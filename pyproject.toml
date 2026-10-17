@@ -23,6 +23,7 @@ dependencies = [
     "pz-rail-flexzboost>=2.0.3",
     "pz-rail-gpz-v1>=2.0.3",
     "optuna>=5.0.0",
+    "threadpoolctl>=3.7.0",
 ]
 
 [dependency-groups]
