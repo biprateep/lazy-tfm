@@ -8,10 +8,13 @@ code and upstream's preprocessing, ensembling and context cache all run as
 they do on the real model. It needs the sdm package, so it skips without it.
 """
 
+import pathlib
+
 import numpy as np
 import pytest
 
 import fakes
+from lazy.models import _hub
 from lazy.models import kumo
 
 #: Small enough for the behavioral suite; v1-small, the CPU-friendly size.
@@ -80,10 +83,19 @@ def _network_class(sdm, torch):
             if x_query is None:
                 return None  # A fit records its context and answers nothing.
             queries = x_query.numerical
+            # Missing values reach the network, which ignores them here.
             centre = context.nanmean(dim=(-2, -1), keepdim=True)
-            spread = context.std(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
+            spread = (
+                (context - centre)
+                .square()
+                .nanmean(dim=(-2, -1), keepdim=True)
+                .sqrt()
+                .clamp(min=1e-6)
+            )
             signal = torch.tanh(
-                (queries.nanmean(-1, keepdim=True) - centre) / spread
+                torch.nan_to_num(
+                    (queries.nanmean(-1, keepdim=True) - centre) / spread
+                )
             )
             out = signal + torch.as_tensor(SPREAD, dtype=queries.dtype)
             return sdm.TableTensor(
@@ -113,7 +125,12 @@ def install(monkeypatch, recorder):
     monkeypatch.setattr(network, "recorder", recorder)
 
     def load(sdm, path, size, device):
-        del sdm, path, size  # Unused: nothing is read.
+        """Loads from ``path``, which must be where the hub puts it now."""
+        del sdm  # Unused: nothing is read.
+        version = {size: version for version, size in kumo.SIZES.items()}
+        found = _hub.get_checkpoint("kumo", version[size]).download()
+        if pathlib.Path(path) != found:
+            raise FileNotFoundError(f"no checkpoint at {path}")
         recorder.loads.append(device)
         return network().to(device).eval()
 

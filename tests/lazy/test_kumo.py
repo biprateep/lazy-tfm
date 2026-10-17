@@ -9,6 +9,7 @@ with upstream's own default path.
 """
 
 import os
+import pathlib
 import pickle
 import re
 import sys
@@ -222,6 +223,127 @@ def test_the_context_warning_says_kumo_was_pretrained_to_the_limit(
     message = str(record[0].message)
     assert "Kumo Tabular was pretrained on tables of up to 50 rows" in message
     assert "degrades" not in message
+
+
+@pytest.mark.parametrize("kv_cache", [True, False])
+def test_threads_fitting_and_predicting_on_one_network_agree(
+    monkeypatch, data, kv_cache
+):
+    """Each thread's answers are those its model gives on its own."""
+    X, y, X_test = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    targets = [y, -y, 2 * y, y**2]
+    expected = [
+        backend(kv_cache=kv_cache).fit(X, t).predict_distribution(X_test).locs
+        for t in targets
+    ]
+    answers = [None] * len(targets)
+    errors = []
+    start = threading.Barrier(len(targets))
+
+    def run(i):
+        try:
+            model = backend(kv_cache=kv_cache)
+            start.wait()
+            model.fit(X, targets[i])
+            answers[i] = model.predict_distribution(X_test).locs
+        except BaseException as error:  # noqa: BLE001 - reported below.
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=run, args=(i,)) for i in range(len(targets))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    for answer, reference in zip(answers, expected, strict=True):
+        np.testing.assert_array_equal(answer, reference)
+
+
+@pytest.mark.parametrize("kv_cache", [True, False])
+def test_the_shared_network_holds_no_context_after_use(
+    monkeypatch, data, kv_cache
+):
+    X, y, X_test = data
+    model = fakes.Backend("kumo", monkeypatch)(kv_cache=kv_cache).fit(X, y)
+    network = model._network()
+    assert network._cache is None
+    model.predict_distribution(X_test)
+    assert network._cache is None
+
+
+def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
+    X, y, X_test = data
+    recorder = fakes.Recorder()
+    cls = fakes.install("kumo", monkeypatch, recorder)
+    settings = {
+        **fakes.settings("kumo"),
+        "n_estimators": 4,
+        "bag_size": 40,
+        "device": "cpu",
+        "progress": False,
+    }
+    model = cls(**settings).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    blob = pickle.dumps(model)
+    elsewhere = pathlib.Path("/nonexistent/elsewhere")
+
+    def moved(checkpoint, *, local_files_only=False):
+        del local_files_only  # Unused: nothing is fetched.
+        return elsewhere / checkpoint.filename
+
+    monkeypatch.setattr(_hub.Checkpoint, "download", moved)
+    loads = len(recorder.loads)
+    restored = pickle.loads(blob)
+    np.testing.assert_array_equal(
+        restored.predict_distribution(X_test).locs, expected
+    )
+    assert restored.checkpoint_.parent.parent == elsewhere
+    # One network for every group of the bagged model.
+    assert len(recorder.loads) == loads + 1
+
+
+def test_the_trim_spans_every_bagged_member(monkeypatch, data):
+    """Bagged members run one group each; the trim is over all of them."""
+    X, y, X_test = data
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=6, bag_size=30)
+    model.fit(X, y)
+    assert len(model.handles_) == 6
+    members = []
+    for group, handle, transformer, clipper in zip(
+        model.member_groups_,
+        model.handles_,
+        model.transformers_,
+        model.clippers_,
+        strict=True,
+    ):
+        queries = model._prepare(X_test, group, transformer, clipper)
+        members.extend(model._predict_members(handle, queries))
+    np.testing.assert_array_equal(
+        model.predict_distribution(X_test).locs,
+        lazy.distributions.QuantileDistribution.trimmed_average(
+            members, kumo.AUTO_TRIM_FRACTION
+        ).locs,
+    )
+    # Six members trimmed by a fifth drop one from each tail; a trim per
+    # group would drop none.
+    mean = lazy.distributions.QuantileDistribution.trimmed_average(members, 0)
+    assert not np.allclose(model.predict_distribution(X_test).locs, mean.locs)
+
+
+# The recorder names a context row by its smallest value, which is NaN here.
+@pytest.mark.filterwarnings("ignore:invalid value encountered in cast")
+def test_missing_values_reach_the_network_and_give_finite_quantiles(
+    monkeypatch, data
+):
+    X, y, X_test = data
+    X, X_test = X.copy(), X_test.copy()
+    X[::4, 1] = np.nan
+    X_test[::3, 2] = np.nan
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=4).fit(X, y)
+    assert np.isfinite(model.predict_distribution(X_test).locs).all()
 
 
 def test_a_missing_sdm_names_lazy_setup(monkeypatch):
