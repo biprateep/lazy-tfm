@@ -84,12 +84,21 @@ def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
 def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
     """The (offset, scale) that standardize the targets: mean and std.
 
+    A target whose values are all equal is constant, with the constant as
+    its offset and a scale of 1, as in LimiX and upstream TabICL. Its std
+    would decide otherwise by float rounding: ``np.std(np.full(100, 0.1))``
+    is 2.8e-17, which would shrink the answer to a point, while that of
+    ``np.full(100, 0.3)`` is exactly 0.
+
     Args:
         targets: The context targets, shape ``(n,)``.
 
     Returns:
-        A tuple ``(offset, scale)``; the scale is 1 for a constant target.
+        A tuple ``(offset, scale)``.
     """
+    low, high = float(np.min(targets)), float(np.max(targets))
+    if low == high:
+        return low, 1.0
     scale = float(np.std(targets))
     return float(np.mean(targets)), scale if scale > 0 else 1.0
 
