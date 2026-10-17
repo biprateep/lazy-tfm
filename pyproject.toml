@@ -22,6 +22,7 @@ dependencies = [
     "pz-rail-cmnn>=2.0.2",
     "pz-rail-flexzboost>=2.0.3",
     "pz-rail-gpz-v1>=2.0.3",
+    "optuna>=5.0.0",
 ]
 
 [dependency-groups]
