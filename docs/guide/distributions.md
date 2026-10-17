@@ -26,11 +26,11 @@ returns:
 ## Each model's native output
 
 TabPFN and LimiX-2 predict the probability of each of several thousand
-buckets, TabICL predicts 999 quantiles, and TabFM predicts the probability of
-equal-mass bins, averaged over shifted copies of them. LAZY keeps each of these
+buckets, TabICL and Kumo Tabular predict 999 quantiles, and TabFM predicts the
+probability of equal-mass bins, averaged over shifted copies of them. LAZY keeps each of these
 as one of three kinds of distribution: {class}`~lazy.distributions.HistogramDistribution` (bucket
 masses, for TabPFN and LimiX), {class}`~lazy.distributions.QuantileDistribution`
-(for TabICL) and {class}`~lazy.distributions.MixtureDistribution` (histograms
+(for TabICL and Kumo Tabular) and {class}`~lazy.distributions.MixtureDistribution` (histograms
 on different buckets, as from bagging or TabFM's shifted bins). Every
 operation is exact on the piecewise-linear CDF that the model implies.
 
@@ -93,6 +93,7 @@ grid of each backend:
 | `limix`  | LimiX-2's 5,000 buckets, mapped with the context's mean and spread. |
 | `tabicl` | 1,500 equal bins over the context targets, padded by 25% each side. |
 | `tabfm`  | The union of every shifted copy's bin edges.                        |
+| `kumo`   | 1,500 equal bins over the context targets, padded by 25% each side. |
 
 The native bucket grids reach far into both tails, including below zero.
 Passing a grid restricts the range, and `"native"` asks for the native grid

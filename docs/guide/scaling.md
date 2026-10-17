@@ -138,5 +138,7 @@ Most of the models need a GPU to be practical. TabPFN refuses CPU contexts
 above 1,000 rows (v2 to v2.6) or 5,000 rows (v3 and later) unless
 `ignore_pretraining_limits=True` or a `bag_size` keeps every bag below that
 size, and `lazy` warns at `fit` when it finds no GPU for TabPFN-3.5. TabICLv2
-is nearly as fast on a CPU as on a GPU, and LimiX-2 and TabFM need a GPU.
+is nearly as fast on a CPU as on a GPU, and Kumo Tabular Small
+(`version="v1-small"`, 28 M parameters) is small enough for a CPU, while
+LimiX-2, TabFM and Kumo Tabular's Medium and Large need a GPU.
 {doc}`choosing` describes which model to use on each.

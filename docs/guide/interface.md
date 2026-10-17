@@ -61,16 +61,16 @@ the cost of a prediction.
 The table below shows how each model provides these parameters;
 "scaffolded" means that LAZY builds the feature itself.
 
-| Parameter             | TabPFN                                   | LimiX-2                                   | TabICL                                | TabFM                                     |
-| --------------------- | ---------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------- |
-| `kv_cache`            | its fit-time cache, at full precision    | ported                                    | its key/value cache                   | its streaming prefill/decode              |
-| `feature_shuffle`     | `FEATURE_SHIFT_METHOD="shuffle"`         | its column shuffler                       | Latin-square shuffles                 | `feat_shuffle_method="random"`            |
-| `transforms`          | `none` native, the rest scaffolded       | `none`, `quantile_uniform` native         | `none` native, the rest scaffolded    | `none`, `power` native                    |
-| `bag_size`            | scaffolded: one regressor per bag        | scaffolded: one member per bag            | scaffolded: one regressor per bag     | its members, given `lazy`'s bags          |
-| `softmax_temperature` | its own; `"auto"` 0.9, v3.5 and fast 1.0 | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     |
-| `mixed_precision`     | float16 autocast                         | float16 autocast                          | `use_amp=True`                        | bfloat16 weights                          |
-| `outlier_threshold`   | `OUTLIER_REMOVAL_STD`                    | scaffolded (`lazy`'s clip)                | its `outlier_threshold`               | its `outlier_threshold`                   |
-| members combined      | averaged buckets / mixture               | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed |
+| Parameter             | TabPFN                                   | LimiX-2                                   | TabICL                                | TabFM                                     | Kumo Tabular                       |
+| --------------------- | ---------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------- | ---------------------------------- |
+| `kv_cache`            | its fit-time cache, at full precision    | ported                                    | its key/value cache                   | its streaming prefill/decode              | its fitted context cache           |
+| `feature_shuffle`     | `FEATURE_SHIFT_METHOD="shuffle"`         | its column shuffler                       | Latin-square shuffles                 | `feat_shuffle_method="random"`            | Latin-square shuffles              |
+| `transforms`          | `none` native, the rest scaffolded       | `none`, `quantile_uniform` native         | `none` native, the rest scaffolded    | `none`, `power` native                    | `none` native, the rest scaffolded |
+| `bag_size`            | scaffolded: one regressor per bag        | scaffolded: one member per bag            | scaffolded: one regressor per bag     | its members, given `lazy`'s bags          | scaffolded: one member per bag     |
+| `softmax_temperature` | its own; `"auto"` 0.9, v3.5 and fast 1.0 | its own; `"auto"` 0.9                     | no softmax: only `"auto"`             | its own; `"auto"` 0.9                     | no softmax: only `"auto"`          |
+| `mixed_precision`     | float16 autocast                         | float16 autocast                          | `use_amp=True`                        | bfloat16 weights                          | float16 autocast                   |
+| `outlier_threshold`   | `OUTLIER_REMOVAL_STD`                    | scaffolded (`lazy`'s clip)                | its `outlier_threshold`               | its `outlier_threshold`                   | its two-pass soft clip             |
+| members combined      | averaged buckets / mixture               | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed | 20% trimmed mean of quantiles      |
 
 This contract is enforced: {func}`lazy.models.registry.register` refuses a
 backend that lacks any of these parameters or their shared defaults, and the
@@ -100,8 +100,8 @@ sees the rows of its bag that fall in that bin.
 
 Everything a member fits on the context is fitted on its own bag: a scaffolded
 transform, the outlier clip and the standardization of the target, along with
-each model's own preprocessing. TabICL and LimiX-2 run each bagged member as a
-model of its own, and so does TabPFN, because its own row subsampling would
+each model's own preprocessing. TabICL, LimiX-2 and Kumo Tabular run each
+bagged member as a model of its own, and so does TabPFN, because its own row subsampling would
 standardize the target and place the buckets using the whole context. TabFM
 keeps the members of its own transforms (`none` and `power`) in one
 classifier, where they keep their column orders, class shifts and averaged
@@ -114,7 +114,10 @@ one, so we recommend passing `y_grid` for a large query set. Two things are
 taken from the whole context rather than from a bag: TabFM's equal-mass bins
 and their number, so that its members answer over the same classes (a
 constructor grid whose bins TabFM takes gives every member those bins), and
-the range of TabICL's native grid, which spans every context target. Each
+the range of the native grids of TabICL and Kumo Tabular, which span every
+context target. Kumo Tabular's trimmed mean is also taken over every member of
+the ensemble, so that a bagged ensemble is combined in the same way as one
+whose members share the context. Each
 member is also seeded on its own (see {doc}`reproducibility`).
 
 ## Transforms
@@ -141,14 +144,19 @@ LAZY for every version rather than read from the installed package, so
 upgrading TabPFN or TabICL cannot change what it runs. It includes each
 model's extras: TabPFN's fingerprint feature, SVD components, target
 transforms, polynomial features (v2.6) and 12-sigma clip (v3.5); TabICL's and
-TabFM's 4-sigma clip; and LimiX-2's eight pipelines, half of them
-quantile-uniform with the originals and SVD components and half power.
+TabFM's 4-sigma clip; LimiX-2's eight pipelines, half of them
+quantile-uniform with the originals and SVD components and half power; and
+Kumo Tabular's four transforms in turn (none, a power transform, a robust
+scaling with a soft clip at 3, and a Gaussian rank transform), its 4-sigma clip
+and its trimmed mean, which drops the highest and lowest 20% of the members at
+every quantile level.
 
-Any explicit value is all the model sees. Those extras are turned off, and
+Any explicit value is all the model sees. Those extras are turned off (on
+Kumo Tabular, the members' quantiles are then averaged without the trim), and
 outlier clipping runs only if `outlier_threshold` asks for it, which leaves
 each model's unavoidable input handling, listed in the table below. Since
-TabICL and TabFM z-score whatever they are given, an affine transform such as
-`robust` changes nothing on them.
+TabICL, TabFM and Kumo Tabular z-score whatever they are given, an affine
+transform such as `robust` changes nothing on them.
 
 | Model   | Runs whatever the recipe                                                                                  |
 | ------- | --------------------------------------------------------------------------------------------------------- |
@@ -156,6 +164,7 @@ TabICL and TabFM z-score whatever they are given, an affine transform such as
 | LimiX-2 | drops constant and all-missing columns; fills missing values and standardizes inside the network; standardizes the target for its buckets |
 | TabICL  | fills missing values with the context mean; drops constant columns; z-scores, clipped at ±100; standardizes the target |
 | TabFM   | fills missing values with the context mean; drops constant columns; z-scores, clipped at ±100              |
+| Kumo Tabular | passes missing values to the network, which embeds them; drops constant columns; z-scores, clipped at ±100; flips the sign of a random half of the columns and of the target for each member; keeps at most 500 columns; standardizes the target |
 
 `"limix"` is LimiX-2's two pipelines written in the shared vocabulary,
 `("quantile_uniform+original", "power")`, and it can be used on any model. It
@@ -165,12 +174,13 @@ of LimiX-2's own quantile pipeline, so on LimiX-2 it differs from `"auto"`.
 ## Outlier clipping
 
 `outlier_threshold` controls one clip, the two-pass soft clip that TabPFN,
-TabICL and TabFM share. The bounds are placed at the mean plus and minus that
+TabICL, TabFM and Kumo Tabular share. The bounds are placed at the mean plus and minus that
 many standard deviations of the context, and then recomputed without the
 values beyond the first bounds. A value past a bound is pulled back to the
 bound plus the logarithm of its magnitude, so extreme values keep their order
 but lose their leverage. Under `transforms="auto"`, `"auto"` is the model's
-own clip (4 on TabICL and TabFM, 12 on TabPFN-3.5, none on the others), and
+own clip (4 on TabICL, TabFM and Kumo Tabular, 12 on TabPFN-3.5, none on the
+others), and
 under an explicit recipe it means no clip. A number clips at that many
 standard deviations on every model (LimiX-2 has no clip of its own, so LAZY
 applies it there), and `None` turns clipping off everywhere.
@@ -187,8 +197,9 @@ the reverse, is used by position with a warning.
 
 Missing values are marked with `NaN`; the masked entries of an astropy
 table or masked array also become `NaN`. Each model handles them in its own
-way: TabPFN and LimiX add missing-value indicators, while TabICL and TabFM
-impute them inside their preprocessing. Infinities and non-numeric columns are
+way: TabPFN and LimiX add missing-value indicators, TabICL and TabFM impute
+them inside their preprocessing, and Kumo Tabular passes them to its network,
+which embeds them itself. Infinities and non-numeric columns are
 rejected, and the target values must be finite. Therefore, a categorical
 column has to be encoded as numbers before it is passed (see {doc}`limits`).
 

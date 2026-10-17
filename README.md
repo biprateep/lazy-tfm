@@ -194,8 +194,8 @@ TabICL v2: 100%|██████████| 20000/20000 [00:10<00:00, 1968.8
 TabFM v1.0 (20,000 rows): 100%|██████████| 33/33 [08:47<00:00, 16.00s/stage, context=34, dither=3/3, level=fine 10/10]
 ```
 
-TabPFN, LimiX and TabICL answer in chunks of query rows, so their bars count
-rows. TabFM is a hierarchy of in-context classifications, each over every
+TabPFN, LimiX, TabICL and Kumo Tabular answer in chunks of query rows, so
+their bars count rows. TabFM is a hierarchy of in-context classifications, each over every
 query row, so its bar counts *stages* (`n_dither × (1 + n_coarse_bins)` of
 them) and shows which dither and level is running on how many context rows.
 

@@ -34,3 +34,7 @@ and also stops the source from being downloaded. The checkpoint that a model
 loads is exactly the one {func}`~lazy.models.download_checkpoint` fetches,
 because the pinned revision is passed to the backend rather than left to its
 own default. Therefore, warming the cache cannot prefetch the wrong file.
+
+For Kumo Tabular, `download_checkpoint("kumo")` fetches only the weights:
+NVIDIA's `structured-data-models` package has to be installed with
+`lazy setup kumo` on a node with a network, like any other package.

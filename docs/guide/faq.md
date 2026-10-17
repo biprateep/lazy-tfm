@@ -2,19 +2,21 @@
 
 ## Do I need a GPU?
 
-Most of the models need a GPU to be practical, and LimiX-2 and TabFM need one.
-Without a GPU, we recommend TabICLv2, which is small, BSD-licensed and nearly
-as fast on a CPU as on a GPU, or TabPFN-3.5-fast with a context of at most
-5,000 rows. {doc}`choosing` and {doc}`scaling` give the details.
+Most of the models need a GPU to be practical, and LimiX-2, TabFM and the
+medium and large sizes of Kumo Tabular need one. Without a GPU, we recommend
+TabICLv2, which is small, BSD-licensed and nearly as fast on a CPU as on a GPU,
+TabPFN-3.5-fast with a context of at most 5,000 rows, or Kumo Tabular's small
+size (`version="v1-small"`), whose weights also permit commercial use. {doc}`choosing` and {doc}`scaling` give the details.
 
 ## What does fit do?
 
-`fit` trains no weights. On TabPFN, TabICL and LimiX-2 it fits each member's
-preprocessing on the context and, with the key/value cache on (`kv_cache=True`,
-the default), also runs the context through the network and stores the result,
+`fit` trains no weights. On TabPFN, TabICL, LimiX-2 and Kumo Tabular it fits
+each member's preprocessing on the context and, with the key/value cache on
+(`kv_cache=True`, the default), also runs the context through the network and stores the result,
 so it costs one forward pass over the context per member. TabPFN builds this
-cache with `fit_mode="fit_with_cache"`, TabICL with its own key/value cache and
-LimiX-2 with the cache that LAZY ports. TabFM only stores the context at `fit`,
+cache with `fit_mode="fit_with_cache"`, TabICL with its own key/value cache,
+Kumo Tabular with the fitted context of its own `fit` and LimiX-2 with the
+cache that LAZY ports. TabFM only stores the context at `fit`,
 and fits its classifiers and prefills their cache inside every `predict` call.
 With `kv_cache=False`, `fit` runs no forward pass and every chunk of queries
 reads the context again in `predict` (see {doc}`tfm` and {doc}`scaling`). The
@@ -31,9 +33,10 @@ see {doc}`interface`).
 ## Can I use it commercially?
 
 LAZY itself is released under the MIT license, but the license of the weights
-decides. Only TabICLv2 (BSD-3-Clause) and TabPFN-2 (Apache-2.0 with attribution) have
-weights that allow commercial use, under the terms of their licenses; the
-others are non-commercial. LimiX-2's weights are released under the
+decides. Only TabICLv2 (BSD-3-Clause), TabPFN-2 (Apache-2.0 with
+attribution) and Kumo Tabular (the OpenMDW License 1.1) have weights that
+allow commercial use, under the terms of their licenses, and the others are
+non-commercial. LimiX-2's weights are released under the
 StableAI LimiX Non-Commercial License 1.0, which also requires distributions,
 derivatives and publications to display "Built with StableAI LimiX", while
 LimiX's code is under the Apache-2.0-based Stable AI Technology Co., Ltd.
