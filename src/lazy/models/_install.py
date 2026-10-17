@@ -6,9 +6,9 @@ PyPI refuses a git URL in an extra, so a backend whose package (or whose
 fast build of it) is on GitHub alone has ``lazy setup`` install it from there
 (:meth:`lazy.models.ContextEnsembleEstimator.setup`). :func:`install`
 does it the same way for every such backend: with pip when this interpreter
-has it, else with uv, leaving the dependencies to the extra; in a uv project
-it prints the ``uv add`` that keeps the package instead, since ``uv sync``
-would remove it again.
+has it, else with uv, leaving the dependencies to the extra; when this
+interpreter runs a uv project's environment it prints the ``uv add`` that
+keeps the package instead, since ``uv sync`` would remove it again.
 
 Typical usage example:
 
@@ -24,13 +24,14 @@ Typical usage example:
 from __future__ import annotations
 
 from importlib import util
+import os
 import pathlib
 import shlex
 import shutil
 import subprocess
 import sys
 
-__all__ = ["in_uv_project", "install", "install_command"]
+__all__ = ["in_uv_project", "install", "install_command", "uv_project"]
 
 
 def install_command(requirement: str) -> list[str] | None:
@@ -71,10 +72,56 @@ def install_command(requirement: str) -> list[str] | None:
     ]
 
 
+def _nearest_project(path: pathlib.Path) -> pathlib.Path | None:
+    """The nearest directory at or above ``path`` holding a uv project.
+
+    Args:
+        path: Where to start looking.
+
+    Returns:
+        The first of ``path`` and its parents with both a pyproject.toml and
+        a uv.lock, or None when there is none.
+    """
+    for directory in (path, *path.parents):
+        if (directory / "pyproject.toml").is_file() and (
+            directory / "uv.lock"
+        ).is_file():
+            return directory
+    return None
+
+
+def uv_project() -> pathlib.Path | None:
+    """The uv project whose environment this interpreter runs, if any.
+
+    A project is the nearest directory with a pyproject.toml and a uv.lock
+    beside it, and its environment is the ``.venv`` there, or
+    ``$UV_PROJECT_ENVIRONMENT`` when that is set (relative to the project).
+    The project is looked for above the working directory and above
+    ``sys.prefix``, so that ``.venv/bin/lazy setup`` run from elsewhere is
+    still recognized, and it counts only when its environment is
+    ``sys.prefix``: a pip or conda environment run from inside a uv
+    project's directory is not the project's, and ``uv sync`` never touches
+    it.
+
+    Returns:
+        The project's directory, or None when this interpreter runs no uv
+        project's environment.
+    """
+    prefix = pathlib.Path(sys.prefix).resolve()
+    environment = os.environ.get("UV_PROJECT_ENVIRONMENT") or ".venv"
+    for start in (pathlib.Path.cwd(), prefix):
+        root = _nearest_project(start)
+        if root is not None and (root / environment).resolve() == prefix:
+            return root
+    return None
+
+
 def in_uv_project() -> bool:
-    """Whether the working directory is inside a project uv has locked."""
-    here = pathlib.Path.cwd()
-    return any((d / "uv.lock").is_file() for d in (here, *here.parents))
+    """Whether this interpreter runs a uv project's environment.
+
+    See :func:`uv_project` for the rule.
+    """
+    return uv_project() is not None
 
 
 def install(
@@ -102,15 +149,20 @@ def install(
 
     Returns:
         Whether ``requirement`` is installed, or would be after a dry run;
-        False in a uv project, where it prints the ``uv add`` to run instead.
+        False in a uv project's environment (:func:`uv_project`), where it
+        prints the ``uv add`` to run instead.
     """
-    if in_uv_project():
+    project = uv_project()
+    if project is not None:
         # uv sync and uv run would undo the install from uv.lock, so the
         # package has to be a requirement of the project itself.
+        add = ["uv", "add", requirement]
+        if not pathlib.Path.cwd().is_relative_to(project):
+            add[2:2] = ["--project", str(project)]
         print(
-            f"{label}: in a uv project, add {what} to the project, so that "
-            "uv sync keeps it:\n"
-            f"  uv add {shlex.quote(requirement)}"
+            f"{label}: this environment belongs to the uv project at "
+            f"{project}, so add {what} to the project, so that uv sync "
+            f"keeps it:\n  {shlex.join(add)}"
         )
         return False
     command = install_command(requirement)

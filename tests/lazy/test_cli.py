@@ -21,6 +21,8 @@ from lazy.models import tabfm
 def backends(monkeypatch, tmp_path):
     """Both extras installed, the TabFM release, and no LimiX source yet."""
     monkeypatch.chdir(tmp_path)  # outside any uv project
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "env"))  # not uv's
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     monkeypatch.setattr(util, "find_spec", lambda name: object())
     monkeypatch.setattr(shutil, "which", lambda name: None)  # no uv on PATH
     monkeypatch.setattr(_icl_stream, "streaming_available", lambda: False)
@@ -121,8 +123,10 @@ def test_without_pip_uv_installs_into_this_interpreter(backends, tmp_path):
 def test_in_a_uv_project_setup_prints_the_uv_add_instead(
     backends, tmp_path, capsys
 ):
-    _, runs, fetched = backends
+    monkeypatch, runs, fetched = backends
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "mine"\n')
     (tmp_path / "uv.lock").write_text("")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / ".venv"))
     assert _cli.main(["setup"]) == 1  # TabFM is not complete yet
     assert runs == []  # an install uv sync would undo is not made
     assert fetched == [True]  # LimiX is still set up
