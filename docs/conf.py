@@ -241,13 +241,12 @@ MODEL_TABLES = {
 INTERFACE_ORDER = ["tabpfn", "limix", "tabicl", "tabfm"]
 
 
-def _version_key(version: str) -> list[tuple[int, int | str]]:
-    """Returns a key that sorts ``"v2.6"`` before ``"v10"``."""
-    return [
-        (0, int(part)) if part.isdigit() else (1, part)
-        for part in re.split(r"(\d+)", version)
-        if part
-    ]
+def _release_key(version: str) -> list[int]:
+    """Returns the release numbers of a version: ``"v1-small"`` gives [1]."""
+    release = re.match(r"v?([\d.]+)", version)
+    if release is None:
+        return []
+    return [int(part) for part in release.group(1).split(".") if part]
 
 
 def _gigabytes(size_bytes: int) -> str:
@@ -331,9 +330,14 @@ def _overview_table() -> list[str]:
     rows = []
     for name in backends:
         default = lazy.DEFAULT_VERSIONS[name]
+        # Newest first, and among the sizes of one release (Kumo Tabular's
+        # v1-small, v1-medium and v1-large) the largest first.
         others = sorted(
             (v for v in lazy.list_versions(name) if v != default),
-            key=_version_key,
+            key=lambda version: (
+                _release_key(version),
+                lazy.get_checkpoint(name, version).parameters,
+            ),
             reverse=True,
         )
         for version in (default, *others):
