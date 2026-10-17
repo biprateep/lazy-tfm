@@ -18,6 +18,8 @@ ESTIMATORS = [
     lazy.TabFMHistogram(),
     lazy.TabICLQuantile(),
     lazy.TabPFNBarDistribution(),
+    lazy.LimiXBarDistribution(),
+    lazy.KumoQuantile(),
 ]
 CHECKS = [
     estimator_checks.check_no_attributes_set_in_init,
