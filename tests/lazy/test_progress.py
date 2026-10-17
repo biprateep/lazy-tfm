@@ -76,6 +76,8 @@ SETTINGS = backend_settings.BACKEND_SETTINGS
 #: TabPFN and TabICL count rows, TabFM counts in-context stages --
 #: n_dither * (1 + n_coarse_bins) = 2 * 3 here.
 EXPECTED = {
+    "kumo": ("40/40", "row", "quantiles="),
+    "limix": ("40/40", "row", "buckets="),
     "tabpfn": ("40/40", "row", "buckets="),
     "tabicl": ("40/40", "row", "quantiles="),
     "tabfm": ("6/6", "stage", "level=fine 2/2"),
@@ -100,7 +102,10 @@ def data():
 def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(
     name, data, capsys
 ):
-    pytest.importorskip(name)
+    try:
+        lazy.ESTIMATORS[name]()._import_backend()
+    except ImportError as error:
+        pytest.skip(f"{name} is not installed: {error}")
     X_ctx, z_ctx, X_q = data
 
     def run(progress):
