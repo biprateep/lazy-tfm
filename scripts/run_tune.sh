@@ -22,6 +22,7 @@ for job in $jobs; do
   .venv/bin/python -m fm4pz.tune "$method" "$regime" "$size" \
     --trials "$per" --workers "$workers" --threads 1 \
     >> "$FM4PZ_RESULTS/logs/tune_${method}_${regime}_${size}.log" 2>&1
-  echo "$(date -Is) done  $method $regime $size exit=$?" >> "$log"
+  status=$?
+  echo "$(date -Is) done  $method $regime $size exit=$status" >> "$log"
 done
 echo "$(date -Is) ALL DONE" >> "$log"

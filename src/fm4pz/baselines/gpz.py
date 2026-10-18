@@ -55,7 +55,9 @@ __all__ = [
     "MAX_ITER",
     "METHOD",
     "SCALES",
+    "PRODUCTION_RESTARTS",
     "Fitted",
+    "GPzFitError",
     "GPz",
 ]
 
@@ -99,6 +101,10 @@ _CHUNK = 16_384
 def _threads() -> int:
     """The threads a fit may use, from ``$FM4PZ_THREADS`` (default 1)."""
     return int(os.environ.get("FM4PZ_THREADS", "1"))
+
+
+#: Initialisations a production fit keeps the best of.
+PRODUCTION_RESTARTS = 5
 
 
 class _QuietGP(_gpz_util.GP):
@@ -187,6 +193,73 @@ def _recover(
     )
 
 
+class GPzFitError(RuntimeError):
+    """A GPz fit failed before its first iteration, so it has no model."""
+
+
+def _fit_once(
+    params: Mapping[str, Any],
+    inputs: FloatArray,
+    target: FloatArray,
+    training: npt.NDArray[np.bool_],
+    init_seed: np.random.SeedSequence,
+) -> Fitted:
+    """Fits GPz once, from one initialisation of its basis functions.
+
+    Args:
+        params: The fit parameters.
+        inputs: The features, shape (n_train, n_features).
+        target: The redshifts, shape (n_train, 1).
+        training: Which rows to fit on; the rest stop the optimiser.
+        init_seed: Seed of the initial basis functions.
+
+    Returns:
+        The fitted model; its ``features`` is filled in by the caller.
+
+    Raises:
+        GPzFitError: If the optimiser failed before its first iteration.
+    """
+    gp = _QuietGP(
+        params["n_basis"],
+        method=params["method"],
+        joint=params["joint"],
+        heteroscedastic=params["heteroscedastic"],
+        decorrelate=params["decorrelate"],
+        seed=init_seed,
+    )
+    gp.patience = params["patience"]
+    with (
+        threadpoolctl.threadpool_limits(limits=_threads()),
+        warnings.catch_warnings(),
+        np.errstate(all="ignore"),
+    ):
+        # The port passes L-BFGS-B a "disp" option it no longer takes.
+        warnings.filterwarnings("ignore", message="Unknown solver options")
+        try:
+            gp.train(
+                inputs,
+                target,
+                omega=np.ones_like(target),
+                training=training,
+                validation=~training,
+                maxIter=MAX_ITER,
+                maxAttempts=np.inf,
+            )
+        except np.linalg.LinAlgError as error:
+            if gp.not_initalized or not hasattr(gp, "best_theta"):
+                raise GPzFitError("the optimiser failed at once") from error
+            _recover(gp, inputs, target, training)
+    if not hasattr(gp, "best_valid"):
+        raise GPzFitError("the optimiser never completed an iteration")
+    return Fitted(
+        gp=gp,
+        features="",
+        n_iter=gp.iter - 1,
+        best_iter=gp.best_iter,
+        valid_loglike=float(gp.best_valid),
+    )
+
+
 @dataclasses.dataclass
 class Fitted:
     """A fitted GPz model and what it needs to predict.
@@ -234,10 +307,26 @@ class GPz(cv.Method):
             ),
             "joint": trial.suggest_categorical("joint", (True, False)),
             "train_frac": trial.suggest_float(
-                "train_frac", 0.6, 0.9, step=0.05
+                "train_frac", 0.6, 0.95, step=0.05
             ),
-            "patience": trial.suggest_int("patience", 20, 300, log=True),
+            "patience": trial.suggest_int("patience", 20, 1000, log=True),
         }
+
+    def production_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """The chosen setting, fitted from :data:`PRODUCTION_RESTARTS` starts.
+
+        The search fits each trial once; a production fit keeps the best of
+        several initialisations of the basis functions, judged by the
+        log-likelihood on its own validation rows, which narrows the spread
+        that one initialisation leaves between the subsamples.
+
+        Args:
+            params: The chosen fit parameters.
+
+        Returns:
+            The parameters with ``restarts`` set.
+        """
+        return {**params, "restarts": PRODUCTION_RESTARTS}
 
     def post_grid(self, params: Mapping[str, Any]) -> list[dict[str, Any]]:
         """Every pair of a width scale and a width floor.
@@ -268,52 +357,40 @@ class GPz(cv.Method):
             train: The training catalogue.
             z_train: Its redshifts, shape (n_train,).
             seed: Seed of the validation split and of the initial basis
-                functions.
+                functions. With ``restarts`` in ``params``, that many
+                initialisations are fitted on the same split and the one
+                with the best validation log-likelihood is kept.
 
         Returns:
             The fitted model.
+
+        Raises:
+            GPzFitError: If every initialisation failed before its first
+                iteration.
         """
         inputs = features.build(train, params["features"])
         target = np.asarray(z_train, dtype=np.float64).reshape(-1, 1)
-        split_seed, init_seed = np.random.SeedSequence(seed).spawn(2)
+        restarts = int(params.get("restarts", 1))
+        split_seed, *init_seeds = np.random.SeedSequence(seed).spawn(
+            1 + restarts
+        )
         training = _fitting_rows(len(target), params["train_frac"], split_seed)
-        gp = _QuietGP(
-            params["n_basis"],
-            method=params["method"],
-            joint=params["joint"],
-            heteroscedastic=params["heteroscedastic"],
-            decorrelate=params["decorrelate"],
-            seed=init_seed,
-        )
-        gp.patience = params["patience"]
-        with (
-            threadpoolctl.threadpool_limits(limits=_threads()),
-            warnings.catch_warnings(),
-            np.errstate(all="ignore"),
-        ):
-            # The port passes L-BFGS-B a "disp" option it no longer takes.
-            warnings.filterwarnings("ignore", message="Unknown solver options")
+        fits = []
+        for init_seed in init_seeds:
             try:
-                gp.train(
-                    inputs,
-                    target,
-                    omega=np.ones_like(target),
-                    training=training,
-                    validation=~training,
-                    maxIter=MAX_ITER,
-                    maxAttempts=np.inf,
+                fits.append(
+                    _fit_once(params, inputs, target, training, init_seed)
                 )
-            except np.linalg.LinAlgError:
-                if gp.not_initalized:
-                    raise
-                _recover(gp, inputs, target, training)
-        return Fitted(
-            gp=gp,
-            features=params["features"],
-            n_iter=gp.iter - 1,
-            best_iter=gp.best_iter,
-            valid_loglike=float(gp.best_valid),
-        )
+            except GPzFitError:
+                continue
+        if not fits:
+            raise GPzFitError(
+                f"every one of {restarts} GPz fits failed before its first "
+                "iteration"
+            )
+        best = max(fits, key=lambda fit: fit.valid_loglike)
+        best.features = params["features"]
+        return best
 
     def predict(self, model: Fitted, catalog: datasets.Catalog) -> FloatArray:
         """The mean and standard deviation of each object's Gaussian.

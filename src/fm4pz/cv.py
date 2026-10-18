@@ -125,6 +125,21 @@ class Method(abc.ABC):
         """
         return []
 
+    def production_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """The chosen setting as a production fit runs it.
+
+        A method may fit its production runs more thoroughly than its
+        search trials (GPz keeps the best of several initialisations);
+        the default runs the chosen setting as it is.
+
+        Args:
+            params: The fit parameters the search chose.
+
+        Returns:
+            The fit parameters of a production run.
+        """
+        return dict(params)
+
     @abc.abstractmethod
     def masses(self, raw: Any, post: Mapping[str, Any]) -> FloatArray:
         """Turns raw predictions into masses on the common grid.
@@ -292,7 +307,19 @@ def run_study(
     """
     study = open_study(method, split, storage=storage, seed=seed)
     objective = _Objective(method, split.train, split.train.redshift)
-    study.optimize(objective, n_trials=n_trials, gc_after_trial=True)
+    # A trial whose fit fails numerically is recorded as failed, and the
+    # search goes on, rather than one bad corner of the space ending it.
+    study.optimize(
+        objective,
+        n_trials=n_trials,
+        gc_after_trial=True,
+        catch=(
+            ArithmeticError,
+            RuntimeError,
+            ValueError,
+            np.linalg.LinAlgError,
+        ),
+    )
     return study
 
 

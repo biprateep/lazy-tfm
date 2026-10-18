@@ -32,22 +32,61 @@ from fm4pz import config
 from fm4pz import cv
 from fm4pz import splits
 
-__all__ = ["best_path", "journal_path", "main", "search"]
+__all__ = [
+    "best_path",
+    "journal_path",
+    "latest_best_path",
+    "main",
+    "search",
+    "search_round",
+]
 
 
-def journal_path(method: str, regime: str, n_train: int) -> pathlib.Path:
-    """The journal file of one search."""
+def search_round() -> int:
+    """The round of searches being run: ``$FM4PZ_ROUND``, by default 1.
+
+    A later round searches a revised space in journals of its own, starting
+    from the best settings of the round before; round 1 keeps its files.
+    """
+    return int(os.environ.get("FM4PZ_ROUND", "1"))
+
+
+def journal_path(
+    method: str, regime: str, n_train: int, round_: int | None = None
+) -> pathlib.Path:
+    """The journal file of one search, of ``round_`` (default: the current)."""
+    round_ = search_round() if round_ is None else round_
+    suffix = ".journal" if round_ == 1 else f".r{round_}.journal"
     return (
         config.results_dir()
         / "tuning"
         / method
-        / f"{regime}_n{n_train}.journal"
+        / f"{regime}_n{n_train}{suffix}"
     )
 
 
-def best_path(method: str, regime: str, n_train: int) -> pathlib.Path:
+def best_path(
+    method: str, regime: str, n_train: int, round_: int | None = None
+) -> pathlib.Path:
     """Where the best setting of one search is exported."""
-    return journal_path(method, regime, n_train).with_suffix(".best.json")
+    return journal_path(method, regime, n_train, round_).with_suffix(
+        ".best.json"
+    )
+
+
+def latest_best_path(method: str, regime: str, n_train: int) -> pathlib.Path:
+    """The exported best setting of the latest round that has one.
+
+    Raises:
+        FileNotFoundError: If no round has exported a setting.
+    """
+    for round_ in range(9, 0, -1):
+        path = best_path(method, regime, n_train, round_)
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f"no search of {method} {regime} {n_train} has exported a setting"
+    )
 
 
 def search(
@@ -95,6 +134,7 @@ def export(method: str, regime: str, n_train: int) -> dict[str, object]:
     states = [trial.state.name for trial in study.trials]
     best.update(
         {
+            "round": search_round(),
             "method": method,
             "regime": regime,
             "n_train": n_train,
@@ -130,6 +170,11 @@ def warm_start(method: str, regime: str, n_train: int) -> int:
     """
     baseline = baselines.get(method)
     queued = list(baseline.warm_starts())
+    if search_round() > 1:
+        queued += _top_settings(
+            journal_path(method, regime, n_train, search_round() - 1),
+            f"{method}-{regime}-{n_train}",
+        )
     sizes = (
         config.REPRESENTATIVE_SIZES
         if regime == "representative"
@@ -149,6 +194,36 @@ def warm_start(method: str, regime: str, n_train: int) -> int:
         enqueue=queued,
     )
     return len(queued) if len(study.trials) == len(queued) else 0
+
+
+def _top_settings(
+    storage: pathlib.Path, study_name: str, count: int = 5
+) -> list[dict[str, object]]:
+    """The parameters of the best finished trials of an earlier search.
+
+    Args:
+        storage: The earlier search's journal.
+        study_name: Its study's name.
+        count: How many settings to return.
+
+    Returns:
+        Their Optuna parameters, best first; empty if there is no journal.
+    """
+    if not storage.exists():
+        return []
+    study = optuna.load_study(
+        study_name=study_name,
+        storage=optuna.storages.JournalStorage(
+            journal.JournalFileBackend(str(storage))
+        ),
+    )
+    done = [
+        trial
+        for trial in study.trials
+        if trial.state == optuna.trial.TrialState.COMPLETE
+    ]
+    done.sort(key=lambda trial: float(trial.values[0]))
+    return [dict(trial.params) for trial in done[:count]]
 
 
 def _worker(args: tuple[str, str, int, int, int, int]) -> None:

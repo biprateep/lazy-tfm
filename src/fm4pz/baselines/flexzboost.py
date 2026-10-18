@@ -76,7 +76,7 @@ BASES: tuple[str, ...] = ("cosine", "Fourier")
 STRATEGIES: tuple[str, ...] = ("multi_output_tree", "one_output_per_tree")
 
 #: Bump thresholds (probability) a trial may propose; None removes none.
-BUMPS: tuple[float | None, ...] = (None, 0.001, 0.003, 0.01, 0.03)
+BUMPS: tuple[float | None, ...] = (None, 0.001, 0.003, 0.01, 0.03, 0.1)
 
 #: Fractions of the booster's rounds at which predictions are kept.
 CHECKPOINTS: tuple[float, ...] = (0.5, 1.0)
@@ -502,22 +502,22 @@ class FlexZBoost(cv.Method):
                 "feature_set", FEATURE_SETS
             ),
             "basis": trial.suggest_categorical("basis", BASES),
-            "max_basis": trial.suggest_int("max_basis", 10, 100, step=5),
+            "max_basis": trial.suggest_int("max_basis", 10, 150, step=5),
             "bump": trial.suggest_categorical("bump", BUMPS),
             "multi_strategy": trial.suggest_categorical(
                 "multi_strategy", STRATEGIES
             ),
             "n_estimators": trial.suggest_int(
-                "n_estimators", 20, 300, log=True
+                "n_estimators", 20, 1500, log=True
             ),
             "learning_rate": trial.suggest_float(
-                "learning_rate", 0.03, 0.3, log=True
+                "learning_rate", 0.005, 0.3, log=True
             ),
-            "max_depth": trial.suggest_int("max_depth", 3, 12),
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
             "min_child_weight": trial.suggest_float(
-                "min_child_weight", 2.0, 300.0, log=True
+                "min_child_weight", 0.5, 300.0, log=True
             ),
-            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+            "subsample": trial.suggest_float("subsample", 0.3, 1.0),
             "colsample_bytree": trial.suggest_float(
                 "colsample_bytree", 0.5, 1.0
             ),

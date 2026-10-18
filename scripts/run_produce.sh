@@ -28,7 +28,8 @@ for job in $jobs; do
     .venv/bin/python -m fm4pz.produce "$method" "$regime" "$size" \
       --seed "$seed" --jobs "$workers" \
       >> "$FM4PZ_RESULTS/logs/produce_${method}.out" 2>&1
-    echo "$(date -Is) done  $method $regime $size s$seed exit=$?" >> "$log"
+    status=$?
+    echo "$(date -Is) done  $method $regime $size s$seed exit=$status" >> "$log"
   done
 done
 echo "$(date -Is) ALL DONE" >> "$log"

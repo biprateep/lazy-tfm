@@ -106,13 +106,14 @@ def produce(
     Returns:
         The run's record, as written to its ``.json``.
     """
-    best = json.loads(tune.best_path(method_name, regime, n_train).read_text())
+    best = json.loads(
+        tune.latest_best_path(method_name, regime, n_train).read_text()
+    )
     method = baselines.get(method_name)
     split = splits.load(regime, n_train=n_train, seed=seed)
     start = time.perf_counter()
-    model = method.fit(
-        best["params"], split.train, split.train.redshift, seed=seed
-    )
+    params = method.production_params(best["params"])
+    model = method.fit(params, split.train, split.train.redshift, seed=seed)
     fitted = time.perf_counter()
     _STATE.update(
         method=method, model=model, post=best["post"], test=split.test
@@ -135,6 +136,7 @@ def produce(
     record = _record(best, split, scoring.summary(z_true, per_object))
     record.update(
         method=method_name,
+        production_params=params,
         fit_seconds=fitted - start,
         predict_seconds=scored - fitted,
         jobs=jobs,
