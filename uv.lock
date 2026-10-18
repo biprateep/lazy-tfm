@@ -470,6 +470,7 @@ name = "fm4pz"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "flexcode" },
     { name = "lazy-tfm", extra = ["kumo", "limix", "tabpfn"] },
     { name = "optuna" },
     { name = "pz-rail-base" },
@@ -478,6 +479,7 @@ dependencies = [
     { name = "pz-rail-gpz-v1" },
     { name = "structured-data-models" },
     { name = "threadpoolctl" },
+    { name = "xgboost" },
 ]
 
 [package.dev-dependencies]
@@ -488,6 +490,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flexcode", specifier = ">=0.2.3" },
     { name = "lazy-tfm", extras = ["kumo", "limix", "tabpfn"], specifier = "==0.4.0" },
     { name = "optuna", specifier = ">=5.0.0" },
     { name = "pz-rail-base", specifier = ">=2.0.11" },
@@ -496,6 +499,7 @@ requires-dist = [
     { name = "pz-rail-gpz-v1", specifier = ">=2.0.3" },
     { name = "structured-data-models", git = "https://github.com/NVIDIA/structured-data-models?rev=2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" },
     { name = "threadpoolctl", specifier = ">=3.7.0" },
+    { name = "xgboost", specifier = ">=3.1" },
 ]
 
 [package.metadata.requires-dev]

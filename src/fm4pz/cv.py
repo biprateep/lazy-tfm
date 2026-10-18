@@ -21,7 +21,7 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 import dataclasses
 import pathlib
 from typing import Any
@@ -37,7 +37,14 @@ from fm4pz import config
 from fm4pz import scoring
 from fm4pz import splits
 
-__all__ = ["Method", "best_params", "cde_loss", "fold_rows", "run_study"]
+__all__ = [
+    "Method",
+    "best_params",
+    "cde_loss",
+    "fold_rows",
+    "open_study",
+    "run_study",
+]
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -104,6 +111,19 @@ class Method(abc.ABC):
         Returns:
             The raw predictions, in whatever form :meth:`masses` takes.
         """
+
+    def warm_starts(self) -> list[dict[str, Any]]:
+        """Settings worth trying first, as Optuna parameters.
+
+        A search starts with these (and with the best setting of the next
+        smaller training size), so that its first trials are informed rather
+        than drawn at random from the whole space.
+
+        Returns:
+            Mappings from each name :meth:`suggest` proposes to a value;
+            empty by default.
+        """
+        return []
 
     @abc.abstractmethod
     def masses(self, raw: Any, post: Mapping[str, Any]) -> FloatArray:
@@ -204,25 +224,24 @@ class _Objective:
         return float(mean[best])
 
 
-def run_study(
+def open_study(
     method: Method,
     split: splits.Split,
     *,
-    n_trials: int,
     storage: pathlib.Path,
     seed: int = 0,
+    enqueue: Sequence[Mapping[str, Any]] = (),
 ) -> optuna.Study:
-    """Runs (or resumes) the hyperparameter search of one training set.
-
-    Several processes may run the same study at once: the storage is an
-    Optuna journal file, which they share.
+    """Creates or loads the search of one training set.
 
     Args:
         method: The baseline.
-        split: The training set; its test set is not used.
-        n_trials: Trials this call adds to the study.
-        storage: The journal file of the study.
+        split: The training set.
+        storage: The journal file of the study, which several processes may
+            share.
         seed: Seed of this process's sampler.
+        enqueue: Settings to run first, as Optuna parameters; queued only if
+            the study has no trials yet.
 
     Returns:
         The study.
@@ -241,6 +260,37 @@ def run_study(
         ),
         load_if_exists=True,
     )
+    if not study.trials:
+        for params in enqueue:
+            study.enqueue_trial(dict(params), skip_if_exists=True)
+    return study
+
+
+def run_study(
+    method: Method,
+    split: splits.Split,
+    *,
+    n_trials: int,
+    storage: pathlib.Path,
+    seed: int = 0,
+) -> optuna.Study:
+    """Runs (or resumes) the hyperparameter search of one training set.
+
+    Several processes may run the same study at once: the storage is an
+    Optuna journal file, which they share. Settings queued by
+    :func:`open_study` run first.
+
+    Args:
+        method: The baseline.
+        split: The training set; its test set is not used.
+        n_trials: Trials this call adds to the study.
+        storage: The journal file of the study.
+        seed: Seed of this process's sampler.
+
+    Returns:
+        The study.
+    """
+    study = open_study(method, split, storage=storage, seed=seed)
     objective = _Objective(method, split.train, split.train.redshift)
     study.optimize(objective, n_trials=n_trials, gc_after_trial=True)
     return study

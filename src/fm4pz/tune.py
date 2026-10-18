@@ -91,6 +91,7 @@ def export(method: str, regime: str, n_train: int) -> dict[str, object]:
         study_name=f"{method}-{regime}-{n_train}", storage=storage
     )
     best = cv.best_params(study)
+    best["trial_params"] = dict(study.best_trial.params)
     states = [trial.state.name for trial in study.trials]
     best.update(
         {
@@ -110,6 +111,44 @@ def export(method: str, regime: str, n_train: int) -> dict[str, object]:
         json.dumps(best, indent=2, sort_keys=True) + "\n"
     )
     return best
+
+
+def warm_start(method: str, regime: str, n_train: int) -> int:
+    """Queues the first settings of a search that has not started.
+
+    They are the method's own :meth:`~fm4pz.cv.Method.warm_starts` and the
+    best setting of the next smaller size of the regime, when its search has
+    finished.
+
+    Args:
+        method: A baseline name.
+        regime: ``"representative"`` or ``"biased"``.
+        n_train: The training size.
+
+    Returns:
+        How many settings were queued (0 if the search had begun).
+    """
+    baseline = baselines.get(method)
+    queued = list(baseline.warm_starts())
+    sizes = (
+        config.REPRESENTATIVE_SIZES
+        if regime == "representative"
+        else config.BIASED_SIZES
+    )
+    smaller = [size for size in sizes if size < n_train]
+    if smaller:
+        previous = best_path(method, regime, smaller[-1])
+        if previous.exists():
+            exported = json.loads(previous.read_text())
+            if "trial_params" in exported:
+                queued.append(exported["trial_params"])
+    study = cv.open_study(
+        baseline,
+        splits.load(regime, n_train=n_train, seed=0),
+        storage=journal_path(method, regime, n_train),
+        enqueue=queued,
+    )
+    return len(queued) if len(study.trials) == len(queued) else 0
 
 
 def _worker(args: tuple[str, str, int, int, int, int]) -> None:
@@ -142,6 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         best = export(args.method, args.regime, args.n_train)
         print(json.dumps(best, indent=2, sort_keys=True))
         return 0
+    warm_start(args.method, args.regime, args.n_train)
     jobs = [
         (
             args.method,

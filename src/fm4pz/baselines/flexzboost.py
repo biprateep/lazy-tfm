@@ -71,7 +71,7 @@ __all__ = [
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
 
-FEATURE_SETS: tuple[str, ...] = ("i_colors", "common12", "mags_errs")
+FEATURE_SETS: tuple[str, ...] = ("i_colors", "common12")
 BASES: tuple[str, ...] = ("cosine", "Fourier")
 STRATEGIES: tuple[str, ...] = ("multi_output_tree", "one_output_per_tree")
 
