@@ -49,7 +49,10 @@ RESULTS = config.results_dir()
 # ## Reading the records
 #
 # A search's exported setting, and the records of the five production runs
-# at that size; a missing run leaves its seed out.
+# at that size; a missing run leaves its seed out. A record fitted with
+# another setting than the one exported (its search was extended after the
+# fit) is stale: it is left out of the tables and listed at the end, to be
+# deleted and run again.
 
 
 # %% Readers
@@ -70,6 +73,11 @@ def read_runs(method: str, regime: str, size: int) -> list[dict[str, Any]]:
         for seed in config.SEEDS
     ]
     return [json.loads(path.read_text()) for path in paths if path.exists()]
+
+
+def is_stale(run: dict[str, Any], best: dict[str, Any]) -> bool:
+    """Whether a record was fitted with another setting than ``best``."""
+    return run["params"] != best["params"] or run["post"] != best["post"]
 
 
 # %% [markdown]
@@ -102,12 +110,18 @@ def mean_std(values: list[float]) -> str:
     return f"{np.mean(values):.3f} ± {spread:.3f}"
 
 
-def row(method: str, regime: str, size: int) -> str:
-    """One markdown table row."""
+def row(method: str, regime: str, size: int) -> tuple[str, list[str]]:
+    """One markdown table row, and the stale records left out of it."""
     best = read_best(method, regime, size)
     runs = read_runs(method, regime, size)
     if best is None:
-        return f"| {size} | (no search) |" + " |" * 7
+        return f"| {size} | (no search) |" + " |" * 7, []
+    stale = [
+        f"runs/{method}/{regime}_n{size}_s{run['seed']}.json"
+        for run in runs
+        if is_stale(run, best)
+    ]
+    runs = [run for run in runs if not is_stale(run, best)]
     cde = [run["metrics"]["cde_loss"] for run in runs]
     dc1 = [run["metrics"]["cde_loss_dc1"] for run in runs]
     fit = [run["fit_seconds"] for run in runs]
@@ -124,7 +138,7 @@ def row(method: str, regime: str, size: int) -> str:
         f"{np.mean(pred):.0f}" if pred else "-",
         f"{max(memory):.1f}" if memory else "-",
     ]
-    return "| " + " | ".join(cells) + " |"
+    return "| " + " | ".join(cells) + " |", stale
 
 
 # %% [markdown]
@@ -136,12 +150,18 @@ HEADER = (
     "test CDE loss (DC1 grid) | seeds | fit s | predict+score s | "
     "peak GPU GB |\n|" + "---|" * 9
 )
+STALE: list[str] = []
 lines = ["# Foundation models on DC1: chosen settings and test losses", ""]
 for method in METHODS:
     for regime, sizes in SIZES.items():
         lines += [f"## {method}, {regime}", "", HEADER]
-        lines += [row(method, regime, size) for size in sizes]
+        for size in sizes:
+            line, stale = row(method, regime, size)
+            lines.append(line)
+            STALE.extend(stale)
         lines.append("")
+if STALE:
+    lines += ["## Stale records", ""] + [f"- {path}" for path in STALE]
 report = "\n".join(lines)
 pathlib.Path(RESULTS / "tfm_report.md").write_text(report)
 print(report)
