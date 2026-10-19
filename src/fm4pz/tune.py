@@ -226,6 +226,38 @@ def _top_settings(
     return [dict(trial.params) for trial in done[:count]]
 
 
+def _settle(method: str, regime: str, n_train: int) -> int:
+    """Marks a search's abandoned trials failed; returns its trial count.
+
+    A trial still marked running when no worker is (its process was
+    killed, as when an allocation ends) would stay running forever; it is
+    recorded as failed, so that resuming the search counts it and does not
+    wait for it. Call it only when no worker of the search is running.
+
+    Args:
+        method: A baseline name.
+        regime: ``"representative"`` or ``"biased"``.
+        n_train: The training size.
+
+    Returns:
+        How many trials the search holds, the failed ones included.
+    """
+    storage = optuna.storages.JournalStorage(
+        journal.JournalFileBackend(str(journal_path(method, regime, n_train)))
+    )
+    study = optuna.load_study(
+        study_name=f"{method}-{regime}-{n_train}", storage=storage
+    )
+    for trial in study.get_trials(
+        deepcopy=False, states=(optuna.trial.TrialState.RUNNING,)
+    ):
+        storage.set_trial_state_values(
+            trial._trial_id,  # noqa: SLF001 - Optuna's own storage key.
+            state=optuna.trial.TrialState.FAIL,
+        )
+    return len(study.trials)
+
+
 def _worker(args: tuple[str, str, int, int, int, int]) -> None:
     """Runs one worker process of a search, with its thread budget."""
     method, regime, n_train, n_trials, worker, threads = args
@@ -250,6 +282,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--first-worker", type=int, default=0)
+    parser.add_argument(
+        "--total",
+        type=int,
+        default=None,
+        help=(
+            "top the search up to this many trials in all, spread over the "
+            "workers, instead of adding --trials per worker"
+        ),
+    )
     parser.add_argument("--export", action="store_true")
     args = parser.parse_args(argv)
     if args.export:
@@ -257,12 +298,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(best, indent=2, sort_keys=True))
         return 0
     warm_start(args.method, args.regime, args.n_train)
+    per_worker = args.trials
+    if args.total is not None:
+        remaining = args.total - _settle(args.method, args.regime, args.n_train)
+        if remaining <= 0:
+            export(args.method, args.regime, args.n_train)
+            return 0
+        per_worker = -(-remaining // args.workers)
     jobs = [
         (
             args.method,
             args.regime,
             args.n_train,
-            args.trials,
+            per_worker,
             args.first_worker + k,
             args.threads,
         )

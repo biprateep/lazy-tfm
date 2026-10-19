@@ -4,7 +4,8 @@
 #   scripts/run_tune.sh METHOD "REGIME:SIZE:TRIALS ..." WORKERS
 #
 # Each search runs WORKERS single-threaded processes that share its Optuna
-# journal under results/tuning/, and exports its best setting when done.
+# journal under results/tuning/, until it holds TRIALS trials in all (so a
+# search cut short resumes where it stopped), and exports its best setting.
 # Progress goes to results/logs/tune_METHOD.log.
 set -u
 cd "$(dirname "$0")/.."
@@ -17,10 +18,9 @@ mkdir -p "$FM4PZ_RESULTS/logs"
 log="$FM4PZ_RESULTS/logs/tune_$method.log"
 for job in $jobs; do
   IFS=: read -r regime size trials <<< "$job"
-  per=$(( (trials + workers - 1) / workers ))
   echo "$(date -Is) start $method $regime $size trials=$trials" >> "$log"
   .venv/bin/python -m fm4pz.tune "$method" "$regime" "$size" \
-    --trials "$per" --workers "$workers" --threads 1 \
+    --total "$trials" --workers "$workers" --threads 1 \
     >> "$FM4PZ_RESULTS/logs/tune_${method}_${regime}_${size}.log" 2>&1
   status=$?
   echo "$(date -Is) done  $method $regime $size exit=$status" >> "$log"
