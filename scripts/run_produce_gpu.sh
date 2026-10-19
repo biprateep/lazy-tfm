@@ -6,8 +6,10 @@
 # Like run_produce.sh, but on GPU number GPU (CUDA_VISIBLE_DEVICES): the
 # model fits and predicts there while JOBS single-threaded processes put the
 # predictions on the grid and score them. A run whose record exists is
-# skipped, so the script can be rerun after an interruption. Progress goes
-# to results/logs/produce_METHOD.log.
+# skipped, so the script can be rerun after an interruption. With WAIT=1 in
+# the environment, each size waits until its search has exported a setting,
+# so that the fits can follow searches still running. Progress goes to
+# results/logs/produce_METHOD.log.
 set -u
 cd "$(dirname "$0")/.."
 export CUDA_VISIBLE_DEVICES=$1 HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" \
@@ -20,6 +22,10 @@ mkdir -p "$FM4PZ_RESULTS/logs"
 log="$FM4PZ_RESULTS/logs/produce_$method.log"
 for job in $jobs; do
   IFS=: read -r regime size <<< "$job"
+  best="$FM4PZ_RESULTS/tuning/$method/${regime}_n${size}.best.json"
+  while [[ "${WAIT:-0}" == 1 && ! -f "$best" ]]; do
+    sleep 60
+  done
   for seed in 0 1 2 3 4; do
     record="$FM4PZ_RESULTS/runs/$method/${regime}_n${size}_s${seed}.json"
     if [[ -f "$record" ]]; then
