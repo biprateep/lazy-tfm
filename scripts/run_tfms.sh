@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs every foundation-model search and production fit on one 4-GPU node.
 #
-#   scripts/run_tfms.sh
+#   [TUNE_THREADS=4] [PRODUCE_JOBS=8] scripts/run_tfms.sh
 #
 # Each lane below is one sequence on one GPU: a model's searches in
 # increasing training size, then its five production fits per size. A
@@ -9,8 +9,10 @@
 # (queued and failed trials included); a fit whose record exists is skipped.
 # So the script can be started again on a new node after an allocation ends,
 # once the stale locks of interrupted fits are removed, which it does first.
-# LimiX-2's representative fits are the longest, so every lane that finishes
-# early joins them. Logs go to results/logs/.
+# LimiX-2's representative fits are the longest, so one more lane fits them
+# from the start, size by size as their searches finish, and every lane that
+# finishes early joins it. TUNE_THREADS and PRODUCE_JOBS set the CPU threads
+# of a search and the scoring processes of a fit. Logs go to results/logs/.
 set -u
 cd "$(dirname "$0")/.."
 export FM4PZ_RESULTS="${FM4PZ_RESULTS:-$PWD/results}"
@@ -25,7 +27,7 @@ rm -rf "$FM4PZ_RESULTS"/runs/*/*.lock
 declare -A TRIALS=(
   [tabpfn]="25 25 25 20 20 20 20"
   [kumo]="13 10 16 16 16 16 16"
-  [limix]="12 9 7 14 14 14 14"
+  [limix]="12 9 7 10 10 10 10"
 )
 declare -A SIZES=(
   [representative]="1000 5000 10000 15000 20000 30000 43486"
@@ -51,10 +53,13 @@ fits() {  # REGIME -> "REGIME:SIZE ..."
   echo "$out"
 }
 
+threads=${TUNE_THREADS:-4}
+jobs=${PRODUCE_JOBS:-8}
+
 lane() {  # GPU METHOD REGIME
-  scripts/run_tune_gpu.sh "$1" "$2" "$(searches "$2" "$3")" 4
-  scripts/run_produce_gpu.sh "$1" "$2" "$(fits "$3")" 8
-  WAIT=1 scripts/run_produce_gpu.sh "$1" limix "$(fits representative)" 8
+  scripts/run_tune_gpu.sh "$1" "$2" "$(searches "$2" "$3")" "$threads"
+  scripts/run_produce_gpu.sh "$1" "$2" "$(fits "$3")" "$jobs"
+  WAIT=1 scripts/run_produce_gpu.sh "$1" limix "$(fits representative)" "$jobs"
 }
 
 lane 0 tabpfn biased > /dev/null 2>&1 &
@@ -63,4 +68,6 @@ lane 1 tabpfn representative > /dev/null 2>&1 &
 lane 1 limix biased > /dev/null 2>&1 &
 lane 2 limix representative > /dev/null 2>&1 &
 lane 3 kumo representative > /dev/null 2>&1 &
+WAIT=1 scripts/run_produce_gpu.sh 2 limix "$(fits representative)" "$jobs" \
+  > /dev/null 2>&1 &
 wait
