@@ -4,6 +4,8 @@
 
 :func:`get` returns a baseline by name; the modules are imported only when
 asked for, so that one baseline's dependencies never slow another's start.
+The foundation models (:mod:`fm4pz.tfms`) are registered here too, so that
+the same search and production drivers run them.
 """
 
 from __future__ import annotations
@@ -19,6 +21,9 @@ NAMES: dict[str, str] = {
     "flexzboost": "fm4pz.baselines.flexzboost",
     "cmnn": "fm4pz.baselines.cmnn",
     "gpz": "fm4pz.baselines.gpz",
+    "tabpfn": "fm4pz.tfms.tabpfn",
+    "limix": "fm4pz.tfms.limix",
+    "kumo": "fm4pz.tfms.kumo",
 }
 
 
