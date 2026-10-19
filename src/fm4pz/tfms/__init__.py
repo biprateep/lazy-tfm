@@ -24,7 +24,8 @@ the predictions, the GPU it ran on, and the peak GPU memory PyTorch held.
 from __future__ import annotations
 
 import abc
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+import contextlib
 import dataclasses
 import gc
 import importlib.metadata
@@ -148,6 +149,30 @@ def _synchronize() -> None:
         torch.cuda.synchronize()
 
 
+@contextlib.contextmanager
+def _out_of_memory_as_runtime_error() -> Iterator[None]:
+    """Raises a GPU's out-of-memory error as a RuntimeError.
+
+    A search records a trial that raises RuntimeError as failed and goes on
+    (:func:`fm4pz.cv.run_study`). PyTorch's out-of-memory error is one, but
+    TabPFN raises its own, which would end the search instead.
+
+    Yields:
+        Nothing; the body runs inside.
+
+    Raises:
+        RuntimeError: If the body ran out of GPU memory.
+    """
+    try:
+        yield
+    except Exception as error:
+        if isinstance(error, RuntimeError) or (
+            "out of memory" not in str(error).lower()
+        ):
+            raise
+        raise RuntimeError(f"out of GPU memory: {error}") from error
+
+
 def _json_safe(value: Any) -> Any:
     """``value`` as JSON can hold it, unknown objects as their strings."""
     return json.loads(json.dumps(value, default=str))
@@ -236,11 +261,12 @@ class FoundationModel(cv.Method, abc.ABC):
             progress=False,
             **self.model_params(params),
         )
-        model.fit(
-            build_features(train, params["feature_set"]),
-            np.asarray(z_train, dtype=np.float64),
-        )
-        _synchronize()
+        with _out_of_memory_as_runtime_error():
+            model.fit(
+                build_features(train, params["feature_set"]),
+                np.asarray(z_train, dtype=np.float64),
+            )
+            _synchronize()
         self._usage["fit_seconds"] += time.perf_counter() - start
         self._provenance = _json_safe(getattr(model, "provenance_", {}))
         self._last = Fitted(model=model, feature_set=params["feature_set"])
@@ -263,10 +289,11 @@ class FoundationModel(cv.Method, abc.ABC):
         start = time.perf_counter()
         if model.model is None:
             raise ValueError("this model was released when another was fitted")
-        distribution = model.model.predict_distribution(
-            build_features(catalog, model.feature_set)
-        )
-        _synchronize()
+        with _out_of_memory_as_runtime_error():
+            distribution = model.model.predict_distribution(
+                build_features(catalog, model.feature_set)
+            )
+            _synchronize()
         self._usage["predict_seconds"] += time.perf_counter() - start
         return Raw(distribution)
 
