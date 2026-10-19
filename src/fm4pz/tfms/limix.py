@@ -35,6 +35,13 @@ TRANSFORMS: tuple[str, ...] = ("auto", "none", "power", "quantile")
 #: The largest context LimiX-2 was pretrained on, in rows.
 MAX_CONTEXT = 20_000
 
+#: Query rows LimiX-2 predicts at a time: a production run's chunk of the
+#: test set (:mod:`fm4pz.produce`) in one pass. A bagged member whose
+#: context cache does not fit on the GPU runs its context again for every
+#: chunk, and a query's answer does not depend on the others in its chunk,
+#: up to float rounding.
+QUERY_CHUNK = 10_000
+
 #: Each bagging choice's ``bag_size``.
 BAGS: dict[str, int | float | None] = {
     "none": None,
@@ -90,6 +97,7 @@ class LimiX(tfms.FoundationModel):
             "version": "v2",
             "softmax_temperature": float(params["softmax_temperature"]),
             "bag_size": BAGS[params.get("bag", "none")],
+            "chunk_size": QUERY_CHUNK,
             **tfms.common_model_params(params),
         }
 
