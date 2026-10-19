@@ -12,6 +12,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export CUDA_VISIBLE_DEVICES=$1 HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" FM4PZ_ROUND=1 \
+  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   OMP_NUM_THREADS="${4:-4}" OPENBLAS_NUM_THREADS="${4:-4}" \
   MKL_NUM_THREADS="${4:-4}" FM4PZ_RESULTS="${FM4PZ_RESULTS:-$PWD/results}"
 method=$2
