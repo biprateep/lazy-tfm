@@ -33,6 +33,7 @@ import numpy.typing as npt
 
 from fm4pz import baselines
 from fm4pz import config
+from fm4pz import cv
 from fm4pz import scoring
 from fm4pz import splits
 from fm4pz import tune
@@ -67,6 +68,63 @@ def _score_chunk(rows: npt.NDArray[np.int64]) -> dict[str, np.ndarray]:
     chunk = test.take(rows)
     masses = method.masses(method.predict(model, chunk), post)
     return scoring.score(chunk.redshift, masses)
+
+
+def _score_raw(
+    method_name: str, raw: Any, post: dict[str, Any], z_true: npt.ArrayLike
+) -> dict[str, np.ndarray]:
+    """Turns predictions into masses and scores them, in a forked worker."""
+    method = baselines.get(method_name)
+    return scoring.score(z_true, method.masses(raw, post))
+
+
+def _produce_on_gpu(
+    method: cv.Method,
+    params: dict[str, Any],
+    post: dict[str, Any],
+    split: splits.Split,
+    chunks: list[npt.NDArray[np.int64]],
+    jobs: int,
+) -> tuple[list[dict[str, np.ndarray]], float, float, float]:
+    """Fits and predicts on the GPU while worker processes score.
+
+    The workers are forked before the fit, since a process that has used
+    CUDA cannot be forked; the GPU predicts one chunk of test rows after
+    another and hands each to them, never more than ``2 * jobs`` ahead.
+
+    Args:
+        method: A method whose :attr:`~fm4pz.cv.Method.on_gpu` is true.
+        params: Its production fit parameters.
+        post: Its post-processing choice.
+        split: The training and test sets.
+        chunks: The test rows of each chunk.
+        jobs: Worker processes scoring chunks.
+
+    Returns:
+        A tuple (parts, start, fitted, scored): each chunk's scores, and
+        the times (``time.perf_counter``) the fit began, the fit ended and
+        the last chunk was scored.
+    """
+    z_true = split.test.redshift
+    with multiprocessing.get_context("fork").Pool(max(1, jobs)) as pool:
+        start = time.perf_counter()
+        model = method.fit(
+            params, split.train, split.train.redshift, seed=split.seed
+        )
+        fitted = time.perf_counter()
+        pending: list[Any] = []
+        for rows in chunks:
+            while sum(not task.ready() for task in pending) >= 2 * jobs:
+                time.sleep(0.2)
+            raw = method.predict(model, split.test.take(rows))
+            pending.append(
+                pool.apply_async(
+                    _score_raw, (method.name, raw, post, z_true[rows])
+                )
+            )
+        parts = [task.get() for task in pending]
+        scored = time.perf_counter()
+    return parts, start, fitted, scored
 
 
 def _record(
@@ -111,24 +169,29 @@ def produce(
     )
     method = baselines.get(method_name)
     split = splits.load(regime, n_train=n_train, seed=seed)
-    start = time.perf_counter()
     params = method.production_params(best["params"])
-    model = method.fit(params, split.train, split.train.redshift, seed=seed)
-    fitted = time.perf_counter()
-    _STATE.update(
-        method=method, model=model, post=best["post"], test=split.test
-    )
     chunks = np.array_split(
         np.arange(len(split.test.redshift)),
         max(1, -(-len(split.test.redshift) // _CHUNK)),
     )
-    if jobs == 1:
-        parts = [_score_chunk(rows) for rows in chunks]
+    if method.on_gpu:
+        parts, start, fitted, scored = _produce_on_gpu(
+            method, params, best["post"], split, chunks, jobs
+        )
     else:
-        with multiprocessing.get_context("fork").Pool(jobs) as pool:
-            parts = pool.map(_score_chunk, chunks)
-    _STATE.clear()
-    scored = time.perf_counter()
+        start = time.perf_counter()
+        model = method.fit(params, split.train, split.train.redshift, seed=seed)
+        fitted = time.perf_counter()
+        _STATE.update(
+            method=method, model=model, post=best["post"], test=split.test
+        )
+        if jobs == 1:
+            parts = [_score_chunk(rows) for rows in chunks]
+        else:
+            with multiprocessing.get_context("fork").Pool(jobs) as pool:
+                parts = pool.map(_score_chunk, chunks)
+        _STATE.clear()
+        scored = time.perf_counter()
     per_object = {
         key: np.concatenate([part[key] for part in parts]) for key in parts[0]
     }
@@ -141,6 +204,8 @@ def produce(
         predict_seconds=scored - fitted,
         jobs=jobs,
     )
+    if resources := method.resources():
+        record["resources"] = resources
     path = run_path(method_name, regime, n_train, seed)
     path.parent.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, Any] = {"z_true": z_true, **per_object}

@@ -54,9 +54,12 @@ class Method(abc.ABC):
 
     Attributes:
         name: The method's name, as it appears in results.
+        on_gpu: Whether it fits and predicts on a GPU, so that a production
+            run scores in worker processes forked before the fit.
     """
 
     name: str
+    on_gpu: bool = False
 
     @abc.abstractmethod
     def suggest(self, trial: optuna.Trial) -> dict[str, Any]:
@@ -139,6 +142,18 @@ class Method(abc.ABC):
             The fit parameters of a production run.
         """
         return dict(params)
+
+    def resources(self) -> dict[str, Any]:
+        """What a production run cost, beyond its wall times.
+
+        A method that runs on a GPU reports the device and its peak memory
+        here; the default reports nothing.
+
+        Returns:
+            A JSON-serialisable mapping, added to the run's record when not
+            empty; empty by default.
+        """
+        return {}
 
     @abc.abstractmethod
     def masses(self, raw: Any, post: Mapping[str, Any]) -> FloatArray:
