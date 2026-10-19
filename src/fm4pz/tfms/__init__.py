@@ -26,6 +26,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Mapping
 import dataclasses
+import gc
 import importlib.metadata
 import json
 import time
@@ -97,11 +98,12 @@ class Fitted:
     """A fitted foundation model and the inputs it was fitted on.
 
     Attributes:
-        model: The fitted ``lazy.LazyModel``.
+        model: The fitted ``lazy.LazyModel``; None once the method has
+            fitted another, which frees its GPU memory.
         feature_set: Which features it reads.
     """
 
-    model: lazy.LazyModel
+    model: lazy.LazyModel | None
     feature_set: str
 
 
@@ -172,6 +174,7 @@ class FoundationModel(cv.Method, abc.ABC):
         """Starts with no compute used."""
         self._usage = {"fit_seconds": 0.0, "predict_seconds": 0.0}
         self._provenance: dict[str, Any] = {}
+        self._last: Fitted | None = None
 
     @abc.abstractmethod
     def model_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
@@ -215,7 +218,15 @@ class FoundationModel(cv.Method, abc.ABC):
         Returns:
             The fitted model.
         """
+        # A search fits one fold after another, and the previous fold's
+        # model, still held by the caller, would keep its GPU memory (and
+        # PyTorch's cache would keep the rest) from the processes sharing
+        # the GPU.
+        if self._last is not None:
+            self._last.model = None
+        gc.collect()
         if torch.cuda.is_available():
+            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
         start = time.perf_counter()
         model = lazy.LazyModel(
@@ -232,7 +243,8 @@ class FoundationModel(cv.Method, abc.ABC):
         _synchronize()
         self._usage["fit_seconds"] += time.perf_counter() - start
         self._provenance = _json_safe(getattr(model, "provenance_", {}))
-        return Fitted(model=model, feature_set=params["feature_set"])
+        self._last = Fitted(model=model, feature_set=params["feature_set"])
+        return self._last
 
     def predict(self, model: Fitted, catalog: datasets.Catalog) -> Raw:
         """The model's distributions, not yet on the common grid.
@@ -249,6 +261,8 @@ class FoundationModel(cv.Method, abc.ABC):
             The distributions.
         """
         start = time.perf_counter()
+        if model.model is None:
+            raise ValueError("this model was released when another was fitted")
         distribution = model.model.predict_distribution(
             build_features(catalog, model.feature_set)
         )
