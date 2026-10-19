@@ -150,7 +150,7 @@ class Method(abc.ABC):
         here; the default reports nothing.
 
         Returns:
-            A JSON-serialisable mapping, added to the run's record when not
+            A JSON-serializable mapping, added to the run's record when not
             empty; empty by default.
         """
         return {}

@@ -3,18 +3,19 @@
 """The tabular foundation models, each a :class:`fm4pz.cv.Method`.
 
 Every model runs through lazy-tfm's ``LazyModel`` and nothing else: we choose
-its inputs and settings, it returns densities on the common grid. A
+its inputs and settings, and it returns densities on the common grid. A
 foundation model learns nothing at fit (it reads the training set as its
-context), so its settings are the inputs, the ensemble and the
-preprocessing, and they are chosen by the same cross-validation as the
-baselines' hyperparameters. The densities come from ``predict_proba`` on
+context), so its hyperparameters are its inputs, its ensemble and its
+preprocessing, which we choose by the same cross-validation as the
+baselines' hyperparameters. The densities are those of ``predict_proba`` on
 :data:`fm4pz.scoring.FINE_GRID`, which puts the exact probability of the
 model's own distribution in each bin, drops what falls outside [0, 2] and
-renormalises, as :func:`fm4pz.scoring.normalize_masses` expects. One
-post-processing choice needs no refit: raising the masses to a power alpha
-and renormalising, the sharpening FlexZBoost applies to its series, which
-lets the cross-validation correct a model that is too broad or too narrow on
-average. Alpha = 1 leaves the model's answer as it is.
+renormalizes each row, as :func:`fm4pz.scoring.normalize_masses` expects.
+One post-processing choice needs no refit: raising the masses to a power
+alpha and renormalizing them, the sharpening FlexZBoost applies to its
+series. This lets the cross-validation correct a model whose distributions
+are on average too broad or too narrow, while alpha = 1 leaves the model's
+answer as it is.
 
 A fitted model also records what it cost: the wall time of the fit and of
 the predictions, the GPU it ran on, and the peak GPU memory PyTorch held.
@@ -65,7 +66,7 @@ FEATURE_SETS: dict[str, str] = {
         "the six magnitudes and their errors (lazy's 'mag', DC1 FlexZBoost)"
     ),
     "all42": (
-        "the six magnitudes, all fifteen colours and the errors of all "
+        "the six magnitudes, all fifteen colors and the errors of all "
         "twenty-one (lazy's 'all')"
     ),
 }
@@ -77,10 +78,10 @@ ALPHAS: tuple[float, ...] = (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.5)
 def build_features(
     catalog: datasets.Catalog, name: str
 ) -> npt.NDArray[np.float64]:
-    """One feature set of a catalogue, as a float64 array.
+    """One feature set of a catalog, as a float64 array.
 
     Args:
-        catalog: A DC1 catalogue.
+        catalog: A DC1 catalog.
         name: One of :data:`FEATURE_SETS`.
 
     Returns:
@@ -126,7 +127,7 @@ class Raw:
 
         They are what ``predict_proba(X, y_grid=FINE_GRID)`` returns times
         the bin width: the exact probability in each bin, with what falls
-        outside [0, 2] dropped and each row renormalised.
+        outside [0, 2] dropped and each row renormalized.
 
         Returns:
             Masses, float32 to halve the memory, shape (n, 4000).
@@ -207,7 +208,7 @@ class FoundationModel(cv.Method, abc.ABC):
 
         Args:
             params: The fit parameters.
-            train: The training catalogue.
+            train: The training catalog.
             z_train: Its redshifts, shape (n_train,).
             seed: The model's ``random_state``.
 
@@ -256,7 +257,7 @@ class FoundationModel(cv.Method, abc.ABC):
         return Raw(distribution)
 
     def masses(self, raw: Raw, post: Mapping[str, Any]) -> FloatArray:
-        """Sharpens the masses by ``post["alpha"]`` and renormalises them.
+        """Sharpens the masses by ``post["alpha"]`` and renormalizes them.
 
         Args:
             raw: What :meth:`predict` returned, for n rows.
