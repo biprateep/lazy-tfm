@@ -9,10 +9,12 @@
 # skipped, so the script can be rerun after an interruption. With WAIT=1 in
 # the environment, each size waits until its search has exported a setting,
 # so that the fits can follow searches still running. Progress goes to
-# results/logs/produce_METHOD.log.
+# results/logs/produce_METHOD.log. A run being fitted holds a lock directory
+# beside its record, so that launchers on several GPUs can share one list;
+# remove the locks (results/runs/*/*.lock) after an allocation ends.
 set -u
 cd "$(dirname "$0")/.."
-export CUDA_VISIBLE_DEVICES=$1 HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" \
+export CUDA_VISIBLE_DEVICES=$1 HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" FM4PZ_ROUND=1 \
   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
   FM4PZ_THREADS=1 FM4PZ_RESULTS="${FM4PZ_RESULTS:-$PWD/results}"
 method=$2
@@ -28,7 +30,8 @@ for job in $jobs; do
   done
   for seed in 0 1 2 3 4; do
     record="$FM4PZ_RESULTS/runs/$method/${regime}_n${size}_s${seed}.json"
-    if [[ -f "$record" ]]; then
+    if [[ -f "$record" ]] || ! mkdir -p "$(dirname "$record")" \
+        || ! mkdir "$record.lock" 2> /dev/null; then
       continue
     fi
     echo "$(date -Is) start $method $regime $size s$seed gpu=$1" >> "$log"
@@ -36,6 +39,7 @@ for job in $jobs; do
       --seed "$seed" --jobs "$workers" \
       >> "$FM4PZ_RESULTS/logs/produce_${method}.out" 2>&1
     status=$?
+    rmdir "$record.lock"
     echo "$(date -Is) done  $method $regime $size s$seed exit=$status" >> "$log"
   done
 done
