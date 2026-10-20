@@ -56,10 +56,14 @@ class Method(abc.ABC):
         name: The method's name, as it appears in results.
         on_gpu: Whether it fits and predicts on a GPU, so that a production
             run scores in worker processes forked before the fit.
+        cross_size_warm_starts: Whether a later round's search also starts
+            from the earlier round's best setting at every other training
+            size (:func:`fm4pz.tune.warm_start`).
     """
 
     name: str
     on_gpu: bool = False
+    cross_size_warm_starts: bool = False
 
     @abc.abstractmethod
     def suggest(self, trial: optuna.Trial) -> dict[str, Any]:
@@ -127,6 +131,26 @@ class Method(abc.ABC):
             empty by default.
         """
         return []
+
+    def adapt_warm_start(
+        self, params: Mapping[str, Any], n_train: int
+    ) -> dict[str, Any] | None:
+        """A queued setting as the search of one training size can run it.
+
+        A setting carried over from another size or an earlier round may
+        name a choice this search does not offer; a method can translate
+        it, or leave the parameter out so that the sampler draws it. By
+        default the setting is queued as it is.
+
+        Args:
+            params: Optuna parameters of the setting.
+            n_train: The training size of the search.
+
+        Returns:
+            The parameters to queue, or None to queue nothing.
+        """
+        del n_train  # Unused.
+        return dict(params)
 
     def production_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
         """The chosen setting as a production fit runs it.

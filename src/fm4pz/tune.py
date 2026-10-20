@@ -17,12 +17,13 @@ Typical usage example:
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import json
 import multiprocessing
 import os
 import pathlib
 import platform
+from typing import Any
 
 import optuna
 from optuna.storages import journal
@@ -158,7 +159,11 @@ def warm_start(method: str, regime: str, n_train: int) -> int:
 
     They are the method's own :meth:`~fm4pz.cv.Method.warm_starts` and the
     best setting of the next smaller size of the regime, when its search has
-    finished.
+    finished. A later round also starts from the earlier round's five best
+    settings at this size and, for a method whose
+    :attr:`~fm4pz.cv.Method.cross_size_warm_starts` is true, from its best
+    setting at every other size. Each setting goes through the method's
+    :meth:`~fm4pz.cv.Method.adapt_warm_start` first.
 
     Args:
         method: A baseline name.
@@ -169,31 +174,49 @@ def warm_start(method: str, regime: str, n_train: int) -> int:
         How many settings were queued (0 if the search had begun).
     """
     baseline = baselines.get(method)
-    queued = list(baseline.warm_starts())
-    if search_round() > 1:
-        queued += _top_settings(
-            journal_path(method, regime, n_train, search_round() - 1),
-            f"{method}-{regime}-{n_train}",
-        )
+    queued: list[Mapping[str, Any] | None] = list(baseline.warm_starts())
     sizes = (
         config.REPRESENTATIVE_SIZES
         if regime == "representative"
         else config.BIASED_SIZES
     )
+    if search_round() > 1:
+        queued += _top_settings(
+            journal_path(method, regime, n_train, search_round() - 1),
+            f"{method}-{regime}-{n_train}",
+        )
+        if baseline.cross_size_warm_starts:
+            queued += [
+                _trial_params(
+                    best_path(method, regime, size, search_round() - 1)
+                )
+                for size in sizes
+                if size != n_train
+            ]
     smaller = [size for size in sizes if size < n_train]
     if smaller:
-        previous = best_path(method, regime, smaller[-1])
-        if previous.exists():
-            exported = json.loads(previous.read_text())
-            if "trial_params" in exported:
-                queued.append(exported["trial_params"])
+        queued.append(_trial_params(best_path(method, regime, smaller[-1])))
+    settings = [
+        adapted
+        for params in queued
+        if params is not None
+        and (adapted := baseline.adapt_warm_start(params, n_train)) is not None
+    ]
     study = cv.open_study(
         baseline,
         splits.load(regime, n_train=n_train, seed=0),
         storage=journal_path(method, regime, n_train),
-        enqueue=queued,
+        enqueue=settings,
     )
-    return len(queued) if len(study.trials) == len(queued) else 0
+    return len(settings) if len(study.trials) == len(settings) else 0
+
+
+def _trial_params(path: pathlib.Path) -> dict[str, Any] | None:
+    """The Optuna parameters of an exported setting, if it was exported."""
+    if not path.exists():
+        return None
+    exported = json.loads(path.read_text())
+    return exported.get("trial_params")
 
 
 def _top_settings(
