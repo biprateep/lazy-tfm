@@ -11,9 +11,11 @@
 # setting is exported; the size's production records made with another
 # setting are moved to results/runs_r1/ (python -m fm4pz.stale); and the
 # seeds without a current record are fitted again, each once MIN_FREE_GB of
-# memory is free (scripts/run_produce_gb10.sh). A search runs as one process
-# with THREADS CPU threads; a fit scores with JOBS processes. Progress goes
-# to results/logs/round2_METHOD.log.
+# memory is free (scripts/run_produce_gb10.sh). Each resumption of a search
+# also waits for MIN_FREE_GB, so that it never pushes a box shared with other
+# jobs into the out-of-memory killer. A search runs as one process with
+# THREADS CPU threads; a fit scores with JOBS processes. Progress goes to
+# results/logs/round2_METHOD.log.
 set -u
 cd "$(dirname "$0")/.."
 export HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" FM4PZ_ROUND=2 \
@@ -28,6 +30,8 @@ workers=${5:-4}
 min_free=${6:-40}
 mkdir -p "$FM4PZ_RESULTS/logs"
 log="$FM4PZ_RESULTS/logs/round2_$method.log"
+
+available_kb() { awk '/^MemAvailable:/ {print $2}' /proc/meminfo; }
 
 counts() {  # REGIME SIZE -> "TRIALS COMPLETE"
   .venv/bin/python - "$method" "$1" "$2" <<'EOF'
@@ -58,6 +62,9 @@ for job in $jobs; do
   for attempt in 1 2 3 4 5 6 7 8; do
     read -r n_trials n_complete < <(counts "$regime" "$size")
     (( n_complete >= min_complete )) && break
+    while (( $(available_kb) < min_free * 1024 * 1024 )); do
+      sleep 300
+    done
     total=$(( n_trials + min_complete - n_complete ))
     echo "$(date -Is) search $method $regime $size: $n_complete complete" \
       "of $n_trials, to --total $total (attempt $attempt)" >> "$log"
