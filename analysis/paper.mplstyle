@@ -1,0 +1,54 @@
+# Publication figure defaults — house style for manuscript figures.
+#
+# Apply with:   plt.style.use("<path>/paper.mplstyle")
+# or via:       import plotstyle, then plotstyle.use_style()
+#
+# Figure WIDTHS are not settable here — they are per-figure geometry.
+# Use COLUMN_WIDTH / TEXT_WIDTH or figsize() from plotstyle.py.
+
+# --- Type: every piece of text in the figure inherits from these -----------
+# Computer Modern for every piece of text, as in LaTeX's own body text.
+# CMU Serif and Latin Modern Roman are complete; cmr10 ships with matplotlib,
+# so the chain always ends on a Computer Modern face, but it lacks the Unicode
+# minus, en dash, curly quotes and bold. plotstyle.use_style() also registers
+# TeX Live's Latin Modern, which matplotlib does not find on its own; with the
+# sheet alone, run plotstyle.verify_style() to see which face resolved.
+font.family:  serif
+font.serif:   CMU Serif, Latin Modern Roman, cmr10
+font.size:    10
+axes.titlesize:  10
+axes.labelsize:  10
+legend.fontsize: 10
+legend.title_fontsize: 10
+figure.titlesize: 12
+xtick.labelsize: 9
+ytick.labelsize: 9
+
+# Computer Modern math, so inline $math$ matches the LaTeX manuscript, and
+# tick labels typeset as math (a true minus sign in every face, cmr10 too).
+mathtext.fontset: cm
+axes.formatter.use_mathtext: True
+
+# --- Ticks: inward, on all four sides -----------------------------------
+xtick.top:       True
+ytick.right:     True
+xtick.direction: in
+ytick.direction: in
+
+# --- Colour: matplotlib's own defaults unless the user names a palette ----
+# The default property cycle (tab10 — C0, C1, ...) for categorical series and
+# the default colormap (viridis) for continuous data, pinned here so a personal
+# matplotlibrc cannot quietly change them. A stated palette is installed
+# afterwards with plotstyle.set_palette() / use_style(palette=..., cmap=...).
+axes.prop_cycle: cycler('color', ['1f77b4', 'ff7f0e', '2ca02c', 'd62728', '9467bd', '8c564b', 'e377c2', '7f7f7f', 'bcbd22', '17becf'])
+image.cmap: viridis
+
+# --- Legend: never boxed ------------------------------------------------
+legend.frameon: False
+
+# --- Output: tight 300 dpi PNG -------------------------------------------
+figure.facecolor: w
+figure.dpi:       300
+savefig.dpi:      300
+savefig.bbox:     tight
+savefig.format:   png

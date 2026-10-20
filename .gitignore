@@ -34,3 +34,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# Quick-look figures; the paper's final figures live in figures/.
+analysis/figs/
