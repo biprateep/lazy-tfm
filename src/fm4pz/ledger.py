@@ -218,12 +218,12 @@ def build(results: pathlib.Path | None = None) -> pd.DataFrame:
         "representative": config.REPRESENTATIVE_SIZES,
         "biased": config.BIASED_SIZES,
     }
-    rows = [
-        dataclasses.asdict(_entry(method, regime, n_train, sources))
-        for method in ROUNDS
-        for regime, regime_sizes in sizes.items()
-        for n_train in regime_sizes
-    ]
+    rows = []
+    for method in ROUNDS:
+        for regime, regime_sizes in sizes.items():
+            for n_train in regime_sizes:
+                entry = _entry(method, regime, n_train, sources)
+                rows.append(dataclasses.asdict(entry))
     return pd.DataFrame(rows)
 
 
