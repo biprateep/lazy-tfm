@@ -22,8 +22,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 import dataclasses
+import datetime as dt
 import json
 import pathlib
+import re
 import time
 from typing import Any
 
@@ -240,16 +242,90 @@ def build(results: pathlib.Path | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _failures(results: pathlib.Path) -> list[str]:
-    """Lines of every log, on every host, that record a failure."""
-    lines = []
+# A launcher's line for a finished run or search, and the watchdog's stop.
+_DONE = re.compile(
+    r"^(?P<time>\S+) done\s+(?P<method>\w+) (?P<regime>\w+) (?P<size>\d+)"
+    r"(?: s(?P<seed>\d+))? exit=(?P<status>\d+)"
+)
+_STOP = re.compile(
+    r"^(?P<time>\S+) stopping (?P<method>\w+) (?P<regime>\w+) (?P<size>\d+)"
+)
+
+
+def _failures(results: pathlib.Path) -> list[tuple[tuple[str, ...], str]]:
+    """The failures in every log, on every host, that nothing has redone.
+
+    A run or search is identified by its method, regime, size and seed (none
+    for a search), wherever it ran. Its latest outcome across all the logs
+    decides: a failure followed by a success of the same run, on any host,
+    is resolved and not listed.
+
+    Args:
+        results: The results directory.
+
+    Returns:
+        One tuple (run, line) per failure no later success redid: the run's
+        key (method, regime, size, seed or ``"search"``) and where and what
+        was logged.
+    """
+    latest: dict[tuple[str, ...], tuple[dt.datetime, bool, str]] = {}
     for name, root in _sources(results):
         for log in sorted(root.glob("logs*/*.log")):
             for line in log.read_text(errors="replace").splitlines():
-                failed = "exit=" in line and "exit=0" not in line
-                if failed or "stopping" in line:
-                    lines.append(f"{name}:{log.name}: {line}")
-    return lines
+                event = _event(line)
+                if event is None:
+                    continue
+                key, when, ok = event
+                if key not in latest or when >= latest[key][0]:
+                    latest[key] = (when, ok, f"{name}:{log.name}: {line}")
+    return [
+        (key, text)
+        for key, (_, ok, text) in sorted(latest.items(), key=lambda kv: kv[1])
+        if not ok
+    ]
+
+
+def _redone(key: tuple[str, ...], table: pd.DataFrame) -> bool:
+    """Whether a failed run's product exists all the same.
+
+    A search is redone when its round's best setting is exported, and a
+    production run when its seed has a record made from that setting
+    (a search finished or a run made by hand leaves no line in the logs).
+    """
+    method, regime, size, seed = key
+    if method not in ROUNDS:
+        return False
+    row = table[
+        (table["method"] == method)
+        & (table["regime"] == regime)
+        & (table["n_train"] == int(size))
+    ]
+    if row.empty:
+        return False
+    if seed == "search":
+        return bool(row["best_exported"].iloc[0])
+    return bool(row["seeds_done"].iloc[0] == len(config.SEEDS))
+
+
+def _event(
+    line: str,
+) -> tuple[tuple[str, ...], dt.datetime, bool] | None:
+    """A log line's run, time and outcome; None for any other line."""
+    done = _DONE.match(line)
+    if done is not None:
+        key = (
+            done["method"],
+            done["regime"],
+            done["size"],
+            done["seed"] or "search",
+        )
+        ok = done["status"] == "0"
+        return key, dt.datetime.fromisoformat(done["time"]), ok
+    stop = _STOP.match(line)
+    if stop is not None:
+        key = (stop["method"], stop["regime"], stop["size"], "search")
+        return key, dt.datetime.fromisoformat(stop["time"]), False
+    return None
 
 
 def _markdown(table: pd.DataFrame, failures: Sequence[str]) -> str:
@@ -271,7 +347,7 @@ def _markdown(table: pd.DataFrame, failures: Sequence[str]) -> str:
         "",
         shown.to_markdown(index=False),
         "",
-        "## Failures in the logs",
+        "## Failures in the logs that nothing has redone",
         "",
         *([f"- `{line}`" for line in failures] or ["None."]),
         "",
@@ -292,7 +368,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     results = config.results_dir()
     table = build(results)
     table.to_csv(results / "ledger.csv", index=False)
-    (results / "ledger.md").write_text(_markdown(table, _failures(results)))
+    failures = [
+        text for key, text in _failures(results) if not _redone(key, table)
+    ]
+    (results / "ledger.md").write_text(_markdown(table, failures))
     print(table.groupby(["method", "status"]).size().to_string())
     return 0
 
