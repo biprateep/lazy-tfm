@@ -33,7 +33,7 @@ import pandas as pd
 
 from fm4pz import config
 
-__all__ = ["ROUNDS", "Entry", "build", "main"]
+__all__ = ["MIN_COMPLETE", "OWNERS", "ROUNDS", "Entry", "build", "main"]
 
 #: The search round each method's final results come from.
 ROUNDS: dict[str, int] = {
@@ -43,6 +43,17 @@ ROUNDS: dict[str, int] = {
     "tabpfn": 2,
     "limix": 2,
     "kumo": 2,
+}
+
+#: Which session runs each method's experiments: the coordinating session
+#: the classical baselines, the foundation-model session the rest.
+OWNERS: dict[str, str] = {
+    "flexzboost": "coordinator",
+    "cmnn": "coordinator",
+    "gpz": "coordinator",
+    "tabpfn": "tfm-scaling",
+    "limix": "tfm-scaling",
+    "kumo": "tfm-scaling",
 }
 
 #: The completed trials a search should reach before it is called done.
@@ -65,6 +76,7 @@ class Entry:
 
     Attributes:
         method: The method.
+        owner: The session that runs it (:data:`OWNERS`).
         regime: ``"representative"`` or ``"biased"``.
         n_train: The training size.
         round: The search round its results come from.
@@ -84,6 +96,7 @@ class Entry:
     """
 
     method: str
+    owner: str
     regime: str
     n_train: int
     round: int
@@ -143,7 +156,7 @@ def _entry(
     round_ = ROUNDS[method]
     suffix = ".journal" if round_ == 1 else f".r{round_}.journal"
     stem = f"{regime}_n{n_train}"
-    entry = Entry(method, regime, n_train, round_)
+    entry = Entry(method, OWNERS[method], regime, n_train, round_)
     journals = {
         name: root / "tuning" / method / f"{stem}{suffix}"
         for name, root in sources

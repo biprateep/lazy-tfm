@@ -53,3 +53,25 @@ representative size, past the 20,000 rows LimiX-2 was pretrained on). Round
 
 LimiX-2 runs on tara because its production fits at 30,000 rows and more
 were killed for lack of memory on dhruba while the FlexZBoost search held it.
+
+## Tracking
+
+One ledger records the state of every experiment: `results/ledger.md` (and
+`results/ledger.csv`) on dhruba, rebuilt every 30 minutes by
+`results/queue/ledger_loop.sh`, and on demand by `scripts/ledger.sh`. It reads
+this checkout's `results/` and, copied under `results/remote/`, tara's
+`paper/results` and `paper-tfm/results`. Both sessions follow the same rules:
+
+1. The ledger is the only status record. A method's experiments are done
+   when all 14 of its rows read `done`; a report states the ledger's time.
+2. Results are written only under those trees, in the layout of
+   `fm4pz.tune` and `fm4pz.produce`, so the ledger sees them. A tree
+   elsewhere (a Perlmutter node's `/pscratch`) is copied into one of them
+   before its work counts.
+3. Each session writes only its own methods' files (the ledger's `owner`
+   column): the coordinating session the classical baselines, `tfm-scaling`
+   the foundation models.
+4. After finishing or fixing a batch of runs, a session runs
+   `scripts/ledger.sh` and reads the failures it lists.
+5. A record made from a setting other than its search's current best is
+   stale; it is moved to `results/runs_r1/<method>/` before it is redone.
