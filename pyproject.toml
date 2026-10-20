@@ -26,6 +26,7 @@ dependencies = [
     "threadpoolctl>=3.7.0",
     "xgboost>=3.1",
     "flexcode>=0.2.3",
+    "tabulate>=0.10.0",
 ]
 
 [dependency-groups]
