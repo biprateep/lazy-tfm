@@ -194,6 +194,7 @@ class FoundationModel(cv.Method, abc.ABC):
     backend: str
     package: str
     on_gpu = True
+    cross_size_warm_starts = True
 
     def __init__(self) -> None:
         """Starts with no compute used."""
