@@ -13,9 +13,13 @@ counts, whether the best setting is exported, how many seeds have a record
 made from that setting (a record made from another setting is stale), and
 one status word.
 
+It also writes ``ledger.json``, the same table with the failures and the
+progress of every experiment hour by hour (completed search trials and
+current production records), which the run dashboard reads.
+
 Typical usage example:
 
-  python -m fm4pz.ledger            # writes results/ledger.{csv,md}
+  python -m fm4pz.ledger            # writes results/ledger.{csv,md,json}
 """
 
 from __future__ import annotations
@@ -35,7 +39,15 @@ import pandas as pd
 
 from fm4pz import config
 
-__all__ = ["MIN_COMPLETE", "OWNERS", "ROUNDS", "Entry", "build", "main"]
+__all__ = [
+    "MIN_COMPLETE",
+    "OWNERS",
+    "ROUNDS",
+    "Entry",
+    "build",
+    "main",
+    "progress",
+]
 
 #: The search round each method's final results come from.
 ROUNDS: dict[str, int] = {
@@ -131,21 +143,26 @@ def _sources(results: pathlib.Path) -> list[tuple[str, pathlib.Path]]:
     return roots
 
 
-def _trial_counts(path: pathlib.Path, study_name: str) -> dict[str, int]:
-    """Trial counts by state in a search journal."""
+def _trials(
+    path: pathlib.Path, study_name: str
+) -> list[optuna.trial.FrozenTrial]:
+    """The trials of a search journal."""
     study = optuna.load_study(
         study_name=study_name,
         storage=optuna.storages.JournalStorage(
             journal.JournalFileBackend(str(path))
         ),
     )
-    states = [trial.state.name for trial in study.trials]
-    return {
-        "trials": len(states),
-        "complete": states.count("COMPLETE"),
-        "failed": states.count("FAIL"),
-        "running": states.count("RUNNING"),
-    }
+    return study.trials
+
+
+def _local_time(when: dt.datetime) -> dt.datetime:
+    """A time with this host's offset; a naive one is taken as local."""
+    return when.astimezone()
+
+
+# One progress event: method, regime, size, kind ("trial" or "run"), time.
+_Event = tuple[str, str, int, str, dt.datetime]
 
 
 def _entry(
@@ -153,12 +170,19 @@ def _entry(
     regime: str,
     n_train: int,
     sources: Sequence[tuple[str, pathlib.Path]],
-) -> Entry:
-    """The state of one experiment, from the newest of its files."""
+) -> tuple[Entry, list[_Event]]:
+    """The state of one experiment, from the newest of its files.
+
+    Returns:
+        The experiment's state and its progress events, as a tuple
+        (entry, events): one event per completed trial of its search and
+        per current production record, at the time each finished.
+    """
     round_ = ROUNDS[method]
     suffix = ".journal" if round_ == 1 else f".r{round_}.journal"
     stem = f"{regime}_n{n_train}"
     entry = Entry(method, OWNERS[method], regime, n_train, round_)
+    events: list[_Event] = []
     journals = {
         name: root / "tuning" / method / f"{stem}{suffix}"
         for name, root in sources
@@ -167,9 +191,15 @@ def _entry(
     if newest is not None:
         entry.host = next(n for n, p in journals.items() if p == newest)
         entry.journal_age_h = (time.time() - newest.stat().st_mtime) / 3600
-        counts = _trial_counts(newest, f"{method}-{regime}-{n_train}")
-        entry.trials, entry.complete = counts["trials"], counts["complete"]
-        entry.failed, entry.running = counts["failed"], counts["running"]
+        trials = _trials(newest, f"{method}-{regime}-{n_train}")
+        states = [trial.state.name for trial in trials]
+        entry.trials, entry.complete = len(states), states.count("COMPLETE")
+        entry.failed = states.count("FAIL")
+        entry.running = states.count("RUNNING")
+        for trial in trials:
+            if trial.state.name == "COMPLETE" and trial.datetime_complete:
+                when = _local_time(trial.datetime_complete)
+                events.append((method, regime, n_train, "trial", when))
     best_path = _newest(
         path.with_suffix(".best.json") for path in journals.values()
     )
@@ -194,12 +224,14 @@ def _entry(
         if current:
             entry.seeds_done += 1
             losses.append(float(record["metrics"]["cde_loss"]))
+            when = dt.datetime.fromtimestamp(record_path.stat().st_mtime)
+            events.append((method, regime, n_train, "run", _local_time(when)))
         else:
             entry.seeds_stale += 1
     if losses:
         entry.test_cde = sum(losses) / len(losses)
     entry.status = _status(entry)
-    return entry
+    return entry, events
 
 
 def _status(entry: Entry) -> str:
@@ -216,6 +248,25 @@ def _status(entry: Entry) -> str:
     return "search-incomplete" if stale else "searching"
 
 
+def _collect(results: pathlib.Path) -> tuple[pd.DataFrame, list[_Event]]:
+    """Every experiment's state and progress events, as (table, events)."""
+    optuna.logging.set_verbosity(optuna.logging.ERROR)
+    sources = _sources(results)
+    sizes = {
+        "representative": config.REPRESENTATIVE_SIZES,
+        "biased": config.BIASED_SIZES,
+    }
+    rows = []
+    events: list[_Event] = []
+    for method in ROUNDS:
+        for regime, regime_sizes in sizes.items():
+            for n_train in regime_sizes:
+                entry, entry_events = _entry(method, regime, n_train, sources)
+                rows.append(dataclasses.asdict(entry))
+                events += entry_events
+    return pd.DataFrame(rows), events
+
+
 def build(results: pathlib.Path | None = None) -> pd.DataFrame:
     """The ledger of every experiment, one row each.
 
@@ -227,19 +278,38 @@ def build(results: pathlib.Path | None = None) -> pd.DataFrame:
         :class:`Entry`.
     """
     results = config.results_dir() if results is None else results
-    optuna.logging.set_verbosity(optuna.logging.ERROR)
-    sources = _sources(results)
-    sizes = {
-        "representative": config.REPRESENTATIVE_SIZES,
-        "biased": config.BIASED_SIZES,
-    }
-    rows = []
-    for method in ROUNDS:
-        for regime, regime_sizes in sizes.items():
-            for n_train in regime_sizes:
-                entry = _entry(method, regime, n_train, sources)
-                rows.append(dataclasses.asdict(entry))
-    return pd.DataFrame(rows)
+    return _collect(results)[0]
+
+
+def progress(events: Iterable[_Event]) -> pd.DataFrame:
+    """Progress events counted by the hour.
+
+    Args:
+        events: Progress events (method, regime, size, kind, time), the kind
+            ``"trial"`` for a completed search trial and ``"run"`` for a
+            current production record.
+
+    Returns:
+        One row per hour, method, regime and kind with at least one event:
+        ``hour`` (the hour's start, ISO 8601 with its offset), ``method``,
+        ``regime``, ``kind`` and ``count``.
+    """
+    rows = [
+        {
+            "hour": when.replace(minute=0, second=0, microsecond=0),
+            "method": method,
+            "regime": regime,
+            "kind": kind,
+        }
+        for method, regime, _, kind, when in events
+    ]
+    columns = ["hour", "method", "regime", "kind"]
+    if not rows:
+        return pd.DataFrame(columns=[*columns, "count"])
+    table = pd.DataFrame(rows).groupby(columns).size().rename("count")
+    table = table.reset_index().sort_values(columns)
+    table["hour"] = table["hour"].map(lambda hour: hour.isoformat())
+    return table
 
 
 # A launcher's line for a finished run or search, and the watchdog's stop.
@@ -355,8 +425,57 @@ def _markdown(table: pd.DataFrame, failures: Sequence[str]) -> str:
     return "\n".join(parts)
 
 
+def _failure_rows(
+    failures: Sequence[tuple[tuple[str, ...], str]],
+) -> list[dict[str, Any]]:
+    """The failures as rows: the run's key, where it was logged, the line."""
+    rows = []
+    for (method, regime, size, seed), text in failures:
+        where, _, line = text.partition(": ")
+        rows.append(
+            {
+                "method": method,
+                "regime": regime,
+                "n_train": int(size),
+                "seed": seed,
+                "logged_at": line.split(" ", 1)[0],
+                "log": where,
+                "line": line,
+            }
+        )
+    return rows
+
+
+def _dashboard(
+    table: pd.DataFrame,
+    failures: Sequence[tuple[tuple[str, ...], str]],
+    events: Iterable[_Event],
+) -> dict[str, Any]:
+    """The ledger as one list of rows for the dashboard.
+
+    Every row carries a ``table`` column naming what it is: ``meta`` (when
+    the ledger was built), ``experiment`` (a row of the ledger),
+    ``failure`` (a failure nothing has redone) or ``progress`` (an hour's
+    events).
+    """
+    built = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    experiments = table.astype(object).where(table.notna(), None)
+    rows: list[dict[str, Any]] = [
+        {"table": "meta", "built": built, "seeds": len(config.SEEDS)}
+    ]
+    rows += [
+        {"table": "experiment", **row} for row in experiments.to_dict("records")
+    ]
+    rows += [{"table": "failure", **row} for row in _failure_rows(failures)]
+    rows += [
+        {"table": "progress", **row}
+        for row in progress(events).to_dict("records")
+    ]
+    return {"rows": rows}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Writes ``ledger.csv`` and ``ledger.md`` under the results directory.
+    """Writes ``ledger.csv``, ``.md`` and ``.json`` under the results directory.
 
     Args:
         argv: Unused; there are no options.
@@ -366,12 +485,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     del argv  # Unused: the ledger has no options.
     results = config.results_dir()
-    table = build(results)
+    table, events = _collect(results)
     table.to_csv(results / "ledger.csv", index=False)
     failures = [
-        text for key, text in _failures(results) if not _redone(key, table)
+        (key, text)
+        for key, text in _failures(results)
+        if not _redone(key, table)
     ]
-    (results / "ledger.md").write_text(_markdown(table, failures))
+    lines = [text for _, text in failures]
+    (results / "ledger.md").write_text(_markdown(table, lines))
+    dashboard = _dashboard(table, failures, events)
+    (results / "ledger.json").write_text(json.dumps(dashboard))
     print(table.groupby(["method", "status"]).size().to_string())
     return 0
 

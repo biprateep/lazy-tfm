@@ -58,7 +58,9 @@ were killed for lack of memory on dhruba while the FlexZBoost search held it.
 
 One ledger records the state of every experiment: `results/ledger.md` (and
 `results/ledger.csv`) on dhruba, rebuilt every 30 minutes by
-`results/queue/ledger_loop.sh`, and on demand by `scripts/ledger.sh`. It reads
+`results/queue/ledger_loop.sh`, and on demand by `scripts/ledger.sh`. The same
+rebuild writes `results/ledger.json`, which the run dashboard on claude.ai
+shows once it is uploaded there. It reads
 this checkout's `results/` and, copied under `results/remote/`, tara's
 `paper/results` and `paper-tfm/results`. Both sessions follow the same rules:
 
