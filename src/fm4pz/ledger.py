@@ -28,6 +28,7 @@ from collections.abc import Iterable, Sequence
 import dataclasses
 import datetime as dt
 import json
+import os
 import pathlib
 import re
 import time
@@ -495,7 +496,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     lines = [text for _, text in failures]
     (results / "ledger.md").write_text(_markdown(table, lines))
     dashboard = _dashboard(table, failures, events)
-    (results / "ledger.json").write_text(json.dumps(dashboard))
+    # Replaced whole, so the dashboard never reads a half-written file.
+    partial = results / f"ledger.json.{os.getpid()}"
+    partial.write_text(json.dumps(dashboard))
+    partial.replace(results / "ledger.json")
     print(table.groupby(["method", "status"]).size().to_string())
     return 0
 
