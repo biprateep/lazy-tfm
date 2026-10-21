@@ -23,6 +23,8 @@
     }
   }
   * { box-sizing: border-box; }
+  /* `hidden` must win over the display a class sets (the tooltip's grid). */
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
   .page { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px;
     padding-block: max(16px, env(safe-area-inset-top)) 32px;
