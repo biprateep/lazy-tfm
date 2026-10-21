@@ -59,7 +59,7 @@ EOF
 
 for job in $jobs; do
   IFS=: read -r regime size <<< "$job"
-  for attempt in 1 2 3 4 5 6 7 8; do
+  for attempt in $(seq 1 40); do
     read -r n_trials n_complete < <(counts "$regime" "$size")
     (( n_complete >= min_complete )) && break
     while (( $(available_kb) < min_free * 1024 * 1024 )); do
