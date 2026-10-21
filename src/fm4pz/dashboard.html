@@ -111,7 +111,7 @@
 
   <section class="card" id="grid-card">
     <h2>Every experiment</h2>
-    <p class="note">One cell per method, regime and training size. A done cell shows its mean test CDE loss, a production cell the seeds done of five, a search cell its completed trials. Tap or hover a cell for details.</p>
+    <p class="note">One cell per method, regime and training size. A done cell shows its mean test CDE loss, a production cell the seeds done of five, a search cell its completed trials. Tap or hover a cell for details. Pruned trials were stopped early by the pruner, as designed; cut-off trials were lost when a worker or node died and were replaced when the search resumed.</p>
     <div class="scroll" id="grid-box"><table class="grid" id="grid" aria-label="Experiment status"></table><div class="tip" id="tip" hidden></div></div>
     <div class="legend">
       <span><i data-status="done"></i>Done</span>
@@ -119,7 +119,7 @@
       <span><i data-status="produce-todo"></i>Production to run</span>
       <span><i data-status="searching"></i>Searching</span>
       <span><i data-status="search-thin"></i>Below its trial floor</span>
-      <span><i data-status="search-incomplete"></i>Search stalled</span>
+      <span><i data-status="search-incomplete"></i>Stalled or interrupted</span>
       <span><i data-status="search-todo"></i>Not started</span>
       <span><i class="failed" data-status="search-todo"></i>Unredone failure</span>
     </div>
@@ -226,7 +226,9 @@ function showTip(cell, row, fails) {
   tip.replaceChildren(
     el("b", { textContent: `${NAMES[row.method]}, ${row.regime}, ${d3.format(",")(row.n_train)}` }),
     line("Status", row.status), line("Round", String(row.round)),
-    line("Trials", `${row.complete} complete, ${row.failed} failed, ${row.running} running (${row.trials} total)`),
+    line("Trials", `${row.complete} complete, ${row.pruned ?? 0} pruned, ${row.running} running (${row.trials} total)`),
+    ...(row.failed ? [line("Cut off", `${row.failed} trials lost when their worker or node died; replaced on resume`)] : []),
+    ...(row.oldest_running_h > 8 ? [line("Hung", `a trial has been running for ${fixed(row.oldest_running_h, 0)} h`)] : []),
     line("CV loss", fixed(row.cv_loss, 3) + (row.best_exported ? "" : " (not exported)")),
     line("Seeds", `${row.seeds_done} current, ${row.seeds_stale} stale`),
     line("Test CDE", fixed(row.test_cde, 3)),
@@ -369,7 +371,8 @@ function renderFailures() {
 
 const COLUMNS = [
   { field: "id", label: "Experiment" }, { field: "status", label: "Status" },
-  { field: "complete", label: "Complete", num: true }, { field: "trials", label: "Trials", num: true, wide: true },
+  { field: "complete", label: "Complete", num: true }, { field: "pruned", label: "Pruned", num: true, wide: true },
+  { field: "failed", label: "Cut off", num: true, wide: true }, { field: "trials", label: "Trials", num: true, wide: true },
   { field: "cv_loss", label: "CV loss", num: true, digits: 3 }, { field: "seeds_done", label: "Seeds", num: true },
   { field: "seeds_stale", label: "Stale", num: true, wide: true }, { field: "test_cde", label: "Test CDE", num: true, digits: 3 },
   { field: "journal_age_h", label: "Journal age [h]", num: true, digits: 1, wide: true },

@@ -84,6 +84,11 @@ MIN_COMPLETE: dict[str, int] = {
 # A search whose journal has been silent this long is called stalled.
 _STALL_SECONDS = 3 * 3600
 
+# A trial still marked running after this long has lost its worker (an
+# out-of-memory kill, a lost node), even if other workers keep the journal
+# fresh; no trial of any method takes this long.
+_HUNG_TRIAL_SECONDS = 8 * 3600
+
 
 @dataclasses.dataclass
 class Entry:
@@ -97,8 +102,11 @@ class Entry:
         round: The search round its results come from.
         trials: Trials in its journal, of any state.
         complete: Completed trials.
-        failed: Failed trials.
+        pruned: Trials the pruner stopped early.
+        failed: Failed trials: in this campaign, trials cut off when their
+            worker or node died, marked failed when the search resumed.
         running: Trials still marked running.
+        oldest_running_h: Hours since the oldest running trial started.
         journal_age_h: Hours since the journal was last written.
         best_exported: Whether the round's best setting is exported.
         cv_loss: The best setting's cross-validated CDE loss.
@@ -117,8 +125,10 @@ class Entry:
     round: int
     trials: int = 0
     complete: int = 0
+    pruned: int = 0
     failed: int = 0
     running: int = 0
+    oldest_running_h: float | None = None
     journal_age_h: float | None = None
     best_exported: bool = False
     cv_loss: float | None = None
@@ -195,8 +205,17 @@ def _entry(
         trials = _trials(newest, f"{method}-{regime}-{n_train}")
         states = [trial.state.name for trial in trials]
         entry.trials, entry.complete = len(states), states.count("COMPLETE")
+        entry.pruned = states.count("PRUNED")
         entry.failed = states.count("FAIL")
         entry.running = states.count("RUNNING")
+        starts = [
+            _local_time(trial.datetime_start)
+            for trial in trials
+            if trial.state.name == "RUNNING" and trial.datetime_start
+        ]
+        if starts:
+            oldest = dt.datetime.now().astimezone() - min(starts)
+            entry.oldest_running_h = oldest.total_seconds() / 3600
         for trial in trials:
             if trial.state.name == "COMPLETE" and trial.datetime_complete:
                 when = _local_time(trial.datetime_complete)
@@ -239,7 +258,8 @@ def _status(entry: Entry) -> str:
     """The one-word status of an experiment."""
     if entry.seeds_done == len(config.SEEDS):
         return "done"
-    stale = (entry.journal_age_h or 0.0) * 3600 > _STALL_SECONDS
+    hung = (entry.oldest_running_h or 0.0) * 3600 > _HUNG_TRIAL_SECONDS
+    stale = hung or (entry.journal_age_h or 0.0) * 3600 > _STALL_SECONDS
     # A search still running has not settled, whatever it exported so far.
     if entry.running and not stale:
         return "searching"
