@@ -160,6 +160,25 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script>
 "use strict";
+// http://dhruba:8765/?debug sends the page's pointer and tooltip events to
+// the server (results/dashboard_debug.log), to debug a browser we cannot run.
+const DEBUG = new URLSearchParams(location.search).has("debug");
+const debugEvents = [];
+function dlog(text) { if (DEBUG) debugEvents.push(`${(performance.now() / 1000).toFixed(2)} ${text}`); }
+if (DEBUG) {
+  dlog(`start ${navigator.userAgent} ${innerWidth}x${innerHeight} touch=${navigator.maxTouchPoints}`);
+  const label = (el) => (el && el.closest ? (el.closest(".cell")?.getAttribute("aria-label") || (el.closest("#tip") ? "TOOLTIP" : el.tagName + "." + el.className)) : String(el));
+  let lastTarget = null;
+  for (const type of ["pointerdown", "pointerup", "pointerover", "pointerout", "pointerleave", "click", "focusin", "focusout", "touchstart", "mouseleave"]) {
+    document.addEventListener(type, (e) => dlog(`${type} ${e.pointerType || ""} ${label(e.target)}`), true);
+  }
+  document.addEventListener("pointermove", (e) => { const l = label(e.target); if (l !== lastTarget) { lastTarget = l; dlog(`move ${e.pointerType} ${l}`); } }, true);
+  setInterval(() => {
+    if (!debugEvents.length) return;
+    const body = debugEvents.splice(0).join(" ; ");
+    fetch("log", { method: "POST", body, keepalive: true }).catch(() => {});
+  }, 1000);
+}
 const NAMES = { flexzboost: "FlexZBoost", cmnn: "CMNN", gpz: "GPz", tabpfn: "TabPFN-3.5", limix: "LimiX-2", kumo: "Kumo Tabular" };
 const ORDER = ["flexzboost", "cmnn", "gpz", "tabpfn", "limix", "kumo"];
 const REGIMES = ["representative", "biased"];
@@ -227,7 +246,11 @@ let dismissedAt = 0;       // when a tap outside the cell closed the tooltip
 let tipCell = null;        // the cell whose details the tooltip shows
 let lastPointer = "mouse"; // the kind of pointer that last pressed
 function showTip(cell, row, fails) {
+  dlog(`SHOW ${cell.getAttribute("aria-label")} pointer=${lastPointer}`);
   tipCell = cell;
+  // Under a mouse the tooltip must not catch the pointer, or the cells it
+  // covers stop answering; a touch may tap it to close it.
+  tip.style.pointerEvents = lastPointer === "mouse" ? "none" : "auto";
   clearTimeout(tipTimer);
   // On touch there is no "pointer left", so the tooltip also closes by itself.
   if (lastPointer !== "mouse") tipTimer = setTimeout(hideTip, 8000);
@@ -252,7 +275,10 @@ function showTip(cell, row, fails) {
   if (top + tip.offsetHeight > gridBox.clientHeight && c.top - b.top - tip.offsetHeight - 6 >= 0) top = c.top - b.top - tip.offsetHeight - 6;
   tip.style.left = left + "px"; tip.style.top = top + "px";
 }
-const hideTip = () => { tip.hidden = true; tipCell = null; };
+const hideTip = () => {
+  if (!tip.hidden) dlog(`HIDE ${(new Error().stack || "").split("\n").slice(1, 3).join(" < ")}`);
+  tip.hidden = true; tipCell = null;
+};
 // Close the tooltip whenever the pointer or a tap is anywhere but its cell.
 // iOS Safari sends no click for a tap on empty space, so listen for pointers.
 document.addEventListener("pointerdown", (event) => {

@@ -159,12 +159,25 @@ def _handler(
                 self._json(http.HTTPStatus.NOT_FOUND, {"error": "not found"})
 
         def do_POST(self) -> None:
+            if self.path == "/log":
+                self._log()
+                return
             if self.path != "/refresh":
                 self._json(http.HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             started = rebuilder.start()
             status = rebuilder.status() | {"started_now": started}
             self._json(http.HTTPStatus.ACCEPTED, status)
+
+        def _log(self) -> None:
+            """Appends a page's debug events to ``dashboard_debug.log``."""
+            length = min(int(self.headers.get("Content-Length", 0)), 65536)
+            body = self.rfile.read(length).decode(errors="replace")
+            debug_log = ledger.with_name("dashboard_debug.log")
+            if not debug_log.exists() or debug_log.stat().st_size < 2**20:
+                with debug_log.open("a") as f:
+                    f.write(f"{_now()} {self.client_address[0]} {body}\n")
+            self._json(http.HTTPStatus.OK, {})
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - name fixed by http.server.
             del format, args  # Unused: polling would flood the log.
