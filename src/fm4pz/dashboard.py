@@ -150,7 +150,11 @@ def _handler(
                     http.HTTPStatus.OK, ledger.read_bytes(), "application/json"
                 )
             elif path == "/status":
-                self._json(http.HTTPStatus.OK, rebuilder.status())
+                # The page's own version, so an open page reloads after an edit.
+                page = int(_PAGE.stat().st_mtime)
+                self._json(
+                    http.HTTPStatus.OK, rebuilder.status() | {"page": page}
+                )
             else:
                 self._json(http.HTTPStatus.NOT_FOUND, {"error": "not found"})
 

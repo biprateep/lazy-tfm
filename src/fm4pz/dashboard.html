@@ -154,6 +154,7 @@
     </div>
     <div class="tablebox"><table class="list" id="ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
   </section>
+  <p class="note" id="version"></p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
@@ -259,6 +260,11 @@ document.addEventListener("pointermove", (event) => {
 document.documentElement.addEventListener("mouseleave", hideTip);
 window.addEventListener("scroll", hideTip, { passive: true });
 gridBox.addEventListener("scroll", hideTip, { passive: true });
+document.addEventListener("touchstart", (event) => { if (tipCell && !tipCell.contains(event.target)) hideTip(); }, { capture: true, passive: true });
+gridBox.addEventListener("pointerleave", (event) => { if (event.pointerType === "mouse") hideTip(); });
+document.getElementById("grid").addEventListener("mouseout", (event) => {
+  if (tipCell && lastPointer === "mouse" && !tipCell.contains(event.relatedTarget)) hideTip();
+});
 
 function renderGrid() {
   const rows = state.experiments;
@@ -453,10 +459,18 @@ async function load() {
 
 const button = document.getElementById("refresh");
 const stateLine = document.getElementById("state");
+let pageVersion = null;  // reload when the server's page changes
 async function watchRebuild() {
   for (;;) {
     let s;
     try { s = await (await fetch("status", { cache: "no-store" })).json(); } catch { s = null; }
+    if (s && s.page) {
+      if (pageVersion === null) {
+        pageVersion = s.page;
+        document.getElementById("version").textContent = "Page version " + new Date(s.page * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "; it reloads itself when updated.";
+      }
+      else if (s.page !== pageVersion) { location.reload(); return; }
+    }
     if (s && s.running) { button.disabled = true; stateLine.className = "state"; stateLine.textContent = "Rebuilding from dhruba and tara…"; await new Promise((r) => setTimeout(r, 3000)); continue; }
     button.disabled = false;
     if (s && s.error) { stateLine.className = "state err"; stateLine.textContent = "The last rebuild failed; showing the ledger before it."; }
