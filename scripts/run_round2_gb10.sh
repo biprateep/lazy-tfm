@@ -2,7 +2,7 @@
 # Runs a foundation model's round-2 searches and refits on a GB10, size by size.
 #
 #   scripts/run_round2_gb10.sh METHOD "REGIME:SIZE ..." MIN_COMPLETE \
-#     [THREADS] [JOBS] [MIN_FREE_GB]
+#     [THREADS] [JOBS] [MIN_FREE_GB] [FIT_FREE_GB]
 #
 # For each size in turn (give a regime's sizes smallest first, so that each
 # search starts from the best of the one before): the search is resumed
@@ -10,10 +10,10 @@
 # promise since it also counts queued, pruned and failed trials; its best
 # setting is exported; the size's production records made with another
 # setting are moved to results/runs_r1/ (python -m fm4pz.stale); and the
-# seeds without a current record are fitted again, each once MIN_FREE_GB of
-# memory is free (scripts/run_produce_gb10.sh). Each resumption of a search
-# also waits for MIN_FREE_GB, so that it never pushes a box shared with other
-# jobs into the out-of-memory killer. A search runs as one process with
+# seeds without a current record are fitted again, each once FIT_FREE_GB of
+# memory is free (scripts/run_produce_gb10.sh; by default MIN_FREE_GB). Each
+# resumption of a search waits for MIN_FREE_GB, so that it never pushes a box
+# shared with other jobs into the out-of-memory killer. A search runs as one process with
 # THREADS CPU threads; a fit scores with JOBS processes. Progress goes to
 # results/logs/round2_METHOD.log.
 set -u
@@ -28,6 +28,7 @@ min_complete=$3
 threads=${4:-4}
 workers=${5:-4}
 min_free=${6:-40}
+fit_free=${7:-$min_free}
 mkdir -p "$FM4PZ_RESULTS/logs"
 log="$FM4PZ_RESULTS/logs/round2_$method.log"
 
@@ -82,7 +83,7 @@ for job in $jobs; do
   for seed in 0 1 2 3 4; do
     runs+="$regime:$size:$seed "
   done
-  scripts/run_produce_gb10.sh "$method" "$runs" "$workers" "$min_free"
+  scripts/run_produce_gb10.sh "$method" "$runs" "$workers" "$fit_free"
   echo "$(date -Is) produced $method $regime $size" >> "$log"
 done
 echo "$(date -Is) ALL DONE $method $jobs" >> "$log"
