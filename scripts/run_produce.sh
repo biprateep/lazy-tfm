@@ -9,7 +9,9 @@
 # Progress goes to results/logs/produce_METHOD.log.
 set -u
 cd "$(dirname "$0")/.."
-export HF_HUB_OFFLINE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+# The baselines run on the CPU; hiding the GPU keeps each worker from
+# holding a CUDA context (about 170 MB of the shared memory each).
+export CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   MKL_NUM_THREADS=1 FM4PZ_THREADS="${FM4PZ_THREADS:-1}" \
   FM4PZ_RESULTS="${FM4PZ_RESULTS:-$PWD/results}"
 method=$1
