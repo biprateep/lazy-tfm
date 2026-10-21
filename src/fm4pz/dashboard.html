@@ -67,7 +67,7 @@
   .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .legend i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid transparent; display: inline-block; }
-  .tip { position: absolute; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .18); padding: 6px 10px; font-size: 12px; pointer-events: none; display: grid; gap: 2px; min-width: 13rem; max-width: 19rem; }
+  .tip { position: absolute; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .18); padding: 6px 10px; font-size: 12px; display: grid; gap: 2px; min-width: 13rem; max-width: 19rem; }
   .tip .k { color: var(--muted); }
   .chart { position: relative; min-height: 230px; }
   .chart svg { display: block; overflow: visible; }
@@ -222,10 +222,15 @@ function renderHeader() {
 
 const tip = document.getElementById("tip");
 const gridBox = document.getElementById("grid-box");
+let tipTimer = 0;          // closes a tooltip opened by touch
+let dismissedAt = 0;       // when a tap outside the cell closed the tooltip
 let tipCell = null;        // the cell whose details the tooltip shows
 let lastPointer = "mouse"; // the kind of pointer that last pressed
 function showTip(cell, row, fails) {
   tipCell = cell;
+  clearTimeout(tipTimer);
+  // On touch there is no "pointer left", so the tooltip also closes by itself.
+  if (lastPointer !== "mouse") tipTimer = setTimeout(hideTip, 8000);
   const line = (k, v) => el("div", {}, el("span", { className: "k", textContent: k + " " }), v);
   tip.replaceChildren(
     el("b", { textContent: `${NAMES[row.method]}, ${row.regime}, ${d3.format(",")(row.n_train)}` }),
@@ -252,7 +257,9 @@ const hideTip = () => { tip.hidden = true; tipCell = null; };
 // iOS Safari sends no click for a tap on empty space, so listen for pointers.
 document.addEventListener("pointerdown", (event) => {
   lastPointer = event.pointerType;
-  if (tipCell && !tipCell.contains(event.target)) hideTip();
+  // A tap outside the open cell (on the tooltip, or a cell under it) only
+  // closes the tooltip; the click that follows must not open another one.
+  if (tipCell && !tipCell.contains(event.target)) { hideTip(); dismissedAt = Date.now(); }
 }, true);
 document.addEventListener("pointermove", (event) => {
   if (tipCell && event.pointerType === "mouse" && !tipCell.contains(event.target)) hideTip();
@@ -260,7 +267,9 @@ document.addEventListener("pointermove", (event) => {
 document.documentElement.addEventListener("mouseleave", hideTip);
 window.addEventListener("scroll", hideTip, { passive: true });
 gridBox.addEventListener("scroll", hideTip, { passive: true });
-document.addEventListener("touchstart", (event) => { if (tipCell && !tipCell.contains(event.target)) hideTip(); }, { capture: true, passive: true });
+document.addEventListener("touchstart", (event) => {
+  if (tipCell && !tipCell.contains(event.target)) { hideTip(); dismissedAt = Date.now(); }
+}, { capture: true, passive: true });
 gridBox.addEventListener("pointerleave", (event) => { if (event.pointerType === "mouse") hideTip(); });
 document.getElementById("grid").addEventListener("mouseout", (event) => {
   if (tipCell && lastPointer === "mouse" && !tipCell.contains(event.relatedTarget)) hideTip();
@@ -299,7 +308,10 @@ function renderGrid() {
           const show = () => showTip(td, row, fails);
           td.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse") show(); });
           td.addEventListener("pointerleave", (event) => { if (event.pointerType === "mouse") hideTip(); });
-          td.addEventListener("click", () => { if (lastPointer !== "mouse") (tipCell === td ? hideTip() : show()); });
+          td.addEventListener("click", () => {
+            if (lastPointer === "mouse" || Date.now() - dismissedAt < 700) return;
+            if (tipCell === td) hideTip(); else show();
+          });
           td.addEventListener("focus", () => { if (td.matches(":focus-visible")) show(); });
           td.addEventListener("blur", hideTip);
         }
