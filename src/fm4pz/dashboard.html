@@ -221,7 +221,10 @@ function renderHeader() {
 
 const tip = document.getElementById("tip");
 const gridBox = document.getElementById("grid-box");
+let tipCell = null;        // the cell whose details the tooltip shows
+let lastPointer = "mouse"; // the kind of pointer that last pressed
 function showTip(cell, row, fails) {
+  tipCell = cell;
   const line = (k, v) => el("div", {}, el("span", { className: "k", textContent: k + " " }), v);
   tip.replaceChildren(
     el("b", { textContent: `${NAMES[row.method]}, ${row.regime}, ${d3.format(",")(row.n_train)}` }),
@@ -243,8 +246,19 @@ function showTip(cell, row, fails) {
   if (top + tip.offsetHeight > gridBox.clientHeight && c.top - b.top - tip.offsetHeight - 6 >= 0) top = c.top - b.top - tip.offsetHeight - 6;
   tip.style.left = left + "px"; tip.style.top = top + "px";
 }
-const hideTip = () => { tip.hidden = true; };
-document.addEventListener("click", (event) => { if (!event.target.closest(".cell")) hideTip(); });
+const hideTip = () => { tip.hidden = true; tipCell = null; };
+// Close the tooltip whenever the pointer or a tap is anywhere but its cell.
+// iOS Safari sends no click for a tap on empty space, so listen for pointers.
+document.addEventListener("pointerdown", (event) => {
+  lastPointer = event.pointerType;
+  if (tipCell && !tipCell.contains(event.target)) hideTip();
+}, true);
+document.addEventListener("pointermove", (event) => {
+  if (tipCell && event.pointerType === "mouse" && !tipCell.contains(event.target)) hideTip();
+});
+document.documentElement.addEventListener("mouseleave", hideTip);
+window.addEventListener("scroll", hideTip, { passive: true });
+gridBox.addEventListener("scroll", hideTip, { passive: true });
 
 function renderGrid() {
   const rows = state.experiments;
@@ -277,8 +291,11 @@ function renderGrid() {
             : row.status === "search-todo" ? "–" : String(row.complete);
           td.setAttribute("aria-label", `${NAMES[method]} ${g} ${n}: ${row.status}`);
           const show = () => showTip(td, row, fails);
-          td.addEventListener("mouseenter", show); td.addEventListener("focus", show); td.addEventListener("click", show);
-          td.addEventListener("mouseleave", hideTip); td.addEventListener("blur", hideTip);
+          td.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse") show(); });
+          td.addEventListener("pointerleave", (event) => { if (event.pointerType === "mouse") hideTip(); });
+          td.addEventListener("click", () => { if (lastPointer !== "mouse") (tipCell === td ? hideTip() : show()); });
+          td.addEventListener("focus", () => { if (td.matches(":focus-visible")) show(); });
+          td.addEventListener("blur", hideTip);
         }
         tr.append(td);
       }
