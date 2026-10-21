@@ -239,13 +239,16 @@ def _status(entry: Entry) -> str:
     """The one-word status of an experiment."""
     if entry.seeds_done == len(config.SEEDS):
         return "done"
+    stale = (entry.journal_age_h or 0.0) * 3600 > _STALL_SECONDS
+    # A search still running has not settled, whatever it exported so far.
+    if entry.running and not stale:
+        return "searching"
     if entry.best_exported:
         if entry.complete < MIN_COMPLETE[entry.method]:
             return "search-thin"
         return "producing" if entry.seeds_done else "produce-todo"
     if entry.trials == 0:
         return "search-todo"
-    stale = (entry.journal_age_h or 0.0) * 3600 > _STALL_SECONDS
     return "search-incomplete" if stale else "searching"
 
 
