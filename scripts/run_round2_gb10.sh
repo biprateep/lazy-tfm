@@ -14,8 +14,10 @@
 # memory is free (scripts/run_produce_gb10.sh; by default MIN_FREE_GB). Each
 # resumption of a search waits for MIN_FREE_GB, so that it never pushes a box
 # shared with other jobs into the out-of-memory killer. A search runs as one process with
-# THREADS CPU threads; a fit scores with JOBS processes. Progress goes to
-# results/logs/round2_METHOD.log.
+# THREADS CPU threads; a fit scores with JOBS processes. With FITS=0 in the
+# environment the launcher only searches, and scripts/run_round2_fits.sh
+# fits each size once its search is done, overlapping it with the next
+# search. Progress goes to results/logs/round2_METHOD.log.
 set -u
 cd "$(dirname "$0")/.."
 export HF_HUB_OFFLINE=1 PYTHONPATH="$PWD/src" FM4PZ_ROUND=2 \
@@ -78,6 +80,9 @@ for job in $jobs; do
     > /dev/null 2>> "$log"
   echo "$(date -Is) searched $method $regime $size: $n_complete complete" \
     "of $n_trials" >> "$log"
+  if [[ "${FITS:-1}" == 0 ]]; then
+    continue
+  fi
   .venv/bin/python -m fm4pz.stale "$method" "$regime" "$size" >> "$log" 2>&1
   runs=""
   for seed in 0 1 2 3 4; do
