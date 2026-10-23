@@ -224,6 +224,12 @@ def scaling_figure(table: pd.DataFrame, regime: str) -> plt.Figure:
     axes[1].yaxis.set_major_formatter(ticker.FormatStrFormatter("%g"))
     axes[1].yaxis.set_minor_formatter(ticker.NullFormatter())
     axes[1].set_ylabel(r"$\sigma_{\rm IQR}$ [$10^{-2}$]")
+    # A little room below the lowest points, so the full-size points
+    # clear the bottom ticks (in log units on the scatter panel).
+    low, high = axes[0].get_ylim()
+    axes[0].set_ylim(low - 0.04 * (high - low), high)
+    low, high = axes[1].get_ylim()
+    axes[1].set_ylim(low * (low / high) ** 0.04, high)
     handles, labels = legend_entries(axes[0])
     fig.legend(
         handles,
