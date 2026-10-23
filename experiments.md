@@ -58,13 +58,13 @@ were killed for lack of memory on dhruba while the FlexZBoost search held it.
 
 One ledger records the state of every experiment: `results/ledger.md` (and
 `results/ledger.csv`) on tara, rebuilt every 10 minutes by the dashboard
-server and on demand by `scripts/ledger.sh`. Since 2026-10-21 every run is on
-tara, and the ledger reads tara's `paper/results` with, copied under
-`results/remote/`, dhruba's `paper/results` (the baselines' earlier runs) and
-tara's `paper-tfm/results` (`FM4PZ_LEDGER_SOURCES`). The same rebuild writes
-`results/ledger.json`, which `python -m fm4pz.dashboard` serves as a live page
-on the tailnet (http://tara:8765, the systemd user service `fm4pz-dashboard`
-on tara), with a button that rebuilds the ledger at once. Both sessions follow the same rules:
+server and on demand by `scripts/ledger.sh`. Since 2026-10-23, when all 84
+experiments were done, every result is in one tree, tara's `paper/results`:
+dhruba's runs were merged into it and the Perlmutter runs synced back, so the
+ledger reads that tree alone (`FM4PZ_LEDGER_SOURCES` set and empty). The same
+rebuild writes `results/ledger.json`, which `python -m fm4pz.dashboard` serves
+as a live page on the tailnet (http://tara:8765, the systemd user service
+`fm4pz-dashboard` on tara), with a button that rebuilds the ledger at once. Both sessions follow the same rules:
 
 1. The ledger is the only status record. A method's experiments are done
    when all 14 of its rows read `done`; a report states the ledger's time.

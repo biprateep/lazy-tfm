@@ -7,14 +7,15 @@
 # their arrays) and logs under results/remote/<host>_<tree>/, then writes
 # results/ledger.csv, .md and .json from all of them and from this host's own
 # results. A source without HOST is a directory on this host. With no
-# arguments it reads $FM4PZ_LEDGER_SOURCES (space-separated), by default
-# tara's paper/ and paper-tfm/ checkouts. This ledger is the one record of the
+# arguments it reads $FM4PZ_LEDGER_SOURCES (space-separated; set and empty
+# for this host's results alone), by default tara's paper/ and paper-tfm/
+# checkouts. This ledger is the one record of the
 # experiments' state that every session reads.
 set -u
 cd "$(dirname "$0")/.."
 results="${FM4PZ_RESULTS:-$PWD/results}"
 sources=("$@")
-(( ${#sources[@]} )) || read -r -a sources <<< "${FM4PZ_LEDGER_SOURCES:-\
+(( ${#sources[@]} )) || read -r -a sources <<< "${FM4PZ_LEDGER_SOURCES-\
 tara:code/photo-z/fm4pz/paper/results tara:code/photo-z/fm4pz/paper-tfm/results}"
 for source in "${sources[@]}"; do
   if [[ $source == *:* ]]; then

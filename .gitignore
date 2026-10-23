@@ -10,6 +10,7 @@
 # Intermediate data products: downloaded catalogues, frozen splits, model
 # outputs, per-run records, tables and logs.
 results/
+results_merged_into_tara_*/
 data/
 logs/
 *.npz
