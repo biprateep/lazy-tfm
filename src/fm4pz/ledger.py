@@ -423,72 +423,105 @@ def _event(
     return None
 
 
-def calibration(results: pathlib.Path) -> pd.DataFrame:
-    """The calibration experiment's runs, done or not.
+def _calibration_grids() -> dict[tuple[str, int, int, int], set[str]]:
+    """Every calibration run wanted, and which experiments want it.
 
-    Its runs are a biased training set with ``k`` calibration galaxies
-    added, for every method, ``k`` and seed of the ``CALIBRATION_*``
-    settings of :mod:`fm4pz.config` and every biased size; ``k = 0`` is the
-    biased production run itself. A run counts as done once its record
-    exists anywhere among the sources.
+    Returns:
+        A map from (method, biased size, calibration galaxies, seed) to the
+        experiments that include the run: ``"step"`` (the calibration
+        experiment, in steps of 500) and ``"matrix"`` (the paper's grid).
+    """
+    grids = {
+        "step": (
+            config.CALIBRATION_METHODS,
+            config.CALIBRATION_SIZES,
+            config.CALIBRATION_SEEDS,
+        ),
+        "matrix": (
+            config.MATRIX_METHODS,
+            config.MATRIX_CALIBRATION_SIZES,
+            config.SEEDS,
+        ),
+    }
+    wanted: dict[tuple[str, int, int, int], set[str]] = {}
+    for name, (methods, calibrations, seeds) in grids.items():
+        for method in methods:
+            for n_train in config.BIASED_SIZES:
+                for n_calibration in calibrations:
+                    for seed in seeds:
+                        key = (method, n_train, n_calibration, seed)
+                        wanted.setdefault(key, set()).add(name)
+    return wanted
+
+
+def calibration(results: pathlib.Path) -> pd.DataFrame:
+    """The calibration runs, done or not.
+
+    A calibration run is a biased training set with ``k`` calibration
+    galaxies added; ``k = 0`` is the biased production run itself. The runs
+    are those of the calibration experiment and of the calibration matrix
+    (the ``CALIBRATION_*`` and ``MATRIX_*`` settings of :mod:`fm4pz.config`),
+    each once. A run counts as done once its record exists anywhere among
+    the sources.
 
     Args:
         results: The results directory.
 
     Returns:
         One row per run: ``method``, ``n_train``, ``n_calibration``,
-        ``seed``, ``done``, ``cde_loss``, ``sigma_iqr`` and ``finished``
-        (when the record was written, ISO 8601), the last three empty until
-        it is done.
+        ``seed``, ``step`` and ``matrix`` (whether each experiment wants
+        it), ``done``, ``cde_loss``, ``sigma_iqr`` and ``finished`` (when the
+        record was written, ISO 8601), the last three empty until it is
+        done.
     """
     sources = _sources(results)
     rows = []
-    for method in config.CALIBRATION_METHODS:
-        for n_train in config.BIASED_SIZES:
-            for n_calibration in config.CALIBRATION_SIZES:
-                for seed in config.CALIBRATION_SEEDS:
-                    name = (
-                        f"runs/{method}/biased_n{n_train}_s{seed}.json"
-                        if n_calibration == 0
-                        else f"calibration/{method}/"
-                        f"biased_cal{n_calibration}_n{n_train}_s{seed}.json"
-                    )
-                    path = _newest(root / name for _, root in sources)
-                    row: dict[str, Any] = {
-                        "method": method,
-                        "n_train": n_train,
-                        "n_calibration": n_calibration,
-                        "seed": seed,
-                        "done": path is not None,
-                        "cde_loss": None,
-                        "sigma_iqr": None,
-                        "finished": None,
-                    }
-                    if path is not None:
-                        metrics = json.loads(path.read_text())["metrics"]
-                        when = dt.datetime.fromtimestamp(path.stat().st_mtime)
-                        row.update(
-                            cde_loss=metrics["cde_loss"],
-                            sigma_iqr=metrics["sigma_iqr"],
-                            finished=_local_time(when).isoformat(
-                                timespec="seconds"
-                            ),
-                        )
-                    rows.append(row)
+    for key, experiments in sorted(_calibration_grids().items()):
+        method, n_train, n_calibration, seed = key
+        name = (
+            f"runs/{method}/biased_n{n_train}_s{seed}.json"
+            if n_calibration == 0
+            else f"calibration/{method}/"
+            f"biased_cal{n_calibration}_n{n_train}_s{seed}.json"
+        )
+        path = _newest(root / name for _, root in sources)
+        row: dict[str, Any] = {
+            "method": method,
+            "n_train": n_train,
+            "n_calibration": n_calibration,
+            "seed": seed,
+            "step": "step" in experiments,
+            "matrix": "matrix" in experiments,
+            "done": path is not None,
+            "cde_loss": None,
+            "sigma_iqr": None,
+            "finished": None,
+        }
+        if path is not None:
+            metrics = json.loads(path.read_text())["metrics"]
+            when = dt.datetime.fromtimestamp(path.stat().st_mtime)
+            row.update(
+                cde_loss=metrics["cde_loss"],
+                sigma_iqr=metrics["sigma_iqr"],
+                finished=_local_time(when).isoformat(timespec="seconds"),
+            )
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
 def _calibration_markdown(runs: pd.DataFrame) -> list[str]:
-    """The calibration experiment as Markdown lines: progress and losses."""
+    """The calibration runs as Markdown lines: progress and losses."""
+    step = runs[runs["step"]]
+    matrix = runs[runs["matrix"]]
     lines = [
         "## Calibration experiment",
         "",
-        f"{int(runs['done'].sum())} of {len(runs)} runs done. Test CDE loss,"
+        f"{int(step['done'].sum())} of {len(step)} runs done. Test CDE loss,"
         " biased training size (rows) by calibration galaxies added"
         " (columns):",
         "",
     ]
-    for method, group in runs.groupby("method"):
+    for method, group in step.groupby("method"):
         grid = group.pivot_table(
             index="n_train",
             columns="n_calibration",
@@ -496,6 +529,27 @@ def _calibration_markdown(runs: pd.DataFrame) -> list[str]:
             aggfunc="mean",
         )
         lines += [f"### {method}", "", grid.round(2).to_markdown(), ""]
+    lines += [
+        "## Calibration matrix",
+        "",
+        f"{int(matrix['done'].sum())} of {len(matrix)} runs done. Mean test"
+        " CDE loss over the seeds done, with their number, biased training"
+        " size (rows) by calibration galaxies added (columns):",
+        "",
+    ]
+    for method, group in matrix.groupby("method", sort=False):
+        cells: dict[int, dict[int, str]] = {}
+        for (n_train, n_calibration), runs_of_cell in group.groupby(
+            ["n_train", "n_calibration"]
+        ):
+            done = runs_of_cell[runs_of_cell["done"]]
+            loss = pd.to_numeric(done["cde_loss"]).mean() if len(done) else None
+            text = "·" if loss is None else f"{loss:.2f}"
+            cells.setdefault(n_calibration, {})[n_train] = (
+                f"{text} ({len(done)})"
+            )
+        grid = pd.DataFrame(cells)
+        lines += [f"### {method}", "", grid.to_markdown(), ""]
     return lines
 
 

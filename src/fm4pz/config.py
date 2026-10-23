@@ -20,6 +20,8 @@ __all__ = [
     "CALIBRATION_METHODS",
     "CALIBRATION_SEEDS",
     "CALIBRATION_SIZES",
+    "MATRIX_CALIBRATION_SIZES",
+    "MATRIX_METHODS",
     "CV_FOLDS",
     "CV_SEED",
     "FINE_BINS",
@@ -84,6 +86,19 @@ CALIBRATION_SIZES: tuple[int, ...] = tuple(range(0, CALIBRATION + 1, 500))
 #: The methods and seeds of the calibration experiment so far.
 CALIBRATION_METHODS: tuple[str, ...] = ("tabpfn",)
 CALIBRATION_SEEDS: tuple[int, ...] = (0,)
+
+#: The calibration matrix, on the submitted paper's grid: every biased size
+#: with these calibration galaxies added, for every method and seed of
+#: :data:`SEEDS`.
+MATRIX_CALIBRATION_SIZES: tuple[int, ...] = (0, 1_000, 2_000, 5_000, 10_000)
+MATRIX_METHODS: tuple[str, ...] = (
+    "flexzboost",
+    "cmnn",
+    "gpz",
+    "tabpfn",
+    "limix",
+    "kumo",
+)
 
 REGIMES: tuple[str, ...] = ("representative", "biased")
 

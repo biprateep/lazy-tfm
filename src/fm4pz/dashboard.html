@@ -88,6 +88,11 @@
   table.list td.line { white-space: normal; font-family: var(--mono); }
   .pill { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); }
   .empty { color: var(--muted); font-size: 12px; }
+  .mgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 12px; }
+  .mgrid h3 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+  table.mtab { border-collapse: separate; border-spacing: 2px; font-size: 11px; font-variant-numeric: tabular-nums; }
+  table.mtab th { font-weight: 400; color: var(--muted); padding: 0 3px; white-space: nowrap; }
+  table.mtab td { min-width: 2.7rem; height: 1.6rem; text-align: center; border-radius: 4px; border: 1px solid var(--line); }
   @media (max-width: 40rem) { .wide-only { display: none; } }
 </style>
 </head>
@@ -136,6 +141,12 @@
   <section class="row2" aria-label="Scaling preview">
     <div class="card"><h2>Representative: test CDE loss so far</h2><p class="note">Mean over the current seeds of each size (open marker: fewer than five); lower is better.</p><div class="chart" id="s-representative"></div></div>
     <div class="card"><h2>Biased: test CDE loss so far</h2><p class="note">Mean over the current seeds of each size (open marker: fewer than five); lower is better.</p><div class="chart" id="s-biased"></div></div>
+  </section>
+
+  <section class="card" id="matrix">
+    <h2>Calibration matrix</h2>
+    <p class="note" id="matrix-note"></p>
+    <div class="mgrid" id="matrix-grid"></div>
   </section>
 
   <section class="card" id="calibration">
@@ -406,7 +417,7 @@ function calColor(sizes, n) {
 }
 
 function renderCalibration() {
-  const runs = state.calibration || [];
+  const runs = (state.calibration || []).filter((r) => r.step);
   const card = document.getElementById("calibration");
   card.hidden = runs.length === 0;
   if (!runs.length) return;
@@ -461,6 +472,39 @@ function renderCalibration() {
   table.querySelector("thead").replaceChildren(el("tr", {}, el("th", { textContent: "Biased size" }), ...ks.map((k) => el("th", { className: "num", textContent: fmtK(k) }))));
   table.querySelector("tbody").replaceChildren(...sizes.map((n) => el("tr", {}, el("td", { textContent: sizeLabel(n) }),
     ...ks.map((k) => el("td", { className: "num", textContent: mean.has(n + "|" + k) ? mean.get(n + "|" + k).toFixed(2) : "·" })))));
+}
+
+function renderMatrix() {
+  const runs = (state.calibration || []).filter((r) => r.matrix);
+  const card = document.getElementById("matrix");
+  card.hidden = runs.length === 0;
+  if (!runs.length) return;
+  const done = runs.filter((r) => r.done);
+  const last = done.map((r) => r.finished).filter(Boolean).sort().pop();
+  const seeds = new Set(runs.map((r) => r.seed)).size;
+  document.getElementById("matrix-note").textContent =
+    `${done.length} of ${runs.length} runs done` +
+    (last ? `, last at ${new Date(last).toLocaleString("en-US", { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}` : "") +
+    `. Each cell is a biased training size (columns) with calibration galaxies added (rows): the mean test CDE loss over the seeds done, shaded by how many of the ${seeds} are done.`;
+  const sizes = [...new Set(runs.map((r) => r.n_train))].sort((a, b) => a - b);
+  const ks = [...new Set(runs.map((r) => r.n_calibration))].sort((a, b) => b - a);
+  const methods = ORDER.filter((m) => runs.some((r) => r.method === m));
+  const fmtK = (k) => (k >= 1000 ? k / 1000 + "k" : String(k));
+  document.getElementById("matrix-grid").replaceChildren(...methods.map((method) => {
+    const mine = runs.filter((r) => r.method === method);
+    const head = el("tr", {}, el("th", { textContent: "added" }), ...sizes.map((n) => el("th", { textContent: sizeLabel(n) })));
+    const body = ks.map((k) => el("tr", {}, el("th", { textContent: fmtK(k) }), ...sizes.map((n) => {
+      const cell = mine.filter((r) => r.n_train === n && r.n_calibration === k);
+      const got = cell.filter((r) => r.done);
+      const td = el("td", { textContent: got.length ? d3.mean(got, (r) => r.cde_loss).toFixed(2) : "·" });
+      const share = cell.length ? got.length / cell.length : 0;
+      td.style.background = share ? `color-mix(in srgb, var(--ok) ${Math.round(12 + 50 * share)}%, transparent)` : "";
+      td.title = `${NAMES[method]}, ${n} biased + ${k} calibration: ${got.length} of ${cell.length} seeds done`;
+      return td;
+    })));
+    const done = mine.filter((r) => r.done).length;
+    return el("div", {}, el("h3", { textContent: `${NAMES[method]} (${done}/${mine.length})` }), el("div", { className: "scroll" }, el("table", { className: "mtab" }, el("thead", {}, head), el("tbody", {}, ...body))));
+  }));
 }
 
 function renderScaling(node, regime) {
@@ -552,7 +596,7 @@ function render() {
   renderProgress(document.getElementById("c-trials"), "trial");
   renderProgress(document.getElementById("c-runs"), "run");
   REGIMES.forEach((g) => renderScaling(document.getElementById("s-" + g), g));
-  renderKeys(); renderCalibration(); renderFailures(); renderLedger();
+  renderKeys(); renderMatrix(); renderCalibration(); renderFailures(); renderLedger();
 }
 
 async function load() {
