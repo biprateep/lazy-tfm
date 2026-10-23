@@ -172,3 +172,95 @@ fig.legend(
 )
 plotstyle.save(fig, f"./figs/calibration_{METHOD}")
 plt.close(fig)
+
+# %% [markdown]
+# ## The change in CDE loss
+#
+# Where returns diminish: on the left the total change from no calibration,
+# $\mathcal{L}(k) - \mathcal{L}(0)$, and on the right the change each further
+# 500 galaxies bring, $\mathcal{L}(k) - \mathcal{L}(k - 500)$. Negative is an
+# improvement. With one seed, a step of a few hundredths is within the
+# scatter between subsamples.
+
+
+# %%
+def size_label(n_train: int) -> str:
+    """A biased training size as the legend shows it."""
+    if n_train % 1000 == 0:
+        return f"{n_train // 1000}k"
+    return f"{n_train / 1000:.0f}k (all)"
+
+
+fig, axes = plt.subplots(
+    1,
+    2,
+    figsize=plotstyle.grid_figsize(1, 2, "text", panel_aspect=0.8),
+    layout="constrained",
+)
+for colour, n_train in zip(colours, sizes, strict=True):
+    losses = table.loc[n_train]
+    style = {
+        "color": colour,
+        "marker": ".",
+        "markersize": 4,
+        "linewidth": 1.2,
+        "label": size_label(n_train),
+    }
+    axes[0].plot(losses.index, losses.values - losses.iloc[0], **style)
+    steps = losses.diff().dropna()
+    axes[1].plot(steps.index, steps.values, **style)
+for axis in axes:
+    axis.axhline(0, color="k", linestyle="--", linewidth=0.8)
+    axis.set_xlabel("Calibration Galaxies Added")
+    axis.xaxis.set_major_locator(ticker.MultipleLocator(2000))
+    axis.xaxis.set_major_formatter(
+        ticker.FuncFormatter(
+            lambda value, _: f"{value / 1000:g}k" if value else "0"
+        )
+    )
+    axis.grid(
+        which="major", color="k", alpha=0.15, linestyle="--", linewidth=0.6
+    )
+axes[0].set_ylabel(r"$\mathcal{L}_{\rm CDE}(k) - \mathcal{L}_{\rm CDE}(0)$")
+# Symmetric-log, so the first large steps and the later small ones both show;
+# linear within 0.05 of zero, about the scatter between subsamples.
+axes[1].set_yscale("symlog", linthresh=0.05, linscale=0.6)
+axes[1].set_ylim(-2.0, 0.08)
+axes[1].yaxis.set_major_locator(
+    ticker.FixedLocator([-1.0, -0.3, -0.1, 0.0, 0.05])
+)
+axes[1].yaxis.set_major_formatter(
+    ticker.FuncFormatter(lambda value, _: f"${value:g}$")
+)
+axes[1].yaxis.set_minor_locator(ticker.NullLocator())
+axes[1].set_ylabel(r"$\Delta\mathcal{L}_{\rm CDE}$ per 500")
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(
+    handles,
+    labels,
+    frameon=False,
+    title=f"{LABEL}, Biased Size",
+    loc="outside lower center",
+    ncols=4,
+    fontsize=plotstyle.SMALL_SIZE,
+)
+plotstyle.save(fig, f"./figs/calibration_{METHOD}_change")
+plt.close(fig)
+
+# %% [markdown]
+# The mean change per 500 galaxies over ranges of calibration size, which
+# smooths the single seed's step-to-step scatter.
+
+# %%
+RANGES = ((500, 1000), (1500, 2000), (2500, 4000), (4500, 6000), (6500, 10000))
+steps = table.T.diff().T
+mean_steps = pd.DataFrame(
+    {
+        f"{low / 1000:g}-{high / 1000:g}k": steps.loc[
+            :, (steps.columns >= low) & (steps.columns <= high)
+        ].mean(axis=1)
+        for low, high in RANGES
+    }
+)
+print("Mean change in CDE loss per 500 calibration galaxies:")
+print(mean_steps.round(3).to_string())
