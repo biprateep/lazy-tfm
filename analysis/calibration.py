@@ -46,6 +46,8 @@ LABEL = "TabPFN-3.5"
 NEURIPS_TEXT_PT = 397.48499
 # Fractions of the gain from all 10,000 calibration galaxies to report.
 FRACTIONS = (0.5, 0.9)
+# Biased sizes left out of the figures (kept in the tables).
+OMITTED_SIZES = (1000,)
 
 plotstyle.register_journal(
     "neurips", column_pt=NEURIPS_TEXT_PT, text_pt=NEURIPS_TEXT_PT
@@ -136,7 +138,7 @@ print(summary_table.round(2).to_string(index=False))
 fig, ax = plt.subplots(
     figsize=plotstyle.figsize("text", 0.55), layout="constrained"
 )
-sizes = list(table.index)
+sizes = [size for size in table.index if size not in OMITTED_SIZES]
 colours = cm.viridis(np.linspace(0, 0.9, len(sizes)))
 for colour, n_train in zip(colours, sizes, strict=True):
     losses = table.loc[n_train]
@@ -225,10 +227,8 @@ axes[0].set_ylabel(r"$\mathcal{L}_{\rm CDE}(k) - \mathcal{L}_{\rm CDE}(0)$")
 # Symmetric-log, so the first large steps and the later small ones both show;
 # linear within 0.05 of zero, about the scatter between subsamples.
 axes[1].set_yscale("symlog", linthresh=0.05, linscale=0.6)
-axes[1].set_ylim(-2.0, 0.08)
-axes[1].yaxis.set_major_locator(
-    ticker.FixedLocator([-1.0, -0.3, -0.1, 0.0, 0.05])
-)
+axes[1].set_ylim(-0.6, 0.08)
+axes[1].yaxis.set_major_locator(ticker.FixedLocator([-0.3, -0.1, 0.0, 0.05]))
 axes[1].yaxis.set_major_formatter(
     ticker.FuncFormatter(lambda value, _: f"${value:g}$")
 )
@@ -241,7 +241,7 @@ fig.legend(
     frameon=False,
     title=f"{LABEL}, Biased Size",
     loc="outside lower center",
-    ncols=4,
+    ncols=3,
     fontsize=plotstyle.SMALL_SIZE,
 )
 plotstyle.save(fig, f"./figs/calibration_{METHOD}_change")
