@@ -47,6 +47,7 @@ __all__ = [
     "Entry",
     "build",
     "main",
+    "calibration",
     "progress",
 ]
 
@@ -422,7 +423,87 @@ def _event(
     return None
 
 
-def _markdown(table: pd.DataFrame, failures: Sequence[str]) -> str:
+def calibration(results: pathlib.Path) -> pd.DataFrame:
+    """The calibration experiment's runs, done or not.
+
+    Its runs are a biased training set with ``k`` calibration galaxies
+    added, for every method, ``k`` and seed of the ``CALIBRATION_*``
+    settings of :mod:`fm4pz.config` and every biased size; ``k = 0`` is the
+    biased production run itself. A run counts as done once its record
+    exists anywhere among the sources.
+
+    Args:
+        results: The results directory.
+
+    Returns:
+        One row per run: ``method``, ``n_train``, ``n_calibration``,
+        ``seed``, ``done``, ``cde_loss``, ``sigma_iqr`` and ``finished``
+        (when the record was written, ISO 8601), the last three empty until
+        it is done.
+    """
+    sources = _sources(results)
+    rows = []
+    for method in config.CALIBRATION_METHODS:
+        for n_train in config.BIASED_SIZES:
+            for n_calibration in config.CALIBRATION_SIZES:
+                for seed in config.CALIBRATION_SEEDS:
+                    name = (
+                        f"runs/{method}/biased_n{n_train}_s{seed}.json"
+                        if n_calibration == 0
+                        else f"calibration/{method}/"
+                        f"biased_cal{n_calibration}_n{n_train}_s{seed}.json"
+                    )
+                    path = _newest(root / name for _, root in sources)
+                    row: dict[str, Any] = {
+                        "method": method,
+                        "n_train": n_train,
+                        "n_calibration": n_calibration,
+                        "seed": seed,
+                        "done": path is not None,
+                        "cde_loss": None,
+                        "sigma_iqr": None,
+                        "finished": None,
+                    }
+                    if path is not None:
+                        metrics = json.loads(path.read_text())["metrics"]
+                        when = dt.datetime.fromtimestamp(path.stat().st_mtime)
+                        row.update(
+                            cde_loss=metrics["cde_loss"],
+                            sigma_iqr=metrics["sigma_iqr"],
+                            finished=_local_time(when).isoformat(
+                                timespec="seconds"
+                            ),
+                        )
+                    rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _calibration_markdown(runs: pd.DataFrame) -> list[str]:
+    """The calibration experiment as Markdown lines: progress and losses."""
+    lines = [
+        "## Calibration experiment",
+        "",
+        f"{int(runs['done'].sum())} of {len(runs)} runs done. Test CDE loss,"
+        " biased training size (rows) by calibration galaxies added"
+        " (columns):",
+        "",
+    ]
+    for method, group in runs.groupby("method"):
+        grid = group.pivot_table(
+            index="n_train",
+            columns="n_calibration",
+            values="cde_loss",
+            aggfunc="mean",
+        )
+        lines += [f"### {method}", "", grid.round(2).to_markdown(), ""]
+    return lines
+
+
+def _markdown(
+    table: pd.DataFrame,
+    failures: Sequence[str],
+    calibration_runs: pd.DataFrame,
+) -> str:
     """The ledger as a Markdown page: a summary, the table, the failures."""
     counts = table.groupby(["method", "status"]).size().unstack(fill_value=0)
     shown = table.copy()
@@ -445,6 +526,7 @@ def _markdown(table: pd.DataFrame, failures: Sequence[str]) -> str:
         "",
         *([f"- `{line}`" for line in failures] or ["None."]),
         "",
+        *_calibration_markdown(calibration_runs),
     ]
     return "\n".join(parts)
 
@@ -474,13 +556,14 @@ def _dashboard(
     table: pd.DataFrame,
     failures: Sequence[tuple[tuple[str, ...], str]],
     events: Iterable[_Event],
+    calibration_runs: pd.DataFrame,
 ) -> dict[str, Any]:
     """The ledger as one list of rows for the dashboard.
 
     Every row carries a ``table`` column naming what it is: ``meta`` (when
     the ledger was built), ``experiment`` (a row of the ledger),
-    ``failure`` (a failure nothing has redone) or ``progress`` (an hour's
-    events).
+    ``failure`` (a failure nothing has redone), ``progress`` (an hour's
+    events) or ``calibration`` (a run of the calibration experiment).
     """
     built = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     experiments = table.astype(object).where(table.notna(), None)
@@ -495,6 +578,8 @@ def _dashboard(
         {"table": "progress", **row}
         for row in progress(events).to_dict("records")
     ]
+    runs = calibration_runs.astype(object).where(calibration_runs.notna(), None)
+    rows += [{"table": "calibration", **row} for row in runs.to_dict("records")]
     return {"rows": rows}
 
 
@@ -517,8 +602,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not _redone(key, table)
     ]
     lines = [text for _, text in failures]
-    (results / "ledger.md").write_text(_markdown(table, lines))
-    dashboard = _dashboard(table, failures, events)
+    calibration_runs = calibration(results)
+    (results / "ledger.md").write_text(
+        _markdown(table, lines, calibration_runs)
+    )
+    dashboard = _dashboard(table, failures, events, calibration_runs)
     # Replaced whole, so the dashboard never reads a half-written file.
     partial = results / f"ledger.json.{os.getpid()}"
     partial.write_text(json.dumps(dashboard))

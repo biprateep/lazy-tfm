@@ -16,6 +16,10 @@ __all__ = [
     "BIASED_SIZES",
     "BIASED_TEST",
     "BIASED_TRAIN",
+    "CALIBRATION",
+    "CALIBRATION_METHODS",
+    "CALIBRATION_SEEDS",
+    "CALIBRATION_SIZES",
     "CV_FOLDS",
     "CV_SEED",
     "FINE_BINS",
@@ -69,6 +73,17 @@ BIASED_SIZES: tuple[int, ...] = (
     30_000,
     BIASED_TRAIN,
 )
+
+#: The representative calibration sample the selection sets aside.
+CALIBRATION = 10_000
+
+#: Calibration galaxies added to a biased training set in the calibration
+#: experiment, in steps of 500 up to the whole sample.
+CALIBRATION_SIZES: tuple[int, ...] = tuple(range(0, CALIBRATION + 1, 500))
+
+#: The methods and seeds of the calibration experiment so far.
+CALIBRATION_METHODS: tuple[str, ...] = ("tabpfn",)
+CALIBRATION_SEEDS: tuple[int, ...] = (0,)
 
 REGIMES: tuple[str, ...] = ("representative", "biased")
 

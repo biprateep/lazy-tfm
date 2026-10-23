@@ -10,9 +10,15 @@ masses of 390,990 galaxies on 4,000 bins would take 12.5 GB. The scores go to
 ``$FM4PZ_RESULTS/runs/<method>/<regime>_n<size>_s<seed>.npz`` and the run's
 record, its metrics included, to the ``.json`` beside it.
 
+With ``--calibration k`` the biased training set also takes ``k`` galaxies of
+the representative calibration sample, refitted with the setting chosen for
+the biased size alone, and the run goes to
+``$FM4PZ_RESULTS/calibration/<method>/biased_cal<k>_n<size>_s<seed>.npz``.
+
 Typical usage example:
 
   python -m fm4pz.produce gpz representative 1000 --seed 3 --jobs 8
+  python -m fm4pz.produce tabpfn biased 5000 --seed 0 --calibration 500
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ from fm4pz import scoring
 from fm4pz import splits
 from fm4pz import tune
 
-__all__ = ["main", "produce", "run_path"]
+__all__ = ["calibration_path", "main", "produce", "run_path"]
 
 # Test rows predicted and scored at a time.
 _CHUNK = 10_000
@@ -54,6 +60,18 @@ def run_path(method: str, regime: str, n_train: int, seed: int) -> pathlib.Path:
         / "runs"
         / method
         / f"{regime}_n{n_train}_s{seed}.npz"
+    )
+
+
+def calibration_path(
+    method: str, n_train: int, n_calibration: int, seed: int
+) -> pathlib.Path:
+    """The per-object scores of one calibration run; its record is beside."""
+    return (
+        config.results_dir()
+        / "calibration"
+        / method
+        / f"biased_cal{n_calibration}_n{n_train}_s{seed}.npz"
     )
 
 
@@ -134,6 +152,7 @@ def _record(
     return {
         "regime": split.regime,
         "n_train": split.n_train,
+        "n_calibration": split.n_calibration,
         "seed": split.seed,
         "params": best["params"],
         "post": best["post"],
@@ -150,7 +169,12 @@ def _record(
 
 
 def produce(
-    method_name: str, regime: str, n_train: int, seed: int, jobs: int
+    method_name: str,
+    regime: str,
+    n_train: int,
+    seed: int,
+    jobs: int,
+    n_calibration: int = 0,
 ) -> dict[str, Any]:
     """Runs one production fit and scores the test set.
 
@@ -160,6 +184,8 @@ def produce(
         n_train: The training size.
         seed: The subsample's seed, which also seeds the method.
         jobs: Worker processes predicting test chunks.
+        n_calibration: Calibration galaxies added to a biased training set,
+            fitted with the setting chosen for ``n_train`` alone.
 
     Returns:
         The run's record, as written to its ``.json``.
@@ -168,7 +194,9 @@ def produce(
         tune.latest_best_path(method_name, regime, n_train).read_text()
     )
     method = baselines.get(method_name)
-    split = splits.load(regime, n_train=n_train, seed=seed)
+    split = splits.load(
+        regime, n_train=n_train, seed=seed, n_calibration=n_calibration
+    )
     params = method.production_params(best["params"])
     chunks = np.array_split(
         np.arange(len(split.test.redshift)),
@@ -206,7 +234,11 @@ def produce(
     )
     if resources := method.resources():
         record["resources"] = resources
-    path = run_path(method_name, regime, n_train, seed)
+    path = (
+        calibration_path(method_name, n_train, n_calibration, seed)
+        if n_calibration
+        else run_path(method_name, regime, n_train, seed)
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, Any] = {"z_true": z_true, **per_object}
     np.savez_compressed(path, **arrays)
@@ -231,9 +263,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("n_train", type=int)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--calibration", type=int, default=0)
     args = parser.parse_args(argv)
     record = produce(
-        args.method, args.regime, args.n_train, args.seed, args.jobs
+        args.method,
+        args.regime,
+        args.n_train,
+        args.seed,
+        args.jobs,
+        n_calibration=args.calibration,
     )
     print(json.dumps(record["metrics"], indent=2, sort_keys=True))
     return 0

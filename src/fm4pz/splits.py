@@ -10,10 +10,16 @@ subsets, scored on a representative hold-out. A subset of size ``n`` for seed
 seed are nested. The draws reproduce the submitted paper's frozen index files
 bit for bit (``checksum`` gives the same digests).
 
+A biased training set can also take ``k`` galaxies of the representative
+calibration sample, added to its rows rather than replacing any: the first
+``k`` of one permutation of the calibration sample per seed, drawn as the
+submitted paper drew its calibration matrix.
+
 Typical usage example:
 
   data = splits.load("biased", n_train=5_000, seed=2)
   data.train.features("mag-color"), data.train.redshift
+  mixed = splits.load("biased", n_train=5_000, seed=0, n_calibration=500)
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ import numpy.typing as npt
 
 from fm4pz import config
 
-__all__ = ["Split", "checksum", "load", "train_rows"]
+__all__ = ["Split", "calibration_rows", "checksum", "load", "train_rows"]
 
 # Offset applied to a seed before it reaches NumPy, as in the submitted paper.
 _SEED_BASE = 20260917
@@ -45,6 +51,8 @@ class Split:
         train: The training catalogue.
         test: The test catalogue.
         train_checksum: :func:`checksum` of the training rows.
+        n_calibration: Calibration galaxies added to the ``n_train``
+            training rows (biased regime only).
     """
 
     regime: str
@@ -53,6 +61,7 @@ class Split:
     train: datasets.Catalog
     test: datasets.Catalog
     train_checksum: str
+    n_calibration: int = 0
 
 
 def checksum(rows: npt.ArrayLike) -> str:
@@ -82,12 +91,18 @@ def _catalogs() -> tuple[datasets.Catalog, datasets.Catalog, datasets.Catalog]:
 
 @functools.cache
 def _selection() -> dict[str, npt.NDArray[np.int64]]:
-    """Rows of the merged catalogue in the biased pool and the test set."""
+    """Rows of the merged catalogue: biased pool, calibration and test."""
     split = datasets.fetch_dc1_biased(**config.SELECTION)
     rows = {
         "pool": np.sort(split.rows["biased"]),
+        "calibration": np.sort(split.rows["calibration"]),
         "test": np.sort(split.rows["test"]),
     }
+    if rows["calibration"].size != config.CALIBRATION:
+        raise RuntimeError(
+            f"the calibration sample has {rows['calibration'].size} rows, "
+            f"not {config.CALIBRATION}: the selection moved"
+        )
     if rows["pool"].size != config.BIASED_TRAIN:
         raise RuntimeError(
             f"the biased pool has {rows['pool'].size} rows, not "
@@ -129,19 +144,50 @@ def train_rows(regime: str, n_train: int, seed: int) -> npt.NDArray[np.int64]:
     return np.sort(pool[_permutation(pool.size, seed)[:n_train]])
 
 
-def load(regime: str, *, n_train: int, seed: int) -> Split:
+def calibration_rows(n_calibration: int, seed: int) -> npt.NDArray[np.int64]:
+    """The calibration galaxies added for one seed, sorted.
+
+    Args:
+        n_calibration: How many, at most :data:`fm4pz.config.CALIBRATION`;
+            the whole sample gives every row.
+        seed: The draw's seed; the sizes of one seed are nested.
+
+    Returns:
+        Rows of the merged catalogue, sorted, as int64.
+    """
+    sample = _selection()["calibration"]
+    if not 0 <= n_calibration <= sample.size:
+        raise ValueError(
+            f"the calibration sample has {sample.size} rows: {n_calibration=}"
+        )
+    if n_calibration == sample.size:
+        return sample.copy()
+    return np.sort(sample[_permutation(sample.size, seed)[:n_calibration]])
+
+
+def load(
+    regime: str, *, n_train: int, seed: int, n_calibration: int = 0
+) -> Split:
     """One training subsample and its test set.
 
     Args:
         regime: ``"representative"`` or ``"biased"``.
         n_train: Training rows.
-        seed: The subsample's seed.
+        seed: The subsample's seed, also the calibration draw's.
+        n_calibration: Calibration galaxies added to the training rows;
+            the biased regime only.
 
     Returns:
         The :class:`Split`.
     """
+    if n_calibration and regime != "biased":
+        raise ValueError(f"only the biased regime takes calibration: {regime=}")
     train_file, test_file, merged = _catalogs()
     rows = train_rows(regime, n_train, seed)
+    if n_calibration:
+        rows = np.union1d(rows, calibration_rows(n_calibration, seed))
+        if rows.size != n_train + n_calibration:
+            raise RuntimeError("calibration rows overlap the biased pool")
     if regime == "representative":
         train, test = train_file.take(rows), test_file
     else:
@@ -154,4 +200,5 @@ def load(regime: str, *, n_train: int, seed: int) -> Split:
         train=train,
         test=test,
         train_checksum=checksum(rows),
+        n_calibration=n_calibration,
     )

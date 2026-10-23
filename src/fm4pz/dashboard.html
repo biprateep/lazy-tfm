@@ -138,6 +138,14 @@
     <div class="card"><h2>Biased: test CDE loss so far</h2><p class="note">Mean over the current seeds of each size (open marker: fewer than five); lower is better.</p><div class="chart" id="s-biased"></div></div>
   </section>
 
+  <section class="card" id="calibration">
+    <h2>Calibration experiment</h2>
+    <p class="note" id="cal-note">Test CDE loss of each biased training set with representative calibration galaxies added to it, one curve per biased training size, refitted with the setting tuned for the biased size alone.</p>
+    <div class="chart" id="c-cal"></div>
+    <div class="keys" id="cal-keys"></div>
+    <div class="tablebox"><table class="list" id="cal-table"><thead></thead><tbody></tbody></table></div>
+  </section>
+
   <section class="card">
     <h2>Failures nothing has redone</h2>
     <p class="note">The latest outcome of each run in every log on dhruba and tara, where it failed and no record or exported setting has since replaced it.</p>
@@ -209,6 +217,7 @@ function derive(rows) {
   const count = (statuses) => experiments.filter((r) => statuses.includes(r.status)).length;
   return {
     built: meta.built ? new Date(meta.built) : null, seeds, experiments, failures, progress,
+    calibration: rows.filter((r) => r.table === "calibration"),
     totals: {
       experiments: experiments.length, done: count(["done"]),
       runs: d3.sum(experiments, (r) => r.seeds_done), runsTotal: experiments.length * seeds,
@@ -392,6 +401,68 @@ function renderProgress(node, kind) {
   endLabels(svg, series.map((s) => { const last = s.points[s.points.length - 1]; return { method: s.method, y: y(last.total), text: `${NAMES[s.method].split(" ")[0]} ${d3.format(",")(last.total)}` }; }), right + 6, height - 24);
 }
 
+function calColor(sizes, n) {
+  return d3.interpolateViridis(0.9 * sizes.indexOf(n) / Math.max(1, sizes.length - 1));
+}
+
+function renderCalibration() {
+  const runs = state.calibration || [];
+  const card = document.getElementById("calibration");
+  card.hidden = runs.length === 0;
+  if (!runs.length) return;
+  const methods = [...new Set(runs.map((r) => r.method))];
+  const done = runs.filter((r) => r.done);
+  const last = done.map((r) => r.finished).filter(Boolean).sort().pop();
+  document.getElementById("cal-note").textContent =
+    `${methods.map((m) => NAMES[m] || m).join(", ")}: ${done.length} of ${runs.length} runs done` +
+    (last ? `, last at ${new Date(last).toLocaleString("en-US", { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}` : "") +
+    ". Test CDE loss against calibration galaxies added, one curve per biased training size (mean over seeds), refitted with the setting tuned for the biased size alone.";
+  const sizes = [...new Set(runs.map((r) => r.n_train))].sort((a, b) => a - b);
+  const ks = [...new Set(runs.map((r) => r.n_calibration))].sort((a, b) => a - b);
+  const mean = new Map();
+  for (const [key, group] of d3.group(done, (r) => r.n_train + "|" + r.n_calibration)) mean.set(key, d3.mean(group, (r) => r.cde_loss));
+
+  const node = document.getElementById("c-cal");
+  const width = node.clientWidth; const height = 260;
+  node.replaceChildren();
+  if (width && mean.size) {
+    const svg = d3.select(node).append("svg").attr("width", "100%").attr("height", height).attr("viewBox", `0 0 ${width} ${height}`);
+    const values = [...mean.values()];
+    const fmt = (v) => d3.format(".1f")(v).replace("-", "−");
+    const y = d3.scaleLinear(d3.extent(values), [height - 34, 8]).nice();
+    const left = axisLeft(svg, y, fmt);
+    const right = width - 60;
+    const x = d3.scaleLinear([0, d3.max(ks)], [left, right]);
+    svg.append("g").selectAll("line").data(y.ticks(5)).join("line").attr("x1", left).attr("x2", right).attr("y1", y).attr("y2", y).style("stroke", "var(--grid)");
+    svg.append("g").selectAll("text").data(y.ticks(5)).join("text").attr("x", left - 6).attr("y", y).attr("dy", "0.32em").attr("text-anchor", "end").text(fmt);
+    svg.append("g").selectAll("text").data(x.ticks(Math.max(2, Math.floor((right - left) / 70)))).join("text")
+      .attr("x", x).attr("y", height - 18).attr("text-anchor", "middle").text((v) => (v >= 1000 ? v / 1000 + "k" : v));
+    svg.append("text").attr("x", (left + right) / 2).attr("y", height - 2).attr("text-anchor", "middle").text("Calibration galaxies added");
+    const line = d3.line().x((p) => x(p.k)).y((p) => y(p.v));
+    const ends = [];
+    for (const n of sizes) {
+      const pts = ks.filter((k) => mean.has(n + "|" + k)).map((k) => ({ k, v: mean.get(n + "|" + k) }));
+      if (!pts.length) continue;
+      const c = calColor(sizes, n);
+      svg.append("path").attr("d", line(pts)).attr("fill", "none").style("stroke", c).attr("stroke-width", 2).attr("stroke-linejoin", "round");
+      svg.append("g").selectAll("circle").data(pts).join("circle").attr("cx", (p) => x(p.k)).attr("cy", (p) => y(p.v)).attr("r", 2.5).style("fill", c);
+      const end = pts[pts.length - 1];
+      ends.push({ x: x(end.k) + 6, y: y(end.v), c, text: sizeLabel(n) });
+    }
+    // Labels at each curve's last point, nudged apart where they meet.
+    ends.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 12 && Math.abs(ends[i].x - ends[i - 1].x) < 30) ends[i].y = ends[i - 1].y + 12;
+    svg.append("g").selectAll("text").data(ends).join("text").attr("x", (e) => e.x).attr("y", (e) => e.y).attr("dy", "0.32em").style("fill", (e) => e.c).text((e) => e.text);
+  }
+  document.getElementById("cal-keys").replaceChildren(...sizes.map((n) => { const i = el("i"); i.style.background = calColor(sizes, n); return el("span", {}, i, sizeLabel(n) + " biased"); }));
+
+  const table = document.getElementById("cal-table");
+  const fmtK = (k) => (k >= 1000 ? k / 1000 + "k" : String(k));
+  table.querySelector("thead").replaceChildren(el("tr", {}, el("th", { textContent: "Biased size" }), ...ks.map((k) => el("th", { className: "num", textContent: fmtK(k) }))));
+  table.querySelector("tbody").replaceChildren(...sizes.map((n) => el("tr", {}, el("td", { textContent: sizeLabel(n) }),
+    ...ks.map((k) => el("td", { className: "num", textContent: mean.has(n + "|" + k) ? mean.get(n + "|" + k).toFixed(2) : "·" })))));
+}
+
 function renderScaling(node, regime) {
   const width = node.clientWidth; const height = 230;
   node.replaceChildren();
@@ -481,7 +552,7 @@ function render() {
   renderProgress(document.getElementById("c-trials"), "trial");
   renderProgress(document.getElementById("c-runs"), "run");
   REGIMES.forEach((g) => renderScaling(document.getElementById("s-" + g), g));
-  renderKeys(); renderFailures(); renderLedger();
+  renderKeys(); renderCalibration(); renderFailures(); renderLedger();
 }
 
 async function load() {
