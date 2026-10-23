@@ -156,9 +156,9 @@ def legend_entries(
             if method_family == family
         ]
         rows.append(row)
-    interleaved = [
-        entry for column in zip(*rows, strict=True) for entry in column
-    ]
+    interleaved: list[tuple[object, str]] = []
+    for column in zip(*rows, strict=True):
+        interleaved.extend(column)
     handles, labels = zip(*interleaved, strict=True)
     return list(handles), list(labels)
 
