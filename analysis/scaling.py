@@ -176,7 +176,7 @@ def scaling_figure(table: pd.DataFrame, regime: str) -> plt.Figure:
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=plotstyle.grid_figsize(1, 2, "text", panel_aspect=0.62),
+        figsize=plotstyle.grid_figsize(1, 2, "text", panel_aspect=0.8),
         layout="constrained",
     )
     rows = table[table["regime"] == regime]
@@ -211,6 +211,10 @@ def scaling_figure(table: pd.DataFrame, regime: str) -> plt.Figure:
         )
         axis.xaxis.set_minor_locator(ticker.NullLocator())
         axis.set_xlabel("Training Set Size")
+        # A grid at the major ticks, as in the submitted figures (PI request).
+        axis.grid(
+            which="major", color="k", alpha=0.15, linestyle="--", linewidth=0.6
+        )
     axes[0].set_ylabel(r"$\mathcal{L}_{\rm CDE}$")
     axes[1].set_yscale("log")
     sigma = 100 * rows["sigma_mean"]
