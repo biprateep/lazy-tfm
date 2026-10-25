@@ -51,8 +51,9 @@ lazy = "lazy._cli:main"
 # without it TabFMHistogram re-encodes the training context for every chunk of
 # query rows -- ~13.7 ms per member-row against ~0.53 ms, about 26x the compute,
 # for identical answers. TabFMHistogram raises TabFMPerformanceWarning when it
-# falls back, and the README says how to install the repository build. A uv
-# checkout gets that build automatically, from [tool.uv.sources] below.
+# falls back, and the installation page of the documentation says how to
+# install the repository build. A uv checkout gets that build automatically,
+# from [tool.uv.sources] below.
 tabfm = [
     "tabfm[pytorch]>=1.0.1",
     # huggingface_hub loads the checkpoint through `_load_as_safetensor`, which

@@ -260,7 +260,7 @@ start.
 | Small CPU settings for the checkpoint tests | `tests/lazy/backend_settings.py` | `test_backend_completeness.py`, `test_conformance_backends.py` |
 | A fake upstream, with `install` and `SETTINGS` | `tests/lazy/fakes/<name>.py` | `test_backend_completeness.py`, `test_conformance.py`, `test_bagging.py` |
 | A real-weights entry in the shared-network test | `_REAL` in `tests/lazy/test_weights_cache.py` | `test_backend_completeness.py` |
-| A row in the hand-written model lists | `README.md`, `docs/installation.md` | review |
+| A row in the hand-written model list | `docs/installation.md` | review |
 | A line in the changelog | `CHANGELOG.md`, under `[Unreleased]` | review |
 
 The fake replaces what the backend needs from outside the package (the

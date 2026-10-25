@@ -336,9 +336,9 @@ defaults next to LAZY's, the standardizations the model applies, and where
 LAZY differs. It joins the toctree of {doc}`models/index`, whose table of the
 models, like the table of backends in {doc}`guide/interface`, is written by
 `docs/conf.py` from the checkpoints' fields and the class's `method_note`, so
-neither was edited by hand. The install commands in the README and on
-{doc}`installation`, the license notes, the list of concrete classes and the
-changelog were updated by hand.
+neither was edited by hand. The install commands on {doc}`installation`, the
+license notes, the list of concrete classes and the changelog were updated by
+hand.
 
 ## Checking the result
 
