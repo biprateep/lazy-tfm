@@ -67,7 +67,8 @@ y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
 ```
 
 <!-- The sidebar. :titlesonly: keeps a page's own sections out of it, so
-Installation, Contributing and Citing show no sub-list. -->
+Installation and Citing show no sub-list, and Contributing lists only the
+pages of its own toctree (Adding a backend and its worked example). -->
 
 ```{toctree}
 :hidden:
@@ -91,8 +92,6 @@ API reference <autoapi/lazy/index>
 :titlesonly:
 
 contributing
-adding_a_backend
-adding_a_backend_kumo
 citing
 ```
 
