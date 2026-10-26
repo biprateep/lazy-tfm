@@ -140,6 +140,7 @@ TUTORIAL_ORDER = [
     "choosing_a_model",
     "ensembles",
     "tuning",
+    "feature_importance",
     "large_data",
     "distribution_shift",
     "photo_z",
