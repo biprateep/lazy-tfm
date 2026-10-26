@@ -7,6 +7,22 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The tutorials gain "Feature importance", which uses scikit-learn's
+  permutation importance and SHAP values to show which features drive a
+  model's prediction and its uncertainty.
+- The User guide gains "Apple silicon and AMD GPUs", on what to expect of
+  each model on hardware other than NVIDIA GPUs, which LAZY has not been
+  tested on, and what to try there.
+
+### Changed
+
+- The README keeps only its opening and points to the documentation, which
+  holds everything it used to repeat.
+- "Adding a backend" and its worked example sit under "Contributing to
+  lazy-tfm" in the documentation's sidebar.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added
