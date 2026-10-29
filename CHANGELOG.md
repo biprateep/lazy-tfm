@@ -7,6 +7,11 @@ change the API.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-28
+
+A citation release, which archives lazy-tfm on Zenodo with its new
+citation metadata.
+
 ### Added
 
 - lazy-tfm is citable: every release is archived on Zenodo, under the
@@ -618,7 +623,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/biprateep/lazy-tfm/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/biprateep/lazy-tfm/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/biprateep/lazy-tfm/compare/v0.2.0...v0.3.0
