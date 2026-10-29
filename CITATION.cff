@@ -1,9 +1,10 @@
-# Citation metadata; GitHub renders it as "Cite this repository".
-# A paper is in preparation: when it appears, add it as preferred-citation.
+# Citation metadata. GitHub renders it as "Cite this repository", and Zenodo
+# reads it for the record of every GitHub release.
 cff-version: 1.2.0
 message: >-
-  If you use lazy-tfm, please cite it, and the pretrained checkpoints you
-  used: a fitted model's provenance_ records exactly which ones.
+  If you use lazy-tfm, please cite the paper below and the software, and the
+  pretrained checkpoints you used: a fitted model's provenance_ records exactly
+  which ones.
 title: "LAZY: Lazy but Accurate z for Yinz"
 abstract: >-
   Conditional probability distributions of a continuous target (a redshift,
@@ -13,7 +14,19 @@ type: software
 authors:
   - family-names: Dey
     given-names: Biprateep
-    affiliation: University of Pittsburgh
+    affiliation: University of Toronto
+    orcid: "https://orcid.org/0000-0002-5665-7912"
+  - family-names: Speagle
+    given-names: Joshua Shen
+    affiliation: University of Toronto
+    orcid: "https://orcid.org/0000-0003-2573-9832"
+# The concept DOI: every version of lazy-tfm on Zenodo; it resolves to the
+# latest release.
+doi: 10.5281/zenodo.23751881
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23751881
+    description: Every version of lazy-tfm, archived on Zenodo
 repository-code: "https://github.com/biprateep/lazy-tfm"
 url: "https://lazy-tfm.readthedocs.io"
 license: MIT
@@ -23,3 +36,28 @@ keywords:
   - foundation model
   - tabular
   - LSST
+preferred-citation:
+  type: conference-paper
+  title: >-
+    Tabular Foundation Models Dramatically Outperform Bespoke Photometric
+    Redshift Estimators
+  authors:
+    - family-names: Dey
+      given-names: Biprateep
+      affiliation: University of Toronto
+      orcid: "https://orcid.org/0000-0002-5665-7912"
+    - family-names: Speagle
+      given-names: Joshua Shen
+      affiliation: University of Toronto
+      orcid: "https://orcid.org/0000-0003-2573-9832"
+  collection-title: >-
+    9th Workshop on Machine Learning and the Physical Sciences (ML4PS 2026)
+  conference:
+    name: >-
+      9th Workshop on Machine Learning and the Physical Sciences (ML4PS 2026)
+  year: 2026
+  # The arXiv preprint, once posted:
+  # identifiers:
+  #   - type: url
+  #     value: "https://arxiv.org/abs/XXXX.XXXXX"
+  #     description: The arXiv preprint

@@ -16,6 +16,7 @@ redshift, a metallicity, a mass or a yield.
 [![Unit test and code coverage](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml/badge.svg)](https://github.com/biprateep/lazy-tfm/actions/workflows/testing-and-coverage.yml)
 [![Documentation](https://readthedocs.org/projects/lazy-tfm/badge/?version=latest)](https://lazy-tfm.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/biprateep/lazy-tfm/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23751881.svg)](https://doi.org/10.5281/zenodo.23751881)
 
 LAZY is a unified, scikit-learn-compatible wrapper around several pretrained
 tabular foundation models (TabPFN, TabICL, TabFM, LimiX-2 and Kumo Tabular).

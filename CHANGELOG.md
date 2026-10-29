@@ -7,6 +7,14 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- lazy-tfm is citable: every release is archived on Zenodo, under the
+  concept DOI 10.5281/zenodo.23751881, and `CITATION.cff` gives both authors
+  with their ORCIDs and the ML4PS 2026 paper as the preferred citation, which
+  GitHub shows as "Cite this repository". The "Citing" page gives Zenodo's
+  BibTeX entry, and the README carries the DOI badge.
+
 ## [0.5.0] - 2026-10-28
 
 A documentation release: a tutorial on feature importance, a guide page on
