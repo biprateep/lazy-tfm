@@ -4,7 +4,7 @@
 
 The training sets are those of the submitted paper, regenerated from the same
 seeds (:mod:`fm4pz.splits`). The redshift grid is the common grid every method
-is scored on, the classical baselines now and the foundation models later.
+is scored on. The search budgets are those the paper's settings came from.
 """
 
 from __future__ import annotations
@@ -17,18 +17,17 @@ __all__ = [
     "BIASED_TEST",
     "BIASED_TRAIN",
     "CALIBRATION",
-    "CALIBRATION_METHODS",
-    "CALIBRATION_SEEDS",
-    "CALIBRATION_SIZES",
-    "MATRIX_CALIBRATION_SIZES",
-    "MATRIX_METHODS",
     "CV_FOLDS",
     "CV_SEED",
     "FINE_BINS",
     "FULL_TRAIN",
+    "MATRIX_CALIBRATION_SIZES",
+    "METHODS",
+    "MIN_COMPLETE",
     "N_TEST",
     "REGIMES",
     "REPRESENTATIVE_SIZES",
+    "SEARCH_TRIALS",
     "SEEDS",
     "SELECTION",
     "Z_MAX",
@@ -79,19 +78,14 @@ BIASED_SIZES: tuple[int, ...] = (
 #: The representative calibration sample the selection sets aside.
 CALIBRATION = 10_000
 
-#: Calibration galaxies added to a biased training set in the calibration
-#: experiment, in steps of 500 up to the whole sample.
-CALIBRATION_SIZES: tuple[int, ...] = tuple(range(0, CALIBRATION + 1, 500))
-
-#: The methods and seeds of the calibration experiment so far.
-CALIBRATION_METHODS: tuple[str, ...] = ("tabpfn",)
-CALIBRATION_SEEDS: tuple[int, ...] = (0,)
-
 #: The calibration matrix, on the submitted paper's grid: every biased size
 #: with these calibration galaxies added, for every method and seed of
 #: :data:`SEEDS`.
 MATRIX_CALIBRATION_SIZES: tuple[int, ...] = (0, 1_000, 2_000, 5_000, 10_000)
-MATRIX_METHODS: tuple[str, ...] = (
+
+#: The estimators: three bespoke ones (CPU) and three tabular foundation
+#: models through lazy-tfm (GPU).
+METHODS: tuple[str, ...] = (
     "flexzboost",
     "cmnn",
     "gpz",
@@ -99,6 +93,16 @@ MATRIX_METHODS: tuple[str, ...] = (
     "limix",
     "kumo",
 )
+
+#: Trials of one hyperparameter search, by method and regime; a method absent
+#: here searches until :data:`MIN_COMPLETE` trials have completed (the pruner
+#: stops many of a foundation model's trials early).
+SEARCH_TRIALS: dict[str, dict[str, int]] = {
+    "cmnn": {"representative": 300, "biased": 300},
+    "flexzboost": {"representative": 200, "biased": 100},
+    "gpz": {"representative": 100, "biased": 100},
+}
+MIN_COMPLETE = 40
 
 REGIMES: tuple[str, ...] = ("representative", "biased")
 
