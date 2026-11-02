@@ -7,6 +7,12 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The package is marked typed (`py.typed`), so type checkers read its
+  annotations.
+- The source distribution includes the tests and the docs pages they read.
+
 ### Changed
 
 - The minimum dependency versions are raised to ones that install and work

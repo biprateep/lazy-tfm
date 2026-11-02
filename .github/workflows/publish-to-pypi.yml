@@ -43,6 +43,8 @@ jobs:
       run: uv build
     - name: Check the metadata renders on PyPI
       run: uvx twine check --strict dist/*
+    - name: Check what the archives hold
+      run: .github/scripts/check-dist.sh
     - name: Install the wheel into a clean environment and import it
       run: |
         uv venv --python 3.12 /tmp/smoke
