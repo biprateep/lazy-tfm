@@ -52,6 +52,11 @@ change the API.
 
 ### Security
 
+- LimiX's source, which `lazy` downloads into its cache, is checked against
+  a pinned hash of the validated commit's code before it runs, and runs
+  from a private copy. Before, code or bytecode planted in a shared
+  `LAZY_DATA_HOME` ran in every LimiX user's `fit`. A checkout named by
+  `LAZY_LIMIX_SRC` is still run as it is.
 - `fetch_dc1` checks the cached DC1 test file's SHA-256 before it unpickles
   it, once per process. Its catalogue has an object column, so loading it
   unpickles, and so runs, what the file holds. Before, any cached file of

@@ -68,8 +68,9 @@ lazy setup kumo
   (~10 MB) at the validated commit on first use, into its cache, without
   installing it. `lazy setup` or `lazy.download_checkpoint("limix")` does
   this ahead of time, for a machine without a network (see
-  {doc}`guide/clusters`). To use your own checkout instead, set
-  `LAZY_LIMIX_SRC` to it. The backend is Linux-only, because LimiX needs
+  {doc}`guide/clusters`). `lazy` checks the cached code against a hash of
+  that commit before running it. To use your own checkout instead, set
+  `LAZY_LIMIX_SRC` to it; `lazy` runs a checkout as it is. The backend is Linux-only, because LimiX needs
   `triton`.
 - **Kumo Tabular.** NVIDIA's `structured-data-models` package, which holds
   the model, is not on PyPI, so the extra installs only its dependencies and

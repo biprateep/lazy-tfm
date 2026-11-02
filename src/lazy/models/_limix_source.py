@@ -18,9 +18,11 @@ is found, in order, from ``$LAZY_LIMIX_SRC``, ``$LIMIX_SRC``, an installed
 or :func:`cache_dir`. When none of them has it, the archive of
 :data:`LIMIX_COMMIT` is downloaded from GitHub into :func:`cache_dir`, once,
 like a checkpoint: nothing is installed, so the generic names never reach the
-environment. The commit is checked against :data:`LIMIX_COMMIT`, the one the
-backend was validated on, and a :class:`LimiXSourceWarning` says so when they
-differ.
+environment. That cached copy may be shared, so its files are checked against
+:data:`LIMIX_MANIFEST` before any of them runs, and the code runs from a
+private copy. Any other source's commit is checked against
+:data:`LIMIX_COMMIT`, the one the backend was validated on, and a
+:class:`LimiXSourceWarning` says so when they differ.
 
 Typical usage example:
 
@@ -30,7 +32,9 @@ Typical usage example:
 
 from __future__ import annotations
 
+import atexit
 import dataclasses
+import hashlib
 import importlib
 from importlib import metadata
 from importlib import util
@@ -75,6 +79,12 @@ REPOSITORY = "https://github.com/limix-ldm-ai/LimiX"
 ENV_VARS = ("LAZY_LIMIX_SRC", "LIMIX_SRC")
 #: GitHub's archive of :data:`LIMIX_COMMIT`, which :func:`fetch` downloads.
 ARCHIVE = f"{REPOSITORY}/archive/{LIMIX_COMMIT}.tar.gz"
+#: The hash of the two subtrees the backend runs, at :data:`LIMIX_COMMIT`:
+#: the SHA-256 of one ``<path>\t<file SHA-256>`` line per file, sorted by
+#: path, bytecode caches left out (:func:`_manifest`).
+LIMIX_MANIFEST = (
+    "ea70acc484a170cc4986cd0d8da2dcebb4742565676b4058a0b03df26b2f3704"
+)
 #: The :attr:`Source.origin` of the source in :func:`cache_dir`.
 CACHE_ORIGIN = "lazy's cache"
 
@@ -237,6 +247,11 @@ def fetch() -> pathlib.Path:
                 f"the archive {ARCHIVE} does not hold LimiX's model/v2_0 and "
                 "inference/v2_0."
             )
+        if _manifest(_files(tops[0])) != LIMIX_MANIFEST:
+            raise ImportError(
+                f"the archive {ARCHIVE} does not hold the LimiX code lazy was "
+                f"validated on: its files differ from commit {LIMIX_COMMIT}."
+            )
         try:
             tops[0].rename(root)
         except OSError:
@@ -285,9 +300,17 @@ def load() -> types.SimpleNamespace:
         parent = types.ModuleType(_ALIAS)
         parent.__path__ = []
         sys.modules[_ALIAS] = parent
+    # lazy's own cache may be shared, so its code runs only once checked,
+    # and from a private copy: Python would also run a bytecode file
+    # planted beside the sources.
+    root = (
+        _checked_copy(source.root)
+        if source.origin == CACHE_ORIGIN
+        else source.root
+    )
     try:
         for name, parts in _SUBTREES.items():
-            _load_package(f"{_ALIAS}.{name}", source.root.joinpath(*parts))
+            _load_package(f"{_ALIAS}.{name}", root.joinpath(*parts))
         namespace = types.SimpleNamespace(
             loading=importlib.import_module(f"{_ALIAS}.model.loading"),
             preprocess=importlib.import_module(
@@ -346,6 +369,75 @@ def missing_dependency(name: str) -> ImportError:
             "on Linux."
         )
     return ImportError(message, name=name)
+
+
+def _files(root: pathlib.Path) -> list[tuple[str, bytes]]:
+    """The subtrees' files under ``root``, without bytecode caches.
+
+    Returns:
+        ``(path, contents)`` pairs, the path relative to ``root`` with
+        ``/`` separators, sorted by path.
+    """
+    found = []
+    for parts in _SUBTREES.values():
+        for path in root.joinpath(*parts).rglob("*"):
+            name = path.relative_to(root)
+            if path.is_file() and "__pycache__" not in name.parts:
+                found.append((name.as_posix(), path.read_bytes()))
+    return sorted(found)
+
+
+def _manifest(files: list[tuple[str, bytes]]) -> str:
+    """The hash :data:`LIMIX_MANIFEST` pins, of :func:`_files`' result."""
+    lines = "".join(
+        f"{name}\t{hashlib.sha256(data).hexdigest()}\n" for name, data in files
+    )
+    return hashlib.sha256(lines.encode()).hexdigest()
+
+
+def _checked_copy(root: pathlib.Path) -> pathlib.Path:
+    """Copies the cached subtrees into a private directory, once checked.
+
+    The copy is written from the bytes that were hashed, and removed when
+    the process exits; tracebacks into LimiX's code point into it.
+
+    Args:
+        root: lazy's cached LimiX source.
+
+    Returns:
+        The private copy, which holds the two subtrees.
+
+    Raises:
+        ImportError: If the cached files are not those of
+            :data:`LIMIX_COMMIT`.
+    """
+    try:
+        files = _files(root)
+    except OSError as error:
+        raise ImportError(
+            f"cannot read LimiX's source in {root}: {error}. Delete {root} "
+            'and run lazy.download_checkpoint("limix") again.'
+        ) from error
+    if _manifest(files) != LIMIX_MANIFEST:
+        raise ImportError(
+            f"LimiX's source in {root} is not the code of commit "
+            f"{LIMIX_COMMIT}: its files were changed after download. Delete "
+            f'{root} and run lazy.download_checkpoint("limix") again.'
+        )
+    copy = pathlib.Path(tempfile.mkdtemp(prefix="lazy-limix-"))
+    owner = os.getpid()
+
+    def remove() -> None:
+        """Removes the copy, but not from a forked child exiting first."""
+        if os.getpid() == owner:
+            shutil.rmtree(copy, ignore_errors=True)
+
+    atexit.register(remove)
+    for name, data in files:
+        path = copy / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return copy
 
 
 def _has_subtrees(root: pathlib.Path) -> bool:

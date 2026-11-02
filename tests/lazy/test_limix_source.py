@@ -2,7 +2,9 @@
 # Copyright (c) 2025 Biprateep Dey
 """Finding LimiX's source and loading it under private names."""
 
+import importlib
 from importlib import metadata
+import importlib.util
 import io
 import pathlib
 import sys
@@ -55,6 +57,13 @@ def clean_env(monkeypatch, tmp_path):
         monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(_limix_source, "_loaded", {})
     monkeypatch.setattr(_limix_source, "_ignored", set())
+    # The stand-in source plays the pinned commit's code.
+    reference = _fake_source(tmp_path / "reference")
+    monkeypatch.setattr(
+        _limix_source,
+        "LIMIX_MANIFEST",
+        _limix_source._manifest(_limix_source._files(reference)),
+    )
     return monkeypatch
 
 
@@ -229,3 +238,55 @@ def test_the_checkpoint_helpers_cover_the_source(clean_env, tmp_path):
     )
     assert _hub.download_checkpoint("limix") == tmp_path
     assert _hub.is_cached("limix")
+
+
+def _cached_source(clean_env, tmp_path):
+    """Downloads the stand-in archive into lazy's cache; returns its root."""
+    clean_env.setattr(_limix_source.metadata, "distribution", _not_installed)
+    clean_env.setattr(
+        _limix_source.urllib.request,
+        "urlopen",
+        lambda url, timeout: io.BytesIO(_archive(tmp_path)),
+    )
+    return _limix_source.fetch()
+
+
+def test_an_archive_with_other_code_is_refused(clean_env, tmp_path):
+    clean_env.setattr(_limix_source, "LIMIX_MANIFEST", "0" * 64)
+    with pytest.raises(ImportError, match="files differ"):
+        _cached_source(clean_env, tmp_path)
+    assert not _limix_source.cache_dir().exists()
+
+
+def test_a_changed_cached_source_is_refused_before_it_runs(clean_env, tmp_path):
+    root = _cached_source(clean_env, tmp_path)
+    (root / "model" / "v2_0" / "helper.py").write_text(
+        "import sys\nsys.lazy_planted = True\nVALUE = 7\n"
+    )
+    with pytest.raises(ImportError, match="changed after download"):
+        _limix_source.load()
+    assert not hasattr(sys, "lazy_planted")
+
+
+def test_the_cached_source_runs_from_a_private_copy(clean_env, tmp_path):
+    """Bytecode planted beside the cached sources is never imported."""
+    root = _cached_source(clean_env, tmp_path)
+    helper = root / "model" / "v2_0" / "helper.py"
+    # Bytecode that Python would take for helper.py's own: it records the
+    # source's size and modification time.
+    planted = compile(
+        "import sys\nsys.lazy_planted = True\nVALUE = 7\n", "h", "exec"
+    )
+    stat = helper.stat()
+    pyc = pathlib.Path(importlib.util.cache_from_source(str(helper)))
+    pyc.parent.mkdir()
+    pyc.write_bytes(
+        importlib._bootstrap_external._code_to_timestamp_pyc(
+            planted, int(stat.st_mtime), stat.st_size
+        )
+    )
+    limix = _limix_source.load()
+    assert not hasattr(sys, "lazy_planted")
+    assert limix.loading.VALUE == 7
+    assert limix.source.root == root
+    assert not pathlib.Path(limix.loading.__file__).is_relative_to(root)
