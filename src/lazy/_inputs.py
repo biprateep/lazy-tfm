@@ -32,10 +32,14 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from scipy import sparse
+from sklearn.utils import validation
 
 from lazy import _typing
 
 __all__ = ["as_feature_frame", "as_target"]
+
+_COMPLEX = "Complex data not supported"
 
 
 def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
@@ -51,12 +55,24 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         are ``x0, x1, ...`` otherwise).
 
     Raises:
+        TypeError: If the features are a sparse matrix or array.
         ValueError: If the table is not two-dimensional, has no columns, has
-            a column that is not numeric, or holds an infinity.
+            a complex or non-numeric column, or holds an infinity.
     """
+    if sparse.issparse(features):
+        raise TypeError(
+            "sparse X is not supported; pass dense features, e.g. with "
+            "OneHotEncoder(sparse_output=False) or "
+            "ColumnTransformer(sparse_threshold=0)"
+        )
     frame, named = _to_frame(features)
     if frame.shape[1] == 0:
-        raise ValueError("X has no feature columns")
+        raise ValueError(
+            f"Found array with 0 feature(s) (shape={frame.shape}) while a "
+            "minimum of 1 is required."
+        )
+    if frame.dtypes.map(pd.api.types.is_complex_dtype).any():
+        raise ValueError(_COMPLEX)
     try:
         values = frame.to_numpy(dtype=np.float64, na_value=np.nan)
     except (TypeError, ValueError) as error:
@@ -82,6 +98,9 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
 def as_target(target: Any) -> _typing.FloatArray:
     """Converts target values to a flat float64 array; masked become NaN.
 
+    A column vector, shape (n_samples, 1), is flattened with a warning, as
+    scikit-learn's regressors do.
+
     Args:
         target: Target values, shape (n_samples,): an array, list, pandas
             Series, astropy Column or Quantity, or masked array (NumPy's or
@@ -89,12 +108,21 @@ def as_target(target: Any) -> _typing.FloatArray:
 
     Returns:
         The values, shape (n_samples,).
+
+    Raises:
+        ValueError: If the target is None, a scalar, complex, or has more
+            than one column.
     """
+    if target is None:
+        raise ValueError(
+            "This estimator requires y to be passed, but the target y is None"
+        )
     data, mask = _unmask(target)
+    _reject_complex(data)
     values = np.asarray(data, dtype=np.float64)
     if mask is not None:
         values = np.where(mask, np.nan, values)
-    return values.ravel()
+    return validation.column_or_1d(values, warn=True)
 
 
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
@@ -111,6 +139,7 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         return _from_structured(features), True
     array, mask = _unmask(features)
     if mask is not None:
+        _reject_complex(array)
         array = np.where(mask, np.nan, array.astype(np.float64))
     if array.ndim == 1:
         raise ValueError(
@@ -122,6 +151,12 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
     if array.ndim != 2:
         raise ValueError(f"X must be 2D, got shape {array.shape}")
     return pd.DataFrame(array), False
+
+
+def _reject_complex(array: Any) -> None:
+    """Raises before a cast to float would drop an imaginary part."""
+    if np.iscomplexobj(array):
+        raise ValueError(_COMPLEX)
 
 
 def _from_astropy(table: Any) -> pd.DataFrame:

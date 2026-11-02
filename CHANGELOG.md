@@ -27,6 +27,13 @@ change the API.
 
 ### Fixed
 
+- A target with several columns raises a `ValueError`; one with half as
+  many rows as X was flattened and fitted on interleaved values. A column
+  vector is flattened with a `DataConversionWarning`, as in scikit-learn.
+- Sparse features raise a `TypeError` that names the dense alternative, and
+  complex features or targets raise instead of losing their imaginary
+  part. The errors for `y=None` and for a wrong or zero feature count use
+  scikit-learn's wording.
 - TabFM's `n_dither` and `keep_cache_on_device`, and TabPFN's
   `ignore_pretraining_limits`, are validated at `fit` with a `ValueError`
   that names the argument. A float or string `n_dither` failed deep inside,

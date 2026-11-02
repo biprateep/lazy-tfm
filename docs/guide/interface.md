@@ -199,9 +199,11 @@ Missing values are marked with `NaN`; the masked entries of an astropy
 table or masked array also become `NaN`. Each model handles them in its own
 way: TabPFN and LimiX add missing-value indicators, TabICL and TabFM impute
 them inside their preprocessing, and Kumo Tabular passes them to its network,
-which embeds them itself. Infinities and non-numeric columns are
-rejected, and the target values must be finite. Therefore, a categorical
-column has to be encoded as numbers before it is passed (see {doc}`limits`).
+which embeds them itself. Infinities, complex values, non-numeric columns
+and sparse matrices are rejected, so a categorical column has to be encoded
+as numbers before it is passed (see {doc}`limits`). The target is one
+finite, real value per row, validated as scikit-learn validates a
+regressor's target.
 
 ## scikit-learn compatibility
 

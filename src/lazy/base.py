@@ -705,8 +705,9 @@ class BaseDensityRegressor(
         frame, named = _inputs.as_feature_frame(X)
         if frame.shape[1] != self.n_features_in_:
             raise ValueError(
-                f"X has {frame.shape[1]} features, but this "
-                f"{type(self).__name__} was fitted with {self.n_features_in_}"
+                f"X has {frame.shape[1]} features, but "
+                f"{type(self).__name__} is expecting {self.n_features_in_} "
+                "features as input"
             )
         return self._align_to_fit(frame, named)
 
