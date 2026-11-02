@@ -36,6 +36,9 @@ change the API.
   Its tags now declare that it accepts NaN features, so selectors such as
   `SequentialFeatureSelector` pass NaN through, and that it requires a
   target. `score` is still the negative CDE loss.
+- The logo sets "LAZY" as the row of a table: each letter in its own column,
+  under a header row, between a top and a bottom rule. The letters and the
+  square icon are unchanged.
 
 ### Fixed
 

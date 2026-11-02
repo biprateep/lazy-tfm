@@ -10,10 +10,13 @@
 # %% [markdown]
 # # The lazy logo
 #
-# "LAZY" in monoline script capitals. The L, the A and the Y are solid lines:
-# the training data. The Z is predicted points with error bars, each bar
-# growing with its distance from the nearest solid stroke, as a model's
-# uncertainty grows away from its data.
+# "LAZY" in monoline script capitals, set as the one row of a table: each
+# letter is an entry in its own column, under a header row of blank labels,
+# between a top rule and a bottom rule, with short separators between the
+# columns. The L, the A and the Y are solid lines: the training data. The Z
+# is predicted points with error bars, each bar growing with its distance
+# from the nearest solid stroke, as a model's uncertainty grows away from its
+# data.
 #
 # The letters are drawn here, not set in a font: each is a few smooth curves
 # through hand-placed points, read off a script-capital reference and split at
@@ -85,8 +88,19 @@ BASELINE_SHIFT = {"L": 0, "A": -6, "Z": -2, "Y": 22}
 below it.
 """
 
-GAP = -4
-"""Space between neighbouring letters' extents; negative tucks them together."""
+PAD = 16.0
+"""Space between a letter's extent and the edges of its column."""
+
+ROW_PAD = 14.0
+"""Space between the letters' extent and the rules above and below them."""
+
+HEADER = 26.0
+"""Height of the header row above the letters."""
+
+SEPARATOR = 0.65
+"""Length of the separators between columns, as a fraction of the row height;
+they are centred in the row and touch neither rule.
+"""
 
 Z_BAR_SCALE = (1.0, 1.0, 0.5)
 """The Z's error bars on each of its strokes, as a fraction of their full
@@ -113,21 +127,39 @@ def spline(
     return np.column_stack(interpolate.splev(np.linspace(0, 1, n), tck))
 
 
-def layout(gap: float = GAP) -> dict[str, list[np.ndarray]]:
-    """Each letter's curves, side by side, y upwards, on one baseline."""
-    placed, x = {}, 0.0
+def layout() -> tuple[dict[str, list[np.ndarray]], np.ndarray, np.ndarray]:
+    """Lays the letters out as the row of a table.
+
+    Returns:
+        Each letter's curves, y upwards, centred in its own column on one
+        baseline; the column edges, shape (5,); and the top and bottom of the
+        row, shape (2,), which clear every letter by ``ROW_PAD``.
+    """
+    placed, edges = {}, [0.0]
     for name in "LAZY":
         curves = [spline(stroke) for stroke in LETTERS[name]]
         points = np.vstack(curves)
         x0, bottom = points[:, 0].min(), points[:, 1].max()
         placed[name] = [
             np.column_stack(
-                [c[:, 0] - x0 + x, bottom - c[:, 1] - BASELINE_SHIFT[name]]
+                [
+                    c[:, 0] - x0 + edges[-1] + PAD,
+                    bottom - c[:, 1] - BASELINE_SHIFT[name],
+                ]
             )
             for c in curves
         ]
-        x += points[:, 0].max() - x0 + gap
-    return placed
+        edges.append(edges[-1] + points[:, 0].max() - x0 + 2 * PAD)
+    ys = np.vstack([c for curves in placed.values() for c in curves])[:, 1]
+    return (
+        placed,
+        np.array(edges),
+        np.array([ys.max(), ys.min()])
+        + [
+            ROW_PAD,
+            -ROW_PAD,
+        ],
+    )
 
 
 def z_points(
@@ -163,7 +195,6 @@ def draw(
     ax: mpl_axes.Axes,
     colour: str = UOFT_BLUE,
     *,
-    gap: float = GAP,
     lw: float = 4.5,
     spacing: float = 11.0,
     min_bar: float = 1.5,
@@ -173,7 +204,23 @@ def draw(
     cap: float = 2.6,
 ) -> None:
     """Draws the logo on ``ax`` in one colour."""
-    placed = layout(gap)
+    placed, edges, (top, bottom) = layout()
+    rule = {"color": colour, "solid_capstyle": "butt"}
+    for y, width in ((top + HEADER, 2.4), (top, 1.2), (bottom, 2.4)):
+        ax.plot(edges[[0, -1]], [y, y], lw=width, **rule)
+    # The header's labels are blank: a short dash over each column.
+    for x in (edges[:-1] + edges[1:]) / 2:
+        ax.plot([x - 9, x + 9], [top + HEADER / 2] * 2, lw=2.2, **rule)
+    mid, half = (top + bottom) / 2, SEPARATOR * (top - bottom) / 2
+    for x in edges[1:-1]:
+        ax.plot(
+            [x, x],
+            [mid - half, mid + half],
+            color=colour,
+            lw=1.4,
+            alpha=0.6,
+            solid_capstyle="round",
+        )
     for name in "LAY":
         for curve in placed[name]:
             ax.plot(
@@ -188,8 +235,9 @@ def draw(
     distance = np.min(
         np.hypot(*(points[:, None] - data[None]).transpose(2, 0, 1)), axis=1
     )
+    distance = (distance - distance.min()) / np.ptp(distance)
     for p, d, k in zip(points, distance, stroke_of, strict=True):
-        grow = (d / distance.max()) ** 0.9 * Z_BAR_SCALE[k]
+        grow = d**0.9 * Z_BAR_SCALE[k]
         ax.errorbar(
             *p,
             yerr=min_bar + (max_bar - min_bar) * grow,
@@ -201,14 +249,15 @@ def draw(
             capsize=cap,
             capthick=eb,
         )
+    ax.set_xlim(edges[0] - 12, edges[-1] + 12)
+    ax.set_ylim(bottom - 12, top + HEADER + 12)
     ax.set_aspect("equal")
-    ax.autoscale()
     ax.axis("off")
 
 
 def draw_icon(ax: mpl_axes.Axes, colour: str = UOFT_BLUE) -> None:
     """The square icon: the predicted Z alone, bolder, for small sizes."""
-    placed = layout()
+    placed, _, _ = layout()
     z = np.vstack(placed["Z"])
     centre = (z.min(axis=0) + z.max(axis=0)) / 2
     strokes = [c - centre for c in placed["Z"]]
@@ -261,7 +310,7 @@ if __name__ == "__main__":
         ("lazy-logo", UOFT_BLUE),
         ("lazy-logo-white", "white"),
     ):
-        fig, ax = plt.subplots(figsize=(6, 2.4))
+        fig, ax = plt.subplots(figsize=(8.1, 2.5))
         draw(ax, colour)
         save(fig, stem)
     fig, ax = plt.subplots(figsize=(2, 2))
