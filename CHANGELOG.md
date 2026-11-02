@@ -23,6 +23,10 @@ change the API.
   complex features or targets raise instead of losing their imaginary
   part. The errors for `y=None` and for a wrong or zero feature count use
   scikit-learn's wording.
+- `LazyModel.set_params(model=...)` with a value that is not a backend name,
+  such as an array, no longer raises; as for any unknown name, `fit` refuses
+  it. scikit-learn's `check_do_not_raise_errors_in_init_or_set_params` now
+  passes.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
