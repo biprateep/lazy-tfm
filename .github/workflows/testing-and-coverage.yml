@@ -72,9 +72,7 @@ jobs:
       run: .venv/bin/python -m pytest
 
   # Every backend's locked upstream package, on a CPU and without checkpoints,
-  # so the fakes run against the real upstream code. The export drops the CUDA
-  # wheels that the lockfile pins for Linux, and the install takes PyTorch from
-  # its CPU index.
+  # so the fakes run against the real upstream code.
   backends:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -87,12 +85,7 @@ jobs:
       with:
         enable-cache: true
     - name: Install the locked backend packages with CPU-only PyTorch
-      run: |
-        uv export --locked --all-extras --group backends --group dev \
-          --no-hashes --no-emit-project \
-          | grep -vE '^(nvidia-|triton)' > requirements-cpu.txt
-        uv venv --python 3.12
-        uv pip install --torch-backend cpu -r requirements-cpu.txt -e .
+      run: .github/scripts/install-backends-cpu.sh
     - name: Run unit tests with pytest
       # This job also runs the tests that need a backend package, so it
       # holds coverage to a higher floor than pyproject.toml's.

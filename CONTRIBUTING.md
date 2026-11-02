@@ -51,9 +51,13 @@ skipped by default. To run them:
 LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 ```
 
-CI runs the tests on Python 3.12 to 3.14 against the lockfile, a daily job
-against the newest resolvable dependencies, the pre-commit hooks, a docs build
-with warnings treated as errors, and a build of the package itself.
+On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
+lockfile. It also runs them with every backend package on a CPU, and at the
+lowest dependency versions `pyproject.toml` allows. It runs the pre-commit
+hooks, a docs build with warnings treated as errors, and a build of the package
+itself. Nothing runs on a schedule. The smoke-test workflow, run by hand from
+the Actions tab, tests against the newest resolvable dependencies, backend
+packages included, to warn of an upstream release that breaks `lazy`.
 
 ## How changes are reviewed
 
