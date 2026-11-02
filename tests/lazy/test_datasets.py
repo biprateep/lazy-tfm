@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import io
 import os
+import pathlib
 import stat
 import time
 import warnings
@@ -35,7 +36,9 @@ EXPECTED_COLUMNS = {
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     """Never touch the real home directory or cache while testing."""
+    # Path.home() reads USERPROFILE on Windows and HOME elsewhere.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.delenv("LAZY_DATA_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / "home").mkdir()
@@ -707,6 +710,39 @@ def test_parallel_downloads_to_one_cache_do_not_collide(
     assert timeouts and all(t is not None and t > 0 for t in timeouts)
 
 
+def test_a_copy_another_process_holds_open_is_kept(isolated_home, monkeypatch):
+    """As on Windows, which cannot replace a file another process has open."""
+    payload = b"the whole file"
+    _serve(monkeypatch, payload)
+    root = isolated_home / "shared"
+
+    def replace(src, dst):
+        pathlib.Path(dst).write_bytes(payload)  # The other process's copy.
+        raise PermissionError(13, "Access is denied", str(dst))
+
+    monkeypatch.setattr(datasets.os, "replace", replace)
+    assert _fetch_fake(root).read_bytes() == payload
+    assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
+
+
+def test_a_refused_move_with_no_finished_copy_raises(
+    isolated_home, monkeypatch
+):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "shared"
+
+    def replace(src, dst):
+        raise PermissionError(13, "Access is denied", str(dst))
+
+    monkeypatch.setattr(datasets.os, "replace", replace)
+    with pytest.raises(PermissionError):
+        _fetch_fake(root)
+    assert not list(root.iterdir())
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows files have no POSIX permission bits"
+)
 @pytest.mark.parametrize("umask", [0o022, 0o027])
 def test_a_downloaded_file_is_as_readable_as_any_new_file(
     isolated_home, monkeypatch, umask

@@ -31,6 +31,9 @@ change the API.
 
 ### Fixed
 
+- On Windows, two processes downloading the same dataset file into a
+  shared cache no longer fail with a `PermissionError`: the one that finishes
+  second keeps the copy already in place.
 - The API reference describes every public constant. Most showed as empty
   entries, since the descriptions were comments that it does not read.
 - A target with several columns raises a `ValueError`; one with half as

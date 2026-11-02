@@ -86,7 +86,8 @@ def test_complete_backends_are_left_alone(backends, capsys):
     )
     assert _cli.main(["setup"]) == 0
     assert not runs
-    assert "/src ($LAZY_LIMIX_SRC)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"{pathlib.Path('/src')} ($LAZY_LIMIX_SRC)" in out
 
 
 def test_missing_extras_are_skipped(backends, capsys):
