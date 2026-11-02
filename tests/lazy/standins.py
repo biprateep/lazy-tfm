@@ -12,6 +12,7 @@ import types
 
 import numpy as np
 
+from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
@@ -121,7 +122,8 @@ class HistogramStandIn(_KNNStandIn):
 
     def _fit_group(self, X, y, group):
         # Buckets placed by the group's own targets, as bar models do.
-        borders = y.mean() + y.std() * np.linspace(-4.0, 4.0, 65)
+        # One row has no spread; any width then gives valid borders.
+        borders = y.mean() + (y.std() or 1.0) * np.linspace(-4.0, 4.0, 65)
         self.borders_ = borders
         return {"members": self._members(X, y, group), "borders": borders}
 
@@ -175,7 +177,7 @@ class QuantileStandIn(_KNNStandIn):
 
     def _native_grid(self):
         low, high = self.support_
-        pad = 0.02 * (high - low)
+        pad = 0.02 * ((high - low) or 1.0)  # One row has no spread.
         return grid_lib.Grid.linear(
             low - pad, high + pad, 100, normalization="histogram"
         )
@@ -211,3 +213,21 @@ STANDINS = (
     QuantileStandIn,
     TrimmedQuantileStandIn,
 )
+
+
+class GaussianDummy(base.BaseDensityRegressor):
+    """p(z | x) = N(x's first column + offset, sigma). Not a photo-z method."""
+
+    def __init__(self, *, sigma=0.1, y_grid=None):
+        self.sigma = sigma
+        self.y_grid = y_grid
+
+    def _fit(self, X, y):
+        self.offset_ = float(np.mean(y) - np.mean(X.iloc[:, 0]))
+
+    def _predict_pdf(self, X, grid):
+        centers = np.asarray(X.iloc[:, 0], dtype=float) + self.offset_
+        return np.exp(
+            -0.5
+            * ((grid.centers[None, :] - centers[:, None]) / self.sigma) ** 2
+        )
