@@ -50,6 +50,15 @@ change the API.
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
 
+### Security
+
+- `fetch_dc1` checks the cached DC1 test file's SHA-256 before it unpickles
+  it, once per process. Its catalogue has an object column, so loading it
+  unpickles, and so runs, what the file holds. Before, any cached file of
+  the right size was trusted, so anyone able to write to a shared
+  `LAZY_DATA_HOME` could plant code there.
+- The other DC1 arrays load without pickle.
+
 ## [0.5.1] - 2026-10-28
 
 A citation release, which archives lazy-tfm on Zenodo with its new
