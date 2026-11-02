@@ -99,7 +99,9 @@ _PACKAGE_PREFIX = os.path.dirname(os.path.abspath(__file__)) + os.sep
 _BLOCK_BYTES = 256 * 2**20
 
 
-class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
+class BaseDensityRegressor(
+    sklearn_base.RegressorMixin, sklearn_base.BaseEstimator, abc.ABC
+):
     """A regressor that predicts conditional densities, with a scikit-learn API.
 
     Subclasses must accept a ``y_grid`` parameter and pass it through
@@ -126,6 +128,16 @@ class BaseDensityRegressor(sklearn_base.BaseEstimator, abc.ABC):
     # Set by each subclass's __init__, which scikit-learn requires to store
     # its parameters verbatim; declared here for the type checker only.
     y_grid: grid_lib.GridLike
+
+    def __sklearn_tags__(self) -> sklearn_base.Tags:
+        """scikit-learn's tags: a regressor that accepts NaN features.
+
+        Returns:
+            A regressor's tags (which require a target), with ``allow_nan``.
+        """
+        tags = super().__sklearn_tags__()
+        tags.input_tags.allow_nan = True
+        return tags
 
     # -- to be provided by subclasses --------------------------------------
 

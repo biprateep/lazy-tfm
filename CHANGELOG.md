@@ -13,6 +13,11 @@ change the API.
   together: scipy 1.13, scikit-learn 1.6, pandas 2.2.2, matplotlib 3.8.4 and
   h5py 3.11. The old floors allowed pandas and h5py builds for NumPy 1, with
   which `import lazy` crashed. CI now tests the floors.
+- Every model is a scikit-learn regressor (`is_regressor` is now `True`), so
+  `VotingRegressor`, `StackingRegressor` and `partial_dependence` accept it.
+  Its tags now declare that it accepts NaN features, so selectors such as
+  `SequentialFeatureSelector` pass NaN through, and that it requires a
+  target. `score` is still the negative CDE loss.
 
 ### Fixed
 
