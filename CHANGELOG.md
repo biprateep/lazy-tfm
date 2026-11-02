@@ -16,6 +16,13 @@ change the API.
 
 ### Fixed
 
+- A target with several columns raises a `ValueError`; one with half as
+  many rows as X was flattened and fitted on interleaved values. A column
+  vector is flattened with a `DataConversionWarning`, as in scikit-learn.
+- Sparse features raise a `TypeError` that names the dense alternative, and
+  complex features or targets raise instead of losing their imaginary
+  part. The errors for `y=None` and for a wrong or zero feature count use
+  scikit-learn's wording.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.

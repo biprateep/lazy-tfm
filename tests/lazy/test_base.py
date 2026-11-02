@@ -169,7 +169,7 @@ def test_columns_may_be_reordered_but_not_renamed(data):
 def test_feature_count_mismatch_is_caught(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    with pytest.raises(ValueError, match="fitted with 2"):
+    with pytest.raises(ValueError, match="expecting 2 features"):
         est.predict_proba(X[["a"]])
 
 
