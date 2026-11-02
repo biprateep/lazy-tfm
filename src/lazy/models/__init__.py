@@ -29,6 +29,7 @@ from lazy.models._hub import DEFAULT_VERSIONS
 from lazy.models._hub import download_checkpoint
 from lazy.models._hub import get_checkpoint
 from lazy.models._hub import is_cached
+from lazy.models._hub import LicenseWarning
 from lazy.models._hub import list_versions
 from lazy.models._weights import clear_model_cache
 from lazy.models._weights import model_cache_enabled
@@ -55,6 +56,7 @@ __all__ = [
     "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
+    "LicenseWarning",
     "LimiXBarDistribution",
     "PerformanceWarning",
     "TabFMHistogram",

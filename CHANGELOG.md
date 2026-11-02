@@ -7,15 +7,45 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
+  issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
+  own downloader asks for the licence to be accepted, but LAZY downloads the
+  pinned file itself, so the user never saw it.
+- The package is marked typed (`py.typed`), so type checkers read its
+  annotations.
+- The source distribution includes the tests and the docs pages they read.
+
 ### Changed
 
 - The minimum dependency versions are raised to ones that install and work
   together: scipy 1.13, scikit-learn 1.6, pandas 2.2.2, matplotlib 3.8.4 and
   h5py 3.11. The old floors allowed pandas and h5py builds for NumPy 1, with
   which `import lazy` crashed. CI now tests the floors.
+- Every model is a scikit-learn regressor (`is_regressor` is now `True`), so
+  `VotingRegressor`, `StackingRegressor` and `partial_dependence` accept it.
+  Its tags now declare that it accepts NaN features, so selectors such as
+  `SequentialFeatureSelector` pass NaN through, and that it requires a
+  target. `score` is still the negative CDE loss.
 
 ### Fixed
 
+- A target with several columns raises a `ValueError`; one with half as
+  many rows as X was flattened and fitted on interleaved values. A column
+  vector is flattened with a `DataConversionWarning`, as in scikit-learn.
+- Sparse features raise a `TypeError` that names the dense alternative, and
+  complex features or targets raise instead of losing their imaginary
+  part. The errors for `y=None` and for a wrong or zero feature count use
+  scikit-learn's wording.
+- TabFM's `n_dither` and `keep_cache_on_device`, and TabPFN's
+  `ignore_pretraining_limits`, are validated at `fit` with a `ValueError`
+  that names the argument. A float or string `n_dither` failed deep inside,
+  and `n_dither=True` was taken as 1.
+- `LazyModel.set_params(model=...)` with a value that is not a backend name,
+  such as an array, no longer raises; as for any unknown name, `fit` refuses
+  it. scikit-learn's `check_do_not_raise_errors_in_init_or_set_params` now
+  passes.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
@@ -27,6 +57,12 @@ change the API.
   from a private copy. Before, code or bytecode planted in a shared
   `LAZY_DATA_HOME` ran in every LimiX user's `fit`. A checkout named by
   `LAZY_LIMIX_SRC` is still run as it is.
+- `fetch_dc1` checks the cached DC1 test file's SHA-256 before it unpickles
+  it, once per process. Its catalogue has an object column, so loading it
+  unpickles, and so runs, what the file holds. Before, any cached file of
+  the right size was trusted, so anyone able to write to a shared
+  `LAZY_DATA_HOME` could plant code there.
+- The other DC1 arrays load without pickle.
 
 ## [0.5.1] - 2026-10-28
 

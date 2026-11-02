@@ -73,6 +73,7 @@ from collections.abc import Mapping, Sequence
 import dataclasses
 import functools
 import hashlib
+import io
 import itertools
 import os
 import pathlib
@@ -556,9 +557,10 @@ def fetch_dc1(
     Raises:
         FileNotFoundError: If a file is not cached and
             ``download_if_missing`` is ``False``.
-        OSError: If a download fails or does not match its checksum, or a
+        OSError: If a download fails or does not match its checksum, if a
             cached file is incomplete and ``download_if_missing`` is
-            ``False``.
+            ``False``, or if the cached test file no longer matches its
+            checksum.
     """
     train = _load_split(
         "train", root=data_home, download_if_missing=download_if_missing
@@ -652,16 +654,28 @@ def _load_split(
     path = _cached_path(
         name, root=root, download_if_missing=download_if_missing
     )
-    with np.load(path, allow_pickle=True) as saved:
-        cat = saved[_CAT_KEYS[name]]
-        raw = pd.DataFrame(
-            {
-                column: np.asarray(cat[column], dtype=np.float32)
-                for column in RAW_COLUMNS
-            }
-        )
-        redshift = np.asarray(cat["SPECZ"], dtype=np.float64)
-        object_id = np.asarray(cat["ID"], dtype=np.int64)
+    key = _CAT_KEYS[name]
+    try:
+        with np.load(path) as saved:
+            cat = saved[key]
+    except ValueError:
+        # An object column (the test catalogue's _merge) loads only with
+        # pickle, which runs code, so the file must be the published one.
+        # The bytes are checked and loaded through one handle, so a file
+        # swapped in between is never the one unpickled.
+        with open(path, "rb") as stream:
+            _check_checksum(stream, _FILES[name])
+            stream.seek(0)
+            with np.load(stream, allow_pickle=True) as saved:
+                cat = saved[key]
+    raw = pd.DataFrame(
+        {
+            column: np.asarray(cat[column], dtype=np.float32)
+            for column in RAW_COLUMNS
+        }
+    )
+    redshift = np.asarray(cat["SPECZ"], dtype=np.float64)
+    object_id = np.asarray(cat["ID"], dtype=np.int64)
     return Catalog(split=name, raw=raw, redshift=redshift, object_id=object_id)
 
 
@@ -677,7 +691,7 @@ def _load_trainz_split(
     path = _cached_path(
         name, root=root, download_if_missing=download_if_missing
     )
-    with np.load(path, allow_pickle=True) as saved:
+    with np.load(path) as saved:
         z_grid = np.asarray(saved["z_grid"], dtype=float)
     row, n_rows = _first_row(path, _CDE_KEYS[name])
     edges = DC1_GRID.edges
@@ -766,6 +780,44 @@ def _cached_file(
         )
     _download(url, dest, _SHA256[filename], size)
     return dest
+
+
+#: The files whose checksum this process has confirmed, by device, inode,
+#: size, and modification and change times.
+_CHECKED: set[tuple[int, ...]] = set()
+
+
+def _check_checksum(stream: io.BufferedReader, filename: str) -> None:
+    """Raises unless the open file holds the published bytes of ``filename``.
+
+    Hashing reads the whole file, so each process hashes a file once, and
+    again whenever it is replaced or rewritten: a rename gives it a new
+    inode, and a write changes its change time, which no user can set.
+
+    Args:
+        stream: The file, open for reading in binary mode.
+        filename: Its published name, a key of the checksum table.
+
+    Raises:
+        OSError: If the file's SHA-256 is not the published one.
+    """
+    stat = os.fstat(stream.fileno())
+    key = (
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+    if key in _CHECKED:
+        return
+    digest = hashlib.file_digest(stream, "sha256")
+    if digest.hexdigest() != _SHA256[filename]:
+        raise OSError(
+            f"{stream.name} is not the published {filename}: its checksum "
+            "differs. Delete it and run fetch_dc1() again to download it."
+        )
+    _CHECKED.add(key)
 
 
 def _is_complete(path: pathlib.Path, size: int) -> bool:

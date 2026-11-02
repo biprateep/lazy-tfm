@@ -120,7 +120,7 @@ class LazyModel(base.BaseDensityRegressor):
 
     @property
     def name_(self) -> str:
-        """The ``"<backend>:<version>"`` label: the name asked for, and version.
+        """The name asked for and its version, as ``"<backend>:<version>"``.
 
         Built from ``self.model`` rather than delegated, so the label is the
         name the caller used; the version is appended because a row saying
@@ -286,7 +286,10 @@ class LazyModel(base.BaseDensityRegressor):
         if "y_grid" in params:
             self.y_grid = params.pop("y_grid")
         model = params.pop("model", self.model)
-        if model != self.model:
+        # `is` first, since == is elementwise for an array.
+        if model is not self.model and not (
+            isinstance(model, str) and model == self.model
+        ):
             old_defaults = _backend_defaults(self.model) or {}
             new_defaults = _backend_defaults(model)
             kept = {
