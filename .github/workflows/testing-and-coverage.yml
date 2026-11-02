@@ -1,9 +1,10 @@
 # Unit tests and coverage against the locked dependency set.
 #
 # `uv sync --locked` fails if uv.lock is out of date with pyproject.toml, so a
-# dependency change that was not locked cannot merge. The backend extras
-# (tabfm, tabicl, tabpfn) are deliberately not installed: every test runs without a GPU
-# or a multi-gigabyte checkpoint, and the backends are imported lazily.
+# dependency change that was not locked cannot merge. The `build` jobs install
+# no backend package, so the tests whose fakes need one skip there; the
+# `backends` job installs every backend's locked package with CPU-only PyTorch
+# and runs them. No job needs a GPU or downloads a checkpoint.
 
 name: Unit test and code coverage
 
@@ -35,6 +36,33 @@ jobs:
       uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Every backend's locked upstream package, on a CPU and without checkpoints,
+  # so the fakes run against the real upstream code. The export drops the CUDA
+  # wheels that the lockfile pins for Linux, and the install takes PyTorch from
+  # its CPU index.
+  backends:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Install the locked backend packages with CPU-only PyTorch
+      run: |
+        uv export --locked --all-extras --group backends --group dev \
+          --no-hashes --no-emit-project \
+          | grep -vE '^(nvidia-|triton)' > requirements-cpu.txt
+        uv venv --python 3.12
+        uv pip install --torch-backend cpu -r requirements-cpu.txt -e .
+    - name: Run unit tests with pytest
+      run: .venv/bin/python -m pytest --cov=lazy --cov-report=xml
+    - name: Upload coverage report to codecov
+      uses: codecov/codecov-action@v7
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        flags: backends
 
   # The same build and checks the release runs, on every push and pull request,
   # so a packaging mistake surfaces here rather than on release day.
