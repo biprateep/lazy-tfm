@@ -8,7 +8,6 @@ with the one upstream ships, and, with the checkpoint, the backend's answer
 with upstream's own default path.
 """
 
-import os
 import pathlib
 import pickle
 import re
@@ -26,13 +25,6 @@ import lazy
 from lazy.models import _device
 from lazy.models import _hub
 from lazy.models import kumo
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 # The categorical branch of upstream's recipe: lazy hands Kumo numeric
 # columns only, so its recipe has none.
@@ -414,7 +406,7 @@ def test_each_group_records_its_transforms_and_shuffle(
     ]
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_default_path_is_upstreams_on_a_cpu():
     """The trim is lazy's, in float64; upstream's runs in float32."""
     sdm = pytest.importorskip("sdm")
@@ -447,7 +439,7 @@ def test_the_default_path_is_upstreams_on_a_cpu():
     np.testing.assert_allclose(ours, theirs * scale + offset, atol=1e-5)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("kv_cache", [True, False])
 def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
     """A one-row chunk takes another matrix-multiply path: not bit for bit."""
@@ -472,7 +464,7 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
     np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize(
     ("params", "exact"),
     [

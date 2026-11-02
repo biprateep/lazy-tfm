@@ -6,20 +6,11 @@ Needs the checkpoints (LAZY_RUN_CHECKPOINT_TESTS=1). The tolerances allow
 only float rounding, so a refactor that moves a prediction fails here.
 """
 
-import os
-
 import golden_data
 import numpy as np
 import pytest
 
 import lazy
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 #: Relative tolerance per backend; 0 means bit-identical. The files were
 #: recorded by this code on one machine's CPU; another machine's BLAS may
@@ -41,7 +32,7 @@ RTOL = {
 ATOL = {"tabpfn": 1e-6, "tabfm": 1e-12, "limix": 1e-6}
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
 def test_the_default_path_reproduces_the_golden_densities(name):
     try:

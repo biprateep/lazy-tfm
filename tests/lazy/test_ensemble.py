@@ -8,7 +8,6 @@ runs on a CPU with nothing downloaded. One test pools two real checkpoints,
 and runs only with ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 """
 
-import os
 import pickle
 import warnings
 
@@ -28,13 +27,6 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import ensemble
 from lazy.models import registry
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 # Every test but the warning's own fits on fewer rows than the warning's
 # threshold.
@@ -515,9 +507,10 @@ def test_a_fitted_ensemble_pickles(standin_backends, data):
 # -- real checkpoints ----------------------------------------------------------
 
 
-@needs_checkpoint
-@pytest.mark.gpu
+@pytest.mark.checkpoint
 def test_tabpfn_fast_and_tabicl_pool_on_a_cpu():
+    pytest.importorskip("tabpfn")
+    pytest.importorskip("tabicl")
     rng = np.random.default_rng(0)
     X = rng.normal(size=(300, 4))
     y = np.sin(X[:, 0]) + 0.5 * X[:, 1] + rng.normal(0.0, 0.1, 300)

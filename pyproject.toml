@@ -156,12 +156,11 @@ source-include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
-addopts = "--doctest-modules"
+addopts = "--doctest-modules --strict-markers"
 markers = [
-    "gpu: needs a CUDA device and a downloaded foundation-model checkpoint",
+    # tests/lazy/conftest.py skips these unless LAZY_RUN_CHECKPOINT_TESTS=1.
+    "checkpoint: downloads and loads a pinned foundation-model checkpoint",
 ]
-# Tests that load a multi-gigabyte checkpoint are opt-in:
-#   LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 
 # Code style: the Google Python Style Guide, as adopted by the author's
 # code-style skill. Every selected rule names the guide section (§) it enforces

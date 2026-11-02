@@ -10,8 +10,6 @@ what a network makes of them. Every feature column is
 its columns arrive in.
 """
 
-import os
-
 import fakes
 import numpy as np
 import pytest
@@ -22,13 +20,6 @@ from lazy.models import _transforms
 from lazy.models import limix
 from lazy.models import tabfm
 from lazy.models import tabpfn
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 N_ROWS, N_MEMBERS, BAG_ROWS, SEED = 60, 4, 25, 3
 
@@ -308,7 +299,7 @@ def test_tabpfn_says_bagging_below_its_limit_is_the_remedy(
     assert f"bag_size={BAG_ROWS} (or fewer) with n_estimators >= 3" in message
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_tabpfn_bags_a_context_beyond_its_cpu_limit():
     """Upstream refuses over 5,000 rows on a CPU; bags of 1,000 run."""
     pytest.importorskip("tabpfn")

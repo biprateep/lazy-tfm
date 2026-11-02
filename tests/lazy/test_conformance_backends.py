@@ -12,7 +12,6 @@ and a GPU's kernel choice and mixed precision change the last digits with
 the batch shape.
 """
 
-import os
 import warnings
 
 import backend_settings
@@ -21,13 +20,6 @@ import pytest
 
 import lazy
 from lazy.models import _transforms
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 NAMES = sorted(lazy.ESTIMATORS)
 
@@ -71,7 +63,7 @@ def test_every_backend_has_checkpoint_test_settings(name):
     assert name in backend_settings.BACKEND_SETTINGS
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_cache_changes_nothing(name, data):
     _skip_without(name)
@@ -88,7 +80,7 @@ def test_the_cache_changes_nothing(name, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_chunking_changes_nothing(name, data):
     _skip_without(name)
@@ -105,7 +97,7 @@ def test_chunking_changes_nothing(name, data):
         )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_native_grid_is_the_default_and_integrates_to_one(name, data):
     _skip_without(name)
@@ -117,7 +109,7 @@ def test_the_native_grid_is_the_default_and_integrates_to_one(name, data):
     np.testing.assert_allclose(pdfs @ model.grid_.widths, 1.0)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_quantiles_invert_the_native_distribution(name, data):
     _skip_without(name)
@@ -133,7 +125,7 @@ def test_quantiles_invert_the_native_distribution(name, data):
         )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
     _skip_without(name)
@@ -146,7 +138,7 @@ def test_a_bag_as_large_as_the_context_is_no_bag(name, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_bagging_runs_and_the_seed_controls_it(name, data):
     _skip_without(name)
@@ -164,7 +156,7 @@ def test_bagging_runs_and_the_seed_controls_it(name, data):
     assert np.isfinite(first).all() and not np.array_equal(first, other)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("transforms", [*_transforms.BASE_TRANSFORMS, "limix"])
 def test_every_transform_runs(name, transforms, data):
@@ -176,7 +168,7 @@ def test_every_transform_runs(name, transforms, data):
     assert np.isfinite(pdfs).all()
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_the_auto_recipe_is_the_default(name, data):
     _skip_without(name)
@@ -189,7 +181,7 @@ def test_the_auto_recipe_is_the_default(name, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", NAMES)
 def test_unshuffled_columns_and_missing_values_run(name, data):
     _skip_without(name)

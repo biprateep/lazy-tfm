@@ -34,13 +34,6 @@ from lazy.models import tabfm
 from lazy.models import tabicl
 from lazy.models import tabpfn
 
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
-
 
 @pytest.fixture
 def tiny():
@@ -305,7 +298,7 @@ class TestTabFM:
         edges, _, _ = est._edges(est.y_context_, 0.0)
         assert edges[0] == -0.005 and np.all(np.diff(edges) >= 0)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     @pytest.mark.parametrize("kind", ["zero-inflated", "integer", "outside"])
     def test_awkward_targets_predict_valid_densities(self, kind):
         generator = np.random.default_rng(0)
@@ -334,7 +327,7 @@ class TestTabFM:
         assert np.isfinite(masses).all()
         np.testing.assert_allclose(masses.sum(axis=1), 1.0)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     @pytest.mark.parametrize("bins", ["auto", 10])
     def test_cuda_rounding_stays_within_the_measured_bounds(self, bins):
         """bfloat16 on CUDA: neither chunking nor the cache is exact there.
@@ -950,7 +943,7 @@ class TestTabICL:
             .X_transformed_,
         )
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_exactly_n_members_run_on_the_backbone(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(120, 3))
@@ -966,7 +959,7 @@ class TestTabICL:
         ] == [6, 2]
         assert np.isfinite(est.predict_distribution(X[:5]).locs).all()
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_an_explicit_recipe_feeds_the_outlier_unclipped(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(120, 3))
@@ -986,7 +979,7 @@ class TestTabICL:
         assert seen(outlier_threshold=None) == pytest.approx(zscore, rel=1e-12)
         assert seen() < 0.5 * zscore  # the auto recipe clips it at 4 sigma
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_the_answer_does_not_depend_on_string_hashing(self, tmp_path):
         """Upstream alone differs between processes in the last digits."""
         script = (
@@ -1013,7 +1006,7 @@ class TestTabICL:
         with pytest.raises(ValueError, match="chunk_size"):
             lazy.get_estimator("tabicl", chunk_size=-1).fit(X, z)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_chunking_the_query_rows_is_bit_identical(self):
         """Same claim as for TabFM, and the reason chunking is the default."""
         generator = np.random.default_rng(0)
@@ -1087,7 +1080,7 @@ class TestTabICL:
         )
         assert _quantile_head.target_scaling(np.full(5, 3.0)) == (3.0, 1.0)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_a_large_offset_keeps_its_resolution(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(120, 3))
@@ -1273,7 +1266,7 @@ class TestTabPFN:
         assert np.all(np.diff(borders) > 0)
         assert borders[0] == pytest.approx(1e4 - 0.03, abs=1e-9)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     @pytest.mark.parametrize("offset", [0.0, 1e4])
     def test_the_borders_are_upstream_buckets_uncollapsed(self, offset):
         """The same buckets as upstream's, but none of them collapsed."""
@@ -1290,7 +1283,7 @@ class TestTabPFN:
         dist = est.predict_distribution(X[60:])
         np.testing.assert_array_equal(dist.bins, est.borders_)
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_a_constant_target_predicts_one_narrow_bucket(self):
         generator = np.random.default_rng(0)
         X = generator.normal(size=(60, 3))
@@ -1313,7 +1306,7 @@ class TestTabPFN:
                 {"criterion": criterion, "logits": torch.zeros((2, 5))}
             )
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_chunking_the_query_rows_is_bit_identical(self):
         """Same claim as for the other two, and why chunking is the default."""
         generator = np.random.default_rng(0)
@@ -1335,7 +1328,7 @@ class TestTabPFN:
 
         assert np.array_equal(run(0), run(7))
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     @pytest.mark.parametrize("version", lazy.list_versions("tabpfn"))
     def test_every_pinned_version_loads_and_answers(self, version):
         """A wrong revision or filename is only caught by loading the thing.
@@ -1365,7 +1358,7 @@ class TestTabPFN:
         assert model.provenance_["version"] == version
         assert model.name_ == f"tabpfn:{version}"
 
-    @needs_checkpoint
+    @pytest.mark.checkpoint
     def test_the_density_matches_the_models_own_quantiles(self):
         """The bar distribution we read is the one upstream reduces to numbers.
 
@@ -1397,7 +1390,7 @@ class TestTabPFN:
         assert ours == pytest.approx(theirs, abs=2 * grid.widths.max())
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_chunking_the_query_rows_changes_only_rounding(monkeypatch):
     """The claim that makes bounded memory free: chunking changes nothing.
 
