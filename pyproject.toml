@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -144,6 +145,14 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "lazy"
+# Distributors such as conda-forge run the tests from the sdist.
+source-include = [
+    "tests/**",
+    # The backend-completeness test reads the docs pages.
+    "docs/**/*.md",
+    "CHANGELOG.md",
+    "CITATION.cff",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
