@@ -286,7 +286,10 @@ class LazyModel(base.BaseDensityRegressor):
         if "y_grid" in params:
             self.y_grid = params.pop("y_grid")
         model = params.pop("model", self.model)
-        if model != self.model:
+        # `is` first, since == is elementwise for an array.
+        if model is not self.model and not (
+            isinstance(model, str) and model == self.model
+        ):
             old_defaults = _backend_defaults(self.model) or {}
             new_defaults = _backend_defaults(model)
             kept = {

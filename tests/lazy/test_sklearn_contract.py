@@ -26,6 +26,7 @@ CHECKS = [
     estimator_checks.check_parameters_default_constructible,
     estimator_checks.check_get_params_invariance,
     estimator_checks.check_set_params,
+    estimator_checks.check_do_not_raise_errors_in_init_or_set_params,
 ]
 
 
