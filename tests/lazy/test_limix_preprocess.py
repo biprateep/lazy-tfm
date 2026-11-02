@@ -267,3 +267,12 @@ def test_the_shuffle_is_seeded(features):
     assert not all(
         np.array_equal(columns(3), columns(seed)) for seed in range(4, 10)
     )
+
+
+@needs_limix
+def test_the_pinned_manifest_is_that_of_the_pinned_commit():
+    source = _limix_source.locate(download=False)
+    if source.commit != _limix_source.LIMIX_COMMIT:
+        pytest.skip(f"the LimiX source is at {source.commit}")
+    files = _limix_source._files(source.root)
+    assert _limix_source._manifest(files) == _limix_source.LIMIX_MANIFEST

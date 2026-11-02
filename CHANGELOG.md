@@ -20,6 +20,14 @@ change the API.
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
 
+### Security
+
+- LimiX's source, which `lazy` downloads into its cache, is checked against
+  a pinned hash of the validated commit's code before it runs, and runs
+  from a private copy. Before, code or bytecode planted in a shared
+  `LAZY_DATA_HOME` ran in every LimiX user's `fit`. A checkout named by
+  `LAZY_LIMIX_SRC` is still run as it is.
+
 ## [0.5.1] - 2026-10-28
 
 A citation release, which archives lazy-tfm on Zenodo with its new
