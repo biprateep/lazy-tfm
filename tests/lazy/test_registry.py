@@ -160,7 +160,7 @@ def _recording_hub(monkeypatch, cached):
     def fetch(**kwargs):
         calls.append(kwargs["local_files_only"])
         if kwargs["local_files_only"] and not cached:
-            raise huggingface_hub.errors.LocalEntryNotFoundError("not cached")
+            raise huggingface_hub.utils.LocalEntryNotFoundError("not cached")
         return "/cache/weights"
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fetch)

@@ -60,7 +60,7 @@ class _Hub:
                 )
             )
         if not self.snapshot.is_dir():
-            raise huggingface_hub.errors.LocalEntryNotFoundError("absent")
+            raise huggingface_hub.utils.LocalEntryNotFoundError("absent")
         return str(self.snapshot)
 
     def list_repo_files(self, repo_id, revision=None):
@@ -142,7 +142,7 @@ def test_an_unreachable_hub_leaves_the_cached_snapshot_in_use(hub, monkeypatch):
 def test_an_uncached_snapshot_still_fails_without_the_hub(hub, monkeypatch):
     def refused(**kwargs):
         if kwargs["local_files_only"]:
-            raise huggingface_hub.errors.LocalEntryNotFoundError("absent")
+            raise huggingface_hub.utils.LocalEntryNotFoundError("absent")
         raise ConnectionError("refused")
 
     monkeypatch.setattr(huggingface_hub, "snapshot_download", refused)
