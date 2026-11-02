@@ -2,12 +2,14 @@
 # Copyright (c) 2025 Biprateep Dey
 """TabPFNRegressor without a network, validating sizes as upstream does.
 
-Its bucket borders are fixed in standardized units and stretched by the
+It accepts only the arguments upstream's constructor accepts. Its bucket
+borders are fixed in standardized units and stretched by the
 targets it is given, as upstream's are. It loads its "network" through
 upstream's loader, as the real regressor does, and the loader counts the
 networks it builds in ``recorder.loads``. Needs the tabpfn package.
 """
 
+import inspect
 import types
 
 import numpy as np
@@ -29,8 +31,11 @@ class Regressor:
     """The recorder, set by :func:`install`."""
     limit = None
     """The context-size limit, set by :func:`install`."""
+    upstream = None
+    """Upstream's ``TabPFNRegressor``, set by :func:`install`."""
 
     def __init__(self, **kwargs):
+        inspect.signature(self.upstream).bind(**kwargs)
         self.kwargs = kwargs
 
     def fit(self, X, y):
@@ -108,5 +113,6 @@ def install(monkeypatch, recorder, *, limit=None):
     monkeypatch.setattr(base, "initialize_tabpfn_model", load)
     monkeypatch.setattr(Regressor, "recorder", recorder)
     monkeypatch.setattr(Regressor, "limit", limit)
+    monkeypatch.setattr(Regressor, "upstream", upstream.TabPFNRegressor)
     monkeypatch.setattr(upstream, "TabPFNRegressor", Regressor)
     return tabpfn.TabPFNBarDistribution
