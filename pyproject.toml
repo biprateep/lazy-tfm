@@ -289,3 +289,8 @@ ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["src/lazy"]
+
+[tool.coverage.report]
+# About 2 points under the 79.6% measured without the backend packages; the
+# backends CI job sets its own floor.
+fail_under = 78
