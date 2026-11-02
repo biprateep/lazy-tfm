@@ -66,11 +66,13 @@ __all__ = [
     "selection_summary",
 ]
 
-#: i-magnitude span of the HSC grid, and the g-z colour span, read once from
-#: RAIL's ``HSC_grid_settings.pkl`` and written down here so that nothing in
-#: this library ever unpickles a downloaded file.
 HSC_MAGNITUDE_LIMITS = (13.0, 26.0)
+"""i-magnitude span of the HSC grid, read once from RAIL's
+``HSC_grid_settings.pkl`` and written down here so that nothing in this
+library ever unpickles a downloaded file.
+"""
 HSC_COLOR_LIMITS = (-2.0, 6.0)
+"""g-z colour span of the HSC grid, read from the same file."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -410,10 +412,14 @@ def _subsample_by_ratio(
     return keep
 
 
-#: The magnitude and redshift bins :func:`selection_summary` reports in, chosen
-#: for DC1's ``i < 25.3``, ``0 < z < 2`` footprint.
 DEFAULT_MAGNITUDE_BINS = (16.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.3)
+"""The magnitude bins :func:`selection_summary` reports in, chosen for DC1's
+``i < 25.3`` footprint.
+"""
 DEFAULT_REDSHIFT_BINS = (0.0, 0.3, 0.6, 0.9, 1.2, 1.5, 2.0)
+"""The redshift bins :func:`selection_summary` reports in, chosen for DC1's
+``0 < z < 2`` footprint.
+"""
 
 
 def selection_summary(

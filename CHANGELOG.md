@@ -31,6 +31,8 @@ change the API.
 
 ### Fixed
 
+- The API reference describes every public constant. Most showed as empty
+  entries, since the descriptions were comments that it does not read.
 - A target with several columns raises a `ValueError`; one with half as
   many rows as X was flattened and fitted on interleaved values. A column
   vector is flattened with a `DataConversionWarning`, as in scikit-learn.

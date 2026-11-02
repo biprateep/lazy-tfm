@@ -70,18 +70,19 @@ __all__ = [
     "BaseDensityRegressor",
 ]
 
-#: Bins of the default grid of a model without a native grid.
 DEFAULT_N_BINS = 200
+"""Bins of the default grid of a model without a native grid."""
 
-#: How far that grid extends past the training targets, as a fraction of
-#: their range on each side.
 DEFAULT_PADDING = 0.05
+"""How far that grid extends past the training targets, as a fraction of their
+range on each side.
+"""
 
-#: Reductions of a density to a single value, accepted by the ``method``
-#: argument of :meth:`BaseDensityRegressor.predict`. ``mode`` and
-#: ``peak_mean`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see
-#: :mod:`lazy.metrics`).
 POINT_ESTIMATORS = ("mode", "peak_mean", "mean", "median")
+"""Reductions of a density to a single value, accepted by the ``method``
+argument of :meth:`BaseDensityRegressor.predict`. ``mode`` and ``peak_mean`` are
+the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see :mod:`lazy.metrics`).
+"""
 
 # What the public methods accept as features: any table lazy._inputs reads
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
@@ -120,9 +121,6 @@ class BaseDensityRegressor(
             (``n_features_in_``,).
     """
 
-    #: The registered backend name (a key of :data:`lazy.ESTIMATORS`), set
-    #: as a class attribute by each backend. ``None`` on a subclass that is
-    #: not one.
     backend: str | None = None
 
     # Set by each subclass's __init__, which scikit-learn requires to store

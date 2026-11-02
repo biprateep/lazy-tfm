@@ -130,11 +130,12 @@ from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
 
-#: Every upstream setting that changes a prediction, pinned per version so
-#: that an upgrade of mymodel cannot change what "auto" runs.
 _AUTO_RECIPES: dict[str, dict[str, Any]] = {
     "v1": {"softmax_temperature": 0.9, "n_buckets": 1000},
 }
+"""Every upstream setting that changes a prediction, pinned per version so that
+an upgrade of mymodel cannot change what "auto" runs.
+"""
 
 
 class MyModelHistogram(_ensemble.ContextEnsembleEstimator):

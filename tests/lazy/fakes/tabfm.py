@@ -19,13 +19,13 @@ from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import tabfm
 
-#: Small enough for the behavioral suite: two levels of two bins.
 SETTINGS = {
     "n_estimators": 2,
     "n_coarse_bins": 2,
     "n_fine_bins": 2,
     "n_dither": 1,
 }
+"""Small enough for the behavioral suite: two levels of two bins."""
 
 
 class _Logits:

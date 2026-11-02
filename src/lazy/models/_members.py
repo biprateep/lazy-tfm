@@ -59,8 +59,8 @@ __all__ = [
     "resolve_bag_size",
 ]
 
-#: Fewer context rows per bag than this draws a warning at fit.
 MIN_BAG_ROWS = 10
+"""Fewer context rows per bag than this draws a warning at fit."""
 
 
 @dataclasses.dataclass(frozen=True)

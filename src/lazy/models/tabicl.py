@@ -71,36 +71,39 @@ __all__ = [
     "quantile_levels",
 ]
 
-#: Bins of the native grid across the training targets' range: as fine as
-#: the 999 quantiles resolve. The padding adds bins of the same width.
 NATIVE_QUANTILE_BINS = _quantile_head.NATIVE_QUANTILE_BINS
+"""Bins of the native grid across the training targets' range: as fine as the
+999 quantiles resolve. The padding adds bins of the same width.
+"""
 
-#: How far the native grid extends beyond the training targets on each
-#: side, as a fraction of their range: TabICL's quantiles extrapolate.
 NATIVE_PAD = _quantile_head.NATIVE_PAD
+"""How far the native grid extends beyond the training targets on each side, as
+a fraction of their range: TabICL's quantiles extrapolate.
+"""
 
-#: The cumulative probabilities TabICL's quantile outputs sit at.
 quantile_levels = _quantile_head.quantile_levels
+"""A function of ``n_quantiles`` that returns the cumulative probabilities
+TabICL's quantile outputs sit at, an array of shape ``(n_quantiles,)``.
+"""
 
 # TabICLv2's own recipe, ``transforms="auto"``, written out here so that the
 # installed upstream version cannot change it: the values TabICLRegressor
 # 2.2.0 defaults to, each passed explicitly.
 
-#: The norm methods members cycle through under ``transforms="auto"``.
 AUTO_NORM_METHODS: tuple[str, ...] = ("none", "power")
+"""The norm methods members cycle through under ``transforms="auto"``."""
 
-#: How members' columns are permuted when ``feature_shuffle=True``.
 AUTO_FEAT_SHUFFLE_METHOD = "latin"
+"""How members' columns are permuted when ``feature_shuffle=True``."""
 
-#: The soft outlier clip of the recipe, in standard deviations.
 AUTO_OUTLIER_THRESHOLD = 4.0
+"""The soft outlier clip of the recipe, in standard deviations."""
 
-#: The threshold that turns upstream's clip off: its bounds become infinite,
-#: and it then returns every value unchanged.
 _CLIP_OFF = math.inf
+"""The threshold that turns upstream's clip off: its bounds become infinite, and
+it then returns every value unchanged.
+"""
 
-#: Every other TabICLRegressor argument, pinned. None of them changes an
-#: answer beyond float rounding, but none is left to upstream either.
 _PINNED_REGRESSOR_ARGS: dict[str, Any] = {
     # Members per forward pass.
     "batch_size": 8,
@@ -120,10 +123,14 @@ _PINNED_REGRESSOR_ARGS: dict[str, Any] = {
     "inference_config": None,
     "verbose": False,
 }
+"""Every other TabICLRegressor argument, pinned. None of them changes an answer
+beyond float rounding, but none is left to upstream either.
+"""
 
-#: The versions the recipe above was read from upstream for. A new version
-#: joins once its recipe is checked against upstream's.
 _RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
+"""The versions the recipe above was read from upstream for. A new version joins
+once its recipe is checked against upstream's.
+"""
 
 
 class TabICLQuantile(

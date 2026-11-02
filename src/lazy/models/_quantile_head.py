@@ -49,17 +49,20 @@ _PACKAGE_PREFIX = (
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
 )
 
-#: Bins of the native grid across the training targets' range: as fine as
-#: 999 quantiles resolve. The padding adds bins of the same width.
 NATIVE_QUANTILE_BINS = 1000
+"""Bins of the native grid across the training targets' range: as fine as 999
+quantiles resolve. The padding adds bins of the same width.
+"""
 
-#: How far the native grid extends beyond the training targets on each
-#: side, as a fraction of their range: the quantiles extrapolate.
 NATIVE_PAD = 0.25
+"""How far the native grid extends beyond the training targets on each side, as
+a fraction of their range: the quantiles extrapolate.
+"""
 
-#: The probability a row may put outside the native grid before
-#: tabulating it there warns.
 OUTSIDE_TOLERANCE = 0.01
+"""The probability a row may put outside the native grid before tabulating it
+there warns.
+"""
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:

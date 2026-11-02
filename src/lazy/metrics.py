@@ -30,13 +30,12 @@ PDF metrics on a grid of bin centres (:class:`lazy.grid.Grid`)::
     PIT_i     = integral of the gridded (linearly interpolated) p_i up to
                 y_true_i
     KS, CvM   = one-sample goodness-of-fit statistics of the PIT sample
-                against U(0, 1) (DC1 used ``skgof``; ``scipy.stats`` gives
-                the identical statistics)
-    AD        = DC1 discards PIT values outside ``(vmin, vmax)`` -- the
+                against U(0, 1) (DC1 used skgof; scipy.stats gives the
+                identical statistics)
+    AD        = DC1 discards PIT values outside (vmin, vmax) -- the
                 statistic diverges at 0 and 1 -- and runs a one-sample
                 Anderson-Darling test of the survivors against
-                ``U(vmin, vmax)``. DC1 reports two cuts; :data:`AD_CUTS`
-                holds them.
+                U(vmin, vmax). DC1 reports two cuts; AD_CUTS holds them.
 
 Proper scoring rules (Gneiting & Raftery 2007), on the same grids::
 
@@ -81,23 +80,31 @@ from scipy import stats
 from lazy import _typing
 from lazy import grid as grid_lib
 
-#: How the point metrics scale a residual: ``"none"`` leaves
-#: ``y_pred - y_true`` as it is; ``"1+y"`` divides it by ``1 + y_true``
-#: (the photometric-redshift convention, needed for DC1's numbers).
 Scale: TypeAlias = Literal["1+y", "none"]
-#: The accepted values of ``scale``.
+"""How the point metrics scale a residual: ``"none"`` leaves ``y_pred - y_true``
+as it is; ``"1+y"`` divides it by ``1 + y_true`` (the photometric-redshift
+convention, needed for DC1's numbers).
+"""
 SCALES: tuple[str, ...] = ("1+y", "none")
+"""The accepted values of ``scale``."""
 
 OUTLIER_FLOOR = 0.06
+"""The smallest outlier threshold of :func:`point_metrics`: a residual is an
+outlier when its size exceeds ``max(OUTLIER_FLOOR, 3 * sigma_IQR)``.
+"""
 DC1_OUTLIER_THRESHOLD = 0.15
+"""The fixed outlier threshold of DC1's ``outlier_rate_015``."""
 PIT_EXTREME = 1e-4
-#: The density below which :func:`nll` clips, in the target's inverse units:
-#: a zero density at the truth (a truth off the grid, an empty bin) then
-#: scores ``-log(1e-12) ~ 27.6`` rather than infinity.
+"""How close to 0 or 1 a PIT value is to count in ``pit_outlier_rate``."""
 NLL_DENSITY_FLOOR = 1e-12
-# The two Anderson-Darling cut ranges DC1 tabulates (AD1, AD2); the script
-# also computed (0.1, 0.9), which the paper does not quote.
+"""The density below which :func:`nll` clips, in the target's inverse units: a
+zero density at the truth (a truth off the grid, an empty bin) then scores
+``-log(1e-12) ~ 27.6`` rather than infinity.
+"""
 AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
+"""The two Anderson-Darling cut ranges that DC1 tabulates (AD1, AD2). DC1's
+script also computed (0.1, 0.9), which the paper does not quote.
+"""
 
 
 @dataclasses.dataclass(frozen=True)

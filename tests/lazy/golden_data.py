@@ -22,16 +22,9 @@ from lazy import datasets
 
 GOLDEN_DIR = pathlib.Path(__file__).with_name("golden")
 
-#: The grid every golden density is tabulated on.
 GRID = datasets.DC1_GRID
+"""The grid every golden density is tabulated on."""
 
-#: Settings the files were recorded with, per backend. They keep the seeds
-#: and paths of the first recording (no key/value cache on TabPFN and
-#: TabICL, seed 42 there and 1 on TabFM, whose bins span the DC1 grid).
-#: LimiX joined later, with its defaults but for two members (one of each
-#: of its recipe's pipelines), and Kumo Tabular later still, at its small
-#: size with five members, the fewest its trimmed mean drops one from each
-#: tail of.
 RECORDED_PARAMS: dict[str, dict[str, Any]] = {
     "kumo": {
         "version": "v1-small",
@@ -75,13 +68,21 @@ RECORDED_PARAMS: dict[str, dict[str, Any]] = {
         "progress": False,
     },
 }
+"""Settings the files were recorded with, per backend. They keep the seeds and
+paths of the first recording (no key/value cache on TabPFN and TabICL, seed 42
+there and 1 on TabFM, whose bins span the DC1 grid). LimiX joined later, with
+its defaults but for two members (one of each of its recipe's pipelines), and
+Kumo Tabular later still, at its small size with five members, the fewest its
+trimmed mean drops one from each tail of.
+"""
 
-#: Backends recorded in a reduced precision that lazy now uses only on CUDA
-#: (``mixed_precision``; a CPU runs float32). TabFM's recording ran it in
-#: bfloat16, as every GPU run does, so the golden still guards the precision
-#: the GPU results are computed in. TabFM chooses its precision at
-#: prediction, so setting the resolved flag after ``fit`` is enough.
 RECORDED_IN_MIXED_PRECISION = {"tabfm"}
+"""Backends recorded in a reduced precision that lazy now uses only on CUDA
+(``mixed_precision``; a CPU runs float32). TabFM's recording ran it in bfloat16,
+as every GPU run does, so the golden still guards the precision the GPU results
+are computed in. TabFM chooses its precision at prediction, so setting the
+resolved flag after ``fit`` is enough.
+"""
 
 
 def fit(name: str) -> Any:

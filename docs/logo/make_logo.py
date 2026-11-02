@@ -37,14 +37,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
 
-#: The University of Toronto's blue.
 UOFT_BLUE = "#1E3765"
+"""The University of Toronto's blue."""
 
-#: Where the rendered files go.
 OUT = pathlib.Path(__file__).resolve().parents[1] / "_static"
+"""Where the rendered files go."""
 
-#: Each letter's strokes, as points in the reference's pixel coordinates (y
-#: downwards). A letter is split into strokes at its sharp corners.
 # fmt: off
 LETTERS: dict[str, list[list[tuple[float, float]]]] = {
     "L": [
@@ -78,17 +76,22 @@ LETTERS: dict[str, list[list[tuple[float, float]]]] = {
     ],
 }
 # fmt: on
+"""Each letter's strokes, as points in the reference's pixel coordinates (y
+downwards). A letter is split into strokes at its sharp corners.
+"""
 
-#: How far each letter sits above the shared baseline; the Y's descender
-#: drops below it.
 BASELINE_SHIFT = {"L": 0, "A": -6, "Z": -2, "Y": 22}
+"""How far each letter sits above the shared baseline; the Y's descender drops
+below it.
+"""
 
-#: Space between neighbouring letters' extents; negative tucks them together.
 GAP = -4
+"""Space between neighbouring letters' extents; negative tucks them together."""
 
-#: The Z's error bars on each of its strokes, as a fraction of their full
-#: length: the bottom stroke sits under the diagonal, so its bars stay short.
 Z_BAR_SCALE = (1.0, 1.0, 0.5)
+"""The Z's error bars on each of its strokes, as a fraction of their full
+length: the bottom stroke sits under the diagonal, so its bars stay short.
+"""
 
 
 # %% [markdown]

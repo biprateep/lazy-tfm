@@ -111,19 +111,20 @@ __all__ = [
     "make_selection_split",
 ]
 
-#: The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
-#: ``0 < z < 2``. The published DC1 numbers are on this grid; pass it as
-#: ``y_grid`` to reproduce them.
 DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200)
+"""The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
+``0 < z < 2``. The published DC1 numbers are on this grid; pass it as ``y_grid``
+to reproduce them.
+"""
 
 BANDS = ("U", "G", "R", "I", "Z", "Y")
+"""The six LSST bands of DC1's photometry, which name its magnitude columns."""
 MAG_COLUMNS = BANDS
 ERR_COLUMNS = tuple(f"{band}ERR" for band in BANDS)
 RAW_COLUMNS = MAG_COLUMNS + ERR_COLUMNS
 
 FeatureMode: TypeAlias = Literal["mag", "mag-color", "all"]
 
-#: Feature mode -> one-line description, for help text and documentation.
 FEATURE_MODES: dict[str, str] = {
     "mag": "the magnitudes and their errors",
     "mag-color": (
@@ -132,6 +133,7 @@ FEATURE_MODES: dict[str, str] = {
     ),
     "all": "every magnitude, every colour, and all their errors",
 }
+"""Feature mode -> one-line description, for help text and documentation."""
 
 _ZENODO = "https://zenodo.org/records/10975874/files"
 _FILES = {"train": "trainz_train.npz", "test": "trainz_test.npz"}
@@ -174,11 +176,15 @@ _warned_legacy: set[pathlib.Path] = set()
 _DOWNLOAD_TIMEOUT = 60.0
 _CHUNK_BYTES = 1 << 20
 
-#: Defaults reproducing the paired split the paper reports: the biased training
-#: set is sized to the DC1 training file, and the calibration sample is stolen
-#: from the hold-out rather than added to it, so nothing is scored twice.
 N_TRAIN = 35_000
+"""The default size of the biased training set, that of the DC1 training file,
+as in the paired split the paper reports.
+"""
 N_CALIBRATION = 10_000
+"""The default size of the calibration sample, as in the paper's paired split.
+It is taken from the hold-out rather than added to it, so nothing is scored
+twice.
+"""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -782,9 +788,10 @@ def _cached_file(
     return dest
 
 
-#: The files whose checksum this process has confirmed, by device, inode,
-#: size, and modification and change times.
 _CHECKED: set[tuple[int, ...]] = set()
+"""The files whose checksum this process has confirmed, by device, inode, size,
+and modification and change times.
+"""
 
 
 def _check_checksum(stream: io.BufferedReader, filename: str) -> None:

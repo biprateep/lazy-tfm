@@ -16,8 +16,8 @@ import pytest
 import fakes
 from lazy.models import tabpfn
 
-#: Small enough for the behavioral suite.
 SETTINGS = {"n_estimators": 2}
+"""Small enough for the behavioral suite."""
 
 N_BUCKETS = 10
 
@@ -25,9 +25,10 @@ N_BUCKETS = 10
 class Regressor:
     """Stands in for ``tabpfn.TabPFNRegressor``."""
 
-    #: Set by :func:`install`: the recorder and the context-size limit.
     recorder = None
+    """The recorder, set by :func:`install`."""
     limit = None
+    """The context-size limit, set by :func:`install`."""
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs

@@ -80,8 +80,8 @@ __all__ = [
 # --------------------------------------------------------------------------
 # Journal geometry
 # --------------------------------------------------------------------------
-# LaTeX points are 72.27 to the inch (NOT 72 — that is the PostScript point).
 PT_PER_INCH = 72.27
+"""LaTeX points per inch: 72.27, not the PostScript point's 72."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,7 +137,9 @@ JOURNALS: dict[str, Journal] = {
         "aastex", column_pt=242.26653, text_pt=513.11743
     ),  # AJ / ApJ
 }
+"""Measured journal geometry, by name; :func:`register_journal` adds one."""
 DEFAULT_JOURNAL = "aastex"
+"""The journal that :func:`use_style` selects unless told otherwise."""
 # Mutable on purpose: use_style() selects the journal that figsize() and
 # grid_figsize() follow afterwards, the way rcParams follow plt.style.use().
 _active_journal: Journal = JOURNALS[DEFAULT_JOURNAL]
@@ -188,15 +190,20 @@ def journal(name: str | Journal | None = None) -> Journal:
 # ``figsize=(COLUMN_WIDTH, 0.62 * COLUMN_WIDTH)`` form. For any other journal
 # use figsize() / grid_figsize(), which follow the journal passed to
 # use_style().
-COLUMN_WIDTH = JOURNALS[DEFAULT_JOURNAL].column_width  # 3.352 in
-TEXT_WIDTH = JOURNALS[DEFAULT_JOURNAL].text_width  # 7.100 in
+COLUMN_WIDTH = JOURNALS[DEFAULT_JOURNAL].column_width
+"""Column width of the default journal, in inches (3.352 for AASTeX)."""
+TEXT_WIDTH = JOURNALS[DEFAULT_JOURNAL].text_width
+"""Text width of the default journal, in inches (7.100 for AASTeX)."""
 
 # --------------------------------------------------------------------------
 # Type: sizes in points, matched to the 10 pt manuscript body
 # --------------------------------------------------------------------------
-SMALL_SIZE = 9  # tick labels; crowded legends
-NORMAL_SIZE = 10  # body: axis labels, legends, axes titles, free text
-BIG_SIZE = 12  # panel titles, suptitles
+SMALL_SIZE = 9
+"""Font size of tick labels and crowded legends, in points."""
+NORMAL_SIZE = 10
+"""Font size of axis labels, legends, axes titles and free text, in points."""
+BIG_SIZE = 12
+"""Font size of panel titles and suptitles, in points."""
 
 # The URW Times clone that matches the manuscript body text. "Nimbus Roman
 # No9 L" is its classic name; newer urw-base35 packages ship the same face as
@@ -205,6 +212,7 @@ BIG_SIZE = 12  # panel titles, suptitles
 # generic "serif" family and let this chain resolve it. Tail entries are
 # Times-metric stand-ins for machines without any Nimbus at all.
 FONT_FAMILY = "Nimbus Roman No9 L"
+"""The serif face that matches the manuscript body text."""
 SERIF_FALLBACKS = [
     "Nimbus Roman No9 L",
     "Nimbus Roman",
@@ -212,6 +220,9 @@ SERIF_FALLBACKS = [
     "Liberation Serif",
     "DejaVu Serif",
 ]
+"""Serif faces that ``font.serif`` tries in order: Nimbus Roman under its two
+names, then Times New Roman, Liberation Serif and DejaVu Serif.
+"""
 
 STYLE_FILE = pathlib.Path(__file__).with_name("paper.mplstyle")
 
@@ -239,6 +250,9 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
     "savefig.bbox": "tight",
     "savefig.format": "png",
 }
+"""The house rcParams: :func:`use_style` applies them when its style sheet
+file does not exist, and :func:`verify_style` checks them.
+"""
 
 # Colour is deliberately NOT in RC_PARAMS. Unless the user names a palette,
 # figures use exactly what matplotlib ships: the default property cycle
@@ -250,6 +264,9 @@ DEFAULT_PALETTE: dict[mpl_typing.RcKeyType, Any] = {
     "axes.prop_cycle": mpl.rcParamsDefault["axes.prop_cycle"],
     "image.cmap": mpl.rcParamsDefault["image.cmap"],
 }
+"""matplotlib's default colour cycle and colormap, which :func:`set_palette`
+restores.
+"""
 
 
 def set_palette(
@@ -421,7 +438,8 @@ def verify_style(
 # --------------------------------------------------------------------------
 # Figure geometry helpers
 # --------------------------------------------------------------------------
-GOLDEN = 2 / (1 + 5**0.5)  # 0.618: height / width of a golden rectangle
+GOLDEN = 2 / (1 + 5**0.5)
+"""Height over width of a golden rectangle, about 0.618."""
 
 # Named height:width ratios. The bracket is what the source manuscripts used:
 # single-column panels 0.56–0.75 (0.7 most often), full-width two-panel rows
@@ -432,6 +450,9 @@ ASPECTS = {
     "tall": 0.75,  # 4:3 — scatter with a running median or a legend inside
     "square": 1.0,  # one-to-one comparisons, sky maps, anything aspect="equal"
 }
+"""Named height-to-width ratios, which :func:`figsize` accepts as ``aspect``
+and :func:`grid_figsize` as ``panel_aspect``.
+"""
 
 
 def _resolve_width(

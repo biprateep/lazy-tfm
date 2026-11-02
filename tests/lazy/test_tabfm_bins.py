@@ -17,11 +17,11 @@ import lazy
 from lazy import datasets
 from lazy.models import tabfm
 
-#: A grid of 25 bins over the targets of _problem.
 GRID_25 = lazy.Grid.linear(0.0, 1.75, 25)
+"""A grid of 25 bins over the targets of _problem."""
 
-#: The bin counts that take the bins from the constructor's grid.
 GRID = {"n_coarse_bins": "grid", "n_fine_bins": "grid"}
+"""The bin counts that take the bins from the constructor's grid."""
 
 
 @pytest.fixture(autouse=True)
