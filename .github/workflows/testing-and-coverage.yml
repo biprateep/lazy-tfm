@@ -37,6 +37,24 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
 
+  # The oldest versions pyproject.toml allows, so a floor that no longer
+  # installs or works is caught here rather than by a user.
+  minimum-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Install the lowest allowed versions
+      run: |
+        uv venv --python 3.12
+        uv pip install --resolution lowest-direct --only-binary :all: \
+          -e . --group dev
+    - name: Run unit tests with pytest
+      run: .venv/bin/python -m pytest
+
   # Every backend's locked upstream package, on a CPU and without checkpoints,
   # so the fakes run against the real upstream code. The export drops the CUDA
   # wheels that the lockfile pins for Linux, and the install takes PyTorch from
