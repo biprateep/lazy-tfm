@@ -20,6 +20,7 @@ import types
 import fakes
 import numpy as np
 import pytest
+import threads
 
 import lazy
 from lazy.models import _device
@@ -193,20 +194,11 @@ def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):
 
     monkeypatch.setattr(type(network), "predict", slow_predict)
     answers = [None, None]
-    errors = []
 
     def run(i):
-        try:
-            answers[i] = models[i].predict_distribution(X_test).locs
-        except BaseException as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
+        answers[i] = models[i].predict_distribution(X_test).locs
 
-    threads = [threading.Thread(target=run, args=(i,)) for i in (0, 1)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert not errors, errors
+    assert threads.run(lambda: run(0), lambda: run(1)), "deadlock"
     for answer, reference in zip(answers, expected, strict=True):
         np.testing.assert_array_equal(answer, reference)
 
@@ -238,26 +230,17 @@ def test_threads_fitting_and_predicting_on_one_network_agree(
         for t in targets
     ]
     answers = [None] * len(targets)
-    errors = []
-    start = threading.Barrier(len(targets))
+    start = threading.Barrier(len(targets), timeout=threads.TIMEOUT)
 
     def run(i):
-        try:
-            model = backend(kv_cache=kv_cache)
-            start.wait()
-            model.fit(X, targets[i])
-            answers[i] = model.predict_distribution(X_test).locs
-        except BaseException as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
+        model = backend(kv_cache=kv_cache)
+        start.wait()
+        model.fit(X, targets[i])
+        answers[i] = model.predict_distribution(X_test).locs
 
-    threads = [
-        threading.Thread(target=run, args=(i,)) for i in range(len(targets))
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert not errors, errors
+    assert threads.run(*(lambda i=i: run(i) for i in range(len(targets)))), (
+        "deadlock"
+    )
     for answer, reference in zip(answers, expected, strict=True):
         np.testing.assert_array_equal(answer, reference)
 

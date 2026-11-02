@@ -18,6 +18,7 @@ import weakref
 import numpy as np
 import pytest
 from sklearn import base as sklearn_base
+import threads
 
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
@@ -144,7 +145,7 @@ def test_the_environment_variable_turns_it_off(monkeypatch, value):
 
 def test_threads_asking_at_once_load_once():
     calls = []
-    started = threading.Barrier(4)
+    started = threading.Barrier(4, timeout=threads.TIMEOUT)
 
     def load():
         calls.append(None)
@@ -157,36 +158,9 @@ def test_threads_asking_at_once_load_once():
         started.wait()
         results.append(_weights.network(key, load))
 
-    threads = [threading.Thread(target=ask) for _ in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    assert threads.run(*[ask] * 4), "a thread is still waiting: deadlock"
     assert len(calls) == 1
     assert all(result is results[0] for result in results)
-
-
-def _run(*targets, timeout=10.0):
-    """Runs each target in a thread; returns whether all of them finished."""
-    errors = []
-
-    def wrap(target):
-        try:
-            target()
-        except Exception as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
-
-    threads = [
-        threading.Thread(target=wrap, args=(target,), daemon=True)
-        for target in targets
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout)
-    if errors:
-        raise errors[0]
-    return not any(thread.is_alive() for thread in threads)
 
 
 def test_a_slow_load_holds_up_no_other_network():
@@ -195,7 +169,7 @@ def test_a_slow_load_holds_up_no_other_network():
 
     def slow():
         loading.set()
-        assert release.wait(10)
+        assert release.wait(threads.TIMEOUT)
         return _Network()
 
     slow_key = _weights.key("tabfm", "v1.0", "/big", "cpu", "float32")
@@ -203,13 +177,13 @@ def test_a_slow_load_holds_up_no_other_network():
     seen = {}
 
     def others():
-        assert loading.wait(10)
+        assert loading.wait(threads.TIMEOUT)
         seen["fast"] = _weights.network(fast_key, _Loader())
         seen["keys"] = _weights.cached_keys()
         seen["dropped"] = _weights.clear_model_cache()
         release.set()
 
-    assert _run(lambda: _weights.network(slow_key, slow), others)
+    assert threads.run(lambda: _weights.network(slow_key, slow), others)
     assert seen["keys"] == [fast_key]
     assert seen["dropped"] == 1
     # The clear overtook the slow load, so it was handed back, not filed.
@@ -330,16 +304,16 @@ def _overlapping_tabpfn_fits(first_out):
     def fit(est, entered, wait_for, leave, then):
         with est._shared_network(upstream):
             entered.set()
-            assert wait_for.wait(10)
+            assert wait_for.wait(threads.TIMEOUT)
             (models, *_) = upstream.base.initialize_tabpfn_model(
                 model_path=est.checkpoint_, which="regressor"
             )
             networks.append(models[0])
             if leave is not None:
-                assert leave.wait(10)
+                assert leave.wait(threads.TIMEOUT)
         then.set()
 
-    finished = _run(
+    finished = threads.run(
         lambda: fit(_tabpfn(), a_in, b_in, None if first_out else b_out, a_out),
         lambda: fit(_tabpfn(), b_in, a_in, a_out if first_out else None, b_out),
     )
@@ -364,7 +338,7 @@ def test_outside_a_fit_upstreams_loader_answers():
         base=types.SimpleNamespace(initialize_tabpfn_model=load)
     )
     with _tabpfn()._shared_network(upstream):
-        assert _run(
+        assert threads.run(
             lambda: upstream.base.initialize_tabpfn_model(model_path="/w")
         )
     assert calls == [{"model_path": "/w"}]
