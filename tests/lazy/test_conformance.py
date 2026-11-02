@@ -1137,6 +1137,41 @@ def test_registered_backends_reject_bad_parameters_before_loading(
         cls(**params).fit(X, z)
 
 
+@pytest.mark.parametrize(
+    ("cls", "params", "match"),
+    [
+        pytest.param(
+            lazy.TabFMHistogram,
+            {"n_dither": value},
+            "n_dither must be an int",
+            id=f"n_dither={value!r}",
+        )
+        for value in (1.5, True, "2")
+    ]
+    + [
+        pytest.param(
+            lazy.TabFMHistogram,
+            {"keep_cache_on_device": "yes"},
+            "keep_cache_on_device must be a bool",
+            id="keep_cache_on_device",
+        ),
+        pytest.param(
+            lazy.TabPFNBarDistribution,
+            {"ignore_pretraining_limits": 1},
+            "ignore_pretraining_limits must be a bool",
+            id="ignore_pretraining_limits",
+        ),
+    ],
+)
+def test_backend_parameters_are_checked_before_loading(
+    cls, params, match, data, monkeypatch
+):
+    X, z, _ = data
+    monkeypatch.setattr(cls, "_import_backend", lambda self: None)
+    with pytest.raises(ValueError, match=match):
+        cls(**params).fit(X, z)
+
+
 def _missing_backend(self):
     raise ImportError("backend not installed")
 

@@ -680,7 +680,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"unknown version {self.version!r} for {self.backend!r}; "
                 f"known: {known}"
             )
-        if not _is_integer(self.chunk_size) or self.chunk_size < 0:
+        if not is_integer(self.chunk_size) or self.chunk_size < 0:
             raise ValueError(
                 f"chunk_size must be a non-negative int (0 means one pass): "
                 f"{self.chunk_size=}"
@@ -700,7 +700,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         _transforms.parse(self.transforms)
         _members.resolve_bag_size(self.bag_size, 1)
-        if self.random_state is not None and not _is_integer(self.random_state):
+        if self.random_state is not None and not is_integer(self.random_state):
             raise ValueError(
                 f"random_state must be an int or None: {self.random_state=}"
             )
@@ -746,7 +746,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _n_members(self) -> int:
         """The ensemble size, validated."""
         n_estimators = self.n_estimators
-        if not _is_integer(n_estimators) or n_estimators < 1:
+        if not is_integer(n_estimators) or n_estimators < 1:
             raise ValueError(
                 f"n_estimators must be a positive int: {self.n_estimators=}"
             )
@@ -1133,7 +1133,7 @@ def _is_positive_real(value: object) -> bool:
     )
 
 
-def _is_integer(value: object) -> TypeGuard[int]:
+def is_integer(value: object) -> TypeGuard[int]:
     """Whether ``value`` is a Python or NumPy integer, and not a bool.
 
     Typed as a guard for ``int``, which NumPy integers stand in for.
