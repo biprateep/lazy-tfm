@@ -185,7 +185,9 @@ def _unmask(
         mask = None
     data = getattr(values, "unmasked", values)  # astropy Masked
     data = getattr(data, "value", data)  # astropy Quantity
-    data = np.asarray(np.ma.getdata(data))
+    if isinstance(data, np.ma.MaskedArray):
+        data = data.data
+    data = np.asarray(data)
     if mask is None:
         return data, None
     return data, np.broadcast_to(np.asarray(mask, dtype=bool), data.shape)

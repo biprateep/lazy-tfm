@@ -7,6 +7,12 @@ change the API.
 
 ## [Unreleased]
 
+### Fixed
+
+- A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
+  and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
+  helper read the Series' internal block manager instead of its values.
+
 ## [0.5.1] - 2026-10-28
 
 A citation release, which archives lazy-tfm on Zenodo with its new
