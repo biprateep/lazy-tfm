@@ -14,26 +14,11 @@ from sklearn import base as sklearn_base
 from sklearn import ensemble
 from sklearn import exceptions
 from sklearn import inspection
+import standins
 
 import lazy
 
-
-class GaussianDummy(lazy.BaseDensityRegressor):
-    """p(z | x) = N(x's first column + offset, sigma). Not a photo-z method."""
-
-    def __init__(self, *, sigma=0.1, y_grid=None):
-        self.sigma = sigma
-        self.y_grid = y_grid
-
-    def _fit(self, X, y):
-        self.offset_ = float(np.mean(y) - np.mean(X.iloc[:, 0]))
-
-    def _predict_pdf(self, X, grid):
-        centers = np.asarray(X.iloc[:, 0], dtype=float) + self.offset_
-        return np.exp(
-            -0.5
-            * ((grid.centers[None, :] - centers[:, None]) / self.sigma) ** 2
-        )
+GaussianDummy = standins.GaussianDummy
 
 
 @pytest.fixture
