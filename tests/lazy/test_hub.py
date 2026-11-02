@@ -159,16 +159,65 @@ def test_a_snapshot_short_of_files_is_not_marked(hub, monkeypatch):
     assert not lazy.is_cached("tabfm")
 
 
-def test_a_single_file_is_trusted_as_it_is(monkeypatch, tmp_path):
-    """hf_hub_download only puts a whole file in place."""
+def _single_file_hub(monkeypatch, tmp_path, cached):
+    """hf_hub_download over one file; returns it and the calls' modes."""
     calls = []
     weights = tmp_path / "weights.ckpt"
-    weights.write_bytes(b"w")
+    if cached:
+        weights.write_bytes(b"w")
 
     def fetch(**kwargs):
         calls.append(kwargs["local_files_only"])
+        if not weights.exists():
+            if kwargs["local_files_only"]:
+                raise huggingface_hub.utils.LocalEntryNotFoundError("absent")
+            weights.write_bytes(b"w")
         return str(weights)
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fetch)
-    assert _hub.get_checkpoint("tabicl").download() == weights
+    return weights, calls
+
+
+@pytest.mark.filterwarnings("error::lazy.LicenseWarning")
+def test_a_single_file_is_trusted_as_it_is(monkeypatch, tmp_path):
+    """hf_hub_download only puts a whole file in place."""
+    weights, calls = _single_file_hub(monkeypatch, tmp_path, cached=True)
+    # A cached checkpoint that shows its licence does not show it again.
+    assert _hub.get_checkpoint("tabpfn:v3.5").download() == weights
     assert calls == [True]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [key for key, spec in _hub.CHECKPOINTS.items() if spec.notify_license],
+)
+def test_the_first_download_shows_the_licence(monkeypatch, tmp_path, key):
+    _single_file_hub(monkeypatch, tmp_path, cached=False)
+    spec = _hub.get_checkpoint(key)
+    with pytest.warns(lazy.LicenseWarning) as record:
+        spec.download()
+    [warning] = [w for w in record if w.category is lazy.LicenseWarning]
+    assert spec.license_note in str(warning.message)
+    assert warning.filename == __file__  # the caller's line, not lazy's
+
+
+@pytest.mark.filterwarnings("error::lazy.LicenseWarning")
+def test_a_permissive_checkpoint_downloads_without_a_licence_warning(
+    monkeypatch, tmp_path
+):
+    _single_file_hub(monkeypatch, tmp_path, cached=False)
+    _hub.get_checkpoint("tabpfn:v2").download()
+
+
+def test_the_licence_is_shown_for_tabpfn_from_v2_5_on():
+    """Decision D10: the versions whose own downloader asks for acceptance."""
+    shown = {
+        key for key, spec in _hub.CHECKPOINTS.items() if spec.notify_license
+    }
+    assert shown == {
+        "tabpfn:v2.5",
+        "tabpfn:v2.6",
+        "tabpfn:v3",
+        "tabpfn:v3.5",
+        "tabpfn:v3.5-fast",
+    }

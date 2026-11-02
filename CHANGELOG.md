@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
+  issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
+  own downloader asks for the licence to be accepted, but LAZY downloads the
+  pinned file itself, so the user never saw it.
 - The package is marked typed (`py.typed`), so type checkers read its
   annotations.
 - The source distribution includes the tests and the docs pages they read.

@@ -42,6 +42,11 @@ and later).
 The limits are the ones stored in each checkpoint. The model cards and reports
 quote smaller ones for some versions (e.g., 50,000 rows for v2.6).
 
+The first download of v2.5 or later issues a {class}`~lazy.LicenseWarning`
+that names its licence, where TabPFN's own downloader would ask for the
+licence to be accepted. `warnings.filterwarnings("ignore",
+category=lazy.LicenseWarning)` silences it.
+
 ## Defaults
 
 The table lists the creators' defaults for TabPFN-3.5 in their

@@ -22,15 +22,16 @@ version without one.
 
 :func:`download_checkpoint` pre-fetches on a machine with a network connection
 before running somewhere without one, and :func:`is_cached` checks without
-triggering a download. Both, with :func:`get_checkpoint` and
-:func:`list_versions`, are part of the public API and are re-exported from the
-top-level :mod:`lazy`.
+triggering a download. Both, with :func:`get_checkpoint`,
+:func:`list_versions` and :class:`LicenseWarning`, are part of the public API
+and are re-exported from the top-level :mod:`lazy`.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from importlib import metadata
+import os
 import pathlib
 import warnings
 
@@ -39,6 +40,7 @@ __all__ = [
     "DEFAULT_VERSIONS",
     "PROVENANCE_KEYS",
     "Checkpoint",
+    "LicenseWarning",
     "download_checkpoint",
     "get_checkpoint",
     "is_cached",
@@ -56,6 +58,22 @@ PROVENANCE_KEYS: tuple[str, ...] = (
     "lazy",
     "device",
 )
+
+
+# Frames under this directory are skipped when a warning names its caller.
+_PACKAGE_PREFIX = (
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+)
+
+
+class LicenseWarning(UserWarning):
+    """The licence of weights that lazy is about to download.
+
+    Issued before a download that finds nothing cached, for each checkpoint
+    with :attr:`Checkpoint.notify_license` set, so it shows again if that
+    download fails. Those are the weights whose upstream package asks the
+    user to accept the licence, a step lazy's own download skips.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,6 +98,10 @@ class Checkpoint:
             because even a dated filename can be replaced upstream.
         license_note: Anything a user must know before downloading. Surfaced
             in the docs.
+        notify_license: Whether the first download issues
+            :class:`LicenseWarning` with :attr:`license_note`. It is set
+            where the upstream package's own downloader asks the user to
+            accept the licence.
         size_note: The download size, and any limit the model declares.
             The docs quote its first word, such as ``"~880 MB"``.
         display_name: The model's name at this version, as its authors
@@ -106,6 +128,7 @@ class Checkpoint:
     filename: str | None = None
     revision: str | None = None
     license_note: str = ""
+    notify_license: bool = False
     size_note: str = ""
     display_name: str = ""
     parameters: int = 0
@@ -162,6 +185,13 @@ class Checkpoint:
         if cached is not None and local_files_only:
             self._warn_unconfirmed(cached)
             return cached
+        if cached is None and self.notify_license:
+            warnings.warn(
+                f"Downloading the {self.display_name} weights. "
+                f"{self.license_note}",
+                LicenseWarning,
+                skip_file_prefixes=(_PACKAGE_PREFIX,),
+            )
         try:
             path = self._fetch(local_files_only=False)
         except Exception:
@@ -508,6 +538,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "TABPFN-2.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_2_5 before use."
             ),
+            notify_license=True,
             size_note="~41 MB. Pretrained for at most 50,000 context rows.",
             display_name="TabPFN-2.5",
             parameters=10_196_761,
@@ -528,6 +559,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "TABPFN-2.6 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_2_6 before use."
             ),
+            notify_license=True,
             size_note="~52 MB.",
             display_name="TabPFN-2.6",
             parameters=12_864_793,
@@ -548,6 +580,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "TABPFN-3 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3 before use."
             ),
+            notify_license=True,
             size_note="~230 MB.",
             display_name="TabPFN-3",
             parameters=58_279_945,
@@ -570,6 +603,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "TABPFN-3.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3_5 before use."
             ),
+            notify_license=True,
             size_note="~880 MB.",
             display_name="TabPFN-3.5",
             parameters=218_987_657,
@@ -590,6 +624,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                 "TABPFN-3.5 Non-Commercial License; read it at "
                 "https://huggingface.co/Prior-Labs/tabpfn_3_5 before use."
             ),
+            notify_license=True,
             size_note=(
                 "~335 MB. A separate, faster model, not a smaller copy of v3.5."
             ),
