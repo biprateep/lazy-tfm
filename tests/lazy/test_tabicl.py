@@ -13,13 +13,13 @@ import io
 import os
 import pathlib
 import pickle
-import threading
 import time
 
 import fakes
 from fakes import tabicl as fake_tabicl
 import numpy as np
 import pytest
+import threads
 
 import lazy
 from lazy.models import _device
@@ -43,20 +43,11 @@ def data():
 def _in_threads(function, n):
     """Runs ``function(i)`` for each i in range(n), each in its own thread."""
     answers = [None] * n
-    errors = []
 
     def run(i):
-        try:
-            answers[i] = function(i)
-        except BaseException as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
+        answers[i] = function(i)
 
-    threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert not errors, errors
+    assert threads.run(*(lambda i=i: run(i) for i in range(n))), "deadlock"
     return answers
 
 

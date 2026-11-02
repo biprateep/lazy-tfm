@@ -18,6 +18,7 @@ import fakes
 from fakes import tabpfn as fake_tabpfn
 import numpy as np
 import pytest
+import threads
 
 import lazy
 from lazy.models import _hub
@@ -229,7 +230,7 @@ def test_concurrent_fits_share_the_network_and_restore_the_loader(
     recorder = fakes.Recorder()
     cls = fakes.install("tabpfn", monkeypatch, recorder)
     upstream = base.initialize_tabpfn_model
-    together = threading.Barrier(4, timeout=10)
+    together = threading.Barrier(4, timeout=threads.TIMEOUT)
     fit = fake_tabpfn.Regressor.fit
 
     def fit_together(self, X, y):
@@ -240,23 +241,14 @@ def test_concurrent_fits_share_the_network_and_restore_the_loader(
     rng = np.random.default_rng(0)
     X = rng.normal(size=(40, 3))
     y = X[:, 0]
-    fitted, errors = [], []
+    fitted = []
 
     def run():
-        try:
-            fitted.append(
-                cls(n_estimators=1, device="cpu", progress=False).fit(X, y)
-            )
-        except Exception as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
+        fitted.append(
+            cls(n_estimators=1, device="cpu", progress=False).fit(X, y)
+        )
 
-    threads = [threading.Thread(target=run, daemon=True) for _ in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(20)
-    assert not any(thread.is_alive() for thread in threads)
-    assert not errors
+    assert threads.run(*[run] * 4), "deadlock"
     assert len(fitted) == 4
     assert len(recorder.loads) == 1
     assert base.initialize_tabpfn_model is upstream
