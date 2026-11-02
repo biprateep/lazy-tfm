@@ -52,8 +52,9 @@ LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 ```
 
 On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
-lockfile. It also runs them with every backend package on a CPU, and at the
-lowest dependency versions `pyproject.toml` allows. It runs the pre-commit
+lockfile, on Linux, with Python 3.12 on macOS and Windows too. It also runs
+them with every backend package on a CPU, and at the lowest dependency
+versions `pyproject.toml` allows. It runs the pre-commit
 hooks, a docs build with warnings treated as errors, and a build of the package
 itself. Nothing runs on a schedule. The smoke-test workflow, run by hand from
 the Actions tab, tests against the newest resolvable dependencies, backend
