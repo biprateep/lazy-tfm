@@ -984,7 +984,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             )
         return _mixture(parts, weights)
 
-    def _chunks(self, X: pd.DataFrame) -> Iterator[distributions.Distribution]:
+    def _distribution_chunks(
+        self, X: pd.DataFrame
+    ) -> Iterator[distributions.Distribution]:
         """The predicted distributions, chunk by chunk, with a progress bar."""
         features = X.to_numpy(dtype=np.float64)
         if not self.chunks_queries:
@@ -1020,7 +1022,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             # and keep none of it.
             placeholder = np.zeros((1, X.shape[1]))
             return self._predict_chunk(placeholder)[:0]
-        return distributions.concatenate(list(self._chunks(X)))
+        return distributions.concatenate(list(self._distribution_chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
@@ -1028,7 +1030,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         if X.shape[0] == 0:
             return np.empty((0, grid.n_bins))
         # Chunk by chunk, so the full native container never exists at once.
-        blocks = [dist.on_grid(grid) for dist in self._chunks(X)]
+        blocks = [dist.on_grid(grid) for dist in self._distribution_chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _default_grid(self) -> grid_lib.Grid:

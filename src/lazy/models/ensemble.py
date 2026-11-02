@@ -341,15 +341,15 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
-        return distributions.concatenate(list(self._pooled_chunks(X)))
+        return distributions.concatenate(list(self._distribution_chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        blocks = [dist.on_grid(grid) for dist in self._pooled_chunks(X)]
+        blocks = [dist.on_grid(grid) for dist in self._distribution_chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
-    def _pooled_chunks(
+    def _distribution_chunks(
         self, X: pd.DataFrame
     ) -> Iterator[distributions.Distribution]:
         """The pooled distributions of validated features, chunk by chunk.

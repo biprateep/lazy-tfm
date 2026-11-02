@@ -34,6 +34,7 @@ backend name or a parameter it does not take is reported, at :meth:`fit`.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import inspect
 from typing import Any
 
@@ -165,6 +166,11 @@ class LazyModel(base.BaseDensityRegressor):
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
         return self.estimator_._predict_distribution(X)  # noqa: SLF001 - delegate.
+
+    def _distribution_chunks(
+        self, X: pd.DataFrame
+    ) -> Iterator[distributions.Distribution]:
+        return self.estimator_._distribution_chunks(X)  # noqa: SLF001 - delegate.
 
     def _default_grid(self) -> grid_lib.Grid:
         # The backend has already resolved its default (native or not).

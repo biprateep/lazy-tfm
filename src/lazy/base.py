@@ -303,6 +303,11 @@ class BaseDensityRegressor(
         gives exact ``pdf``, ``cdf``, ``ppf``, ``rvs``, moments and
         ``to_qp()``.
 
+        Every row's distribution is held at once, ``8 * n_buckets`` bytes per
+        row for a bar distribution. :meth:`predict_quantiles`,
+        :meth:`predict_interval` and :meth:`predict_pit` hold one of the
+        model's chunks of rows at a time instead.
+
         Args:
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
@@ -315,9 +320,7 @@ class BaseDensityRegressor(
         validation.check_is_fitted(self)
         X = self._check_features(X)
         if X.empty:
-            return distributions.HistogramDistribution(
-                self.grid_.edges, np.zeros((0, self.grid_.n_bins))
-            )
+            return self._empty_distribution()
         return self._predict_distribution(X)
 
     def predict_quantiles(  # noqa: GS030 - scikit-learn's X, y.
@@ -339,7 +342,12 @@ class BaseDensityRegressor(
             The value at each level, shape (n_samples, k).
         """
         validation.check_is_fitted(self)
-        return self.predict_distribution(X).ppf(quantiles)
+        return np.concatenate(
+            [
+                dist.ppf(quantiles)
+                for dist in self._chunked(self._check_features(X))
+            ]
+        )
 
     def predict_interval(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, coverage: float = 0.95
@@ -365,7 +373,12 @@ class BaseDensityRegressor(
         validation.check_is_fitted(self)
         if not 0.0 < coverage < 1.0:
             raise ValueError(f"coverage must lie in (0, 1): {coverage=}")
-        return self.predict_distribution(X).interval(coverage)
+        return np.concatenate(
+            [
+                dist.interval(coverage)
+                for dist in self._chunked(self._check_features(X))
+            ]
+        )
 
     def predict_pit(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y: npt.ArrayLike
@@ -390,9 +403,11 @@ class BaseDensityRegressor(
         validation.check_is_fitted(self)
         X = self._check_features(X)
         y = _check_target(y, len(X))
-        if X.empty:
-            return np.zeros(0)
-        return self._predict_distribution(X).pit(y)
+        pits, start = [], 0
+        for dist in self._chunked(X):
+            pits.append(dist.pit(y[start : start + len(dist)]))
+            start += len(dist)
+        return np.concatenate(pits)
 
     def predict_pdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y_grid: grid_lib.GridLike = None
@@ -563,6 +578,42 @@ class BaseDensityRegressor(
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _distribution_chunks(
+        self, X: pd.DataFrame
+    ) -> Iterator[distributions.Distribution]:
+        """The native distributions of validated features, in chunks of rows.
+
+        A model that predicts its queries a chunk at a time overrides this to
+        yield each chunk's distributions as they are predicted, so that a
+        caller reducing them holds one chunk at a time; this default yields
+        every row's at once.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features), with
+                n_samples >= 1.
+
+        Yields:
+            The distributions of consecutive rows of ``X``, in order.
+        """
+        yield self._predict_distribution(X)
+
+    def _chunked(self, X: pd.DataFrame) -> Iterator[distributions.Distribution]:
+        """:meth:`_distribution_chunks` of validated features, of any length.
+
+        For no rows, an empty distribution on the default grid, without
+        running the model.
+        """
+        if X.empty:
+            yield self._empty_distribution()
+        else:
+            yield from self._distribution_chunks(X)
+
+    def _empty_distribution(self) -> distributions.HistogramDistribution:
+        """No rows, on the default grid."""
+        return distributions.HistogramDistribution(
+            self.grid_.edges, np.zeros((0, self.grid_.n_bins))
+        )
 
     def _density_blocks(
         self, X: pd.DataFrame, grid: grid_lib.Grid

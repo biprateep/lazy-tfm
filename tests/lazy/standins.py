@@ -231,3 +231,8 @@ class GaussianDummy(base.BaseDensityRegressor):
             -0.5
             * ((grid.centers[None, :] - centers[:, None]) / self.sigma) ** 2
         )
+
+
+def refuse_every_row(self, X):
+    """A ``_predict_distribution`` that fails: no caller may need all rows."""
+    raise AssertionError("every row's distributions built at once")

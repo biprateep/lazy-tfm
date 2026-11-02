@@ -1277,3 +1277,43 @@ def test_blocked_scoring_matches_the_whole_array(
         check_exact=False,
         rtol=1e-12,
     )
+
+
+@pytest.mark.parametrize("chunk_size", [0, 4])
+def test_quantiles_intervals_and_pits_reduce_one_chunk_at_a_time(
+    cls, chunk_size, data, monkeypatch
+):
+    """They never hold all rows' distributions at once, nor change them."""
+    X, z, X_test = data
+    z_test = np.linspace(0.2, 1.5, len(X_test))
+    model = cls(n_estimators=2, progress=False, chunk_size=chunk_size)
+    model.fit(X, z)
+    dist = model.predict_distribution(X_test)
+    seen = []
+    original = type(model)._distribution_chunks
+
+    def recording(self, features):
+        for chunk in original(self, features):
+            seen.append(len(chunk))
+            yield chunk
+
+    monkeypatch.setattr(type(model), "_distribution_chunks", recording)
+    monkeypatch.setattr(
+        type(model), "_predict_distribution", standins.refuse_every_row
+    )
+    # The same passes as predict_distribution, so the same answers, exactly.
+    np.testing.assert_array_equal(
+        model.predict_quantiles(X_test, [0.1, 0.5, 0.9]),
+        dist.ppf([0.1, 0.5, 0.9]),
+    )
+    np.testing.assert_array_equal(
+        model.predict_interval(X_test, 0.8), dist.interval(0.8)
+    )
+    np.testing.assert_array_equal(
+        model.predict_pit(X_test, z_test), dist.pit(z_test)
+    )
+    # A model that chunks its queries hands over each chunk as it goes.
+    n = len(X_test)
+    step = 4 if chunk_size and model.chunks_queries else n
+    chunks = [min(step, n - start) for start in range(0, n, step)]
+    assert seen == chunks * 3

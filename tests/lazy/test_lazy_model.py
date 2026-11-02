@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from sklearn import base as sklearn_base
 from sklearn import exceptions
+import standins
 
 import lazy
 from lazy.models import registry
@@ -306,3 +307,24 @@ def test_a_failed_refit_leaves_the_wrapper_unfitted(monkeypatch):
             model.predict(features)
     with pytest.raises(AttributeError):
         model.n_context_  # noqa: B018 - nothing left to delegate to.
+
+
+def test_quantiles_reduce_the_backends_chunks_one_at_a_time(monkeypatch):
+    monkeypatch.setitem(registry.ESTIMATORS, "tabicl", standins.QuantileStandIn)
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 2))
+    y = X[:, 0] + rng.normal(0.0, 0.1, 40)
+    model = lazy.LazyModel("tabicl", chunk_size=7, progress=False).fit(X, y)
+    expected = model.predict_distribution(X).ppf([0.1, 0.9])
+
+    monkeypatch.setattr(
+        standins.QuantileStandIn,
+        "_predict_distribution",
+        standins.refuse_every_row,
+    )
+    monkeypatch.setattr(
+        lazy.LazyModel, "_predict_distribution", standins.refuse_every_row
+    )
+    np.testing.assert_array_equal(
+        model.predict_quantiles(X, [0.1, 0.9]), expected
+    )
