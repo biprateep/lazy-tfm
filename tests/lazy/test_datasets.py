@@ -35,7 +35,9 @@ EXPECTED_COLUMNS = {
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     """Never touch the real home directory or cache while testing."""
+    # Path.home() reads USERPROFILE on Windows and HOME elsewhere.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.delenv("LAZY_DATA_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / "home").mkdir()
@@ -707,6 +709,9 @@ def test_parallel_downloads_to_one_cache_do_not_collide(
     assert timeouts and all(t is not None and t > 0 for t in timeouts)
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows files have no POSIX permission bits"
+)
 @pytest.mark.parametrize("umask", [0o022, 0o027])
 def test_a_downloaded_file_is_as_readable_as_any_new_file(
     isolated_home, monkeypatch, umask

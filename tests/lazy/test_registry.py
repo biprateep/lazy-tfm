@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import json
+import pathlib
 import re
 
 import huggingface_hub
@@ -125,9 +126,8 @@ def test_provenance_identifies_the_weights_and_the_code():
     assert record["package"].startswith("tabpfn ")
     assert record["lazy"].startswith("lazy-tfm ")
     assert record["device"] == "cuda"
-    assert not any(
-        isinstance(v, str) and "/home" in v for v in record.values()
-    ), (
+    home = str(pathlib.Path.home())
+    assert not any(isinstance(v, str) and home in v for v in record.values()), (
         "a provenance record travels between machines, so it carries no local"
         " paths"
     )
@@ -178,14 +178,14 @@ def _recording_hub(monkeypatch, cached):
 @pytest.mark.parametrize("key", ["tabicl:v2"])
 def test_a_cached_pinned_checkpoint_never_touches_the_network(monkeypatch, key):
     calls = _recording_hub(monkeypatch, cached=True)
-    assert str(lazy.CHECKPOINTS[key].download()) == "/cache/weights"
+    assert lazy.CHECKPOINTS[key].download() == pathlib.Path("/cache/weights")
     assert calls == [True]
 
 
 @pytest.mark.parametrize("key", ["tabicl:v2", "tabfm:v1.0"])
 def test_an_uncached_pinned_checkpoint_is_downloaded(monkeypatch, key):
     calls = _recording_hub(monkeypatch, cached=False)
-    assert str(lazy.CHECKPOINTS[key].download()) == "/cache/weights"
+    assert lazy.CHECKPOINTS[key].download() == pathlib.Path("/cache/weights")
     assert calls == [True, False]
 
 
