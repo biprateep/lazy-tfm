@@ -3,6 +3,7 @@
 """LimiXBarDistribution: what the uniform conformance suite does not cover."""
 
 import builtins
+import functools
 import os
 import pathlib
 import pickle
@@ -20,6 +21,7 @@ from lazy.models import _members
 from lazy.models import limix
 
 
+@functools.cache
 def _has_limix() -> bool:
     try:
         _limix_source.locate(download=False)  # a skip check never downloads
@@ -28,10 +30,11 @@ def _has_limix() -> bool:
     return True
 
 
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1" or not _has_limix(),
-    reason="needs LimiX's source and LAZY_RUN_CHECKPOINT_TESTS=1",
-)
+@pytest.fixture(autouse=True)
+def _skip_without_the_source(request: pytest.FixtureRequest) -> None:
+    """Skips a checkpoint test when LimiX's source is not at hand."""
+    if request.node.get_closest_marker("checkpoint") and not _has_limix():
+        pytest.skip("needs LimiX's source")
 
 
 @pytest.fixture(scope="module")
@@ -99,7 +102,7 @@ def test_standardisation_is_upstreams():
     assert limix._standardisation(np.ones(4)) == (1.0, 1.0)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_cache_matches_upstreams_forward_pass(data):
     X, z, X_test = data
     model = _model().fit(X, z)
@@ -115,7 +118,7 @@ def test_the_cache_matches_upstreams_forward_pass(data):
     np.testing.assert_allclose(cached, uncached, atol=1e-4)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_upstreams_recipe_is_the_default(data):
     X, z, _ = data
     model = _model(n_estimators=8).fit(X, z)
@@ -125,7 +128,7 @@ def test_upstreams_recipe_is_the_default(data):
     assert model.provenance_["source_commit"] is not None
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("bag_size", [None, 150])
 def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
     X, z, _ = data
@@ -138,7 +141,7 @@ def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
     assert tokens == ["auto_quantile", "auto_quantile", "auto_power"]
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_bagged_member_shuffles_every_column_as_upstream(data):
     """As the paper's bagged runs: upstream's shuffler, on all its output."""
     X, z, X_test = data
@@ -162,7 +165,7 @@ def test_a_bagged_member_shuffles_every_column_as_upstream(data):
         )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_provenance_records_the_resolved_settings(data):
     X, z, _ = data
     default = _model(n_estimators=3).fit(X, z).provenance_
@@ -183,7 +186,7 @@ def test_provenance_records_the_resolved_settings(data):
     assert explicit.provenance_["limix_pipelines"] == ["none", "none"]
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_an_outlier_threshold_clips_what_the_network_sees(data):
     X, z, X_test = data
     X = X.copy()
@@ -211,7 +214,7 @@ def test_an_outlier_threshold_clips_what_the_network_sees(data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_native_grid_holds_every_members_buckets(data):
     """Unbagged, the whole context's; bagged, each bag's, merged."""
     X, z, _ = data
@@ -235,7 +238,7 @@ def test_the_native_grid_holds_every_members_buckets(data):
     np.testing.assert_allclose(bagged.native_grid_.edges, expected, rtol=1e-12)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_cache_that_does_not_fit_falls_back(monkeypatch, data):
     X, z, X_test = data
     monkeypatch.setattr(limix, "_free_device_memory", lambda network: 1)
@@ -252,7 +255,7 @@ def test_a_cache_that_does_not_fit_falls_back(monkeypatch, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_pickled_model_predicts_the_same(data):
     X, z, X_test = data
     model = _model().fit(X, z)
@@ -262,7 +265,7 @@ def test_a_pickled_model_predicts_the_same(data):
     np.testing.assert_array_equal(restored.predict_proba(X_test), before)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_large_unbagged_context_warns(monkeypatch, data):
     X, z, _ = data
     monkeypatch.setattr(
@@ -290,7 +293,7 @@ np.save(sys.argv[3], model.predict_proba(np.load(sys.argv[2])))
 """
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_pickled_model_predicts_the_same_in_a_fresh_process(data, tmp_path):
     X, z, X_test = data
     model = _model().fit(X, z)
@@ -314,7 +317,7 @@ def test_a_pickled_model_predicts_the_same_in_a_fresh_process(data, tmp_path):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_an_unpickled_model_finds_its_device_and_checkpoint_afresh(
     monkeypatch, data
 ):
@@ -358,7 +361,7 @@ def _simulated_gpu(monkeypatch, free_bytes, cache_bytes):
     return held, calls
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_caches_that_fit_are_kept(monkeypatch, data):
     X, z, X_test = data
     # 0.6 of 10 units free leaves room for 6 of the 8 members' caches.
@@ -382,7 +385,7 @@ def test_the_caches_that_fit_are_kept(monkeypatch, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
     monkeypatch, data
 ):
@@ -415,7 +418,7 @@ def test_a_spread_float64_cannot_resolve_is_refused():
         limix._bucket_edges(borders, 1e10, 1e-5)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_fitting_a_target_with_a_tiny_spread_says_to_centre_it(data):
     X, z, _ = data
     with pytest.raises(ValueError, match="Centre or rescale"):

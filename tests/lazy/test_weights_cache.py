@@ -8,7 +8,6 @@ the stubs cannot: that a shared network answers bit for bit as a fresh one.
 """
 
 import importlib.util
-import os
 import pathlib
 import pickle
 import threading
@@ -28,13 +27,6 @@ from lazy.models import limix
 from lazy.models import tabfm
 from lazy.models import tabicl
 from lazy.models import tabpfn
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 
 @pytest.fixture(autouse=True)
@@ -507,7 +499,7 @@ _REAL = [
 ]
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize(("cls", "params"), _REAL)
 def test_a_shared_network_answers_bit_for_bit(cls, params, data):
     X, z, X_test = data

@@ -7,7 +7,6 @@ and the probability bookkeeping are checked without a checkpoint. The last
 loads TabFM on the CPU, and runs only with ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 """
 
-import os
 import warnings
 
 import fakes
@@ -17,13 +16,6 @@ import pytest
 import lazy
 from lazy import datasets
 from lazy.models import tabfm
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 #: A grid of 25 bins over the targets of _problem.
 GRID_25 = lazy.Grid.linear(0.0, 1.75, 25)
@@ -335,7 +327,7 @@ def test_bin_counts_are_auto_grid_or_ints_from_two_to_ten(monkeypatch, value):
         _fit(monkeypatch, X, z, n_fine_bins=value)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_checkpoint_gives_auto_and_ten_by_ten_alike():
     """The real classifier, on the CPU: 500 rows are 10 x 10 either way."""
     X, z, X_query = _problem(500, n_query=20)
@@ -350,7 +342,7 @@ def test_the_checkpoint_gives_auto_and_ten_by_ten_alike():
     np.testing.assert_array_equal(*runs)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_checkpoint_predicts_on_a_matched_grid():
     """Real class labels with gaps: the absent bins come back as zero."""
     X, z, X_query = _problem(200, n_query=20)

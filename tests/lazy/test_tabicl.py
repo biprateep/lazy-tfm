@@ -10,7 +10,6 @@ their own, from the pickled path, as soon as they are unpickled.
 """
 
 import io
-import os
 import pathlib
 import pickle
 import time
@@ -24,13 +23,6 @@ import threads
 import lazy
 from lazy.models import _device
 from lazy.models import _hub
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 
 @pytest.fixture
@@ -202,7 +194,7 @@ def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_a_pickle_predicts_bit_for_bit_on_a_cpu():
     torch = pytest.importorskip("torch")
     pytest.importorskip("tabicl")
@@ -230,7 +222,7 @@ def test_a_pickle_predicts_bit_for_bit_on_a_cpu():
     assert networks == {id(model.handles_[0].regressors[0].model_)}
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_one_row_chunks_change_the_answer_by_rounding_alone():
     """A one-row chunk takes another matrix-multiply path: not bit for bit."""
     pytest.importorskip("tabicl")

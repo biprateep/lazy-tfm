@@ -3,13 +3,12 @@
 """What TabPFN is handed: lazy's own pins, not upstream's defaults.
 
 Most tests here read the settings lazy builds and need no checkpoint. Those
-marked ``needs_checkpoint`` load one, on the CPU, and run only with
+marked ``checkpoint`` load one, on the CPU, and run only with
 ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 """
 
 import dataclasses
 import json
-import os
 import threading
 import types
 import warnings
@@ -25,13 +24,6 @@ from lazy.models import _hub
 from lazy.models import _members
 from lazy.models import _transforms
 from lazy.models import tabpfn
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 VERSIONS = lazy.list_versions("tabpfn")
 
@@ -208,7 +200,7 @@ def test_the_oldest_recipes_are_what_upstream_ships_for_them(version):
     assert {k: shipped[k] for k in recipe} == recipe
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("version", VERSIONS)
 def test_the_pinned_recipes_are_what_the_checkpoints_store(version):
     upstream = pytest.importorskip("tabpfn")
@@ -293,7 +285,7 @@ def small():
     return X[:120], y[:120], X[120:]
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_fitted_regressor_ran_the_pinned_recipe(small):
     X, y, _ = small
     est = _fit(X, y, version="v3")
@@ -307,7 +299,7 @@ def test_the_fitted_regressor_ran_the_pinned_recipe(small):
     json.dumps(est.provenance_)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
     small, monkeypatch
 ):
@@ -334,7 +326,7 @@ def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
     assert np.all(np.isfinite(pdfs))
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 def test_an_explicit_temperature_reaches_upstream(small):
     X, y, _ = small
     est = _fit(X, y, version="v3.5", softmax_temperature=0.5)
@@ -342,7 +334,7 @@ def test_an_explicit_temperature_reaches_upstream(small):
     assert est.provenance_["softmax_temperature"] == 0.5
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize(
     ("outlier_threshold", "expected"),
     [("auto", 12.0), (None, None), (3.0, 3.0)],
@@ -361,7 +353,7 @@ def test_no_column_is_taken_for_a_category():
     assert settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] == 1
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("version", ["v2", "v3.5"])
 def test_a_three_valued_column_stays_numeric(small, version):
     """Upstream's own rule would encode it: < 4 values in > 100 rows."""
@@ -390,7 +382,7 @@ def test_only_mixed_precision_autocasts(mixed_precision, expected):
     )
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("mixed_precision", [True, False])
 def test_the_cpu_runs_in_float32(small, mixed_precision):
     """Upstream would autocast to bfloat16 on a CPU that has it fast."""
@@ -429,7 +421,7 @@ def test_an_explicit_recipe_runs_without_the_extras(version, limit):
     assert settings["OUTLIER_REMOVAL_STD"] is None
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("outlier_threshold", ["auto", None, 3.0])
 def test_an_explicit_recipe_reaches_upstream_bare(small, outlier_threshold):
     X, y, _ = small

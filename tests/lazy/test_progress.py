@@ -7,8 +7,6 @@ run only with ``LAZY_RUN_CHECKPOINT_TESTS=1``, like the rest of
 ``test_backends.py``.
 """
 
-import os
-
 import backend_settings
 import numpy as np
 import pandas as pd
@@ -17,13 +15,6 @@ from sklearn import base as sklearn_base
 
 import lazy
 from lazy.models import _progress
-
-needs_checkpoint = pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") != "1",
-    reason=(
-        "set LAZY_RUN_CHECKPOINT_TESTS=1 to run tests that load a checkpoint"
-    ),
-)
 
 
 @pytest.mark.parametrize("value", ["auto", True, False])
@@ -97,7 +88,7 @@ def data():
     return X.iloc[:200], z[:200], X.iloc[200:].reset_index(drop=True)
 
 
-@needs_checkpoint
+@pytest.mark.checkpoint
 @pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))
 def test_the_bar_reports_the_backends_own_unit_and_changes_nothing(
     name, data, capsys

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
 
+import os
+
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
@@ -12,6 +14,20 @@ from lazy import selection
 # Every plotting test runs headless. Nothing above draws, and switching to Agg
 # is allowed even after pyplot has been imported.
 mpl.use("Agg")
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Skips the tests marked ``checkpoint`` unless they are asked for."""
+    if os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(
+        reason="set LAZY_RUN_CHECKPOINT_TESTS=1 to run the checkpoint tests"
+    )
+    for item in items:
+        if item.get_closest_marker("checkpoint"):
+            item.add_marker(skip)
 
 
 @pytest.fixture

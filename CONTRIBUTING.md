@@ -44,8 +44,8 @@ uv run pytest               # unit tests and doctests; no GPU or checkpoint need
 uv run pre-commit run --all-files   # ruff format, ruff check, mypy
 ```
 
-Tests that need a GPU and a downloaded checkpoint are marked `gpu` and are
-skipped by default. To run them:
+Tests that download and load a pinned checkpoint are marked `checkpoint` and
+are skipped by default. To run them:
 
 ```bash
 LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
