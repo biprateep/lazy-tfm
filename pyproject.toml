@@ -171,6 +171,9 @@ markers = [
 required-version = ">=0.16.0"
 line-length = 80  # §3.2
 indent-width = 4  # §3.4
+# Agent skills are tooling, not package code; the code-style skill's eval
+# inputs break the style on purpose.
+extend-exclude = [".claude"]
 
 [tool.ruff.format]
 quote-style = "double"  # §3.10
