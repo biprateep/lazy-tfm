@@ -1119,3 +1119,83 @@ def test_the_chirp_is_reproducible_and_validates():
     assert len(X_test) == 0
     with pytest.raises(ValueError, match="do not fit"):
         datasets.load_dataset("chirp", n_gaps=10, gap_width=0.2)
+
+
+#: Set when the planted object below is unpickled, which runs its code.
+_UNPICKLED = []
+
+
+class _Planted:
+    """An object whose unpickling records that it ran."""
+
+    def __reduce__(self):
+        return (_UNPICKLED.append, ("ran",))
+
+
+def _write_catalog(path, *, planted=True):
+    """A two-row catalogue with DC1's columns, and an object column."""
+    fields = [("ID", "<i8"), ("SPECZ", "<f4")]
+    fields += [(column, "<f4") for column in datasets.RAW_COLUMNS]
+    if planted:
+        fields.append(("_merge", object))
+    cat = np.zeros(2, dtype=fields)
+    if planted:
+        cat["_merge"] = [_Planted(), _Planted()]
+    np.savez(path, test_cat=cat)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.fixture
+def catalog_file(tmp_path, monkeypatch):
+    """A cached test catalogue; returns its path and true checksum."""
+    path = tmp_path / "trainz_test.npz"
+    digest = _write_catalog(path)
+    monkeypatch.setattr(datasets, "_cached_path", lambda name, **kw: path)
+    monkeypatch.setattr(datasets, "_CHECKED", set())
+    _UNPICKLED.clear()
+    return path, digest
+
+
+def test_a_changed_catalogue_is_refused_before_it_is_unpickled(
+    catalog_file, monkeypatch
+):
+    monkeypatch.setitem(datasets._SHA256, "trainz_test.npz", "0" * 64)
+    with pytest.raises(OSError, match="checksum differs"):
+        datasets._load_split("test", root=None, download_if_missing=False)
+    assert _UNPICKLED == []
+
+
+def test_the_published_catalogue_loads(catalog_file, monkeypatch):
+    _, digest = catalog_file
+    monkeypatch.setitem(datasets._SHA256, "trainz_test.npz", digest)
+    cat = datasets._load_split("test", root=None, download_if_missing=False)
+    assert len(cat.redshift) == 2
+
+
+def test_a_catalogue_without_objects_loads_without_pickle_or_a_hash(
+    catalog_file, monkeypatch
+):
+    path, _ = catalog_file
+    _write_catalog(path, planted=False)
+    monkeypatch.setitem(datasets._SHA256, "trainz_test.npz", "0" * 64)
+    cat = datasets._load_split("test", root=None, download_if_missing=False)
+    assert len(cat.redshift) == 2
+
+
+def test_a_catalogue_replaced_after_a_check_is_checked_again(
+    catalog_file, monkeypatch
+):
+    path, digest = catalog_file
+    monkeypatch.setitem(datasets._SHA256, "trainz_test.npz", digest)
+    datasets._load_split("test", root=None, download_if_missing=False)
+    _UNPICKLED.clear()
+    planted = path.with_name("planted.npz")
+    _write_catalog(planted)
+    with open(planted, "ab") as stream:  # Bytes the published file lacks.
+        stream.write(b"\0")
+    stat = path.stat()
+    os.utime(planted, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    os.replace(planted, path)
+    with pytest.raises(OSError, match="checksum differs"):
+        datasets._load_split("test", root=None, download_if_missing=False)
+    assert _UNPICKLED == []

@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn import base as sklearn_base
+from sklearn import ensemble
 from sklearn import exceptions
+from sklearn import inspection
 
 import lazy
 
@@ -110,6 +112,18 @@ def test_score_is_negated_cde_loss_so_higher_is_better(data):
     assert sharp > blunt
 
 
+def test_regressor_meta_estimators_accept_a_model(data):
+    X, y = data
+    stack = ensemble.StackingRegressor([("dummy", GaussianDummy())], cv=2)
+    assert stack.fit(X, y).predict(X).shape == (len(X),)
+    # The dummy's mode tracks column a, in steps of the grid, so the
+    # dependence on a never falls and rises overall.
+    average = inspection.partial_dependence(
+        GaussianDummy().fit(X, y), X, ["a"]
+    )["average"][0]
+    assert np.all(np.diff(average) >= 0) and average[-1] > average[0] + 1
+
+
 # -- the grid is an argument to the prediction, not to the fit ---------------
 
 
@@ -169,7 +183,7 @@ def test_columns_may_be_reordered_but_not_renamed(data):
 def test_feature_count_mismatch_is_caught(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    with pytest.raises(ValueError, match="fitted with 2"):
+    with pytest.raises(ValueError, match="expecting 2 features"):
         est.predict_proba(X[["a"]])
 
 

@@ -5,6 +5,8 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import sparse
+from sklearn import exceptions
 
 import lazy
 from lazy import _inputs
@@ -212,9 +214,35 @@ def test_a_masked_column_vector_target_is_flattened():
     target = np.ma.masked_array(
         [[0.1], [0.2], [0.3]], mask=[[False], [True], [False]]
     )
-    values = _inputs.as_target(target)
+    with pytest.warns(exceptions.DataConversionWarning, match="column-vector"):
+        values = _inputs.as_target(target)
     assert values.shape == (3,)
     np.testing.assert_array_equal(values, [0.1, np.nan, 0.3])
+
+
+def test_a_target_with_several_columns_is_refused():
+    # Half as many rows of two columns have as many values as X has rows.
+    with pytest.raises(ValueError, match="1d array"):
+        _inputs.as_target(np.ones((3, 2)))
+
+
+def test_a_complex_target_is_refused_not_truncated():
+    with pytest.raises(ValueError, match="Complex data not supported"):
+        _inputs.as_target(np.array([1 + 2j, 3 + 0j]))
+
+
+def test_sparse_features_are_refused_with_a_dense_alternative():
+    with pytest.raises(TypeError, match="sparse X is not supported"):
+        _inputs.as_feature_frame(sparse.csr_matrix(np.eye(3)))
+
+
+@pytest.mark.parametrize("masked", [False, True])
+def test_complex_features_are_refused_not_truncated(masked):
+    features = np.ones((3, 2)) * (1 + 1j)
+    if masked:
+        features = np.ma.masked_array(features, mask=np.eye(3, 2, dtype=bool))
+    with pytest.raises(ValueError, match="Complex data not supported"):
+        _inputs.as_feature_frame(features)
 
 
 def test_a_one_dimensional_x_gets_scikit_learns_reshape_hint():

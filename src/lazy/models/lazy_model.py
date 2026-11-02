@@ -120,7 +120,7 @@ class LazyModel(base.BaseDensityRegressor):
 
     @property
     def name_(self) -> str:
-        """The ``"<backend>:<version>"`` label: the name asked for, and version.
+        """The name asked for and its version, as ``"<backend>:<version>"``.
 
         Built from ``self.model`` rather than delegated, so the label is the
         name the caller used; the version is appended because a row saying
