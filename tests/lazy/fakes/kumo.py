@@ -17,11 +17,11 @@ import fakes
 from lazy.models import _hub
 from lazy.models import kumo
 
-#: Small enough for the behavioral suite; v1-small, the CPU-friendly size.
 SETTINGS = {"version": "v1-small", "n_estimators": 2}
+"""Small enough for the behavioral suite; v1-small, the CPU-friendly size."""
 
-#: Where the fake's quantiles sit, in standardized units of the target.
 SPREAD = np.linspace(-1.5, 1.5, 9)
+"""Where the fake's quantiles sit, in standardized units of the target."""
 
 
 def _network_class(sdm, torch):
@@ -33,8 +33,8 @@ def _network_class(sdm, torch):
         supports_multi_target = False
         supports_related_tables = False
 
-        #: Set by :func:`install`.
         recorder = None
+        """Set by :func:`install`."""
 
         def __init__(self):
             super().__init__(task="regression")

@@ -41,9 +41,10 @@ __all__ = [
     "uv_project",
 ]
 
-#: What gives a checkout of this repository every backend: the extras, and
-#: the dependency group holding what PyPI cannot (pyproject.toml).
 CHECKOUT_SYNC = ("uv", "sync", "--extra", "all", "--group", "backends")
+"""What gives a checkout of this repository every backend: the extras, and the
+dependency group holding what PyPI cannot (pyproject.toml).
+"""
 
 
 def install_command(requirement: str) -> list[str] | None:

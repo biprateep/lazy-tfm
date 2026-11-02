@@ -65,10 +65,9 @@ __all__ = [
     "parse",
 ]
 
-#: The ``transforms`` value meaning each model's own tuned recipe.
 AUTO = "auto"
+"""The ``transforms`` value meaning each model's own tuned recipe."""
 
-#: The transform names every backend accepts.
 BASE_TRANSFORMS: tuple[str, ...] = (
     "none",
     "power",
@@ -77,11 +76,12 @@ BASE_TRANSFORMS: tuple[str, ...] = (
     "quantile_rtdl",
     "robust",
 )
+"""The transform names every backend accepts."""
 
-#: Named recipes: sequences of transforms that members cycle through.
 RECIPES: dict[str, tuple[str, ...]] = {
     "limix": ("quantile_uniform+original", "power"),
 }
+"""Named recipes: sequences of transforms that members cycle through."""
 
 _ORIGINAL = "+original"
 

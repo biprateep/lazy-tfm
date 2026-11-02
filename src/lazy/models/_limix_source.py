@@ -71,22 +71,23 @@ _PACKAGE_PREFIX = (
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
 )
 
-#: The LimiX commit the backend was validated against.
 LIMIX_COMMIT = "516bf396333feb3198cf7aff8a6c10421f218e24"
-#: Where LimiX's source is published.
+"""The LimiX commit the backend was validated against."""
 REPOSITORY = "https://github.com/limix-ldm-ai/LimiX"
-#: Environment variables naming a LimiX checkout, in the order they are read.
+"""Where LimiX's source is published."""
 ENV_VARS = ("LAZY_LIMIX_SRC", "LIMIX_SRC")
-#: GitHub's archive of :data:`LIMIX_COMMIT`, which :func:`fetch` downloads.
+"""Environment variables naming a LimiX checkout, in the order they are read."""
 ARCHIVE = f"{REPOSITORY}/archive/{LIMIX_COMMIT}.tar.gz"
-#: The hash of the two subtrees the backend runs, at :data:`LIMIX_COMMIT`:
-#: the SHA-256 of one ``<path>\t<file SHA-256>`` line per file, sorted by
-#: path, bytecode caches left out (:func:`_manifest`).
+"""GitHub's archive of :data:`LIMIX_COMMIT`, which :func:`fetch` downloads."""
 LIMIX_MANIFEST = (
     "ea70acc484a170cc4986cd0d8da2dcebb4742565676b4058a0b03df26b2f3704"
 )
-#: The :attr:`Source.origin` of the source in :func:`cache_dir`.
+"""The hash of the two subtrees the backend runs, at :data:`LIMIX_COMMIT`: the
+SHA-256 of one ``<path>\\t<file SHA-256>`` line per file, sorted by path,
+bytecode caches left out (:func:`_manifest`).
+"""
 CACHE_ORIGIN = "lazy's cache"
+"""The :attr:`Source.origin` of the source in :func:`cache_dir`."""
 
 _ALIAS = "lazy.models._limix_ext"
 _SUBTREES = {"model": ("model", "v2_0"), "inference": ("inference", "v2_0")}

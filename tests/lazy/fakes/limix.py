@@ -18,11 +18,11 @@ from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import limix
 
-#: Small enough for the behavioral suite.
 SETTINGS = {"n_estimators": 2}
+"""Small enough for the behavioral suite."""
 
-#: The network's bucket borders, in standardized units of the target.
 BORDERS = np.linspace(-3.0, 3.0, 11)
+"""The network's bucket borders, in standardized units of the target."""
 
 
 class Pipeline:
@@ -42,8 +42,8 @@ class Pipeline:
 class Member(_limix_stream.Member):
     """A member's context, recorded as it is made."""
 
-    #: Set by :func:`install`.
     recorder = None
+    """Set by :func:`install`."""
 
     def __init__(self, x, y, seed):
         super().__init__(x, y, seed)

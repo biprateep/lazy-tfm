@@ -1121,8 +1121,8 @@ def test_the_chirp_is_reproducible_and_validates():
         datasets.load_dataset("chirp", n_gaps=10, gap_width=0.2)
 
 
-#: Set when the planted object below is unpickled, which runs its code.
 _UNPICKLED = []
+"""Set when the planted object below is unpickled, which runs its code."""
 
 
 class _Planted:

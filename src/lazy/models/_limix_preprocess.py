@@ -93,7 +93,6 @@ class Recipe:
     target_ddof: int
 
 
-#: The pinned recipe; see :class:`Recipe`. Upstream at commit 516bf39.
 RECIPE = Recipe(
     pipelines=types.MappingProxyType(
         {
@@ -122,15 +121,8 @@ RECIPE = Recipe(
     softmax_temperature=0.9,
     target_ddof=1,
 )
+"""The pinned recipe; see :class:`Recipe`. Upstream at commit 516bf39."""
 
-#: Upstream ``RebalanceFeatureDistribution`` settings per token: the members
-#: of upstream's recipe, and the vocabulary transforms LimiX implements
-#: exactly as :mod:`lazy.models._transforms` defines them. Those are only
-#: three. LimiX's ``quantile`` keeps n // 5 quantiles (the vocabulary's,
-#: up to 1,000), its ``robust`` scales to unit variance, its ``power``
-#: imputes missing values to the mean and standardises twice, and its
-#: ``+original`` puts the original columns first (the vocabulary's last),
-#: so every other transform is scaffolded, ahead of the ``"none"`` pipeline.
 PIPELINES: dict[str, Mapping[str, Any]] = {
     "none": {"worker_tags": [None], "original_flag": False, "svd_tag": None},
     # Identical columns twice: their order does not matter.
@@ -148,11 +140,20 @@ PIPELINES: dict[str, Mapping[str, Any]] = {
     },
     **RECIPE.pipelines,
 }
+"""Upstream ``RebalanceFeatureDistribution`` settings per token: the members of
+upstream's recipe, and the vocabulary transforms LimiX implements exactly as
+:mod:`lazy.models._transforms` defines them. Those are only three. LimiX's
+``quantile`` keeps n // 5 quantiles (the vocabulary's, up to 1,000), its
+``robust`` scales to unit variance, its ``power`` imputes missing values to the
+mean and standardises twice, and its ``+original`` puts the original columns
+first (the vocabulary's last), so every other transform is scaffolded, ahead of
+the ``"none"`` pipeline.
+"""
 
-#: Vocabulary transform name to token, for the transforms LimiX has.
 NATIVE_TRANSFORMS: dict[str, str] = {
     name: name for name in PIPELINES if name not in RECIPE.pipelines
 }
+"""Vocabulary transform name to token, for the transforms LimiX has."""
 
 
 def auto_tokens(n_members: int) -> tuple[str, ...]:

@@ -43,9 +43,10 @@ __all__ = [
     "set_model_cache",
 ]
 
-#: The environment variable that turns the cache off, with ``0``, ``false``,
-#: ``no`` or ``off``.
 ENV_VAR = "LAZY_MODEL_CACHE"
+"""The environment variable that turns the cache off, with ``0``, ``false``,
+``no`` or ``off``.
+"""
 
 _OFF = frozenset({"0", "false", "no", "off"})
 

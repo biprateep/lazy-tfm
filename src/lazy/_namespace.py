@@ -26,8 +26,8 @@ import warnings
 
 __all__ = ["OTHER_DISTRIBUTION", "ImportNameWarning", "warn_if_shared"]
 
-#: The unrelated PyPI distribution that also installs a ``lazy`` package.
 OTHER_DISTRIBUTION = "lazy"
+"""The unrelated PyPI distribution that also installs a ``lazy`` package."""
 
 
 class ImportNameWarning(UserWarning):

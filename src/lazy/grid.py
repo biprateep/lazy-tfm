@@ -47,10 +47,10 @@ __all__ = [
     "as_grid",
 ]
 
-#: How a density on a grid integrates to one; see Grid.
 Normalization: TypeAlias = Literal["trapezoid", "histogram"]
-#: The accepted values of Grid.normalization.
+"""How a density on a grid integrates to one; see Grid."""
 NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
+"""The accepted values of Grid.normalization."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -406,13 +406,13 @@ class Grid:
         )
 
 
-#: What every ``y_grid`` argument accepts: a grid, an array of bin centres,
-#: ``"native"`` for the model's own grid, or ``None`` for the model's
-#: default.
 GridLike: TypeAlias = Grid | npt.ArrayLike | Literal["native"] | None
+"""What every ``y_grid`` argument accepts: a grid, an array of bin centres,
+``"native"`` for the model's own grid, or ``None`` for the model's default.
+"""
 
-#: The ``y_grid`` value that asks an estimator for its native grid.
 NATIVE = "native"
+"""The ``y_grid`` value that asks an estimator for its native grid."""
 
 
 def as_grid(grid: GridLike) -> Grid:

@@ -47,7 +47,6 @@ __all__ = [
     "list_versions",
 ]
 
-#: The keys of every :meth:`Checkpoint.provenance` record, in its order.
 PROVENANCE_KEYS: tuple[str, ...] = (
     "backend",
     "version",
@@ -58,6 +57,7 @@ PROVENANCE_KEYS: tuple[str, ...] = (
     "lazy",
     "device",
 )
+"""The keys of every :meth:`Checkpoint.provenance` record, in its order."""
 
 
 # Frames under this directory are skipped when a warning names its caller.
@@ -378,8 +378,6 @@ _KUMO_LICENSE = (
     "https://huggingface.co/nvidia/Kumo-Tabular."
 )
 
-#: Every pinned checkpoint, keyed ``"<backend>:<version>"``. Built from the
-#: records themselves so a key can never disagree with what it points at.
 CHECKPOINTS: dict[str, Checkpoint] = {
     checkpoint.key: checkpoint
     for checkpoint in (
@@ -637,9 +635,10 @@ CHECKPOINTS: dict[str, Checkpoint] = {
         ),
     )
 }
+"""Every pinned checkpoint, keyed ``"<backend>:<version>"``. Built from the
+records themselves so a key can never disagree with what it points at.
+"""
 
-#: The version each backend loads when none is asked for. Changing one of these
-#: changes what every unversioned call returns, so they move only deliberately.
 DEFAULT_VERSIONS: dict[str, str] = {
     "kumo": "v1-large",
     "limix": "v2",
@@ -647,6 +646,9 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "tabicl": "v2",
     "tabpfn": "v3.5",
 }
+"""The version each backend loads when none is asked for. Changing one of these
+changes what every unversioned call returns, so they move only deliberately.
+"""
 
 
 def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:

@@ -117,39 +117,42 @@ class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
 MAX_CLASSES = 10
 """TabFM's classifier ceiling, and hence the ceiling on each hierarchy level."""
 
-#: The ``n_coarse_bins`` and ``n_fine_bins`` value that sizes equal-mass
-#: bins from the context.
 AUTO_BINS = "auto"
+"""The ``n_coarse_bins`` and ``n_fine_bins`` value that sizes equal-mass bins
+from the context.
+"""
 
-#: The ``n_coarse_bins`` and ``n_fine_bins`` value that takes the bins from
-#: the constructor's grid.
 GRID_BINS = "grid"
+"""The ``n_coarse_bins`` and ``n_fine_bins`` value that takes the bins from the
+constructor's grid.
+"""
 
-#: Context rows per final bin that ``"auto"`` aims at.
 ROWS_PER_BIN = 5
+"""Context rows per final bin that ``"auto"`` aims at."""
 
-#: The most bins a constructor grid can have for its bins to be the classes:
-#: ten groups of ten.
 MAX_GRID_BINS = MAX_CLASSES * MAX_CLASSES
+"""The most bins a constructor grid can have for its bins to be the classes: ten
+groups of ten.
+"""
 
 # TabFM v1.0's own recipe, ``transforms="auto"``, written out here so that the
 # installed upstream version cannot change it: the values TabFMClassifier
 # defaults to, each passed explicitly.
 
-#: The norm methods members cycle through under ``transforms="auto"``.
 AUTO_NORM_METHODS: tuple[str, ...] = ("none", "power")
+"""The norm methods members cycle through under ``transforms="auto"``."""
 
-#: The soft outlier clip of the recipe, in standard deviations.
 AUTO_OUTLIER_THRESHOLD = 4.0
+"""The soft outlier clip of the recipe, in standard deviations."""
 
-#: Columns each member sees under the recipe; a wider table is subsampled.
 AUTO_MAX_NUM_FEATURES = 500
+"""Columns each member sees under the recipe; a wider table is subsampled."""
 
-#: The softmax temperature of the recipe: TabFMClassifier's default, the
-#: value TabFM v1.0 was released with.
 AUTO_SOFTMAX_TEMPERATURE = 0.9
+"""The softmax temperature of the recipe: TabFMClassifier's default, the value
+TabFM v1.0 was released with.
+"""
 
-#: Every other TabFMClassifier argument, pinned to the recipe's value.
 _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
     # Each member sees the class labels cyclically shifted, undone on its
     # logits, which are then averaged before one softmax.
@@ -173,20 +176,22 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
     "min_rows_for_single_val_split": 2000,
     "verbose": False,
 }
+"""Every other TabFMClassifier argument, pinned to the recipe's value."""
 
-#: The versions the recipe above was read from upstream for. A new version
-#: joins once its recipe is checked against upstream's.
 _RECIPE_VERSIONS: tuple[str, ...] = ("v1.0",)
+"""The versions the recipe above was read from upstream for. A new version joins
+once its recipe is checked against upstream's.
+"""
 
 
-#: The repository build of TabFM, with the KV-cache API, at the commit lazy
-#: was validated on. PyPI refuses direct URLs in an extra, so ``lazy setup``
-#: installs it (:meth:`TabFMHistogram.setup`); pyproject.toml pins the same
-#: commit.
 REPOSITORY_BUILD = (
     "tabfm[pytorch] @ git+https://github.com/google-research/tabfm"
     "@fbb665569425fd2f490c6576b3af967876fe11ff"
 )
+"""The repository build of TabFM, with the KV-cache API, at the commit lazy was
+validated on. PyPI refuses direct URLs in an extra, so ``lazy setup`` installs
+it (:meth:`TabFMHistogram.setup`); pyproject.toml pins the same commit.
+"""
 
 # What `lazy setup` runs in a fresh interpreter to check the TabFM it just
 # installed: the running process has already imported the old one.

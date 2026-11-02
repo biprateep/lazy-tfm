@@ -8,8 +8,8 @@ import re
 
 __all__ = ["resolve_device"]
 
-#: The device strings accepted besides ``"auto"``, case-insensitively.
 _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
+"""The device strings accepted besides ``"auto"``, case-insensitively."""
 
 
 def resolve_device(device: object = "auto") -> str:

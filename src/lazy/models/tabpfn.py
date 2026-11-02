@@ -84,9 +84,10 @@ def _native_transforms() -> dict[str, tuple[str, bool]]:
     return {"none": ("none", False), "none+original": ("none", True)}
 
 
-#: Versions whose architecture has no quantised key/value cache; upstream
-#: would quietly fall back to full precision.
 _UNQUANTISED_VERSIONS = ("v2", "v2.5", "v2.6")
+"""Versions whose architecture has no quantised key/value cache; upstream would
+quietly fall back to full precision.
+"""
 
 
 def _preprocessor(
@@ -108,7 +109,6 @@ def _preprocessor(
     }
 
 
-#: Settings every version's own recipe shares.
 _SHARED_RECIPE: dict[str, Any] = {
     "FEATURE_SHIFT_METHOD": "shuffle",
     "FINGERPRINT_FEATURE": True,
@@ -117,16 +117,8 @@ _SHARED_RECIPE: dict[str, Any] = {
     "FIX_NAN_BORDERS_AFTER_TARGET_TRANSFORM": True,
     "PASSTHROUGH_INF": False,
 }
+"""Settings every version's own recipe shares."""
 
-#: Each version's own recipe (``transforms="auto"``): every
-#: ``InferenceConfig`` field that changes a regression prediction on numeric
-#: features, as the checkpoint stores it (v2.6 and later) or, for v2 and
-#: v2.5, which predate stored configs, as tabpfn 9.0.0's
-#: ``InferenceConfig.get_default`` writes it. Copied here so that a tabpfn
-#: upgrade cannot change what ``"auto"`` runs. ``OUTLIER_REMOVAL_STD`` is the
-#: resolved value (upstream's ``"auto"`` is None for a regressor), and
-#: ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both are what
-#: ``"auto"`` resolves to, and are handed over as such.
 _AUTO_RECIPES: dict[str, dict[str, Any]] = {
     "v2": {
         **_SHARED_RECIPE,
@@ -222,6 +214,15 @@ _AUTO_RECIPES: dict[str, dict[str, Any]] = {
         "FEATURE_SUBSAMPLING_IMPORTANCE_TOP_K_COUNT": 150,
     },
 }
+"""Each version's own recipe (``transforms="auto"``): every ``InferenceConfig``
+field that changes a regression prediction on numeric features, as the
+checkpoint stores it (v2.6 and later) or, for v2 and v2.5, which predate stored
+configs, as tabpfn 9.0.0's ``InferenceConfig.get_default`` writes it. Copied
+here so that a tabpfn upgrade cannot change what ``"auto"`` runs.
+``OUTLIER_REMOVAL_STD`` is the resolved value (upstream's ``"auto"`` is None for
+a regressor), and ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both
+are what ``"auto"`` resolves to, and are handed over as such.
+"""
 # The fast variant is the same recipe on a smaller checkpoint.
 _AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
 

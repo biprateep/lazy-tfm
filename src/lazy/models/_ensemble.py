@@ -86,7 +86,6 @@ _PACKAGE_PREFIX = (
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
 )
 
-#: The parameters every backend's constructor must take, keyword-only.
 UNIFORM_PARAMS: tuple[str, ...] = (
     "version",
     "n_estimators",
@@ -104,9 +103,8 @@ UNIFORM_PARAMS: tuple[str, ...] = (
     "progress",
     "verbose",
 )
+"""The parameters every backend's constructor must take, keyword-only."""
 
-#: Every uniform parameter's default, the same on every backend; ``version``
-#: alone is per backend, because the checkpoints are.
 UNIFORM_DEFAULTS: dict[str, Any] = {
     "n_estimators": 8,
     "transforms": _transforms.AUTO,
@@ -123,15 +121,15 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
     "progress": "auto",
     "verbose": False,
 }
+"""Every uniform parameter's default, the same on every backend; ``version``
+alone is per backend, because the checkpoints are.
+"""
 
-#: The ``softmax_temperature`` and ``outlier_threshold`` value that defers to
-#: the model's own setting.
 AUTO = "auto"
+"""The ``softmax_temperature`` and ``outlier_threshold`` value that defers to
+the model's own setting.
+"""
 
-#: The keys every fitted backend's ``provenance_`` carries: which weights and
-#: code answered (:data:`lazy.models._hub.PROVENANCE_KEYS`, recorded by
-#: ``_load_checkpoint``) and the ensemble's resolved settings (``_recipe``).
-#: A backend may record more.
 REQUIRED_PROVENANCE: tuple[str, ...] = (
     *_hub.PROVENANCE_KEYS,
     "n_estimators",
@@ -146,10 +144,12 @@ REQUIRED_PROVENANCE: tuple[str, ...] = (
     "outlier_threshold",
     "groups",
 )
+"""The keys every fitted backend's ``provenance_`` carries: which weights and
+code answered (:data:`lazy.models._hub.PROVENANCE_KEYS`, recorded by
+``_load_checkpoint``) and the ensemble's resolved settings (``_recipe``). A
+backend may record more.
+"""
 
-#: The distributions ``_predict_group`` may answer with, by ``native_output``.
-#: A histogram model may answer with a mixture of histograms (TabFM's
-#: dithered bins).
 _NATIVE_TYPES: dict[str, tuple[type[distributions.Distribution], ...]] = {
     "histogram": (
         distributions.HistogramDistribution,
@@ -157,6 +157,9 @@ _NATIVE_TYPES: dict[str, tuple[type[distributions.Distribution], ...]] = {
     ),
     "quantiles": (distributions.QuantileDistribution,),
 }
+"""The distributions ``_predict_group`` may answer with, by ``native_output``. A
+histogram model may answer with a mixture of histograms (TabFM's dithered bins).
+"""
 
 
 class ContextSizeWarning(UserWarning):

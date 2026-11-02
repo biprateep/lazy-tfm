@@ -28,8 +28,8 @@ import numpy as np
 from lazy.models import _hub
 from lazy.models import _weights
 
-#: The directory holding one fake per registered backend.
 FAKES_DIR = pathlib.Path(__file__).parent
+"""The directory holding one fake per registered backend."""
 
 
 class Recorder:

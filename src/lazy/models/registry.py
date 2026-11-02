@@ -33,10 +33,11 @@ from lazy.models import tabpfn
 
 __all__ = ["ESTIMATORS", "get_estimator", "list_estimators", "register"]
 
-#: Short name -> estimator class. These names are what :class:`LazyModel` and
-#: :func:`get_estimator` accept, and what the benchmark tables record. Filled
-#: only through :func:`register`.
 ESTIMATORS: dict[str, type[base.BaseDensityRegressor]] = {}
+"""Short name -> estimator class. These names are what :class:`LazyModel` and
+:func:`get_estimator` accept, and what the benchmark tables record. Filled only
+through :func:`register`.
+"""
 
 
 def register(name: str, cls: type[base.BaseDensityRegressor]) -> None:

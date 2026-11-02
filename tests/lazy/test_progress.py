@@ -60,12 +60,9 @@ def test_every_backend_takes_the_parameter_and_clones_it(name):
 
 # -- what each backend actually reports ---------------------------------------
 
-#: Small enough for CPU, with the settings each backend's own tests use.
 SETTINGS = backend_settings.BACKEND_SETTINGS
+"""Small enough for CPU, with the settings each backend's own tests use."""
 
-#: What the finished bar must say: the unit it counts in and the final tally.
-#: TabPFN and TabICL count rows, TabFM counts in-context stages --
-#: n_dither * (1 + n_coarse_bins) = 2 * 3 here.
 EXPECTED = {
     "kumo": ("40/40", "row", "quantiles="),
     "limix": ("40/40", "row", "buckets="),
@@ -73,6 +70,10 @@ EXPECTED = {
     "tabicl": ("40/40", "row", "quantiles="),
     "tabfm": ("6/6", "stage", "level=fine 2/2"),
 }
+"""What the finished bar must say: the unit it counts in and the final tally.
+TabPFN and TabICL count rows, TabFM counts in-context stages -- n_dither * (1 +
+n_coarse_bins) = 2 * 3 here.
+"""
 
 
 @pytest.fixture

@@ -12,10 +12,6 @@ import pytest
 
 import lazy
 
-#: Relative tolerance per backend; 0 means bit-identical. The files were
-#: recorded by this code on one machine's CPU; another machine's BLAS may
-#: round float32 differently, which the narrowly spaced quantiles of TabICL
-#: and Kumo amplify most. LimiX moves by 4e-6 with the thread count alone.
 RTOL = {
     "kumo": 1e-3,
     "tabpfn": 1e-4,
@@ -23,13 +19,19 @@ RTOL = {
     "tabfm": 1e-12,
     "limix": 1e-4,
 }
+"""Relative tolerance per backend; 0 means bit-identical. The files were
+recorded by this code on one machine's CPU; another machine's BLAS may round
+float32 differently, which the narrowly spaced quantiles of TabICL and Kumo
+amplify most. LimiX moves by 4e-6 with the thread count alone.
+"""
 
-#: Absolute tolerance per backend, as a fraction of the peak density.
-#: TabFM's is float64 rounding: rebinning onto the grid takes differences
-#: of cumulative masses, whose rounding is absolute (about 1e-16 of the
-#: peak), so a far-tail density of 1e-9 can move by 1e-6 of itself when
-#: the masses are scaled first (as on_grid has done since ee67572).
 ATOL = {"tabpfn": 1e-6, "tabfm": 1e-12, "limix": 1e-6}
+"""Absolute tolerance per backend, as a fraction of the peak density. TabFM's is
+float64 rounding: rebinning onto the grid takes differences of cumulative
+masses, whose rounding is absolute (about 1e-16 of the peak), so a far-tail
+density of 1e-9 can move by 1e-6 of itself when the masses are scaled first (as
+on_grid has done since ee67572).
+"""
 
 
 @pytest.mark.checkpoint

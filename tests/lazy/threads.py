@@ -6,10 +6,11 @@ from collections.abc import Callable
 import threading
 import time
 
-#: Seconds a test waits on a barrier or event shared between its threads.
-#: :func:`run` waits twice as long, so a broken barrier is reported as the
-#: error it raises rather than as a thread that never finished.
 TIMEOUT = 20.0
+"""Seconds a test waits on a barrier or event shared between its threads.
+:func:`run` waits twice as long, so a broken barrier is reported as the error it
+raises rather than as a thread that never finished.
+"""
 
 
 def run(*targets: Callable[[], object], timeout: float = 2 * TIMEOUT) -> bool:

@@ -29,11 +29,11 @@ from tqdm import auto as tqdm_auto
 
 __all__ = ["PROGRESS_MODES", "Progress", "bar", "check_progress"]
 
-#: What ``progress`` accepts on every estimator.
 PROGRESS_MODES = ("auto", True, False)
+"""What ``progress`` accepts on every estimator."""
 
-#: The type of every estimator's ``progress`` parameter.
 Progress: TypeAlias = bool | Literal["auto"]
+"""The type of every estimator's ``progress`` parameter."""
 
 
 def check_progress(progress: object) -> None:

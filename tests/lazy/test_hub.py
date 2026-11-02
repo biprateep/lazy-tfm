@@ -14,8 +14,6 @@ import pytest
 import lazy
 from lazy.models import _hub
 
-#: The stand-in repository: path -> contents. ``regression/`` is outside the
-#: TabFM checkpoint's patterns.
 REPO = {
     "classification/model.safetensors": b"w" * 40,
     "classification/config.json": b"{}",
@@ -24,11 +22,14 @@ REPO = {
     "README.md": b"readme",
     "regression/model.safetensors": b"r" * 30,
 }
+"""The stand-in repository: path -> contents. ``regression/`` is outside the
+TabFM checkpoint's patterns.
+"""
 
-#: The bytes the TabFM patterns select from REPO.
 SELECTED_BYTES = sum(
     len(data) for name, data in REPO.items() if not name.startswith("regr")
 )
+"""The bytes the TabFM patterns select from REPO."""
 
 
 class _Hub:

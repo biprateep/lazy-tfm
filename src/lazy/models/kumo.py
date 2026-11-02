@@ -80,52 +80,51 @@ __all__ = [
     "KumoQuantile",
 ]
 
-#: The structured-data-models commit LAZY's recipe was read from and tested
-#: on.
 REPOSITORY_COMMIT = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298"
+"""The structured-data-models commit LAZY's recipe was read from and tested on.
+"""
 
-#: What ``lazy setup kumo`` installs. PyPI holds only a placeholder of the
-#: package, and refuses a git URL in an extra.
 REPOSITORY_BUILD = (
     "structured-data-models @ git+https://github.com/NVIDIA/"
     f"structured-data-models@{REPOSITORY_COMMIT}"
 )
+"""What ``lazy setup kumo`` installs. PyPI holds only a placeholder of the
+package, and refuses a git URL in an extra.
+"""
 
-#: The model size each version loads; the sizes share one recipe.
 SIZES: dict[str, str] = {
     "v1-large": "large",
     "v1-medium": "medium",
     "v1-small": "small",
 }
+"""The model size each version loads; the sizes share one recipe."""
 
 # Kumo Tabular's own recipe, ``transforms="auto"``, written out here so that
 # the installed upstream version cannot change it: the regression branch of
 # sdm.models.kumo.tabular.recipe.default_recipe at REPOSITORY_BUILD.
 
-#: The transforms members cycle through under ``transforms="auto"``, by
-#: upstream's position in the ensemble: none, a Yeo-Johnson power transform,
-#: a robust scaling with a soft clip at 3, and a Gaussian rank transform.
 AUTO_TRANSFORMS: tuple[str, ...] = (
     "identity",
     "power",
     "robust",
     "rank_gaussian",
 )
+"""The transforms members cycle through under ``transforms="auto"``, by
+upstream's position in the ensemble: none, a Yeo-Johnson power transform, a
+robust scaling with a soft clip at 3, and a Gaussian rank transform.
+"""
 
-#: How members' columns are permuted when ``feature_shuffle=True``.
 AUTO_FEAT_SHUFFLE_METHOD = "latin"
+"""How members' columns are permuted when ``feature_shuffle=True``."""
 
-#: The two-pass soft outlier clip of the recipe, in standard deviations.
 AUTO_OUTLIER_THRESHOLD = 4.0
+"""The two-pass soft outlier clip of the recipe, in standard deviations."""
 
-#: The fraction of members dropped from each tail of every quantile; an
-#: explicit ``transforms`` drops none.
 AUTO_TRIM_FRACTION = 0.2
+"""The fraction of members dropped from each tail of every quantile; an explicit
+``transforms`` drops none.
+"""
 
-#: The rest of the recipe, and how upstream is run, pinned. ``max_columns``,
-#: ``z_clip`` and ``flip_probability`` act under any ``transforms``;
-#: ``robust_soft_clip`` and ``rank_gaussian_knots`` belong to the auto
-#: transforms.
 _PINNED_RECIPE: dict[str, Any] = {
     # Standardize's floor on the standard deviation.
     "standardize_eps": 1e-6,
@@ -141,17 +140,22 @@ _PINNED_RECIPE: dict[str, Any] = {
     # The precision NVIDIA's benchmarks and model card run on a GPU.
     "autocast_dtype": "float16",
 }
+"""The rest of the recipe, and how upstream is run, pinned. ``max_columns``,
+``z_clip`` and ``flip_probability`` act under any ``transforms``;
+``robust_soft_clip`` and ``rank_gaussian_knots`` belong to the auto transforms.
+"""
 
-#: The quantiles upstream's regression head returns per row, at the levels
-#: 0.001 to 0.999 (``num_quantiles`` of sdm.models.KumoTabular at
-#: REPOSITORY_COMMIT, the same for every size).
 _N_QUANTILES = 999
+"""The quantiles upstream's regression head returns per row, at the levels 0.001
+to 0.999 (``num_quantiles`` of sdm.models.KumoTabular at REPOSITORY_COMMIT, the
+same for every size).
+"""
 
 # Features in float64 and targets in float32, as upstream is handed them.
 _Array: TypeAlias = npt.NDArray[np.floating[Any]]
 
-#: The versions the recipe above was read from upstream for.
 _RECIPE_VERSIONS: tuple[str, ...] = tuple(SIZES)
+"""The versions the recipe above was read from upstream for."""
 
 
 class KumoQuantile(

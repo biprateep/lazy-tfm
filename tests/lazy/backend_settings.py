@@ -6,7 +6,6 @@ A backend the conformance suite cannot find here fails that suite, so a new
 backend arrives with its settings.
 """
 
-#: Per backend: parameters small enough for CPU, as its own tests use.
 BACKEND_SETTINGS = {
     "kumo": {"version": "v1-small", "n_estimators": 2, "chunk_size": 7},
     "limix": {"n_estimators": 2, "chunk_size": 7},
@@ -19,3 +18,4 @@ BACKEND_SETTINGS = {
         "n_dither": 2,
     },
 }
+"""Per backend: parameters small enough for CPU, as its own tests use."""

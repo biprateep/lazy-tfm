@@ -79,10 +79,10 @@ _CACHE_MEMORY_FRACTION = 0.6
 # Frames in this package, skipped to point warnings at the caller's code.
 _PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: The versions :data:`lazy.models._limix_preprocess.RECIPE` was read from
-#: upstream for. A new version joins once its recipe is checked against
-#: upstream's.
 _RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
+"""The versions :data:`lazy.models._limix_preprocess.RECIPE` was read from
+upstream for. A new version joins once its recipe is checked against upstream's.
+"""
 
 
 class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):

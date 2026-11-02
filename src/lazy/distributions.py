@@ -58,9 +58,10 @@ __all__ = [
 # distribution's tail must be to be its mode, relatively.
 _MODE_RTOL = 1e-9
 
-#: Optional per-object metadata carried alongside a distribution, as in qp:
-#: each value has one entry per row.
 Ancil: TypeAlias = Mapping[str, npt.NDArray[Any]]
+"""Optional per-object metadata carried alongside a distribution, as in qp: each
+value has one entry per row.
+"""
 
 
 def _freeze(array: npt.ArrayLike) -> _typing.FloatArray:
@@ -954,10 +955,10 @@ def _cumulative(probabilities: _typing.FloatArray) -> _typing.FloatArray:
     )
 
 
-#: Any per-object distribution this module defines.
 Distribution: TypeAlias = (
     HistogramDistribution | QuantileDistribution | MixtureDistribution
 )
+"""Any per-object distribution this module defines."""
 
 
 def concatenate(parts: Sequence[Distribution]) -> Distribution:

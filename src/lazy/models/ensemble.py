@@ -58,35 +58,39 @@ __all__ = [
     "LazyEnsembleModel",
 ]
 
-#: The accepted values of ``pooling``.
 POOLINGS: tuple[str, ...] = ("geometric", "linear", "quantile")
+"""The accepted values of ``pooling``."""
 
 Pooling: TypeAlias = Literal["geometric", "linear", "quantile"]
 
-#: What a member may be given as: a backend name, or an estimator.
 Member: TypeAlias = str | base.BaseDensityRegressor
+"""What a member may be given as: a backend name, or an estimator."""
 
-#: How far the pooling grid extends past the training targets, as a fraction
-#: of their range on each side; the native grid of TabICL is padded alike.
 POOL_PADDING = 0.25
+"""How far the pooling grid extends past the training targets, as a fraction of
+their range on each side; the native grid of TabICL is padded alike.
+"""
 
-#: The fewest bins the automatic pooling grid has.
 MIN_POOL_BINS = 200
+"""The fewest bins the automatic pooling grid has."""
 
-#: The most bins the automatic pooling grid has, which bounds the memory of
-#: a pooled prediction at 80 kB per row in float64.
 MAX_POOL_BINS = 10_000
+"""The most bins the automatic pooling grid has, which bounds the memory of a
+pooled prediction at 80 kB per row in float64.
+"""
 
-#: The floor added to every member's density before the geometric pool takes
-#: its logarithm, as a fraction of the uniform density over the pooling grid.
 LOG_FLOOR = 1e-10
+"""The floor added to every member's density before the geometric pool takes its
+logarithm, as a fraction of the uniform density over the pooling grid.
+"""
 
-#: The cumulative levels the quantile pool averages the members at: 0, 0.001,
-#: ..., 1, the ends included, so that the pool has no point masses.
 QUANTILE_LEVELS: _typing.FloatArray = np.linspace(0.0, 1.0, 1001)
+"""The cumulative levels the quantile pool averages the members at: 0, 0.001,
+..., 1, the ends included, so that the pool has no point masses.
+"""
 
-#: Contexts with fewer rows than this make a pool of several members warn.
 SMALL_CONTEXT_ROWS = 3_000
+"""Contexts with fewer rows than this make a pool of several members warn."""
 
 # A bagged member's mixture is inverted exactly on the union of its
 # components' edges, unless there are more than this many; it is then read

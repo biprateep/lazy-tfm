@@ -20,14 +20,14 @@ import fakes
 from lazy.models import _hub
 from lazy.models import tabicl
 
-#: Small enough for the behavioral suite.
 SETTINGS = {"n_estimators": 2}
+"""Small enough for the behavioral suite."""
 
-#: Where the fake's quantiles sit, in standardized units of the target.
 SPREAD = np.linspace(-1.5, 1.5, 9)
+"""Where the fake's quantiles sit, in standardized units of the target."""
 
-#: Float64 weights in the fake network, so that a pickled one shows (4 MB).
 N_WEIGHTS = 500_000
+"""Float64 weights in the fake network, so that a pickled one shows (4 MB)."""
 
 
 class Network:
@@ -57,8 +57,8 @@ class Network:
 class Regressor:
     """Stands in for ``tabicl.TabICLRegressor``."""
 
-    #: Set by :func:`install`.
     recorder = None
+    """Set by :func:`install`."""
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
