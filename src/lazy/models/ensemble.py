@@ -29,9 +29,8 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 import inspect
 import math
-import numbers
 import os
-from typing import Any, Literal, TypeAlias, TypeGuard
+from typing import Any, Literal, TypeAlias
 import warnings
 
 import numpy as np
@@ -431,20 +430,15 @@ def _check_pooling(pooling: object) -> Pooling:
 
 def _check_options(pool_bins: object, chunk_size: object) -> None:
     """Validates ``pool_bins`` and ``chunk_size``."""
-    if pool_bins is not None and (not _is_integer(pool_bins) or pool_bins < 2):
+    if pool_bins is not None and (
+        not _ensemble.is_integer(pool_bins) or pool_bins < 2
+    ):
         raise ValueError(f"pool_bins must be None or an int >= 2: {pool_bins=}")
-    if not _is_integer(chunk_size) or chunk_size < 0:
+    if not _ensemble.is_integer(chunk_size) or chunk_size < 0:
         raise ValueError(
             "chunk_size must be a non-negative int (0 means one pass): "
             f"{chunk_size=}"
         )
-
-
-def _is_integer(value: object) -> TypeGuard[int]:
-    """Whether ``value`` is a Python or NumPy integer, and not a bool."""
-    return isinstance(value, numbers.Integral) and not isinstance(
-        value, bool | np.bool_
-    )
 
 
 def _check_models(models: object) -> list[tuple[str, Member]]:

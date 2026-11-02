@@ -533,6 +533,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             built()
 
     def _check_backend_params(self) -> None:
+        if not isinstance(self.ignore_pretraining_limits, bool):
+            raise ValueError(
+                "ignore_pretraining_limits must be a bool: "
+                f"{self.ignore_pretraining_limits=}"
+            )
         if (
             self.kv_cache in ("int8", "fp8")
             and self.version in _UNQUANTISED_VERSIONS
