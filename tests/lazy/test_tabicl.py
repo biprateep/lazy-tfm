@@ -256,3 +256,15 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone():
         np.testing.assert_array_equal(single, whole)
     spread = (whole[:, -1] - whole[:, 0]).min()
     np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)
+
+
+def test_missing_values_reach_the_fake_as_they_reach_upstream(
+    monkeypatch, data
+):
+    """Upstream's encoder fills them, so the fake fits and predicts too."""
+    X, y, X_test = data
+    X, X_test = X.copy(), X_test.copy()
+    X[::5, 1] = np.nan
+    X_test[::3, 0] = np.nan
+    model = fakes.Backend("tabicl", monkeypatch)().fit(X, y)
+    assert np.isfinite(model.predict_distribution(X_test).locs).all()

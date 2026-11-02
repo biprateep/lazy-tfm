@@ -103,6 +103,9 @@ class Regressor:
         self._build_inference_config()
         self._load_model()
         self.model_.to(self.device_)
+        # Upstream's encoder, which also fills missing values, comes first.
+        self.X_encoder_ = preprocessing.TransformToNumerical()
+        X = self.X_encoder_.fit_transform(X)
         self.context_ = np.array(X, dtype=np.float64)
         self.ensemble_generator_ = preprocessing.EnsembleGenerator(
             classification=False,
@@ -128,7 +131,7 @@ class Regressor:
             # Upstream hands the network the cache and leaves it there.
             self.model_._cache = self.model_kv_cache_
             context = self.model_.cached_context()
-        signal = fakes.response(X, context)
+        signal = fakes.response(self.X_encoder_.transform(X), context)
         return (signal[:, None] + SPREAD).astype(np.float32)
 
     def __getstate__(self):
