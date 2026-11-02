@@ -876,7 +876,13 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
             # mkstemp makes the file private (0600); give it the mode any new
             # file would get, so that a shared cache is readable by others.
             os.chmod(tmp, 0o666 & ~_umask())
-            os.replace(tmp, dest)
+            try:
+                os.replace(tmp, dest)
+            except PermissionError:
+                # Windows refuses to replace a file that another process,
+                # having finished first, holds open; keep that copy.
+                if not _is_complete(dest, size):
+                    raise
     finally:
         tmp.unlink(missing_ok=True)
     print(

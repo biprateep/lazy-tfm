@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import io
 import os
+import pathlib
 import stat
 import time
 import warnings
@@ -707,6 +708,36 @@ def test_parallel_downloads_to_one_cache_do_not_collide(
     assert paths[0].read_bytes() == payload
     assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
     assert timeouts and all(t is not None and t > 0 for t in timeouts)
+
+
+def test_a_copy_another_process_holds_open_is_kept(isolated_home, monkeypatch):
+    """As on Windows, which cannot replace a file another process has open."""
+    payload = b"the whole file"
+    _serve(monkeypatch, payload)
+    root = isolated_home / "shared"
+
+    def replace(src, dst):
+        pathlib.Path(dst).write_bytes(payload)  # The other process's copy.
+        raise PermissionError(13, "Access is denied", str(dst))
+
+    monkeypatch.setattr(datasets.os, "replace", replace)
+    assert _fetch_fake(root).read_bytes() == payload
+    assert sorted(p.name for p in root.iterdir()) == ["fake.bin"]
+
+
+def test_a_refused_move_with_no_finished_copy_raises(
+    isolated_home, monkeypatch
+):
+    _serve(monkeypatch, b"the whole file")
+    root = isolated_home / "shared"
+
+    def replace(src, dst):
+        raise PermissionError(13, "Access is denied", str(dst))
+
+    monkeypatch.setattr(datasets.os, "replace", replace)
+    with pytest.raises(PermissionError):
+        _fetch_fake(root)
+    assert not list(root.iterdir())
 
 
 @pytest.mark.skipif(
