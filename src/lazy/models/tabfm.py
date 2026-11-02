@@ -65,7 +65,6 @@ import functools
 from importlib import util
 import inspect
 import math
-import numbers
 import os
 import types
 from typing import Any
@@ -659,7 +658,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             value = getattr(self, name)
             if _is_auto(value) or _is_grid(value):
                 continue
-            if not _is_count(value):
+            if not _ensemble.is_integer(value):
                 raise ValueError(
                     f"{name} must be 'auto', 'grid' or an int from 2 to "
                     f"{MAX_CLASSES}: {name}={value!r}"
@@ -674,20 +673,23 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                     f"each hierarchy level needs at least two bins: "
                     f"{name}={value}"
                 )
-        if self.n_dither < 1:
-            raise ValueError("n_dither must be at least 1")
+        for name in ("n_dither", "member_batch_size", "query_block_rows"):
+            value = getattr(self, name)
+            if not (_ensemble.is_integer(value) and value >= 1):
+                raise ValueError(
+                    f"{name} must be an int of at least 1: {name}={value!r}"
+                )
+        if not isinstance(self.keep_cache_on_device, bool):
+            raise ValueError(
+                "keep_cache_on_device must be a bool: "
+                f"{self.keep_cache_on_device=}"
+            )
         self._check_grid_bins()
         # _fit sets the clipped context targets before the base class
         # validates, so the layout is fixed here, before any group is fitted.
         self._resolve_bins(self.y_context_.size)
         if self.prior_shift not in (None, "em"):
             raise ValueError("prior_shift must be None or 'em'")
-        for name in ("member_batch_size", "query_block_rows"):
-            value = getattr(self, name)
-            if not _is_count(value):
-                raise ValueError(
-                    f"{name} must be an int of at least 1: {name}={value!r}"
-                )
         self.inference_ = self._resolve_inference()
 
     def _resolve_inference(self) -> str:
@@ -1380,15 +1382,6 @@ def _is_auto(value: object) -> bool:
 def _is_grid(value: object) -> bool:
     """Whether a bin count is ``"grid"``."""
     return isinstance(value, str) and value == GRID_BINS
-
-
-def _is_count(value: object) -> bool:
-    """Whether ``value`` is an int (Python or NumPy, not a bool) >= 1."""
-    return (
-        isinstance(value, numbers.Integral)
-        and not isinstance(value, bool | np.bool_)
-        and int(value) >= 1
-    )
 
 
 def _bin_labels(

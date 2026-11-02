@@ -7,6 +7,12 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The package is marked typed (`py.typed`), so type checkers read its
+  annotations.
+- The source distribution includes the tests and the docs pages they read.
+
 ### Changed
 
 - The minimum dependency versions are raised to ones that install and work
@@ -23,6 +29,10 @@ change the API.
   complex features or targets raise instead of losing their imaginary
   part. The errors for `y=None` and for a wrong or zero feature count use
   scikit-learn's wording.
+- TabFM's `n_dither` and `keep_cache_on_device`, and TabPFN's
+  `ignore_pretraining_limits`, are validated at `fit` with a `ValueError`
+  that names the argument. A float or string `n_dither` failed deep inside,
+  and `n_dither=True` was taken as 1.
 - `LazyModel.set_params(model=...)` with a value that is not a backend name,
   such as an array, no longer raises; as for any unknown name, `fit` refuses
   it. scikit-learn's `check_do_not_raise_errors_in_init_or_set_params` now
