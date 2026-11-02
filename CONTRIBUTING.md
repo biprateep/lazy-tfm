@@ -21,6 +21,9 @@ The `backends` group holds what PyPI cannot install, NVIDIA's
 default group, since it brings PyTorch, so a plain `uv sync` and CI stay
 light.
 
+The hooks run ruff and mypy from this environment, at the versions in
+`uv.lock`, so run `uv sync` again after the lockfile changes.
+
 `uv sync` also removes packages that are not in the lockfile. If you keep
 extra packages in the environment, use `uv sync --inexact`.
 
