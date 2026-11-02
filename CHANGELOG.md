@@ -13,6 +13,9 @@ change the API.
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
   pinned file itself, so the user never saw it.
+- The package is marked typed (`py.typed`), so type checkers read its
+  annotations.
+- The source distribution includes the tests and the docs pages they read.
 
 ### Changed
 
@@ -23,6 +26,10 @@ change the API.
 
 ### Fixed
 
+- `LazyModel.set_params(model=...)` with a value that is not a backend name,
+  such as an array, no longer raises; as for any unknown name, `fit` refuses
+  it. scikit-learn's `check_do_not_raise_errors_in_init_or_set_params` now
+  passes.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.

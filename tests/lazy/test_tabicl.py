@@ -13,13 +13,13 @@ import io
 import os
 import pathlib
 import pickle
-import threading
 import time
 
 import fakes
 from fakes import tabicl as fake_tabicl
 import numpy as np
 import pytest
+import threads
 
 import lazy
 from lazy.models import _device
@@ -43,20 +43,11 @@ def data():
 def _in_threads(function, n):
     """Runs ``function(i)`` for each i in range(n), each in its own thread."""
     answers = [None] * n
-    errors = []
 
     def run(i):
-        try:
-            answers[i] = function(i)
-        except BaseException as error:  # noqa: BLE001 - reported below.
-            errors.append(error)
+        answers[i] = function(i)
 
-    threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert not errors, errors
+    assert threads.run(*(lambda i=i: run(i) for i in range(n))), "deadlock"
     return answers
 
 
@@ -256,3 +247,15 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone():
         np.testing.assert_array_equal(single, whole)
     spread = (whole[:, -1] - whole[:, 0]).min()
     np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)
+
+
+def test_missing_values_reach_the_fake_as_they_reach_upstream(
+    monkeypatch, data
+):
+    """Upstream's encoder fills them, so the fake fits and predicts too."""
+    X, y, X_test = data
+    X, X_test = X.copy(), X_test.copy()
+    X[::5, 1] = np.nan
+    X_test[::3, 0] = np.nan
+    model = fakes.Backend("tabicl", monkeypatch)().fit(X, y)
+    assert np.isfinite(model.predict_distribution(X_test).locs).all()

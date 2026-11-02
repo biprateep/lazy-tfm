@@ -103,6 +103,8 @@ def runs(monkeypatch):
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(subprocess, "run", run)
+    # Whether uv is on this machine's PATH must not decide the test.
+    monkeypatch.setattr(_install.shutil, "which", lambda name: f"/bin/{name}")
     return made
 
 
