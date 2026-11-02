@@ -270,7 +270,9 @@ behavioral conformance tests in `tests/lazy/test_conformance.py` (seeds,
 chunking, the cache, transforms, bagging, pickling) run the backend's own code
 in the default suite, on a CPU and in seconds; `tests/lazy/fakes/__init__.py`
 describes what a fake provides, and the five existing ones are the models to
-follow. A fake that needs the upstream package skips without it.
+follow. A fake that needs the upstream package skips without it, so these
+tests run in CI's `backends` job, which installs every backend's package on a
+CPU, and skip in the lighter jobs.
 
 The golden file is recorded once, on a CPU, and regenerated only for a change
 that is meant to move the densities and that the maintainers have approved (as
