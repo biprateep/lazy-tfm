@@ -238,6 +238,25 @@ def test_chunking_changes_nothing(standin_backends, data):
     )
 
 
+def test_quantiles_reduce_one_pooled_chunk_at_a_time(
+    standin_backends, data, monkeypatch
+):
+    X, y = data
+    model = lazy.LazyEnsembleModel(["tabpfn", "limix"], chunk_size=7)
+    expected = model.fit(X, y).predict_distribution(X).ppf([0.1, 0.9])
+
+    monkeypatch.setattr(
+        lazy.LazyEnsembleModel,
+        "_predict_distribution",
+        standins.refuse_every_row,
+    )
+    # Equal up to rounding: numpy's reductions over one chunk's masses and
+    # over every row's can differ in the last bit (one row here, 9e-15).
+    np.testing.assert_allclose(
+        model.predict_quantiles(X, [0.1, 0.9]), expected, rtol=1e-12
+    )
+
+
 # -- the pooling grid --------------------------------------------------------
 
 

@@ -52,7 +52,12 @@ the slowest, and it needs its repository build to be even this fast (see
 Peak memory is bounded by `chunk_size` on every backend (8,192 query rows by
 default), and on TabFM's streaming path `query_block_rows` also bounds the
 host memory of a block of queries. We recommend lowering `chunk_size` on a
-small GPU, and setting it to `0` gives a single pass. A row's answer does not
+small GPU, and setting it to `0` gives a single pass. On the host, `predict`,
+`score` and `evaluate` work through the query rows a block at a time, and
+`predict_quantiles`, `predict_interval` and `predict_pit` a chunk at a time
+(TabFM, which predicts all its queries together, excepted), so their memory
+does not grow with the number of rows; `predict_proba` and
+`predict_distribution` return every row at once. A row's answer does not
 depend on which other rows share its chunk (see {doc}`reproducibility`). Every
 backend shows a progress bar while it predicts (with `progress="auto"`, on a
 terminal or in a notebook but not when output goes to a file).

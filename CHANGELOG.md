@@ -19,6 +19,14 @@ change the API.
 
 ### Changed
 
+- `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
+  the model's `chunk_size` chunks of rows as it is predicted, instead of every
+  row's distribution at once, so their peak memory no longer grows with the
+  number of rows (TabFM, which predicts all its queries together, is
+  unchanged): on 20,000 rows of a 5,000-bucket model it falls from 3.0 GiB to
+  1.2 GiB with the default `chunk_size`, as measured. Their results are
+  unchanged, but for float rounding: at most 1e-14 relatively, measured in
+  one row of 120.
 - The minimum dependency versions are raised to ones that install and work
   together: scipy 1.13, scikit-learn 1.6, pandas 2.2.2, matplotlib 3.8.4 and
   h5py 3.11. The old floors allowed pandas and h5py builds for NumPy 1, with

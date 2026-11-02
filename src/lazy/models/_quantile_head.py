@@ -128,9 +128,9 @@ class QuantileHead:
     """The native grid and density tabulation of a quantile-head backend.
 
     Mixed in before :class:`~lazy.models._ensemble.ContextEnsembleEstimator`,
-    whose ``_chunks`` and ``native_grid_`` it uses. The native grid has
-    :data:`NATIVE_QUANTILE_BINS` equal-width bins across the range of every
-    context target (bagged or not), padded by :data:`NATIVE_PAD` of that
+    whose ``_distribution_chunks`` and ``native_grid_`` it uses. The native
+    grid has :data:`NATIVE_QUANTILE_BINS` equal-width bins across the range of
+    every context target (bagged or not), padded by :data:`NATIVE_PAD` of that
     range on each side; tabulating a row that puts more than
     :data:`OUTSIDE_TOLERANCE` of its probability outside it warns.
     """
@@ -140,7 +140,7 @@ class QuantileHead:
 
     # Provided by ContextEnsembleEstimator; declared for the type checker.
     native_grid_: grid_lib.Grid
-    _chunks: Any
+    _distribution_chunks: Any
 
     def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         del X  # Unused: the native grid depends on the targets alone.
@@ -167,7 +167,7 @@ class QuantileHead:
             return np.empty((0, grid.n_bins))
         blocks = []
         outside = 0
-        for dist in self._chunks(X):
+        for dist in self._distribution_chunks(X):
             blocks.append(dist.on_grid(grid))
             if grid == self.native_grid_ and isinstance(
                 dist, distributions.QuantileDistribution

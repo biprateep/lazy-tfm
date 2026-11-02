@@ -1061,7 +1061,7 @@ class TestTabICL:
         assert outside[0] == 0.0
         assert outside[1] == pytest.approx(3 / 16, abs=0.011)
 
-        monkeypatch.setattr(est, "_chunks", lambda X: iter([dist]))
+        monkeypatch.setattr(est, "_distribution_chunks", lambda X: iter([dist]))
         X = pd.DataFrame({"a": [0.0, 1.0]})
         with pytest.warns(UserWarning, match="1 of 2 rows put more than 1%"):
             est._predict_pdf(X, est.native_grid_)

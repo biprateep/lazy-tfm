@@ -51,13 +51,15 @@ dist[:10]              # the first ten rows
 ensemble = dist.to_qp()   # a qp.Ensemble, for RAIL (the qp extra)
 ```
 
-Since the operations are exact, `predict_quantiles(X, q)` is
-`predict_distribution(X).ppf(q)` and never goes through a grid, and
+Since the operations are exact, `predict_quantiles(X, q)` equals
+`predict_distribution(X).ppf(q)`, up to float rounding, and never goes through
+a grid, and
 `predict_interval(X, coverage)` gives the bounds of the central interval in the
 same way. The `pdf` and `cdf` methods evaluate every row at every value, so
 `dist.cdf(z_true)` has shape `(n, n)`. The `pit` method instead evaluates
 each row at its own value, $F_i(y_i)$, which is the diagonal of that array,
-and `predict_pit(X, y)` is `predict_distribution(X).pit(y)`. For RAIL and
+and `predict_pit(X, y)` equals `predict_distribution(X).pit(y)` in the same
+way. For RAIL and
 other qp users, `to_qp` converts any of the three kinds to a `qp.Ensemble`, and
 {func}`~lazy.distributions.from_qp` converts a histogram or quantile ensemble
 back (both need the `qp` extra, see {doc}`../installation`).
