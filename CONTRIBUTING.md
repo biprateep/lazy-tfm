@@ -52,6 +52,19 @@ CI runs the tests on Python 3.12 to 3.14 against the lockfile, a daily job
 against the newest resolvable dependencies, the pre-commit hooks, a docs build
 with warnings treated as errors, and a build of the package itself.
 
+## How changes are reviewed
+
+Changes reach `main` through pull requests; a fix of a few lines of prose or
+formatting may go straight to `main`. A pull request asks one or both
+maintainers for a review, and waits for it before merging, when it changes
+something users rely on (an imported name, the `lazy` command, a `LAZY_*`
+variable, a saved-file format, or a signature, default, return value, error
+or warning), changes outputs for the same inputs and seed, or changes a core
+design choice. Its Review section names the reason. Other pull requests, such
+as internal changes, new features, speed-ups and tests, merge once CI passes
+and their tests cover the change. Waiting for a review never holds up other
+work.
+
 ## Adding a backend
 
 A new foundation model joins LAZY as a backend: a subclass of
