@@ -449,6 +449,9 @@ add_module_names = False
 # Attributes: sections render as fields, not as a second copy of the
 # attributes autoapi already documents (dataclass fields would appear twice).
 napoleon_use_ivar = True
+# Else napoleon's escaping of a trailing underscore shows through, and the
+# fitted attributes (grid_, provenance_, ...) render without it.
+strip_signature_backslash = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -490,7 +493,7 @@ html_context = {
 
 def _skip_public_reexports(  # Sphinx's event signature.
     app: application.Sphinx,  # noqa: ARG001
-    what: str,  # noqa: ARG001
+    what: str,
     name: str,  # noqa: ARG001
     obj: Any,  # An autoapi mapper object.
     skip: bool,
@@ -503,7 +506,13 @@ def _skip_public_reexports(  # Sphinx's event signature.
     the grid). The first have no page of their own, so they are documented
     where they are re-exported; the second already have one, and a second
     copy would make every cross-reference to them ambiguous.
+
+    An attribute without a docstring of its own is skipped too: its class's
+    ``Attributes:`` section already documents it, and autoapi would add an
+    empty entry for it.
     """
+    if what == "attribute" and not getattr(obj, "docstring", ""):
+        return True
     original = getattr(obj, "obj", {}).get("original_path") or ""
     if getattr(obj, "imported", False) and original:
         module = original.rpartition(".")[0]
