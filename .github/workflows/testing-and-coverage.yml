@@ -42,8 +42,10 @@ jobs:
     - name: Install the locked environment
       run: uv sync --locked --python ${{ matrix.python-version }}
     - name: Run unit tests with pytest
-      run: uv run --no-sync pytest --cov=lazy --cov-report=xml
+      run: uv run --no-sync pytest --cov --cov-report=xml
+    # The legs measure the same code, so one report is enough.
     - name: Upload coverage report to codecov
+      if: matrix.python-version == '3.12'
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -92,7 +94,9 @@ jobs:
         uv venv --python 3.12
         uv pip install --torch-backend cpu -r requirements-cpu.txt -e .
     - name: Run unit tests with pytest
-      run: .venv/bin/python -m pytest --cov=lazy --cov-report=xml
+      # This job also runs the tests that need a backend package, so it
+      # holds coverage to a higher floor than pyproject.toml's.
+      run: .venv/bin/python -m pytest --cov --cov-report=xml --cov-fail-under=89
     - name: Upload coverage report to codecov
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
       with:
