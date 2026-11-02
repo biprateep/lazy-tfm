@@ -216,3 +216,7 @@ key/value cache of the context, which costs one forward pass over the context
 per member. TabFM is the exception, since it fits and prefills inside every
 `predict` call (see {doc}`scaling`). `score` returns the negative CDE loss, so
 a search object that maximizes it prefers the better distributions.
+
+Every model is a scikit-learn regressor, so meta-estimators such as
+`StackingRegressor` and {func}`sklearn.inspection.partial_dependence` accept
+it. Its tags declare that it accepts `NaN` features and requires a target.

@@ -8,6 +8,7 @@ them they hold ``__init__`` to storing its arguments and nothing else, and
 """
 
 import pytest
+from sklearn import utils as sklearn_utils
 from sklearn.utils import estimator_checks
 
 import lazy
@@ -35,3 +36,10 @@ CHECKS = [
 @pytest.mark.parametrize("estimator", ESTIMATORS, ids=repr)
 def test_sklearn_contract(estimator, check):
     check(type(estimator).__name__, estimator)
+
+
+@pytest.mark.parametrize("estimator", ESTIMATORS, ids=repr)
+def test_every_estimator_is_a_regressor_that_accepts_nan(estimator):
+    tags = sklearn_utils.get_tags(estimator)
+    assert tags.estimator_type == "regressor"
+    assert tags.input_tags.allow_nan
