@@ -275,7 +275,8 @@ class HistogramDistribution(_Base):
         masses: Non-negative weight in each bucket, shape (n_rows,
             n_buckets), stored as given; every method treats each row as
             renormalised to sum to one (an empty row as uniform over the
-            buckets). :attr:`probabilities` gives the renormalised masses.
+            buckets of positive width). :attr:`probabilities` gives the
+            renormalised masses.
         ancil: Optional per-row metadata, each value of length n_rows.
     """
 
@@ -316,11 +317,15 @@ class HistogramDistribution(_Base):
     def probabilities(self) -> _typing.FloatArray:
         """The masses renormalised to sum to one per row, (n_rows, n_buckets).
 
-        An empty row is uniform in probability over the buckets.
+        An empty row is uniform in probability over the buckets of positive
+        width, so that a zero-width bucket carries none; over every bucket
+        if none has a width.
         """
         total = self.masses.sum(axis=1, keepdims=True)
         empty = total[:, 0] <= 0
-        uniform = np.full_like(self.masses, 1.0 / self.masses.shape[1])
+        wide = self.widths > 0
+        weights = wide if wide.any() else np.ones_like(wide)
+        uniform = weights / weights.sum()
         with np.errstate(divide="ignore", invalid="ignore"):
             return np.where(empty[:, None], uniform, self.masses / total)
 
@@ -352,8 +357,8 @@ class HistogramDistribution(_Base):
     def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """The mass in each bin of ``grid`` over its width, unnormalized.
 
-        From :attr:`probabilities`, so that an empty row is uniform in
-        probability over the buckets here as in every other method.
+        From :attr:`probabilities`, so that an empty row is treated here as
+        in every other method.
         """
         return grid.rebin(self.probabilities, self.bins)
 
