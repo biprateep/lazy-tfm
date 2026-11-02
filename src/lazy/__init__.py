@@ -82,6 +82,7 @@ from lazy.models import is_cached
 from lazy.models import KumoQuantile
 from lazy.models import LazyEnsembleModel
 from lazy.models import LazyModel
+from lazy.models import LicenseWarning
 from lazy.models import LimiXBarDistribution
 from lazy.models import list_estimators
 from lazy.models import list_versions
@@ -110,6 +111,7 @@ __all__ = [
     "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
+    "LicenseWarning",
     "LimiXBarDistribution",
     "POINT_ESTIMATORS",
     "PerformanceWarning",

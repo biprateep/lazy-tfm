@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
+  issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
+  own downloader asks for the licence to be accepted, but LAZY downloads the
+  pinned file itself, so the user never saw it.
+
 ### Changed
 
 - The minimum dependency versions are raised to ones that install and work
