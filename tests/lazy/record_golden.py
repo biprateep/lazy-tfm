@@ -28,25 +28,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Records the requested backends (all, by default) and returns 0."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "backends", nargs="*", default=sorted(golden_data.RECORDED_PARAMS)
+        "backends",
+        nargs="*",
+        choices=sorted(golden_data.RECORDED_PARAMS),
+        help="the backends to record; every one when none is named",
     )
     args = parser.parse_args(argv)
     _, _, X_test = golden_data.problem()
     golden_data.GOLDEN_DIR.mkdir(exist_ok=True)
-    recorded = _recording()
-    for name in args.backends:
-        model = golden_data.fit(name)
-        pdfs = model.predict_proba(X_test, golden_data.GRID)
-        path = golden_data.GOLDEN_DIR / f"{name}.npz"
-        np.savez_compressed(
-            path,
-            pdfs=pdfs,
-            edges=golden_data.GRID.edges,
-            provenance=json.dumps(
-                {**recorded, "model": model.provenance_}, default=str
-            ),
-        )
-        print(f"{name}: {pdfs.shape} -> {path}")
+    with golden_data.pinned_threads():
+        recorded = _recording()
+        for name in args.backends or sorted(golden_data.RECORDED_PARAMS):
+            model = golden_data.fit(name)
+            pdfs = model.predict_proba(X_test, golden_data.GRID)
+            path = golden_data.GOLDEN_DIR / f"{name}.npz"
+            np.savez_compressed(
+                path,
+                pdfs=pdfs,
+                edges=golden_data.GRID.edges,
+                provenance=json.dumps(
+                    {**recorded, "model": model.provenance_}, default=str
+                ),
+            )
+            print(f"{name}: {pdfs.shape} -> {path}")
     return 0
 
 
@@ -68,6 +72,8 @@ def _recording() -> dict[str, object]:
         "commit": commit,
         "machine": platform.platform(),
         "cpus": os.cpu_count(),
+        # TabPFN's and TabFM's CPU densities differ between processors.
+        "cpu_capability": torch.backends.cpu.get_cpu_capability(),
         "torch_threads": torch.get_num_threads(),
         "thread_variables": {
             name: os.environ.get(name)

@@ -54,6 +54,13 @@ tab, optionally with a `pytest -k` expression, or by adding the label
 `checkpoints` to a pull request; removing the label and adding it back runs
 it again.
 
+The golden tests compare each backend's densities with files in
+`tests/lazy/golden/`, at four torch threads. TabPFN's and TabFM's files were
+recorded on a GitHub runner and match only there: another processor moves
+those two backends by a few percent of the peak. To re-record them, which
+needs Biprateep's approval, run the workflow by hand with `record` naming the
+backends, and commit those backends' files from its `golden` artifact.
+
 On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
 lockfile, on Linux, with Python 3.12 on macOS and Windows too. It also runs
 them with every backend package on a CPU, and at the lowest dependency

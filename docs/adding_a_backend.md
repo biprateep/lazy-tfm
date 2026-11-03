@@ -281,9 +281,13 @@ follow. A fake that needs the upstream package skips without it, so these
 tests run in CI's `backends` job, which installs every backend's package on a
 CPU, and skip in the lighter jobs.
 
-The golden file is recorded once, on a CPU, and regenerated only for a change
+The golden file is recorded once, on a CPU at four torch threads
+(`golden_data.THREADS`), and regenerated only for a change
 that is meant to move the densities and that the maintainers have approved (as
 when the tails of the quantile models were spread over one quantile spacing),
-since it is the guard on the published numbers. The tests that load a checkpoint run
+since it is the guard on the published numbers. Where a backend's densities
+differ between processors, as TabPFN's and TabFM's do, record it on a GitHub
+runner with the checkpoint workflow's `record` input (see the contributing
+guide), so that CI can check it. The tests that load a checkpoint run
 only with `LAZY_RUN_CHECKPOINT_TESTS=1`, so a new backend is finished when
 both the default suite and that run pass.
