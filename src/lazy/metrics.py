@@ -1348,14 +1348,12 @@ def _split_grid(
     if bin_edges is None:
         return y_grid.centers, y_grid.histogram_edges
     edges = np.asarray(bin_edges, dtype=float)
-    if edges.shape != y_grid.edges.shape or not np.allclose(
-        edges, y_grid.edges, rtol=0.0, atol=1e-12
-    ):
+    if not grid_lib._edges_agree(edges, y_grid.edges):  # noqa: SLF001 - the grid's rule.
         raise ValueError(
             "bin_edges differ from the edges of the Grid passed as y_grid; "
             "pass the Grid alone"
         )
-    return y_grid.centers, edges
+    return y_grid.centers, y_grid.edges
 
 
 def _bin_widths(bin_edges: npt.ArrayLike, n_bins: int) -> _typing.FloatArray:
