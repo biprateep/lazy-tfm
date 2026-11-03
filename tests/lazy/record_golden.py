@@ -22,7 +22,6 @@ import sys
 
 import golden_data
 import numpy as np
-import torch
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -56,6 +55,8 @@ def _recording() -> dict[str, object]:
 
     The commit ends in ``-dirty`` when the checkout has uncommitted changes.
     """
+    import torch  # noqa: PLC0415 - pytest imports this module, without torch.
+
     commit = subprocess.run(
         ["git", "describe", "--always", "--dirty", "--abbrev=40"],
         capture_output=True,
