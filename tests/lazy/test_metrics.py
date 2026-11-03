@@ -211,6 +211,16 @@ def test_explicit_bin_edges_must_agree_with_the_grid():
         metrics.cde_loss(y_true, grid, pdfs, bin_edges=grid.edges * 1.01)
 
 
+def test_bin_edges_rebuilt_far_from_zero_agree_with_their_grid():
+    grid = grid_lib.Grid.linear(1e7, 1e7 + 10.0, 100, normalization="histogram")
+    edges = grid_lib.Grid.from_centers(grid.centers).edges
+    pdfs = np.full((1, 100), 0.1)
+    # The edges agree to rounding, so the grid's own edges score them.
+    assert metrics.cde_loss(
+        [1e7 + 5.0], grid, pdfs, bin_edges=edges
+    ) == metrics.cde_loss([1e7 + 5.0], grid, pdfs)
+
+
 def test_point_metrics_leave_residuals_unscaled_by_default():
     y_true = np.array([0.0, 1.0, 3.0, 10.0])
     y_pred = np.array([0.1, 1.2, 3.1, 14.0])
