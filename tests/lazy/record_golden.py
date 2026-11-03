@@ -28,30 +28,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Records the requested backends (all, by default) and returns 0."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "backends", nargs="*", default=sorted(golden_data.RECORDED_PARAMS)
+        "backends",
+        nargs="*",
+        choices=sorted(golden_data.RECORDED_PARAMS),
+        help="the backends to record; every one when none is named",
     )
     args = parser.parse_args(argv)
     _, _, X_test = golden_data.problem()
     golden_data.GOLDEN_DIR.mkdir(exist_ok=True)
     with golden_data.pinned_threads():
         recorded = _recording()
-        fitted = {name: golden_data.fit(name) for name in args.backends}
-        predicted = {
-            name: model.predict_proba(X_test, golden_data.GRID)
-            for name, model in fitted.items()
-        }
-    for name, pdfs in predicted.items():
-        model = fitted[name]
-        path = golden_data.GOLDEN_DIR / f"{name}.npz"
-        np.savez_compressed(
-            path,
-            pdfs=pdfs,
-            edges=golden_data.GRID.edges,
-            provenance=json.dumps(
-                {**recorded, "model": model.provenance_}, default=str
-            ),
-        )
-        print(f"{name}: {pdfs.shape} -> {path}")
+        for name in args.backends or sorted(golden_data.RECORDED_PARAMS):
+            model = golden_data.fit(name)
+            pdfs = model.predict_proba(X_test, golden_data.GRID)
+            path = golden_data.GOLDEN_DIR / f"{name}.npz"
+            np.savez_compressed(
+                path,
+                pdfs=pdfs,
+                edges=golden_data.GRID.edges,
+                provenance=json.dumps(
+                    {**recorded, "model": model.provenance_}, default=str
+                ),
+            )
+            print(f"{name}: {pdfs.shape} -> {path}")
     return 0
 
 

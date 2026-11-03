@@ -21,7 +21,7 @@ on:
         required: false
         default: ""
       record:
-        description: "backends to re-record golden densities for, instead of testing"
+        description: "backends to re-record golden densities for, space-separated, instead of testing (select is then ignored)"
         required: false
         default: ""
   pull_request:
@@ -67,6 +67,7 @@ jobs:
         .venv/bin/python -m pytest "${args[@]}"
     - name: Record the golden densities
       if: env.RECORD != ''
+      # Unquoted, so that each name is its own argument.
       run: .venv/bin/python tests/lazy/record_golden.py $RECORD
     - name: Upload the golden densities
       if: env.RECORD != ''
