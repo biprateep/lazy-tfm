@@ -35,7 +35,7 @@ Typical usage example:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 import dataclasses
 from typing import Any, TypeAlias
 
@@ -57,6 +57,13 @@ __all__ = [
 # How much denser than every segment between the quantiles a quantile
 # distribution's tail must be to be its mode, relatively.
 _MODE_RTOL = 1e-9
+
+# A mixture's quantiles and mode are those of its histogram on the union of
+# the components' edges, which holds members x buckets values per row: a
+# bagged model's 40,008 for eight members of 5,000 buckets. The rows go a
+# block at a time, so that a block's histogram holds about this many bytes;
+# its components' CDFs take a few times that while it is built.
+_MIXTURE_BLOCK_BYTES = 32 * 2**20
 
 Ancil: TypeAlias = Mapping[str, npt.NDArray[Any]]
 """Optional per-object metadata carried alongside a distribution, as in qp: each
@@ -875,12 +882,42 @@ class MixtureDistribution(_Base):
         """The mixture as one histogram on the union of edges; exact."""
         return self.histogramize(self.bins)
 
-    def _weighted(self, values: Sequence[_typing.FloatArray]) -> Any:
-        """The weighted sum of one array per component."""
-        total = self.weights[0] * values[0]
-        for weight, value in zip(self.weights[1:], values[1:], strict=True):
-            total = total + weight * value
+    def _weighted(self, values: Iterable[_typing.FloatArray]) -> Any:
+        """The weighted sum of one array per component, accumulated in turn.
+
+        A generator of the arrays keeps only the running sum and one array.
+        """
+        total = None
+        for weight, value in zip(self.weights, values, strict=True):
+            if total is None:
+                total = weight * value
+            else:
+                total += weight * value
         return total
+
+    def _histogram_blocks(
+        self,
+    ) -> Iterator[tuple[slice, HistogramDistribution]]:
+        """The union histogram a block of rows at a time.
+
+        Each block is :meth:`histogramize` on the union of edges, with this
+        mixture's weights: a sliced mixture would renormalize them, which can
+        move them by an ulp.
+
+        Yields:
+            Tuples (rows, histogram): the slice of rows a block covers, and
+            those rows' histogram on the union of edges. No rows give one
+            empty block.
+        """
+        bins = self.bins
+        size = max(1, _MIXTURE_BLOCK_BYTES // (8 * bins.size))
+        for start in range(0, max(self.npdf, 1), size):
+            rows = slice(start, start + size)
+            cdf = _unit(
+                self._weighted(c[rows].cdf(bins) for c in self.components)
+            )
+            masses = np.maximum(np.diff(cdf, axis=1), 0.0)
+            yield rows, HistogramDistribution(bins, masses)
 
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
@@ -906,27 +943,33 @@ class MixtureDistribution(_Base):
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values))."""
-        return self._weighted([c.pdf(values) for c in self.components])
+        return self._weighted(c.pdf(values) for c in self.components)
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
-        return _unit(self._weighted([c.cdf(values) for c in self.components]))
+        return _unit(self._weighted(c.cdf(values) for c in self.components))
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
         return _unit(
             self._weighted(
-                [c._cdf_rows(values) for c in self.components]  # noqa: SLF001 - same module.
+                c._cdf_rows(values)  # noqa: SLF001 - same module.
+                for c in self.components
             )
         )
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         # The union histogram is the same distribution, so its inverse is
         # this one's.
-        return self.to_histogram()._ppf_rows(levels)  # noqa: SLF001 - same module.
+        return np.concatenate(
+            [
+                block._ppf_rows(levels[rows])  # noqa: SLF001 - same module.
+                for rows, block in self._histogram_blocks()
+            ]
+        )
 
     def mean(self) -> _typing.FloatArray:
         """The mean of each row, shape (n_rows,)."""
-        return self._weighted([c.mean() for c in self.components])
+        return self._weighted(c.mean() for c in self.components)
 
     def var(self) -> _typing.FloatArray:
         """The variance of each row, shape (n_rows,).
@@ -937,15 +980,15 @@ class MixtureDistribution(_Base):
         means = [c.mean() for c in self.components]
         mean = self._weighted(means)
         return self._weighted(
-            [
-                c.var() + (m - mean) ** 2
-                for c, m in zip(self.components, means, strict=True)
-            ]
+            c.var() + (m - mean) ** 2
+            for c, m in zip(self.components, means, strict=True)
         )
 
     def mode(self) -> _typing.FloatArray:
         """The centre of each row's densest union bucket, shape (n_rows,)."""
-        return self.to_histogram().mode()
+        return np.concatenate(
+            [block.mode() for _, block in self._histogram_blocks()]
+        )
 
     def to_qp(self) -> Any:
         """The mixture as a ``qp.Ensemble`` (``hist`` on the union edges)."""
