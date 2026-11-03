@@ -51,7 +51,7 @@ than in an override of `_fit`.
 every call and raises a `TypeError` or `RuntimeError` naming the backend
 otherwise. A query's answer must not depend on the other queries in its
 chunk, and a prediction must leave the handle as it found it, so that the
-cache and chunking tests can compare answers bit for bit. A model that
+cache and chunking tests can compare answers to float rounding. A model that
 combines its members by a trimmed mean of their quantiles
 (`member_combination="quantile_trimmed_average"`, with
 `member_trim_fraction`) also implements `_predict_members`, which returns

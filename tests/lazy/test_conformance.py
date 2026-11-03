@@ -452,8 +452,8 @@ def test_chunking_changes_nothing_but_rounding(cls, data):
     answers for a 7-row chunk and for the whole set differ by one ulp in
     a few bins (bit-identical on the Arm machines the suite is developed
     on), as blocked scoring did. The checkpoint tests check each real
-    backend on a CPU: bit for bit where it claims ``exact_chunking``, and to
-    float rounding where it does not.
+    backend on a CPU: bit for bit where it claims ``exact_chunking`` (none
+    does), and to float rounding otherwise.
     """
     X, z, X_test = data
     whole = cls(chunk_size=0).fit(X, z).predict_proba(X_test)
@@ -466,7 +466,9 @@ def test_the_cache_changes_nothing(cls, data):
     cached = cls(kv_cache=True, bag_size=40).fit(X, z)
     uncached = cls(kv_cache=False, bag_size=40).fit(X, z)
     expected = uncached.predict_proba(X_test)
-    rtol = cls.kv_cache_rtol
+    # Tighter than a backend's kv_cache_rtol, which is its checkpoint's
+    # agreement on a CPU: the fakes' cached path is the same arithmetic.
+    rtol = 1e-5
     np.testing.assert_allclose(
         cached.predict_proba(X_test),
         expected,

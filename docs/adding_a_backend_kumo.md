@@ -34,17 +34,16 @@ are three files in one Hugging Face repository,
 `{small,medium,large}/regressor.pt`, at a tagged commit, which upstream
 downloads itself. Since the column-wise attention lets each query see only the
 context rows, we expected a query's answer not to depend on the other queries.
-On a CPU, the queries predicted at once or seven at a time gave bit-identical
-predictions. However, a query predicted on its own takes a different
+Chunks of several queries give the same answers to float rounding, and bit
+for bit on some CPUs. A query predicted on its own takes a different
 matrix-multiply path and differs by about $10^{-6}$ of the quantiles' spread,
 and the cached and uncached forward passes differ by up to about $10^{-5}$ of
 the spread for a bagged member with missing values whose columns LAZY
 permutes. The backend therefore declares `exact_chunking = False`, and the
 conformance suite checks its chunking to that tolerance on a CPU (on a GPU
 under mixed precision, the backends agree only to float16 rounding; see
-{doc}`guide/reproducibility`). The package itself cannot come from PyPI, which holds only a
-placeholder of the name, so the backend needs a `setup` hook, as TabFM and
-LimiX do.
+{doc}`guide/reproducibility`). The package comes from PyPI with the `kumo`
+extra (see "Installing the package" below).
 
 From this reading we made two decisions. The three sizes become three
 versions (`v1-large`, the default as it is upstream, `v1-medium` and
@@ -110,6 +109,7 @@ class KumoQuantile(
         "accuracy has not been measured"
     )
     exact_chunking = False
+    kv_cache_rtol = 1e-3
     cpu_friendly_versions = ("v1-small",)
 ```
 

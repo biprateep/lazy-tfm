@@ -19,7 +19,8 @@ themselves, in full. The bucket masses rather than quantiles, because upstream
 computes its quantiles by inverting this same piecewise-uniform CDF.
 
 The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
-fit-time key/value cache (at full precision, so exact on a CPU),
+fit-time key/value cache (at full precision, so exact to float rounding on
+a CPU),
 ``feature_shuffle`` onto its ``FEATURE_SHIFT_METHOD``, ``outlier_threshold``
 onto its soft clip, ``OUTLIER_REMOVAL_STD``,
 ``softmax_temperature`` onto its own and ``mixed_precision`` onto its
@@ -421,7 +422,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ``0`` does them in one pass. A row's answer never depends on the
             other rows in its chunk: TabPFN's attention builds its keys and
             values from the context rows alone and its preprocessors are
-            fitted on the context. Bit for bit on a CPU; under mixed
+            fitted on the context. To float rounding on a CPU; under mixed
             precision on a GPU, to float16 rounding.
         progress: A progress bar over the query rows: ``"auto"`` shows it
             on a terminal or in a notebook, ``True`` always, ``False`` never.
@@ -471,6 +472,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     )
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
+    # Not bit for bit on every CPU: on a 4-core x86 machine, 7-row chunks
+    # and one pass differ in the last bits of most densities.
+    exact_chunking = False
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
