@@ -290,8 +290,7 @@ bagging.round(3)
 #
 # Finally, every model chooses its device at `fit`, and most of them need a
 # GPU to be practical at these sizes (TabPFN-3.5 refuses more than 5,000
-# context rows per member on a CPU), while TabICL runs nearly as fast on a CPU
-# as on a GPU.
+# context rows per member on a CPU), while TabICL is fast on a CPU.
 #
 # For the next steps, we suggest the following pages:
 #

@@ -10,12 +10,14 @@ We measured the cost of each model on one NVIDIA GB10 (a Grace-Blackwell
 desktop with 20 Arm CPU cores and 128 GB of memory shared by CPU and GPU),
 with every model at its default settings, on DC1 photometry (12 features). The
 *GPU* run fits on 10,000 context rows and predicts 10,000 more, while the
-*CPU* run fits on 1,000 and predicts 1,000 with the GPU unused. Peak GPU
-memory is what PyTorch allocated at the peak. The last column is the DC1 CDE
-loss on the GPU run (lower is better), a rough guide to accuracy at this
-context size and not a ranking.
+*CPU* run fits on 1,000 and predicts 1,000 with the GPU unused. The CPU run
+therefore has a hundredth of the pairs of context and query rows (1,000 ×
+1,000 against 10,000 × 10,000), so the two columns do not compare the
+devices. Peak GPU memory is what PyTorch allocated at the peak. The last
+column is the DC1 CDE loss on the GPU run (lower is better), a rough guide to
+accuracy at this context size and not a ranking.
 
-| Model | GPU: fit + predict | Peak GPU memory | CPU: fit + predict | CDE loss |
+| Model | GPU, 10k + 10k rows | Peak GPU memory | CPU, 1k + 1k rows | CDE loss |
 | ----- | -----------------: | --------------: | -----------------: | -------: |
 | TabPFN-3.5 | 14 s | 3.2 GB | 36 s | −13.47 |
 | TabPFN-3.5-fast | 9 s | 2.3 GB | 11 s\* | −13.00 |
@@ -143,7 +145,8 @@ Most of the models need a GPU to be practical. TabPFN refuses CPU contexts
 above 1,000 rows (v2 to v2.6) or 5,000 rows (v3 and later) unless
 `ignore_pretraining_limits=True` or a `bag_size` keeps every bag below that
 size, and `lazy` warns at `fit` when it finds no GPU for TabPFN-3.5. TabICLv2
-is nearly as fast on a CPU as on a GPU, and Kumo Tabular Small
-(`version="v1-small"`, 28 M parameters) is small enough for a CPU, while
-LimiX-2, TabFM and Kumo Tabular's Medium and Large need a GPU.
+fits on 1,000 rows and predicts 1,000 in 7 s on a CPU (in the table above),
+and Kumo Tabular Small (`version="v1-small"`, 28 M parameters) is small
+enough for a CPU, while LimiX-2, TabFM and Kumo Tabular's Medium and Large
+need a GPU.
 {doc}`choosing` describes which model to use on each.
