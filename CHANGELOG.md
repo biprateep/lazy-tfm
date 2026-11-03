@@ -74,6 +74,8 @@ change the API.
 
 ### Fixed
 
+- The warning that a cached checkpoint snapshot may be incomplete names the
+  user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a
   CPU (`exact_chunking` is now `False`), and Kumo Tabular's docs no longer
   claim a bit-for-bit cache there: on a 4-core x86 CPU both agree only to

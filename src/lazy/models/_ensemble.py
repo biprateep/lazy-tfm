@@ -50,16 +50,15 @@ from __future__ import annotations
 import abc
 from collections.abc import Callable, Hashable, Iterator, Mapping
 import numbers
-import os
 import sys
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
-import warnings
 
 import numpy as np
 import pandas as pd
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
@@ -79,12 +78,6 @@ __all__ = [
     "PerformanceWarning",
     "import_extra",
 ]
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package (or LazyModel) they are raised.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 UNIFORM_PARAMS: tuple[str, ...] = (
     "version",
@@ -775,27 +768,25 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             if friendly
             else ""
         )
-        warnings.warn(
+        _warnings.warn(
             f"PyTorch sees no GPU, so device='auto' runs {self.display_name} "
             f"on the CPU. {self.display_name} runs slowly on CPU"
             f"{self.cpu_note}. {suggestion}Pass "
             "device='cpu' to run it there anyway without this warning; see "
             "'Supported models' in the documentation.",
             PerformanceWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _warn_if_bags_too_small(self) -> None:
         """Warns when bags are so small an int was likely meant as a float."""
         if not self.bagging_ or self.bag_rows_ >= _members.MIN_BAG_ROWS:
             return
-        warnings.warn(
+        _warnings.warn(
             f"bag_size={self.bag_size!r} gives each member only "
             f"{self.bag_rows_} context row(s). An int bag_size is a row "
             "count and a float one a fraction of the context: bag_size=1 is "
             "one row, bag_size=1.0 all of them.",
             UserWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
@@ -813,13 +804,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             self.context_limit_note
             or "degrades on contexts larger than about {limit:,} rows"
         )
-        warnings.warn(
+        _warnings.warn(
             f"{self.display_name} {note.format(limit=limit)}, and {seen}. "
             "Bag the context in smaller pieces: "
             f"pass bag_size={limit} with n_estimators >= {needed} so the "
             "members together cover it.",
             ContextSizeWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
 
     def _recipe(self) -> dict[str, Any]:

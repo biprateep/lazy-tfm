@@ -47,9 +47,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterator
-import os
 from typing import Any, TypeAlias
-import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -59,6 +57,7 @@ from sklearn.utils import validation
 
 from lazy import _inputs
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
@@ -88,10 +87,6 @@ the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see :mod:`lazy.metrics`).
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
 # objects). Tables from optional packages have no common type, hence Any.
 _Features: TypeAlias = Any
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package they are raised.
-_PACKAGE_PREFIX = os.path.dirname(os.path.abspath(__file__)) + os.sep
 
 # predict, score and evaluate reduce each row's density as they go, a block
 # of rows at a time, so that no more than about this many bytes of float64
@@ -781,21 +776,19 @@ class BaseDensityRegressor(
         fitted = vars(self).get("feature_names_in_")
         if fitted is None:
             if named:
-                warnings.warn(
+                _warnings.warn(
                     f"X has feature names, but {type(self).__name__} was "
                     "fitted without feature names; using columns by position",
                     UserWarning,
-                    skip_file_prefixes=(_PACKAGE_PREFIX,),
                 )
             frame.columns = [f"x{i}" for i in range(frame.shape[1])]
             return frame
         if not named:
-            warnings.warn(
+            _warnings.warn(
                 "X does not have valid feature names, but "
                 f"{type(self).__name__} was fitted with feature names; using "
                 "columns by position",
                 UserWarning,
-                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
             frame.columns = list(fitted)
             return frame

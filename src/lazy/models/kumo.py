@@ -49,12 +49,12 @@ import pathlib
 import types
 import typing
 from typing import Any, TypeAlias
-import warnings
 
 import numpy as np
 import numpy.typing as npt
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
@@ -352,12 +352,11 @@ class KumoQuantile(
         """
         if not requested:
             return True
-        warnings.warn(
+        _warnings.warn(
             "lazy setup kumo is deprecated and will be removed in 0.7.0: "
             "pip install 'lazy-tfm[kumo]' now installs "
             "structured-data-models.",
             FutureWarning,
-            skip_file_prefixes=(_ensemble._PACKAGE_PREFIX,),  # noqa: SLF001 - the package's shared prefix.
         )
         try:
             # The check every fit makes, KumoTabular included.
@@ -889,12 +888,11 @@ if not typing.TYPE_CHECKING:
             raise AttributeError(
                 f"module {__name__!r} has no attribute {name!r}"
             )
-        warnings.warn(
+        _warnings.warn(
             "lazy.models.kumo.REPOSITORY_BUILD is deprecated and will be "
             "removed in 0.7.0: the kumo extra installs "
             "structured-data-models from PyPI.",
             FutureWarning,
-            stacklevel=2,
         )
         return (
             "structured-data-models @ git+https://github.com/NVIDIA/"

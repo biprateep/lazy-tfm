@@ -22,14 +22,13 @@ Typical usage example:
 
 from __future__ import annotations
 
-import os
 from typing import Any
-import warnings
 
 import numpy as np
 import pandas as pd
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 
@@ -42,12 +41,6 @@ __all__ = [
     "quantile_levels",
     "target_scaling",
 ]
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package (or LazyModel) they are raised.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 NATIVE_QUANTILE_BINS = 1000
 """Bins of the native grid across the training targets' range: as fine as 999
@@ -178,14 +171,13 @@ class QuantileHead:
                     )
                 )
         if outside:
-            warnings.warn(
+            _warnings.warn(
                 f"{outside} of {len(X)} rows put more than "
                 f"{OUTSIDE_TOLERANCE:.0%} of their probability outside the "
                 f"native grid [{grid.y_min:g}, {grid.y_max:g}], and their "
                 "densities there are renormalised. Pass a wider y_grid, or "
                 "use predict_distribution, which has full support.",
                 UserWarning,
-                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 

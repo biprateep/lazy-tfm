@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import dataclasses
 from importlib import metadata
-import os
 import pathlib
-import warnings
+
+from lazy import _warnings
 
 __all__ = [
     "CHECKPOINTS",
@@ -58,12 +58,6 @@ PROVENANCE_KEYS: tuple[str, ...] = (
     "device",
 )
 """The keys of every :meth:`Checkpoint.provenance` record, in its order."""
-
-
-# Frames under this directory are skipped when a warning names its caller.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 
 class LicenseWarning(UserWarning):
@@ -186,11 +180,10 @@ class Checkpoint:
             self._warn_unconfirmed(cached)
             return cached
         if cached is None and self.notify_license:
-            warnings.warn(
+            _warnings.warn(
                 f"Downloading the {self.display_name} weights. "
                 f"{self.license_note}",
                 LicenseWarning,
-                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
         try:
             path = self._fetch(local_files_only=False)
@@ -287,13 +280,12 @@ class Checkpoint:
 
     def _warn_unconfirmed(self, path: pathlib.Path) -> None:
         """Warns that a cached snapshot may be missing files."""
-        warnings.warn(
+        _warnings.warn(
             f"the cached snapshot of {self.repo_id} at {path} could not be "
             "confirmed complete, and may be what an interrupted download "
             "left behind. Run lazy.download_checkpoint("
             f"{self.key!r}) with a network connection to complete it.",
             RuntimeWarning,
-            stacklevel=3,
         )
 
     def _patterns(self) -> list[str] | None:

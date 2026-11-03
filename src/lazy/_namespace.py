@@ -44,6 +44,8 @@ def warn_if_shared() -> bool:
         other = metadata.distribution(OTHER_DISTRIBUTION)
     except metadata.PackageNotFoundError:
         return False
+    # Not lazy._warnings.warn: during an import, the frames above lazy are
+    # importlib's, so skipping lazy's would not reach the user's import.
     warnings.warn(
         f"The PyPI package {OTHER_DISTRIBUTION!r} {other.version} (lazy "
         "attributes for Python objects) is installed in this environment. It "

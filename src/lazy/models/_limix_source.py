@@ -48,8 +48,8 @@ import tarfile
 import tempfile
 import types
 import urllib.request
-import warnings
 
+from lazy import _warnings
 from lazy import datasets
 
 __all__ = [
@@ -64,12 +64,6 @@ __all__ = [
     "locate",
     "missing_dependency",
 ]
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package (or LazyModel) they are raised.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 LIMIX_COMMIT = "516bf396333feb3198cf7aff8a6c10421f218e24"
 """The LimiX commit the backend was validated against."""
@@ -290,12 +284,11 @@ def load() -> types.SimpleNamespace:
         return loaded
     source = locate()
     if source.commit != LIMIX_COMMIT:
-        warnings.warn(
+        _warnings.warn(
             f"LimiX source at {source.root} ({source.origin}) is at commit "
             f"{source.commit or 'unknown'}; lazy was validated on "
             f"{LIMIX_COMMIT}. Results may differ.",
             LimiXSourceWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
     if _ALIAS not in sys.modules:
         parent = types.ModuleType(_ALIAS)
@@ -336,13 +329,12 @@ def _warn_if_redirected(source: Source) -> None:
         root = pathlib.Path(value).expanduser().resolve()
         if root != source.root and root not in _ignored:
             _ignored.add(root)
-            warnings.warn(
+            _warnings.warn(
                 f"${name}={value} names another LimiX source than the one "
                 f"this process loaded, {source.root} ({source.origin}); "
                 "LimiX's code cannot be loaded twice, so it keeps using that "
                 "one. Restart Python to switch.",
                 LimiXSourceWarning,
-                skip_file_prefixes=(_PACKAGE_PREFIX,),
             )
         return
 
