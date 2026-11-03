@@ -59,7 +59,6 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
 from lazy.models import _ensemble
-from lazy.models import _hub
 from lazy.models import _install
 from lazy.models import _locks
 from lazy.models import _members
@@ -552,9 +551,7 @@ class KumoQuantile(
         duration of a prediction. The weights are float32 whatever
         ``mixed_precision`` says, which only autocasts.
         """
-        if self.__dict__.pop("_relocate_checkpoint", False):
-            spec = _hub.get_checkpoint(self.backend, self.version)
-            self.checkpoint_ = spec.download()
+        self._checkpoint()
         return self._memoized_network(
             (self.version, self.device_), self._shared_network
         )
@@ -665,8 +662,6 @@ class KumoQuantile(
             if isinstance(recipe, dict):
                 moved["kumo"] = {**recipe, "autocast": self._autocast_dtype()}
             self.provenance_ = {**self.provenance_, **moved}
-        if "checkpoint_" in state:
-            self._relocate_checkpoint = True
 
 
 @dataclasses.dataclass

@@ -54,7 +54,6 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
 from lazy.models import _ensemble
-from lazy.models import _hub
 from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
@@ -531,10 +530,7 @@ class TabICLQuantile(
             type(regressor), "_load_model"
         ):
             return
-        if self.__dict__.pop("_relocate_checkpoint", False):
-            spec = _hub.get_checkpoint(self.backend, self.version)
-            self.checkpoint_ = spec.download()
-        regressor.model_path = str(self.checkpoint_)
+        regressor.model_path = str(self._checkpoint())
         with self._shared_network(regressor):
             regressor._load_model()  # noqa: SLF001 - the shared loader.
             # As upstream's fit does: a network just loaded is on the CPU.
@@ -635,8 +631,6 @@ class TabICLQuantile(
             if isinstance(recipe, dict):
                 moved["tabicl"] = {**recipe, "use_amp": self.mixed_precision_}
             self.provenance_ = {**self.provenance_, **moved}
-        if "checkpoint_" in state:
-            self._relocate_checkpoint = True
         if "handles_" in state:
             self.handles_ = [
                 dataclasses.replace(

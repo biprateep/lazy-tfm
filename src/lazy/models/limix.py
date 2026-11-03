@@ -62,7 +62,6 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
 from lazy.models import _ensemble
-from lazy.models import _hub
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
@@ -478,9 +477,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         afresh, in this machine's Hugging Face cache, and reloads it on next
         use.
         """
-        if self.__dict__.pop("_relocate_checkpoint", False):
-            spec = _hub.get_checkpoint(self.backend, self.version)
-            self.checkpoint_ = spec.download()
+        self._checkpoint()
         return self._memoized_network(
             (self.version, self.device_), self._shared_network
         )
@@ -640,8 +637,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         if "device_" in state and self.device == "auto":
             self.device_ = _device.resolve_device(self.device)
             self.provenance_ = {**self.provenance_, "device": self.device_}
-        if "checkpoint_" in state:
-            self._relocate_checkpoint = True
         if "handles_" in state:
             self._caches_pending = True
 

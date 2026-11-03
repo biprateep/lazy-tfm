@@ -95,6 +95,10 @@ change the API.
 
 ### Fixed
 
+- An unpickled Kumo, LimiX or TabICL model predicting from two threads at
+  once could read the checkpoint path of the machine that made the pickle,
+  which on another machine does not exist. The path is now found again
+  before the model marks it found.
 - The warning that a cached checkpoint snapshot may be incomplete names the
   user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a
