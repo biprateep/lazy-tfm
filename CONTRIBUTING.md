@@ -58,7 +58,8 @@ versions `pyproject.toml` allows. It runs the pre-commit
 hooks, a docs build with warnings treated as errors, and a build of the package
 itself. Nothing runs on a schedule. The smoke-test workflow, run by hand from
 the Actions tab, tests against the newest resolvable dependencies, backend
-packages included, to warn of an upstream release that breaks `lazy`.
+packages included, to warn of an upstream release that breaks `lazy`. It also
+tries Python 3.15, which `lazy` does not support yet, without failing the run.
 
 ## How changes are reviewed
 
