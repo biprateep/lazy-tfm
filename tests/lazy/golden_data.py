@@ -90,7 +90,8 @@ resolved flag after ``fit`` is enough.
 THREADS = 4
 """Torch threads the golden densities are recorded and checked at, as many as a
 GitHub Linux runner has CPUs. TabPFN's CPU densities move with the count by
-up to 8% of the peak (audit finding TC-31).
+up to 8% of the peak (audit finding TC-31), through its fingerprint feature
+(see ``RTOL`` in ``test_golden.py``).
 """
 
 

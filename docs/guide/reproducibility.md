@@ -103,6 +103,47 @@ about half a percent. Precision changes a prediction by the same kind of
 rounding: `mixed_precision=True` uses each model's reduced-precision path on a
 GPU, and every model computes in float32 on a CPU.
 
+## Across machines
+
+On one machine, the same inputs, settings and seed give the same densities to
+the bit, run after run. On another machine they can differ, because the
+processor and the libraries' code paths round differently. For most backends
+this is float rounding; for TabPFN on a CPU, and for any backend in bfloat16,
+it is a few percent of a density's peak:
+
+| Backend | Another thread count, kernel set or BLAS path, on a CPU | Cause |
+|---|---:|---|
+| Kumo | up to $7 \times 10^{-5}$ of the peak | float32 rounding |
+| TabICL | up to $5 \times 10^{-5}$ of the peak | float32 rounding |
+| LimiX-2 | within $10^{-4}$ relatively | float32 rounding |
+| TabFM, float32 (the CPU default) | up to $6 \times 10^{-6}$ of the peak | float32 rounding |
+| TabFM, bfloat16 | 2% to 4% of the peak | bfloat16 keeps 8 bits of mantissa |
+| TabPFN | 4% to 8% of the peak | its fingerprint feature (below) |
+
+The figures are the largest difference, over 50 rows and 200 bins of
+`DC1_GRID`, between two runs on one 4-core x86 CPU that differed in one thing:
+the torch thread count (one or four), torch's vector kernels
+(`ATEN_CPU_CAPABILITY`), or MKL's code path (`MKL_CBWR`). Two processors
+differ in the same ways: that CPU differed by the same amounts from a GitHub
+runner (TabPFN, TabFM) and from the maintainer's machine that recorded the
+golden densities (Kumo, TabICL). For LimiX-2, the figure is the golden test's
+tolerance, which densities recorded on that machine meet on GitHub's
+runners.
+
+TabPFN adds a *fingerprint* feature: a hash of each row of its preprocessed
+data, which helps the model tell identical rows apart. The data it hashes is
+float32, so a difference in its last bit, which another processor's
+arithmetic produces, gives that row a different hash. The model then sees a
+different value of that feature, and its density moves by several percent of
+the peak. Without the fingerprint, TabPFN differs across machines by about
+$10^{-5}$ of the peak. This is upstream TabPFN's behaviour, which LAZY's pinned
+recipe keeps.
+
+So compare results from different machines with scores over many rows (the
+CDE loss, CRPS or NLL), not density by density. The golden tests, which
+compare densities, run on GitHub's Linux runners, which agree with one another
+to the bit.
+
 LimiX-2 needed three changes to make a row's answer independent of which
 other rows share its chunk. The first is that each member's preprocessing is
 fitted on the context alone (upstream's column filter, categorical detection
