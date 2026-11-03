@@ -315,7 +315,9 @@ def test_tabpfn_bags_a_context_beyond_its_cpu_limit():
     with pytest.raises(RuntimeError, match="Bag the context below the limit"):
         tabpfn.TabPFNBarDistribution(**params, bag_size=5_500).fit(X, y)
     est = tabpfn.TabPFNBarDistribution(**params, bag_size=1_000).fit(X, y)
-    networks = {id(m) for handle in est.handles_ for m in handle.models_}
+    networks = set()
+    for handle in est.handles_:
+        networks.update(map(id, handle.models_))
     assert len(est.handles_) == 2 and len(networks) == 1
     densities = est.predict_proba(X[:4])
     masses = densities * est.native_grid_.widths

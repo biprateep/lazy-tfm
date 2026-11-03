@@ -48,3 +48,12 @@ repos:
         types: [python]
         files: ^src/
         pass_filenames: false
+      # The Google style rules ruff cannot express. An error fails the hook;
+      # a warning does not. It imports a package to tell its submodules from
+      # its other members, and notes an import it cannot check.
+      - id: code-style
+        name: Check the style rules ruff cannot
+        entry: uv run --no-sync python .claude/skills/code-style/scripts/check_code_style.py
+        language: system
+        types: [python]
+        exclude: ^\.claude/

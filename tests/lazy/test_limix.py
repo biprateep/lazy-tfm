@@ -3,7 +3,6 @@
 """LimiXBarDistribution: what the uniform conformance suite does not cover."""
 
 import builtins
-import functools
 import os
 import pathlib
 import pickle
@@ -12,6 +11,7 @@ import sys
 import warnings
 
 import fakes
+import limix_skip
 import numpy as np
 import pytest
 
@@ -22,19 +22,13 @@ from lazy.models import _members
 from lazy.models import limix
 
 
-@functools.cache
-def _has_limix() -> bool:
-    try:
-        _limix_source.locate(download=False)  # a skip check never downloads
-    except ImportError:
-        return False
-    return True
-
-
 @pytest.fixture(autouse=True)
 def _skip_without_the_source(request: pytest.FixtureRequest) -> None:
     """Skips a checkpoint test when LimiX's source is not at hand."""
-    if request.node.get_closest_marker("checkpoint") and not _has_limix():
+    if (
+        request.node.get_closest_marker("checkpoint")
+        and not limix_skip.source_present()
+    ):
         pytest.skip("needs LimiX's source")
 
 
@@ -134,11 +128,9 @@ def test_upstreams_recipe_is_the_default(data):
 def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
     X, z, _ = data
     model = _model(n_estimators=3, bag_size=bag_size).fit(X, z)
-    tokens = [
-        entry["pipeline"].token
-        for handle in model.handles_
-        for entry in handle["members"]
-    ]
+    tokens = []
+    for handle in model.handles_:
+        tokens += [entry["pipeline"].token for entry in handle["members"]]
     assert tokens == ["auto_quantile", "auto_quantile", "auto_power"]
 
 

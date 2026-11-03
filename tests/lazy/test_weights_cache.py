@@ -14,12 +14,12 @@ import threading
 import types
 import weakref
 
+import limix_skip
 import numpy as np
 import pytest
 from sklearn import base as sklearn_base
 import threads
 
-from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _weights
 from lazy.models import kumo
@@ -466,14 +466,6 @@ def data():
     return X[:200], z[:200], X[200:]
 
 
-def _has_limix():
-    try:
-        _limix_source.locate(download=False)  # a skip check never downloads
-    except ImportError:
-        return False
-    return True
-
-
 _REAL = [
     pytest.param(
         kumo.KumoQuantile,
@@ -487,7 +479,9 @@ _REAL = [
     pytest.param(
         limix.LimiXBarDistribution,
         {},
-        marks=pytest.mark.skipif(not _has_limix(), reason="needs LimiX"),
+        marks=pytest.mark.skipif(
+            not limix_skip.source_present(), reason="needs LimiX"
+        ),
     ),
     pytest.param(
         tabfm.TabFMHistogram,

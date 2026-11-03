@@ -18,8 +18,8 @@ uv run pre-commit install   # lint and format on every commit
 
 A plain `uv sync` installs no extra, so it and CI stay light, without PyTorch.
 
-The hooks run ruff and mypy from this environment, at the versions in
-`uv.lock`, so run `uv sync` again after the lockfile changes.
+The hooks run ruff, mypy and the style checker from this environment, at the
+versions in `uv.lock`, so run `uv sync` again after the lockfile changes.
 
 `uv sync` also removes packages that are not in the lockfile. If you keep
 extra packages in the environment, use `uv sync --inexact`.
@@ -27,18 +27,19 @@ extra packages in the environment, use `uv sync --inexact`.
 ## Code style
 
 Code follows the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
-checked by ruff (formatting and lint, configured in `pyproject.toml`) and
-mypy. In practice, this means 80-column lines, imports of modules rather than
-of their members, Google docstrings (`Args:`, `Returns:`, `Raises:`) that give
-shapes and units, and an annotation on every signature. The one deliberate
-exception is scikit-learn's vocabulary, in which the feature matrix is `X` and
-the target `y`, as scikit-learn requires.
+checked by ruff (formatting and lint, configured in `pyproject.toml`), mypy,
+and the checker of the code-style skill (`.claude/skills/code-style/`), which
+covers the rules ruff cannot express. In practice, this means 80-column lines,
+imports of modules rather than of their members, Google docstrings (`Args:`,
+`Returns:`, `Raises:`) that give shapes and units, and an annotation on every
+signature. The one deliberate exception is scikit-learn's vocabulary, in which
+the feature matrix is `X` and the target `y`, as scikit-learn requires.
 
 ## Checks
 
 ```bash
 uv run pytest               # unit tests and doctests; no GPU or checkpoint needed
-uv run pre-commit run --all-files   # ruff format, ruff check, mypy
+uv run pre-commit run --all-files   # ruff format, ruff check, mypy, style
 ```
 
 Tests that download and load a pinned checkpoint are marked `checkpoint` and

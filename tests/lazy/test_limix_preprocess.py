@@ -7,6 +7,7 @@ import importlib
 import json
 import random
 
+import limix_skip
 import numpy as np
 import pytest
 
@@ -14,17 +15,9 @@ from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
 from lazy.models import _transforms
 
-
-def _has_limix() -> bool:
-    try:
-        _limix_source.locate(download=False)  # a skip check never downloads
-    except ImportError:
-        return False
-    return True
-
-
 needs_limix = pytest.mark.skipif(
-    not _has_limix(), reason="needs LimiX's source ($LAZY_LIMIX_SRC)"
+    not limix_skip.source_present(),
+    reason="needs LimiX's source ($LAZY_LIMIX_SRC)",
 )
 
 

@@ -156,11 +156,10 @@ class TestTabFM:
     ):
         """Blocks of views hold whole chunks; chunk_size=0 is one pass."""
         chunk, block = _icl_stream._pass_sizes(40, chunk_size, block_rows)
-        sizes = [
-            min(r + chunk, min(b + block, 40) - b) - r
-            for b in range(0, 40, block)
-            for r in range(0, min(b + block, 40) - b, chunk)
-        ]
+        sizes = []
+        for b in range(0, 40, block):
+            rows = min(b + block, 40) - b
+            sizes += [min(r + chunk, rows) - r for r in range(0, rows, chunk)]
         assert sizes == passes
 
     def test_the_cached_path_is_handed_chunk_size(self, monkeypatch):
