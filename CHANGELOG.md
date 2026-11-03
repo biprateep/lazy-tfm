@@ -23,6 +23,15 @@ change the API.
 
 ### Changed
 
+- On its own buckets (the default grid of TabPFN, LimiX, a bagged model and
+  TabFM's `"grid"` bins), a histogram's densities are each bucket's mass over
+  its width, computed directly instead of through differences of cumulative
+  sums, which lost the relative precision of small bins. `predict_proba`,
+  `predict` and `score` on that grid are 2.2 to 2.8 times faster for a
+  5,000-bucket model (`benchmarks/cpu.py`), and their results move slightly
+  toward the exact values: by up to 2.8e-11 of a row's peak on 1,000 rows of
+  5,000 uneven buckets, and more for very narrow buckets carrying little mass,
+  which the old sums could round to zero.
 - `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
   the model's `chunk_size` chunks of rows as it is predicted, instead of every
   row's distribution at once, so their peak memory no longer grows with the
