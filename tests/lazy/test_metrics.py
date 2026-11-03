@@ -511,6 +511,15 @@ def test_the_summary_table_adds_crps_and_nll():
         )
 
 
+@pytest.mark.parametrize("histogram", [False, True])
+def test_normalizing_leaves_the_callers_densities_unchanged(histogram):
+    pdfs = np.array([[np.nan, -1.0, 2.0, np.inf], [0.0, 0.0, 0.0, 0.0]])
+    before = pdfs.copy()
+    edges = np.linspace(0.0, 4.0, 5) if histogram else None
+    metrics.normalize_grid_pdfs(np.arange(4.0) + 0.5, pdfs, bin_edges=edges)
+    np.testing.assert_array_equal(pdfs, before)
+
+
 @pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
 def test_pit_never_exceeds_one_by_rounding(normalization):
     grid = grid_lib.Grid.linear(0.0, 1.0, 50, normalization=normalization)
