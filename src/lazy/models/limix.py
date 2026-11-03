@@ -585,6 +585,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             return
         if uncached == len(entries):
             self.kv_cache_ = False
+            off: dict[str, Any] = {"kv_cache": False}
+            self.provenance_ = {**self.provenance_, **off}
         warnings.warn(
             f"LimiX is predicting {uncached} of its {len(entries)} members "
             f"without the key/value cache ({self._uncached_reason}), so every "

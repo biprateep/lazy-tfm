@@ -48,6 +48,8 @@ change the API.
 
 ### Fixed
 
+- LimiX-2's `provenance_["kv_cache"]` is `False` when no member's cache fit
+  in the device's memory, as `kv_cache_` already was. It said `True`.
 - An empty row of a `HistogramDistribution` (all masses zero) put
   probability on its zero-width buckets, which made a point mass at each.
   It is now uniform over the buckets of positive width only.
