@@ -49,7 +49,10 @@ change the API.
 ### Fixed
 
 - LimiX-2's `provenance_["kv_cache"]` is `False` when no member's cache fit
-  in the device's memory, as `kv_cache_` already was. It said `True`.
+  in the device's memory, as `kv_cache_` already was. It said `True`. The
+  warning about uncached members now also says that a smaller `bag_size` or
+  fewer `n_estimators` needs less memory and runs faster, but changes the
+  answers.
 - A row slice or a concatenation of a `MixtureDistribution` keeps its
   weights bit for bit, instead of normalizing them again. For a bagged model
   of 6, 7, 13 or some other numbers of members, a second normalization moved

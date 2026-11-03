@@ -246,7 +246,10 @@ def test_a_model_whose_caches_do_not_fit_records_the_cache_as_off(
     fakes.install("limix", monkeypatch)
     monkeypatch.setattr(limix, "_free_device_memory", lambda network: 1)
     monkeypatch.setattr(_limix_stream, "cache_bytes", lambda *args: 1)
-    with pytest.warns(lazy.PerformanceWarning, match="2 of its 2 members"):
+    # The warning also names the trade that would let more caches fit.
+    with pytest.warns(
+        lazy.PerformanceWarning, match="2 of its 2 members.*smaller bag_size"
+    ):
         model = _model().fit(X, z)
     assert model.kv_cache_ is False
     assert model.provenance_["kv_cache"] is False

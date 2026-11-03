@@ -591,7 +591,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             f"LimiX is predicting {uncached} of its {len(entries)} members "
             f"without the key/value cache ({self._uncached_reason}), so every "
             "chunk of queries re-runs their context. The answers are the "
-            "same; pass kv_cache=False to silence this.",
+            "same; pass kv_cache=False to silence this. A smaller bag_size "
+            "or fewer n_estimators needs less memory and runs faster, but "
+            "changes the answers.",
             _ensemble.PerformanceWarning,
             skip_file_prefixes=(_PACKAGE_DIR,),
         )
