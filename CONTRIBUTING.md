@@ -173,6 +173,7 @@ which uploads to TestPyPI, and check that the result installs with
 `pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ lazy-tfm`.
 Then create a GitHub release with the tag `v<version>`, for example `v0.1.0`.
 Publishing it runs the workflow, which checks that the tag matches the
-version, builds and checks the package, and uploads it to PyPI. Finally, move
+version, builds and checks the package, runs the test suite on the tagged
+commit, and uploads it to PyPI only if all of them pass. Finally, move
 to the next development version, for example `uv version 0.2.0.dev0`, and
 commit.
