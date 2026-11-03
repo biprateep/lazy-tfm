@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
 
+from collections import abc
 import os
 
 import matplotlib as mpl
@@ -9,6 +10,7 @@ import pandas as pd
 import pytest
 import standins
 
+import lazy
 from lazy import datasets
 from lazy import selection
 from lazy.models import registry
@@ -30,6 +32,19 @@ def pytest_collection_modifyitems(
     for item in items:
         if item.get_closest_marker("checkpoint"):
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _release_the_networks_after_each_module() -> abc.Iterator[None]:
+    """Lets go of the networks a module's checkpoint tests loaded.
+
+    By default, lazy keeps every network it loads for the rest of the
+    process, so one pytest run over every backend's checkpoints would hold
+    them all at once, more memory than a GitHub runner has.
+    """
+    yield
+    if os.environ.get("LAZY_RUN_CHECKPOINT_TESTS") == "1":
+        lazy.clear_model_cache()
 
 
 @pytest.fixture

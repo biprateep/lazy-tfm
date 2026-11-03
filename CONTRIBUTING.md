@@ -48,6 +48,11 @@ are skipped by default. To run them:
 LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 ```
 
+The checkpoint-tests workflow runs them on a CPU on request: from the Actions
+tab, optionally with a `pytest -k` expression, or by adding the label
+`checkpoints` to a pull request; removing the label and adding it back runs
+it again.
+
 On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
 lockfile, on Linux, with Python 3.12 on macOS and Windows too. It also runs
 them with every backend package on a CPU, and at the lowest dependency
