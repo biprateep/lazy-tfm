@@ -29,7 +29,6 @@ import dataclasses
 import os
 import pathlib
 from typing import Any
-import warnings
 
 import cycler
 import matplotlib as mpl
@@ -44,6 +43,7 @@ import numpy as np
 import numpy.typing as npt
 
 from lazy import _typing
+from lazy import _warnings
 
 __all__ = [
     "PT_PER_INCH",
@@ -419,7 +419,7 @@ def verify_style(
         if strict_font:
             fatal.append(font_problem)
         else:
-            warnings.warn(font_problem, UserWarning, stacklevel=2)
+            _warnings.warn(font_problem, UserWarning)
     if strict and fatal:
         bullets = "\n  - ".join(fatal)
         raise RuntimeError(f"plot style not in effect:\n  - {bullets}")

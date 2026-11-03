@@ -126,6 +126,14 @@ def test_offline_an_unconfirmed_snapshot_is_used_with_a_warning(hub):
     assert not lazy.is_cached("tabfm")
 
 
+def test_the_unconfirmed_snapshot_warning_names_the_callers_line(hub):
+    hub.write("config.json")
+    hub.online = False
+    with pytest.warns(RuntimeWarning, match="interrupted download") as record:
+        lazy.download_checkpoint("tabfm")
+    assert record[0].filename == __file__
+
+
 def test_an_unreachable_hub_leaves_the_cached_snapshot_in_use(hub, monkeypatch):
     """Some failures reach the caller instead of falling back to the cache."""
     hub.write("config.json")

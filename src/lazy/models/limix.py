@@ -49,16 +49,15 @@ from collections.abc import Callable, Mapping
 import dataclasses
 import functools
 from importlib import util
-import os
 import pathlib
 import types
 from typing import Any
-import warnings
 
 import numpy as np
 import pandas as pd
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
@@ -76,8 +75,6 @@ __all__ = ["LimiXBarDistribution"]
 
 # The largest share of free GPU memory the key/value caches may take.
 _CACHE_MEMORY_FRACTION = 0.6
-# Frames in this package, skipped to point warnings at the caller's code.
-_PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
 """The versions :data:`lazy.models._limix_preprocess.RECIPE` was read from
@@ -586,7 +583,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             self.kv_cache_ = False
             off: dict[str, Any] = {"kv_cache": False}
             self.provenance_ = {**self.provenance_, **off}
-        warnings.warn(
+        _warnings.warn(
             f"LimiX is predicting {uncached} of its {len(entries)} members "
             f"without the key/value cache ({self._uncached_reason}), so every "
             "chunk of queries re-runs their context. The answers are the "
@@ -594,7 +591,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             "or fewer n_estimators needs less memory and runs faster, but "
             "changes the answers.",
             _ensemble.PerformanceWarning,
-            skip_file_prefixes=(_PACKAGE_DIR,),
         )
 
     def _member_probabilities(

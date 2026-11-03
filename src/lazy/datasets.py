@@ -81,7 +81,6 @@ import tempfile
 import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
-import warnings
 import zipfile
 
 import numpy as np
@@ -90,6 +89,7 @@ import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import grid as grid_lib
 from lazy import selection
 
@@ -497,12 +497,11 @@ def _legacy_copy(
         return None
     if legacy.parent not in _warned_legacy:
         _warned_legacy.add(legacy.parent)
-        warnings.warn(
+        _warnings.warn(
             f"lazy.datasets is using {legacy} from its old cache directory, "
             f"{legacy.parent}; the cache is now {data_home()}. Move the "
             "files there to silence this.",
             UserWarning,
-            skip_file_prefixes=(os.path.dirname(os.path.abspath(__file__)),),
         )
     return legacy
 

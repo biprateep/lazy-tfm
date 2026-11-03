@@ -29,9 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 import inspect
 import math
-import os
 from typing import Any, Literal, TypeAlias
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -39,6 +37,7 @@ from sklearn import base as sklearn_base
 from sklearn import utils as sklearn_utils
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
@@ -99,12 +98,6 @@ _EXACT_PPF_MAX_EDGES = 20_000
 
 # The parameters the ensemble passes on to members that keep their default.
 _SHARED_PARAMS = ("random_state", "device")
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 
 class EnsembleSizeWarning(UserWarning):
@@ -536,14 +529,13 @@ def _warn_if_small(n_rows: int, n_members: int) -> None:
     """Warns when a small context meets a pool of several members."""
     if n_members < 2 or n_rows >= SMALL_CONTEXT_ROWS:
         return
-    warnings.warn(
+    _warnings.warn(
         f"The context has {n_rows:,} rows. On small contexts an equal pool "
         "can be dragged down by one weak member, and do no better than the "
         "best single model, or worse; 'Ensembles of models' in the "
         "documentation gives the measurements. Consider fewer members, or "
         "the best single model.",
         EnsembleSizeWarning,
-        skip_file_prefixes=(_PACKAGE_PREFIX,),
     )
 
 

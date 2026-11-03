@@ -52,11 +52,11 @@ import sys
 import threading
 import types
 from typing import Any
-import warnings
 
 import numpy as np
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
@@ -1066,12 +1066,11 @@ def bucket_masses(
             )
         )
         if borders.size > 1 and np.any(np.diff(borders) == 0):
-            warnings.warn(
+            _warnings.warn(
                 "some of TabPFN's float32 bucket borders coincide, so those "
                 "buckets have zero width; pass the fitted regressor, "
                 "bucket_masses(output, regressor), for float64 borders",
                 RuntimeWarning,
-                stacklevel=2,
             )
     masses = torch.softmax(logits.detach().double(), dim=-1).cpu().numpy()
     if masses.ndim != 2 or masses.shape[1] != borders.size - 1:

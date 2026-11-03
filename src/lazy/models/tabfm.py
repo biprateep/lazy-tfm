@@ -65,16 +65,15 @@ import functools
 from importlib import util
 import inspect
 import math
-import os
 import types
 from typing import Any
-import warnings
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
@@ -96,12 +95,6 @@ __all__ = [
     "prior_shift_em",
     "quantile_edges",
 ]
-
-# Warnings skip every frame inside this package, so that they point at the
-# user's call however deep in the package (or LazyModel) they are raised.
-_PACKAGE_PREFIX = (
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
-)
 
 
 class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
@@ -710,10 +703,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # set that is the difference between one hour and a day, and because
         # both paths produce the same answer the only symptom is a run that
         # never seems to end. Nothing else reports it, so this does.
-        warnings.warn(
+        _warnings.warn(
             _SLOW_PATH_WARNING,
             TabFMPerformanceWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
         return "predict_proba"
 
@@ -1419,13 +1411,12 @@ def _clip_to_support(
     low, high = support
     outside = int(np.count_nonzero((y < low) | (y > high)))
     if outside:
-        warnings.warn(
+        _warnings.warn(
             f"{outside} of {y.size} training targets lie outside the y_grid "
             f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
             "ends, so their probability piles into the end bins. Pass a "
             "y_grid that covers the targets.",
             UserWarning,
-            skip_file_prefixes=(_PACKAGE_PREFIX,),
         )
     return np.clip(y, low, high)
 
