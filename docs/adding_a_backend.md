@@ -59,6 +59,14 @@ each member's answer separately. The base class then trims over every member
 of the ensemble at once, so that a bagged ensemble, where every member is a
 group of its own, is trimmed the same way as one that runs in a single call.
 
+Every prediction reaches the model through those two methods. The base class
+cuts the queries into chunks and yields each chunk's distributions from
+`_distribution_chunks`, from which every prediction method works: the
+densities, the native distributions, quantiles, intervals and PIT values. A
+backend overrides none of these, since the others would bypass an override of
+one. A model that must see every query in one call sets `chunks_queries =
+False`, as TabFM does.
+
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
 `Checkpoint.provenance` (in `lazy.models._hub`), the base class adds the
