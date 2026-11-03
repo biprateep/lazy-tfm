@@ -139,9 +139,10 @@ def _unit(values: _typing.FloatArray) -> _typing.FloatArray:
     A cumulative sum of masses that add to one can round to just above one
     (or a weighted sum of CDFs to just outside [0, 1]); clipping keeps every
     CDF a probability and non-decreasing, so differences between its values
-    are never negative masses.
+    are never negative masses. Clips in place: every caller passes an array
+    it has just built.
     """
-    return np.clip(values, 0.0, 1.0)
+    return np.clip(values, 0.0, 1.0, out=values)
 
 
 def _closed_bucket(
@@ -281,7 +282,8 @@ class _Base:
             The distribution's masses in those buckets, with its ``ancil``.
         """
         target = np.asarray(bins, dtype=np.float64)
-        masses = np.maximum(np.diff(self.cdf(target), axis=1), 0.0)
+        masses = np.diff(self.cdf(target), axis=1)
+        np.maximum(masses, 0.0, out=masses)
         return HistogramDistribution(target, masses, self.ancil)
 
 
@@ -421,18 +423,24 @@ class HistogramDistribution(_Base):
         probabilities = self.probabilities
         cumulative = _cumulative(probabilities)
         index, fraction = self._locate(y)
-        value = cumulative[:, index] + probabilities[:, index] * fraction
-        value = np.where(y < self.bins[0], 0.0, value)
-        return _unit(np.where(y >= self.bins[-1], 1.0, value))
+        value = probabilities[:, index]
+        value *= fraction
+        value += cumulative[:, index]
+        value[:, y < self.bins[0]] = 0.0
+        value[:, y >= self.bins[-1]] = 1.0
+        return _unit(value)
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
         cumulative = _cumulative(probabilities)
         index, fraction = self._locate(values)
         rows = np.arange(self.npdf)
-        value = cumulative[rows, index] + probabilities[rows, index] * fraction
-        value = np.where(values < self.bins[0], 0.0, value)
-        return _unit(np.where(values >= self.bins[-1], 1.0, value))
+        value = probabilities[rows, index]
+        value *= fraction
+        value += cumulative[rows, index]
+        value[values < self.bins[0]] = 0.0
+        value[values >= self.bins[-1]] = 1.0
+        return _unit(value)
 
     def _locate(
         self, values: _typing.FloatArray
@@ -455,7 +463,7 @@ class HistogramDistribution(_Base):
                 (values - self.bins[index]) / widths[index],
                 1.0,
             )
-        return index, np.clip(fraction, 0.0, 1.0)
+        return index, np.clip(fraction, 0.0, 1.0, out=fraction)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
@@ -1027,10 +1035,9 @@ class MixtureDistribution(_Base):
 
 def _cumulative(probabilities: _typing.FloatArray) -> _typing.FloatArray:
     """The mass below each bucket edge, shape (n_rows, n_buckets + 1)."""
-    return np.concatenate(
-        [np.zeros((len(probabilities), 1)), np.cumsum(probabilities, axis=1)],
-        axis=1,
-    )
+    cumulative = np.zeros((len(probabilities), probabilities.shape[1] + 1))
+    np.cumsum(probabilities, axis=1, out=cumulative[:, 1:])
+    return cumulative
 
 
 Distribution: TypeAlias = (

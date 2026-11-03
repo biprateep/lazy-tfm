@@ -40,6 +40,10 @@ change the API.
   model's `predict_proba`, `predict` and `score` are 1.7 to 2.0 times faster,
   and their peak memory falls from 88 MiB to 60 to 76 MiB
   (`benchmarks/cpu.py`), with the same results to the bit.
+- A histogram's CDF builds fewer temporary arrays. On the CPU benchmark,
+  `LazyEnsembleModel`'s peak memory falls from 119 to 99 MiB, and a bagged
+  5,000-bucket model's `predict_quantiles` from 301 to 269 MiB, with the
+  same results to the bit.
 - `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
   the model's `chunk_size` chunks of rows as it is predicted, instead of every
   row's distribution at once, so their peak memory no longer grows with the
