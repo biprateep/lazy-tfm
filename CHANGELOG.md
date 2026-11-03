@@ -95,6 +95,10 @@ change the API.
 
 ### Fixed
 
+- An unpickled LimiX model predicting from two threads at once could fail
+  with a `TypeError`, or leave members uncached depending on timing: the
+  second thread used the key/value caches before the first had rebuilt
+  them. The second thread now waits for the rebuild.
 - The warning that a cached checkpoint snapshot may be incomplete names the
   user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a

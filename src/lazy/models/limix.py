@@ -66,6 +66,7 @@ from lazy.models import _hub
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
+from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _transforms
@@ -561,8 +562,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self._cache_bytes += needed
 
     def _restore_caches(self) -> None:
-        """Rebuilds the caches pickling dropped, within the memory budget."""
-        self._caches_pending = False
+        """Rebuilds the caches pickling dropped, within the memory budget.
+
+        The pending flag is cleared last, so a thread that sees it cleared
+        finds every cache rebuilt; the caller holds the estimator's lock.
+        """
         network = self._network()
         self._reset_cache_budget()
         for handle in self.handles_:
@@ -570,6 +574,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
                 if entry["use_cache"]:
                     self._cache_member(network, entry)
         self._warn_if_uncached()
+        self._caches_pending = False
 
     def _warn_if_uncached(self) -> None:
         """Says, once, how many members run without their cache, and why."""
@@ -601,7 +606,11 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         member = entry["member"]
         queries = entry["pipeline"].transform(X)
         if self.kv_cache_ and self.__dict__.get("_caches_pending", False):
-            self._restore_caches()
+            # Keyed by the estimator, not the shared network, so restoring
+            # one model does not hold up another's predictions.
+            with _locks.network_lock(self):
+                if self.__dict__.get("_caches_pending", False):
+                    self._restore_caches()
         if self.kv_cache_ and entry["use_cache"]:
             logits = _limix_stream.decode(
                 network,
