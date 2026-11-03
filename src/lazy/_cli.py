@@ -9,15 +9,12 @@ installed: install a repository build that PyPI refuses in an extra, say, or
 download source code that is not on PyPI, which a model would otherwise do on
 first use, so that running it warms the cache before going offline. A backend
 whose extra is not installed is skipped, and one already complete is left
-alone, so the command is safe to run again. A backend whose extra cannot be
-told from the packages it installs (``setup_needs_name``) is installed only
-when it is named.
+alone, so the command is safe to run again.
 
 Typical usage example:
 
   pip install 'lazy-tfm[all]'
   lazy setup
-  lazy setup kumo
 """
 
 from __future__ import annotations
@@ -63,7 +60,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if issubclass(cls, _ensemble.ContextEnsembleEstimator)
     }
     setup.add_argument(
-        "backends", nargs="*", metavar="BACKEND", help=_backends_help(backends)
+        "backends",
+        nargs="*",
+        metavar="BACKEND",
+        help="set up only these backends; all of them when none is named",
     )
     args = parser.parse_args(argv)
     unknown = sorted(set(args.backends) - set(registry.ESTIMATORS))
@@ -77,32 +77,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.backends or name in args.backends
     ]
     return 0 if all(complete) else 1
-
-
-def _backends_help(
-    backends: dict[str, type[_ensemble.ContextEnsembleEstimator]],
-) -> str:
-    """The help of ``lazy setup``'s backend names, from their declarations.
-
-    Args:
-        backends: The registered backends, by name.
-
-    Returns:
-        The help, naming the backends installed only when named.
-    """
-    needs_name = [
-        name for name, cls in backends.items() if cls.setup_needs_name
-    ]
-    undetected = (
-        ", and install those whose extra cannot be detected "
-        f"({', '.join(needs_name)})"
-        if needs_name
-        else ""
-    )
-    return (
-        f"set up only these backends{undetected}; all of them when none is "
-        "named"
-    )
 
 
 if __name__ == "__main__":

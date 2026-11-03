@@ -19,7 +19,7 @@ from lazy.models import tabfm
 
 @pytest.fixture
 def backends(monkeypatch, tmp_path):
-    """Both extras installed, the TabFM release, and no LimiX source yet."""
+    """The extras installed, the TabFM release, no LimiX source, no sdm."""
     monkeypatch.chdir(tmp_path)  # outside any uv project
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "env"))  # not uv's
     monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
@@ -45,7 +45,7 @@ def backends(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(_limix_source, "locate", locate)
-    monkeypatch.setattr(kumo, "_installed_build", lambda: None)
+    monkeypatch.setitem(sys.modules, "sdm", None)  # no Kumo package
     return monkeypatch, runs, fetched
 
 
@@ -99,7 +99,6 @@ def test_missing_extras_are_skipped(backends, capsys):
     out = capsys.readouterr().out
     assert "'lazy-tfm[tabfm]'" in out
     assert "'lazy-tfm[limix]'" in out
-    assert "'lazy-tfm[kumo]'" in out
 
 
 def test_without_pip_uv_installs_into_this_interpreter(backends, tmp_path):
@@ -150,69 +149,43 @@ def test_a_failed_install_fails_the_command(backends):
     assert _cli.main(["setup"]) == 1
 
 
-def test_kumos_package_is_installed_only_when_named(backends, capsys):
-    """Its extra holds only common packages, so it cannot be detected."""
-    _, runs, fetched = backends
+def test_unnamed_setup_neither_installs_nor_mentions_kumo(backends, capsys):
+    _, runs, _ = backends
     assert _cli.main(["setup"]) == 0
-    assert all(kumo.REPOSITORY_BUILD not in run for run in runs)
-    assert "lazy setup kumo" in capsys.readouterr().out
-    runs.clear()
-    fetched.clear()
-    assert _cli.main(["setup", "kumo"]) == 0
+    assert all(kumo._VALIDATED_RELEASE not in run for run in runs)
+    assert "Kumo" not in capsys.readouterr().out
+
+
+def test_naming_kumo_warns_and_installs_a_missing_package(backends):
+    _, runs, fetched = backends
+    with pytest.warns(FutureWarning, match="removed in 0.7.0"):
+        assert _cli.main(["setup", "kumo"]) == 0
     install, check = runs  # Kumo's alone: TabFM and LimiX were not named.
-    assert install[-1] == kumo.REPOSITORY_BUILD
+    assert install[-1] == kumo._VALIDATED_RELEASE
     assert check[:2] == [sys.executable, "-c"]
     assert not fetched
 
 
-def test_kumo_named_without_its_dependencies_fails(backends, capsys):
+def test_naming_kumo_warns_and_leaves_an_importable_package(backends, capsys):
     monkeypatch, runs, _ = backends
-    monkeypatch.setattr(
-        util, "find_spec", lambda name: None if name == "pyarrow" else object()
-    )
-    assert _cli.main(["setup", "kumo"]) == 1
-    assert not runs
-    assert "pip install 'lazy-tfm[kumo]'" in capsys.readouterr().out
-
-
-def test_the_validated_build_is_left_alone(backends, capsys):
-    monkeypatch, runs, _ = backends
-    monkeypatch.setattr(
-        kumo, "_installed_build", lambda: ("0.2.0", kumo.REPOSITORY_COMMIT)
-    )
-    assert _cli.main(["setup", "kumo"]) == 0
+    monkeypatch.setattr(kumo.KumoQuantile, "_import_backend", lambda self: None)
+    with pytest.warns(FutureWarning, match=r"'lazy-tfm\[kumo\]' now installs"):
+        assert _cli.main(["setup", "kumo"]) == 0
     assert not runs
     assert "structured-data-models is installed" in capsys.readouterr().out
 
 
-def test_another_build_fails_until_it_is_replaced(backends, capsys):
+def test_naming_kumo_without_its_dependencies_fails(backends, capsys):
     monkeypatch, runs, _ = backends
-    monkeypatch.setattr(kumo, "_installed_build", lambda: ("0.3.0", None))
-    assert _cli.main(["setup"]) == 1
-    assert "not the validated" in capsys.readouterr().out
-    assert all(kumo.REPOSITORY_BUILD not in run for run in runs)
-    assert _cli.main(["setup", "kumo"]) == 0
-    assert runs[-2][-1] == kumo.REPOSITORY_BUILD
+    monkeypatch.setattr(
+        util, "find_spec", lambda name: None if name == "pyarrow" else object()
+    )
+    with pytest.warns(FutureWarning):
+        assert _cli.main(["setup", "kumo"]) == 1
+    assert not runs
+    assert "pip install 'lazy-tfm[kumo]'" in capsys.readouterr().out
 
 
 def test_an_unknown_backend_is_an_error(backends):
     with pytest.raises(SystemExit):
         _cli.main(["setup", "kumoo"])
-
-
-def _setup_help(capsys):
-    with pytest.raises(SystemExit):
-        _cli.main(["setup", "--help"])
-    return " ".join(capsys.readouterr().out.split())
-
-
-def test_the_help_names_the_backends_installed_only_when_named(
-    monkeypatch, capsys
-):
-    """Built from setup_needs_name, so the command never names a backend."""
-    assert "cannot be detected (kumo)" in _setup_help(capsys)
-    monkeypatch.setattr(tabfm.TabFMHistogram, "setup_needs_name", True)
-    assert "cannot be detected (kumo, tabfm)" in _setup_help(capsys)
-    monkeypatch.setattr(kumo.KumoQuantile, "setup_needs_name", False)
-    monkeypatch.setattr(tabfm.TabFMHistogram, "setup_needs_name", False)
-    assert "cannot be detected" not in _setup_help(capsys)

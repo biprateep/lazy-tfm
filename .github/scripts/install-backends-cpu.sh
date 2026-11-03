@@ -7,7 +7,7 @@ set -euo pipefail
 if [[ "${1:-}" == "--upgrade" ]]; then
   uv lock --upgrade
 fi
-uv export --locked --all-extras --group backends --group dev \
+uv export --locked --all-extras --group dev \
   --no-hashes --no-emit-project > requirements.txt
 grep -vE '^(nvidia-|triton)' requirements.txt > requirements-cpu.txt
 uv venv --python 3.12

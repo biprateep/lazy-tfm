@@ -38,13 +38,11 @@ explicitly on a machine without CUDA will raise an error.
 
 ## Specific backend installation notes
 
-PyPI cannot install everything three of the backends need. After installing
-their extras, `lazy setup` completes them, and is safe to run again. Kumo
-Tabular is set up only when it is named:
+PyPI cannot install everything two of the backends need. After installing
+their extras, `lazy setup` completes them, and is safe to run again:
 
 ```console
 lazy setup
-lazy setup kumo
 ```
 
 - **TabFM.** The extra installs TabFM's PyPI release, which has no KV-cache
@@ -72,24 +70,17 @@ lazy setup kumo
   that commit before running it. To use your own checkout instead, set
   `LAZY_LIMIX_SRC` to it; `lazy` runs a checkout as it is. The backend is Linux-only, because LimiX needs
   `triton`.
-- **Kumo Tabular.** NVIDIA's `structured-data-models` package, which holds
-  the model, is not on PyPI, so the extra installs only its dependencies and
-  `lazy setup kumo` installs the package from GitHub, at the validated
-  commit. The backend has to be named, because its dependencies are common
-  enough that they do not show the extra was asked for. When the environment
-  is a uv project's own, `lazy setup kumo` prints the `uv add` command to run
-  instead.
+- **Kumo Tabular.** The extra installs NVIDIA's `structured-data-models`
+  package from PyPI; see {doc}`models/kumo`.
 
 ## Installation from source
 
 ```console
 git clone https://github.com/biprateep/lazy-tfm
 cd lazy-tfm
-uv sync --extra all --group backends
+uv sync --extra all
 ```
 
 This installs the package in editable mode with every dependency pinned by
-`uv.lock`, including the repository build of TabFM and Kumo Tabular's
-package, which the `backends` group holds at the validated commit. That group
-is left out of a plain `uv sync`, since it brings PyTorch. See
-{doc}`contributing` for the development workflow.
+`uv.lock`, including the repository build of TabFM. See {doc}`contributing`
+for the development workflow.

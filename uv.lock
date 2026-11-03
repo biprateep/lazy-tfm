@@ -2015,24 +2015,18 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "einops" },
-    { name = "huggingface-hub" },
     { name = "kditransform" },
     { name = "nvtx" },
-    { name = "pyarrow" },
     { name = "qp-prob" },
     { name = "safetensors" },
+    { name = "structured-data-models" },
     { name = "tabfm", extra = ["pytorch"] },
     { name = "tabicl" },
     { name = "tabpfn" },
     { name = "torch" },
-    { name = "typing-extensions" },
 ]
 kumo = [
-    { name = "huggingface-hub" },
-    { name = "pyarrow" },
-    { name = "safetensors" },
-    { name = "torch" },
-    { name = "typing-extensions" },
+    { name = "structured-data-models" },
 ]
 limix = [
     { name = "einops" },
@@ -2055,9 +2049,6 @@ tabpfn = [
 ]
 
 [package.dev-dependencies]
-backends = [
-    { name = "structured-data-models" },
-]
 dev = [
     { name = "astropy" },
     { name = "hypothesis" },
@@ -2085,31 +2076,26 @@ requires-dist = [
     { name = "einops", marker = "extra == 'limix'", specifier = ">=0.8" },
     { name = "h5py", specifier = ">=3.11" },
     { name = "huggingface-hub", specifier = ">=0.24" },
-    { name = "huggingface-hub", marker = "extra == 'kumo'" },
     { name = "kditransform", marker = "extra == 'limix'", specifier = ">=1.0" },
     { name = "lazy-tfm", extras = ["kumo", "limix", "qp", "tabfm", "tabicl", "tabpfn"], marker = "extra == 'all'" },
     { name = "matplotlib", specifier = ">=3.8.4" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "nvtx", marker = "extra == 'limix'", specifier = ">=0.2" },
     { name = "pandas", specifier = ">=2.2.2" },
-    { name = "pyarrow", marker = "extra == 'kumo'" },
     { name = "qp-prob", marker = "extra == 'qp'", specifier = ">=1.1" },
-    { name = "safetensors", marker = "extra == 'kumo'" },
     { name = "safetensors", marker = "extra == 'tabfm'", specifier = ">=0.4.3" },
     { name = "scikit-learn", specifier = ">=1.6" },
     { name = "scipy", specifier = ">=1.13" },
+    { name = "structured-data-models", marker = "extra == 'kumo'", specifier = ">=0.2.1" },
     { name = "tabfm", extras = ["pytorch"], marker = "extra == 'tabfm'", git = "https://github.com/google-research/tabfm?rev=fbb665569425fd2f490c6576b3af967876fe11ff" },
     { name = "tabicl", marker = "extra == 'tabicl'", specifier = ">=2.2.0" },
     { name = "tabpfn", marker = "extra == 'tabpfn'", specifier = ">=9.0.0" },
-    { name = "torch", marker = "extra == 'kumo'", specifier = ">=2.7" },
     { name = "torch", marker = "extra == 'limix'", specifier = ">=2.9.1" },
     { name = "tqdm", specifier = ">=4.66" },
-    { name = "typing-extensions", marker = "extra == 'kumo'" },
 ]
 provides-extras = ["tabfm", "tabicl", "tabpfn", "kumo", "limix", "qp", "all"]
 
 [package.metadata.requires-dev]
-backends = [{ name = "structured-data-models", git = "https://github.com/NVIDIA/structured-data-models?rev=2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }]
 dev = [
     { name = "astropy", specifier = ">=6" },
     { name = "hypothesis", specifier = ">=6.100" },
@@ -4509,8 +4495,8 @@ wheels = [
 
 [[package]]
 name = "structured-data-models"
-version = "0.2.0rc2.dev6+g2b76468cb"
-source = { git = "https://github.com/NVIDIA/structured-data-models?rev=2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298#2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy" },
@@ -4518,6 +4504,10 @@ dependencies = [
     { name = "safetensors" },
     { name = "torch" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/33/cb15b007fc67fe53c9bff242e1ca9b7d57229ac39f82e3081db828405d1b/structured_data_models-0.2.1.tar.gz", hash = "sha256:035ead2627dff755987287fd13f7864b3a7be2c4b0bdc060a94add8d93c29a26", size = 2220106, upload-time = "2026-10-14T17:12:56.009Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/0e/cf1f2d36c52deb723b3d2e26f655c5adc28648853e62c1dec67e94d84de4/structured_data_models-0.2.1-py3-none-any.whl", hash = "sha256:4fa9a422dc3c55033cdb14096cae024b743b543ef2a8feb4b7cffb21c966f3da", size = 283697, upload-time = "2026-10-14T17:12:54.1Z" },
 ]
 
 [[package]]

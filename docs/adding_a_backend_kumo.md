@@ -111,7 +111,6 @@ class KumoQuantile(
     )
     exact_chunking = False
     cpu_friendly_versions = ("v1-small",)
-    setup_needs_name = True
 ```
 
 The context limit is the size of the tables NVIDIA pretrained on, and since
@@ -255,21 +254,13 @@ as NVIDIA runs the model.
 
 ### Installing the package
 
-The `kumo` extra in `pyproject.toml` lists the dependencies of
-`structured-data-models` (PyPI refuses a git URL in an extra), and joins the
-`all` extra. Those dependencies (`torch`, `pyarrow` and the Hugging Face
-packages) are common enough that their presence does not show the extra was
-asked for, so the backend sets `setup_needs_name = True` and its `setup`
-hook installs `structured-data-models` only when the backend is named,
-`lazy setup kumo`, through `lazy.models._install.install`. A checkout of the
-repository gets the package from the `backends` dependency group instead,
-pinned to the same commit.
-Without a name, it checks that an installed package is the pinned commit,
-which it reads from the package's install record. `_import_backend` likewise
-tells a user without `sdm` to run `lazy setup kumo` after the extra, and
-refuses a package called `sdm` that has no `KumoTabular`. Since `sdm`
-ships no type information and is absent from CI, it also joins the modules
-mypy may miss.
+The `kumo` extra in `pyproject.toml` requires `structured-data-models>=0.2.1`,
+and joins the `all` extra. The `setup` hook does nothing unless the backend
+is named, which is deprecated; then it installs the package if
+`sdm.models.KumoTabular` does not import. `_import_backend` tells a user
+without `sdm` to install the extra, and refuses a package called `sdm` that
+has no `KumoTabular`. Since `sdm` ships no type information and is
+absent from CI, it also joins the modules mypy may miss.
 
 ## Registering and pinning
 

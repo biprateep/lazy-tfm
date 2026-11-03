@@ -6,9 +6,8 @@ Kumo Tabular (NVIDIA 2026) is an in-context tabular foundation model whose
 regressor predicts 999 quantiles of the target per query row, at the levels
 0.001 to 0.999. It ships in three sizes, which are this backend's versions
 (:data:`SIZES`), in NVIDIA's ``structured-data-models`` package (imported as
-``sdm``), which is not on PyPI: ``lazy setup`` installs it from GitHub
-(:data:`REPOSITORY_BUILD`). :class:`KumoQuantile` returns the quantiles as a
-:class:`~lazy.distributions.QuantileDistribution`.
+``sdm``), which the ``kumo`` extra installs. :class:`KumoQuantile` returns the
+quantiles as a :class:`~lazy.distributions.QuantileDistribution`.
 
 Upstream runs every member through a *recipe* of preprocessing steps, which
 is written out here (:func:`_recipe`, :data:`AUTO_TRANSFORMS`,
@@ -45,12 +44,12 @@ from collections.abc import Iterator, Mapping
 import contextlib
 import dataclasses
 import functools
-from importlib import metadata
 from importlib import util
-import json
 import pathlib
 import types
+import typing
 from typing import Any, TypeAlias
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -74,7 +73,6 @@ __all__ = [
     "AUTO_OUTLIER_THRESHOLD",
     "AUTO_TRANSFORMS",
     "AUTO_TRIM_FRACTION",
-    "REPOSITORY_BUILD",
     "REPOSITORY_COMMIT",
     "SIZES",
     "KumoQuantile",
@@ -84,13 +82,14 @@ REPOSITORY_COMMIT = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298"
 """The structured-data-models commit LAZY's recipe was read from and tested on.
 """
 
-REPOSITORY_BUILD = (
-    "structured-data-models @ git+https://github.com/NVIDIA/"
-    f"structured-data-models@{REPOSITORY_COMMIT}"
-)
-"""What ``lazy setup kumo`` installs. PyPI holds only a placeholder of the
-package, and refuses a git URL in an extra.
+_REQUIREMENT = "structured-data-models>=0.2.1"
+"""The ``kumo`` extra's requirement. Release 0.2.1 is the first with Kumo
+Tabular, and its ``sdm/models/kumo/tabular`` is the code at
+:data:`REPOSITORY_COMMIT`.
 """
+
+_VALIDATED_RELEASE = "structured-data-models==0.2.1"
+"""What the deprecated ``lazy setup kumo`` installs: the validated release."""
 
 SIZES: dict[str, str] = {
     "v1-large": "large",
@@ -101,7 +100,7 @@ SIZES: dict[str, str] = {
 
 # Kumo Tabular's own recipe, ``transforms="auto"``, written out here so that
 # the installed upstream version cannot change it: the regression branch of
-# sdm.models.kumo.tabular.recipe.default_recipe at REPOSITORY_BUILD.
+# sdm.models.kumo.tabular.recipe.default_recipe at REPOSITORY_COMMIT.
 
 AUTO_TRANSFORMS: tuple[str, ...] = (
     "identity",
@@ -281,9 +280,6 @@ class KumoQuantile(
     # quantiles' spread away; other chunk sizes give the same bits.
     exact_chunking = False
     cpu_friendly_versions = ("v1-small",)
-    # The extra lists only common packages, so it cannot tell whether Kumo
-    # was asked for.
-    setup_needs_name = True
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -325,58 +321,51 @@ class KumoQuantile(
             "sdm",
             needed_by=type(self).__name__,
             extra=self.extra,
-            # The extra holds only the package's dependencies.
-            then="lazy setup kumo",
         )
         if not hasattr(getattr(sdm, "models", None), "KumoTabular"):
             raise ImportError(
                 f"{type(self).__name__} needs NVIDIA's structured-data-models, "
                 f"but the 'sdm' installed at {getattr(sdm, '__file__', '?')} "
-                "has no models.KumoTabular; `lazy setup kumo` installs it"
+                "has no models.KumoTabular; uninstall the package that "
+                "provides it, then pip install 'lazy-tfm[kumo]'"
             )
         return sdm
 
     @classmethod
     def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
-        """Installs structured-data-models from GitHub, when asked to.
+        """Installs structured-data-models when named, which is deprecated.
 
-        The ``kumo`` extra brings the package's dependencies, which are
-        common enough that they do not tell whether the extra was asked for,
-        so the package itself is installed only when the backend is named,
-        ``lazy setup kumo``. Then :data:`REPOSITORY_BUILD` is installed
-        (:func:`lazy.models._install.install`, with pip or uv), or, in a uv
-        project, the ``uv add`` that keeps it is printed instead. Without a
-        name, an installed package is checked against
-        :data:`REPOSITORY_COMMIT`.
+        The ``kumo`` extra installs the package, so unnamed this does
+        nothing. Named, ``lazy setup kumo`` warns, and installs
+        :data:`_VALIDATED_RELEASE` when ``sdm.models.KumoTabular`` does not
+        import (:func:`lazy.models._install.install`, with pip or
+        uv).
 
         Args:
             dry_run: Say what would be installed, and install nothing.
             requested: Whether the backend was named on the command line.
 
         Returns:
-            Whether the validated build is installed, or would be after a
-            dry run; True when it is absent and was not asked for.
+            Whether the package is installed, or would be after a dry run;
+            True when the backend was not named.
         """
-        installed = _installed_build()
-        if installed is not None and installed[1] == REPOSITORY_COMMIT:
+        if not requested:
+            return True
+        warnings.warn(
+            "lazy setup kumo is deprecated and will be removed in 0.7.0: "
+            "pip install 'lazy-tfm[kumo]' now installs "
+            "structured-data-models.",
+            FutureWarning,
+            skip_file_prefixes=(_ensemble._PACKAGE_PREFIX,),  # noqa: SLF001 - the package's shared prefix.
+        )
+        try:
+            # The check every fit makes, KumoTabular included.
+            cls()._import_backend()  # noqa: SLF001 - a classmethod of the same class.
+        except ImportError:
+            pass
+        else:
             print("Kumo Tabular: structured-data-models is installed.")
             return True
-        if installed is None and not requested:
-            print(
-                "Kumo Tabular: not installed, skipped (pip install "
-                "'lazy-tfm[kumo]', then lazy setup kumo, adds it)."
-            )
-            return True
-        if installed is not None:
-            version, commit = installed
-            print(
-                f"Kumo Tabular: structured-data-models {version} is "
-                f"installed (commit {commit or 'unknown'}), not the "
-                f"validated {REPOSITORY_COMMIT[:9]}."
-            )
-            if not requested:
-                print("  lazy setup kumo replaces it.")
-                return False
         if util.find_spec("pyarrow") is None:
             # The install leaves dependencies to the extra.
             print(
@@ -386,7 +375,7 @@ class KumoQuantile(
             return False
         return _install.install(
             "Kumo Tabular",
-            REPOSITORY_BUILD,
+            _VALIDATED_RELEASE,
             what="structured-data-models",
             check="from sdm.models import KumoTabular",
             dry_run=dry_run,
@@ -879,19 +868,37 @@ def _cycle(tokens: tuple[str, ...]) -> tuple[str, ...]:
     return distinct
 
 
-def _installed_build() -> tuple[str, str | None] | None:
-    """The installed structured-data-models: its version and git commit.
+# Hidden from the type checker, which would otherwise type every misspelt
+# attribute of this module as a str.
+if not typing.TYPE_CHECKING:
 
-    Returns:
-        A tuple ``(version, commit)``, where the commit is None when the
-        package was not installed from a git URL; None when it is absent.
-    """
-    try:
-        distribution = metadata.distribution("structured-data-models")
-    except metadata.PackageNotFoundError:
-        return None
-    direct = json.loads(distribution.read_text("direct_url.json") or "{}")
-    return distribution.version, direct.get("vcs_info", {}).get("commit_id")
+    def __getattr__(name: str) -> str:
+        """The deprecated ``REPOSITORY_BUILD``, with a FutureWarning.
+
+        Args:
+            name: The attribute looked up.
+
+        Returns:
+            The git requirement of :data:`REPOSITORY_COMMIT`.
+
+        Raises:
+            AttributeError: For any other name.
+        """
+        if name != "REPOSITORY_BUILD":
+            raise AttributeError(
+                f"module {__name__!r} has no attribute {name!r}"
+            )
+        warnings.warn(
+            "lazy.models.kumo.REPOSITORY_BUILD is deprecated and will be "
+            "removed in 0.7.0: the kumo extra installs "
+            "structured-data-models from PyPI.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return (
+            "structured-data-models @ git+https://github.com/NVIDIA/"
+            f"structured-data-models@{REPOSITORY_COMMIT}"
+        )
 
 
 def _load_network(

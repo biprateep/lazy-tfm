@@ -321,10 +321,12 @@ def test_missing_values_reach_the_network_and_give_finite_quantiles(
     assert np.isfinite(model.predict_distribution(X_test).locs).all()
 
 
-def test_a_missing_sdm_names_lazy_setup(monkeypatch):
-    monkeypatch.setitem(sys.modules, "sdm", None)
-    with pytest.raises(ImportError, match="then lazy setup kumo"):
-        kumo.KumoQuantile()._import_backend()
+def test_the_deprecated_repository_build_still_names_the_commit():
+    with pytest.warns(FutureWarning, match="removed in 0.7.0"):
+        build = kumo.REPOSITORY_BUILD
+    assert build.endswith(f"@{kumo.REPOSITORY_COMMIT}")
+    with pytest.raises(AttributeError):
+        _ = kumo.REPOSITORY_BUILDS
 
 
 def test_another_package_called_sdm_is_refused(monkeypatch):

@@ -41,9 +41,9 @@ __all__ = [
     "uv_project",
 ]
 
-CHECKOUT_SYNC = ("uv", "sync", "--extra", "all", "--group", "backends")
-"""What gives a checkout of this repository every backend: the extras, and the
-dependency group holding what PyPI cannot (pyproject.toml).
+CHECKOUT_SYNC = ("uv", "sync", "--extra", "all")
+"""What gives a checkout of this repository every backend: the extras, with
+the repository builds that pyproject.toml's uv sources pin.
 """
 
 
