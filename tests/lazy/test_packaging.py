@@ -7,7 +7,6 @@ import tomllib
 from packaging import requirements
 
 import lazy
-from lazy.models import _install
 from lazy.models import kumo
 from lazy.models import tabfm
 
@@ -63,21 +62,7 @@ def test_the_published_requirements_hold_no_direct_url():
         assert requirements.Requirement(line).url is None, line
 
 
-def test_a_checkout_syncs_the_structured_data_models_lazy_setup_installs():
-    """``uv sync --group backends`` and ``lazy setup kumo`` agree."""
-    source = PYPROJECT["tool"]["uv"]["sources"]["structured-data-models"]
-    assert source["rev"] == kumo.REPOSITORY_COMMIT
-    assert kumo.REPOSITORY_BUILD.endswith(
-        f"git+{source['git']}@{source['rev']}"
-    )
-    group = _install.CHECKOUT_SYNC[_install.CHECKOUT_SYNC.index("--group") + 1]
-    assert PYPROJECT["dependency-groups"][group] == ["structured-data-models"]
-
-
-def test_a_plain_sync_installs_no_backend():
-    """CI runs ``uv sync``, which must not bring PyTorch with Kumo's package."""
-    defaults = PYPROJECT["tool"]["uv"].get("default-groups", ["dev"])
-    assert "backends" not in defaults
-    for group in defaults:
-        for line in PYPROJECT["dependency-groups"][group]:
-            assert "structured-data-models" not in line, group
+def test_the_kumo_extra_installs_the_release_lazy_setup_installs():
+    """The first release with Kumo Tabular, which ``lazy setup kumo`` adds."""
+    extras = PYPROJECT["project"]["optional-dependencies"]
+    assert extras["kumo"] == [kumo._REQUIREMENT]

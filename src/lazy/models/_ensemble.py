@@ -217,8 +217,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     contract above is a hook the package calls on every registered class:
     :meth:`prefetch` for downloads beside the weights,
     :meth:`clear_upstream_caches` for upstream's own caches, :meth:`setup`
-    for ``lazy setup`` (with ``setup_needs_name``), and ``cpu_note`` for the
-    CPU warning. Each defaults to doing nothing.
+    for ``lazy setup``, and ``cpu_note`` for the CPU warning. Each defaults
+    to doing nothing.
 
     Attributes:
         display_name: The model's name in progress bars and warnings.
@@ -273,10 +273,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             say); they fit on a CPU without the warning, which suggests them.
         cpu_note: What the CPU warning adds after "runs slowly on CPU", as a
             clause starting with a space; empty for nothing.
-        setup_needs_name: Whether :meth:`setup` installs the model only
-            when ``lazy setup`` names it, because its extra holds nothing
-            that tells whether it was asked for; ``lazy setup --help`` lists
-            these backends.
         method_note: How the model gives a distribution, in one sentence,
             for the documentation's table of the backends.
     """
@@ -302,7 +298,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
     cpu_note: ClassVar[str] = ""
-    setup_needs_name: ClassVar[bool] = False
     method_note: ClassVar[str] = ""
 
     # Set by each backend's __init__; declared for the type checker only.
@@ -559,14 +554,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         named on its command line. It installs or fetches what PyPI cannot
         provide, prints a line saying what it did, and does nothing when the
         extra is not installed or the install is already complete, so that
-        it is safe to run again. A backend whose extra holds nothing that
-        tells it apart (Kumo Tabular's lists only common packages) installs
-        only when ``requested``, and declares ``setup_needs_name``. The
-        default has nothing to do and prints nothing.
+        it is safe to run again. The default has nothing to do and prints
+        nothing.
 
         Args:
             dry_run: Say what would be done, and change nothing.
             requested: Whether the backend was named on the command line.
+                Deprecated: only ``lazy setup kumo`` uses it, and it goes
+                with that command in 0.7.0.
 
         Returns:
             Whether the model is complete, or would be after a dry run;
@@ -1082,7 +1077,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
 
 def import_extra(
-    module: str, *, needed_by: str, extra: str, then: str = ""
+    module: str, *, needed_by: str, extra: str
 ) -> types.ModuleType:
     """Imports a backend's optional package, naming the extra if it is missing.
 
@@ -1093,8 +1088,6 @@ def import_extra(
         module: The package to import, such as ``"tabicl"``.
         needed_by: The class that needs it, for the message.
         extra: The pip extra of lazy-tfm that installs it.
-        then: What to run after the extra, for a package the extra cannot
-            install itself (``"lazy setup kumo"``); empty for nothing.
 
     Returns:
         The imported package.
@@ -1109,10 +1102,9 @@ def import_extra(
     except ImportError as error:
         if (error.name or "").partition(".")[0] != module.partition(".")[0]:
             raise
-        after = f", then {then}" if then else ""
         raise ImportError(
             f"{needed_by} needs the {module} backend: "
-            f"pip install 'lazy-tfm[{extra}]'{after}"
+            f"pip install 'lazy-tfm[{extra}]'"
         ) from error
     return sys.modules[module]
 

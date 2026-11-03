@@ -36,18 +36,16 @@ Face](https://huggingface.co/nvidia/Kumo-Tabular), under the OpenMDW License
 ## Installation
 
 Kumo Tabular is part of NVIDIA's `structured-data-models` package (imported as
-`sdm`), which is not on PyPI yet. The extra installs its dependencies, and
-`lazy setup kumo` installs the package itself from GitHub, at the commit LAZY
-was validated on (the backend is named because its extra lists only common
-packages, which do not show that it was asked for):
+`sdm`), which the extra installs from PyPI:
 
 ```console
 pip install 'lazy-tfm[kumo]'
-lazy setup kumo
 ```
 
-Without a name, `lazy setup` checks that an installed `structured-data-models`
-is that commit.
+LAZY was validated on the package's commit
+[2b76468](https://github.com/NVIDIA/structured-data-models/commit/2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298).
+Its Kumo Tabular code is identical to that of release 0.2.1, the extra's
+lowest version.
 
 ## Defaults
 

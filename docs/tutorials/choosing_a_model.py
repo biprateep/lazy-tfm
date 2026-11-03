@@ -56,7 +56,7 @@ import sys
 
 if "google.colab" in sys.modules:
     # %pip install -q 'lazy-tfm[tabpfn,tabicl,tabfm,limix,kumo]'
-    # !lazy setup && lazy setup kumo
+    # !lazy setup
     pass
 
 # %%

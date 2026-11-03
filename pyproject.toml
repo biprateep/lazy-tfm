@@ -70,15 +70,7 @@ tabpfn = [
     "tabpfn>=9.0.0", # TabPFN-3; its checkpoint is fetched from Hugging Face on first use
 ]
 kumo = [
-    # NVIDIA's structured-data-models, which holds Kumo Tabular, has only a
-    # placeholder on PyPI, and PyPI refuses metadata with direct URLs, so
-    # `lazy setup` installs it from GitHub (lazy.models.kumo.REPOSITORY_BUILD).
-    # These are its dependencies at that commit.
-    "torch>=2.7",
-    "pyarrow",
-    "safetensors",
-    "huggingface_hub",
-    "typing_extensions",
+    "structured-data-models>=0.2.1", # NVIDIA's package holding Kumo Tabular
 ]
 limix = [
     # LimiX itself is not on PyPI, and PyPI refuses metadata with direct URLs,
@@ -123,22 +115,13 @@ docs = [
     "myst-nb>=1.1", # MyST Markdown pages and the tutorial notebooks
     "sphinx-rtd-theme>=3",
 ]
-# The backend packages that PyPI cannot hold in an extra, from the sources
-# below: `uv sync --extra all --group backends` gives a checkout every backend.
-# Not a default group, since structured-data-models brings PyTorch, and CI
-# installs no backend.
-backends = [
-    "structured-data-models",
-]
 
 # Development-only source overrides: honoured by `uv sync` in a checkout, never
 # written into the published metadata. The repository build also calls itself
-# 1.0.1, so only the commit distinguishes it from the release. The
-# structured-data-models commit is lazy.models.kumo.REPOSITORY_COMMIT, which
-# `lazy setup kumo` installs (tests/lazy/test_packaging.py checks both pins).
+# 1.0.1, so only the commit distinguishes it from the release. `lazy setup`
+# installs the same commit (tests/lazy/test_packaging.py checks it).
 [tool.uv.sources]
 tabfm = { git = "https://github.com/google-research/tabfm", rev = "fbb665569425fd2f490c6576b3af967876fe11ff" }
-structured-data-models = { git = "https://github.com/NVIDIA/structured-data-models", rev = "2b76468cb5b4ac1f4bc59f7f07f0506a4a2e8298" }
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]

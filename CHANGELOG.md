@@ -45,6 +45,28 @@ change the API.
 - The logo sets "LAZY" as the row of a table: each letter in its own column,
   under a header row, between a top and a bottom rule. The letters and the
   square icon are unchanged.
+- The `kumo` extra installs NVIDIA's `structured-data-models` 0.2.1 or
+  later from PyPI, so Kumo Tabular no longer needs `lazy setup kumo`. The
+  release's Kumo Tabular code is identical to the commit LAZY was validated
+  on. Without a name, `lazy setup` does nothing for Kumo Tabular. A source
+  checkout gets every backend with `uv sync --extra all`; the `backends`
+  dependency group is gone.
+
+### Deprecated
+
+- `lazy setup kumo` warns with a `FutureWarning` and will be removed in
+  0.7.0. It still installs `structured-data-models` when
+  `sdm.models.KumoTabular` does not import. The `requested` argument of the
+  backends' `setup` hook, which only this path uses, goes with it.
+  `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
+  install, also warns and will be removed in 0.7.0.
+
+### Removed
+
+- The backend class attribute `setup_needs_name`, and the `then` argument
+  of `lazy.models._ensemble.import_extra`, are removed, since no backend
+  needs them now. `lazy setup --help` no longer lists backends that
+  install only when named.
 
 ### Fixed
 

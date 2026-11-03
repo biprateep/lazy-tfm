@@ -101,11 +101,9 @@ checkpoint it read in memory). `setup` completes an install that the pip extra
 cannot, and `lazy setup` runs it for every backend, or for those named on its
 command line: it prints a line saying what it did, skips a backend whose extra
 is not installed, and returns whether the backend is complete (TabFM installs
-its repository build, and LimiX downloads its source). A backend whose extra
-lists only packages common enough not to show it was asked for (Kumo Tabular's)
-sets `setup_needs_name = True` and acts only when it is named, which the hook
-is told by `requested=True`, and `lazy setup --help` lists such backends from
-that attribute.
+its repository build, and LimiX downloads its source). The hook is told by
+`requested=True` that the backend was named; this argument will be removed in
+0.7.0.
 
 ## A skeleton
 
