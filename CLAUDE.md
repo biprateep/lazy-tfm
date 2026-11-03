@@ -94,7 +94,7 @@ Run the checks that `CONTRIBUTING.md` lists before every push.
 
 ### Start here
 
-Read the tracking issue "Audit and roadmap", the open phase issue and its decision log, the open pull requests, and the open issues labelled `needs-gpu`, whose results may have arrived. Continue from the first unchecked item.
+Read the tracking issue "Audit and roadmap", the open phase issue and its decision log, the open pull requests, and the open issues labelled `gpu-result`. Continue from the first unchecked item.
 
 ### Roles and review
 
@@ -158,9 +158,18 @@ Read the tracking issue "Audit and roadmap", the open phase issue and its decisi
 ### Work that needs a GPU
 
 - A step needs a GPU machine when it needs a GPU, real weights on a GPU, or a maintainer's local data. Examples are a GPU benchmark, a checkpoint run on a GPU, and a research experiment. Checkpoint tests on a CPU run in the checkpoint-tests workflow instead.
-- If no on-request workflow can run such a step, hand it to a session working through `biprateep` (Part 3). Label its issue `needs-gpu`, or open a task issue with that label.
+- If no on-request workflow can run such a step, hand it to a session working through `biprateep` (Part 3). Labels carry the step between the two kinds of session:
+
+  | Label | Meaning | Set by |
+  |---|---|---|
+  | `needs-gpu` | The step waits for a GPU session. | Part 2, or Part 3 when it releases a step |
+  | `gpu-running` | A GPU session has claimed the step. | Part 3 |
+  | `gpu-result` | The result is on the issue, unread by Part 2. | Part 3 |
+
+- To hand a step over, add `needs-gpu` to its issue, or open a task issue with that label. Add a comment that mentions `@biprateep`, so that Biprateep is notified.
 - The issue states the commit or branch, the command or question, and what the result must report.
-- Do not wait for the result: other work proceeds. Read the result on the issue when it arrives. If the result says the step is complete, remove the label.
+- Do not wait for the result: other work proceeds.
+- When an issue has `gpu-result`, read the result and remove the label. If the step needs more GPU work, add `needs-gpu` again with a comment that says what.
 
 ### Agents
 
@@ -189,7 +198,7 @@ These sessions run on Biprateep's machines, which have GPUs, often in conversati
 
 ### Start here
 
-Biprateep sets the work in the session. Without other instructions, read the open issues labelled `needs-gpu` and take the oldest unclaimed one.
+Biprateep sets the work in the session. Without other instructions, take the oldest open issue labelled `needs-gpu`.
 
 ### Identity
 
@@ -200,11 +209,12 @@ Biprateep sets the work in the session. Without other instructions, read the ope
 
 ### Shared work
 
-1. Before starting an issue, claim it with a comment. If another claim has no release, ask Biprateep before starting.
+1. Before starting a step, claim it: replace `needs-gpu` with `gpu-running`, and comment that a session has claimed it. If an issue already has `gpu-running`, ask Biprateep before starting.
 2. Put the result on the issue as a comment. Lead with the answer, then give the commit, machine, GPU, thread settings, library versions and command, as "Measurements" asks.
 3. If the output does not fit in a comment, put it in a secret gist and link it.
-4. Say whether the step is complete. If it is not, say what is needed next. Leave the label: the Part 2 session removes it.
-5. If a step stops before it ends, release the claim with a comment that says where it stopped.
+4. Say whether the step is complete. If it is not, say what is needed next.
+5. Replace `gpu-running` with `gpu-result`. The Part 2 session removes it once it reads the result.
+6. If a step stops before it ends, release it: replace `gpu-running` with `needs-gpu`, and comment where it stopped.
 
 - Code reaches `main` as Part 2's "Git" and "Pull requests" sections describe, with `biprateep` in place of `joshspeagle`.
 - An account cannot approve its own pull request. A review that Part 2 requires comes from `joshspeagle`, or from Biprateep in a comment.
