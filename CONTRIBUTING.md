@@ -67,6 +67,24 @@ The upstream-check workflow, also run by hand, reports what upstream has
 published since `lazy` pinned it: newer checkpoint revisions, new checkpoint
 repositories and newer backend packages.
 
+## Benchmarks
+
+A change expected to affect speed or memory reports a benchmark against
+`main`. `benchmarks/cpu.py` times lazy's own prediction code (densities, point
+estimates, quantiles, scores and ensemble pooling) on test stand-ins sized
+like the real models, with no network or checkpoint:
+
+```bash
+git fetch origin main
+uv run python benchmarks/cpu.py --against origin/main --repeats 5
+```
+
+It runs each case in a fresh process, alternating this checkout and `main`,
+and prints the setup, each side's median time and peak memory, and the ratio.
+The stand-ins' own work is the same on both sides, so a ratio understates
+lazy's own speed-up. To see how much the ratio varies on your machine, compare
+the checkout with itself: `--against HEAD`.
+
 ## How changes are reviewed
 
 Changes reach `main` through pull requests; a fix of a few lines of prose or
