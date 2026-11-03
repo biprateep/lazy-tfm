@@ -457,8 +457,9 @@ def test_chunking_changes_nothing_but_rounding(cls, data):
     Equal up to the last bit: on CI's x86 runners the quantile stand-in's
     answers for a 7-row chunk and for the whole set differ by one ulp in
     a few bins (bit-identical on the Arm machines the suite is developed
-    on), as blocked scoring did. The real backends' exactness on a CPU is
-    checked bit for bit by the checkpoint tests.
+    on), as blocked scoring did. The checkpoint tests check each real
+    backend on a CPU: bit for bit where it claims ``exact_chunking``, and to
+    float rounding where it does not.
     """
     X, z, X_test = data
     whole = cls(chunk_size=0).fit(X, z).predict_proba(X_test)
