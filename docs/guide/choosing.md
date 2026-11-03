@@ -42,9 +42,10 @@ On a CPU, TabPFN-3.5 is slow, and TabPFN itself refuses CPU contexts larger
 than 5,000 rows (1,000 for the v2 family) unless
 `ignore_pretraining_limits=True` is passed, so `lazy` warns when it finds no
 GPU. On a laptop or a CPU, or when permissive licensing is needed, TabICLv2 is
-the model to use, since it is small, BSD-licensed and nearly as fast on a CPU
-as on a GPU, at some cost in accuracy. For a TabPFN on a CPU, TabPFN-3.5-fast
-is a smaller TabPFN-3.5 at under half its size. It is more than twice as fast
+the model to use, since it is small, BSD-licensed and fast on a CPU (7 s
+for 1,000 context rows and 1,000 queries, see {doc}`scaling`), at some cost
+in accuracy. For a TabPFN on a CPU, TabPFN-3.5-fast is a smaller TabPFN-3.5
+at under half its size. It is more than twice as fast
 on a CPU (within the 5,000-row CPU limit of TabPFN), somewhat faster on a GPU,
 and less accurate than TabPFN-3.5 (−13.05 vs. −13.47 in CDE loss on 10,000 DC1
 context rows), and `lazy` does not warn when it runs on a CPU. Kumo Tabular
