@@ -716,6 +716,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             tabpfn.preprocessing.configs.PreprocessorConfig(**fields)
             for fields in settings["PREPROCESS_TRANSFORMS"]
         ]
+        settings["FINGERPRINT_FEATURE"] = False  # Probe only; never merged.
         return settings
 
     def _recipe(self) -> dict[str, Any]:
