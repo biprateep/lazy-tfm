@@ -1,0 +1,59 @@
+# On request, run the tests that download and load the pinned checkpoints, on
+# a CPU: from the Actions tab ("Checkpoint tests" -> Run workflow, optionally
+# with a pytest -k expression), or by adding the label "checkpoints" to a pull
+# request; to run it again on a pull request, remove the label and add it
+# back. Nothing runs on a schedule. No login is needed: every pinned checkpoint
+# downloads anonymously from Hugging Face.
+#
+# The pinned checkpoints come to about 11 GB (their size_bytes in
+# src/lazy/models/_hub.py), more than an Actions cache holds, so every run
+# downloads them.
+
+name: Checkpoint tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      select:
+        description: "pytest -k expression; empty runs every checkpoint test"
+        required: false
+        default: ""
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  checkpoints:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'checkpoints'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # On the job, so that a run another label starts, which skips the job,
+    # cancels nothing: a new request replaces the one still running.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    env:
+      LAZY_RUN_CHECKPOINT_TESTS: "1"
+      SELECT: ${{ inputs.select }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+      with:
+        enable-cache: true
+    - name: Install the locked backend packages with CPU-only PyTorch
+      run: .github/scripts/install-backends-cpu.sh
+    # The CPU install leaves out triton with the CUDA wheels, but LimiX's
+    # network imports it on a CPU too. The install script writes the locked
+    # requirements.txt this step reads.
+    - name: Install the locked triton for LimiX
+      run: uv pip install "$(grep -E '^triton==' requirements.txt)"
+    - name: Run the checkpoint tests
+      run: |
+        args=(-m checkpoint -rs)
+        if [[ -n "$SELECT" ]]; then args+=(-k "$SELECT"); fi
+        .venv/bin/python -m pytest "${args[@]}"
