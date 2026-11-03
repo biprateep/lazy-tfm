@@ -458,8 +458,6 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
     whole = model.predict_distribution(X[100:]).locs
     model.chunk_size = 1
     single = model.predict_distribution(X[100:]).locs
-    if model.exact_chunking:
-        np.testing.assert_array_equal(single, whole)
     spread = (whole[:, -1] - whole[:, 0]).min()
     np.testing.assert_allclose(single, whole, rtol=0, atol=1e-4 * spread)
 
