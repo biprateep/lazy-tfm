@@ -50,6 +50,15 @@ change the API.
 
 - LimiX-2's `provenance_["kv_cache"]` is `False` when no member's cache fit
   in the device's memory, as `kv_cache_` already was. It said `True`.
+- A `Grid` copies the edges it is given, instead of making the caller's
+  array read-only.
+- Two grids compare equal when their edges agree to 1e-12 of the largest
+  edge's magnitude and to 1e-6 of the narrowest bin's width, instead of to
+  1e-12 absolutely. A grid rebuilt from its
+  own centres far from zero (from 10⁷) was unequal to itself, and grids whose
+  edges are all below 1e-12 were equal however they differed. The metrics
+  check a `bin_edges` passed with a `Grid` by the same rule, and score with
+  the grid's own edges.
 - An empty row of a `HistogramDistribution` (all masses zero) put
   probability on its zero-width buckets, which made a point mass at each.
   It is now uniform over the buckets of positive width only.
