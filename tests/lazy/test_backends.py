@@ -1116,7 +1116,7 @@ class TestTabPFN:
             "kv_cache_precision": "auto",
         }
         assert tabpfn._cache_options("int8")["kv_cache_precision"] == "int8"
-        assert tabpfn._cache_options(False) == {"fit_mode": "fit_preprocessors"}
+        assert tabpfn._cache_options(False)["fit_mode"] == "fit_preprocessors"
 
     @pytest.mark.parametrize("version", ["v2", "v2.5", "v2.6"])
     def test_a_quantised_cache_is_rejected_where_upstream_has_none(

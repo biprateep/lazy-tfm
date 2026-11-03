@@ -340,12 +340,11 @@ def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
 
     Upstream quantises its cache to int8 by default on v3 and later, which
     changes the outputs; ``True`` asks for full precision, so caching is
-    exact.
+    exact. Without the cache, upstream ignores the precision.
     """
-    if kv_cache is False:
-        return {"fit_mode": "fit_preprocessors"}
-    precision = "auto" if kv_cache is True else kv_cache
-    return {"fit_mode": "fit_with_cache", "kv_cache_precision": precision}
+    fit_mode = "fit_preprocessors" if kv_cache is False else "fit_with_cache"
+    precision = kv_cache if isinstance(kv_cache, str) else "auto"
+    return {"fit_mode": fit_mode, "kv_cache_precision": precision}
 
 
 class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
@@ -563,9 +562,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # TabPFN's own default (the newest version it knows, which moves with
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
-        # Every other argument that changes a prediction is passed too, at
-        # the value upstream defaults to today, so that a later default
-        # cannot change it.
+        # Every other argument is passed too, at the value upstream defaults
+        # to today, so that a later default cannot change a prediction. Two
+        # deprecated ones are left out: auto_scale_n_estimators acts only on
+        # n_estimators="auto", and n_jobs does nothing.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
@@ -580,6 +580,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             show_progress_bar=False,
             inference_precision=self._inference_precision(),
             inference_config=self._inference_config(group),
+            memory_saving_mode="auto",
+            keep_cache_on_device=True,
+            n_preprocessing_jobs=1,
+            differentiable_input=False,
+            eval_metric=None,
             **_cache_options(self.kv_cache),
         )
         try:
