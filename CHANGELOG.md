@@ -48,6 +48,13 @@ change the API.
 
 ### Fixed
 
+- A row slice or a concatenation of a `MixtureDistribution` keeps its
+  weights bit for bit, instead of normalizing them again. For a bagged model
+  of 6, 7, 13 or some other numbers of members, a second normalization moved
+  them by one unit in the last place, so `predict_distribution(X).ppf` and
+  a slice of it differed from `predict_quantiles` in the last bits. They now
+  agree exactly, and `predict_distribution` returns weights that differ from
+  before by at most one unit in the last place.
 - An empty row of a `HistogramDistribution` (all masses zero) put
   probability on its zero-width buckets, which made a point mass at each.
   It is now uniform over the buckets of positive width only.

@@ -513,6 +513,15 @@ def test_concatenating_mixtures_keeps_their_components(mixture):
     np.testing.assert_allclose(joined.cdf([1.0]), mixture.cdf([1.0]))
 
 
+def test_slicing_and_concatenating_a_mixture_keep_its_weights(mixture):
+    # Six equal weights move by an ulp if normalized a second time.
+    mixture = distributions.MixtureDistribution.equal(mixture.components * 3)
+    joined = distributions.concatenate([mixture[:3], mixture[3:]])
+    np.testing.assert_array_equal(mixture[:3].weights, mixture.weights)
+    np.testing.assert_array_equal(joined.weights, mixture.weights)
+    np.testing.assert_array_equal(joined.ppf(LEVELS), mixture.ppf(LEVELS))
+
+
 def test_ancil_must_have_one_entry_per_row(histogram):
     with pytest.raises(ValueError, match="entries for 6 rows"):
         distributions.HistogramDistribution(
