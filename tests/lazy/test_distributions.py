@@ -412,6 +412,26 @@ def test_mixture_quantiles_and_mode_go_a_block_of_rows_at_a_time(
     np.testing.assert_array_equal(mixture.mode(), expected.mode())
 
 
+INVALID_WEIGHTS = [
+    [0.0, 0.0],
+    [np.inf, 1.0],
+    [np.nan, 1.0],
+    [-1.0, 2.0],
+    [1e308, 1e308],
+    [1.0],
+]
+
+
+@pytest.mark.parametrize("weights", INVALID_WEIGHTS)
+def test_invalid_weights_raise(histogram, quantiles, weights):
+    with pytest.raises(ValueError, match="weights must be 2 finite"):
+        distributions.MixtureDistribution((histogram, histogram), weights)
+    with pytest.raises(ValueError, match="weights must be 2 finite"):
+        distributions.QuantileDistribution.average(
+            [quantiles, quantiles], weights
+        )
+
+
 def test_mixtures_take_histograms_only(histogram, quantiles):
     with pytest.raises(TypeError, match="HistogramDistribution"):
         distributions.MixtureDistribution((histogram, quantiles), [0.5, 0.5])
@@ -511,6 +531,15 @@ def test_slicing_and_concatenation_keep_rows_and_ancil(histogram):
 def test_concatenating_mixtures_keeps_their_components(mixture):
     joined = distributions.concatenate([mixture[:3], mixture[3:]])
     np.testing.assert_allclose(joined.cdf([1.0]), mixture.cdf([1.0]))
+
+
+def test_slicing_and_concatenating_a_mixture_keep_its_weights(mixture):
+    # Six equal weights move by an ulp if normalized a second time.
+    mixture = distributions.MixtureDistribution.equal(mixture.components * 3)
+    joined = distributions.concatenate([mixture[:3], mixture[3:]])
+    np.testing.assert_array_equal(mixture[:3].weights, mixture.weights)
+    np.testing.assert_array_equal(joined.weights, mixture.weights)
+    np.testing.assert_array_equal(joined.ppf(LEVELS), mixture.ppf(LEVELS))
 
 
 def test_ancil_must_have_one_entry_per_row(histogram):

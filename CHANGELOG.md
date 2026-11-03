@@ -48,6 +48,17 @@ change the API.
 
 ### Fixed
 
+- A row slice or a concatenation of a `MixtureDistribution` keeps its
+  weights bit for bit, instead of normalizing them again. For a bagged model
+  of 6, 7, 13 or some other numbers of members, a second normalization moved
+  them by one unit in the last place, so `predict_distribution(X).ppf` and
+  a slice of it differed from `predict_quantiles` in the last bits. They now
+  agree exactly, and `predict_distribution` returns weights that differ from
+  before by at most one unit in the last place.
+- `MixtureDistribution` and `QuantileDistribution.average` raise a
+  `ValueError` for weights that are not finite, are negative, or do not have
+  a positive finite sum. All-zero or infinite weights used to give NaN
+  weights, and so NaN results, with only a `RuntimeWarning`.
 - A `Grid` copies the edges it is given, instead of making the caller's
   array read-only.
 - Two grids compare equal when their edges agree to 1e-12 of the largest
