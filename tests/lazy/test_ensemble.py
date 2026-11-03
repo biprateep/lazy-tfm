@@ -269,6 +269,46 @@ def test_the_pooling_grid_stops_where_every_member_does(gaussian_data):
     assert grid.n_bins == ensemble.MIN_POOL_BINS
 
 
+@pytest.mark.parametrize("pooling", ["linear", "geometric", "quantile"])
+def test_pooling_matches_a_plain_weighted_sum_to_the_bit(pooling):
+    grid = grid_lib.Grid.linear(0.0, 1.0, 40, normalization="histogram")
+    rng = np.random.default_rng(5)
+    parts = [
+        distributions.HistogramDistribution(
+            np.linspace(-0.5, 1.5, n + 1), rng.gamma(0.5, size=(6, n))
+        )
+        for n in (30, 70)
+    ]
+    weights = np.array([0.3, 0.7])
+    pooled = ensemble._pool(iter(parts), weights, pooling, grid)
+    pairs = list(zip(weights, parts, strict=True))
+    if pooling == "quantile":
+        expected = sum(w * ensemble._quantiles(p, grid) for w, p in pairs)
+        assert pooled.locs.tobytes() == expected.tobytes()
+        return
+    edges = grid.edges
+    if pooling == "linear":
+        expected = sum(w * p.histogramize(edges).masses for w, p in pairs)
+    else:
+        floor = ensemble.LOG_FLOOR / (grid.y_max - grid.y_min)
+        log_pool = sum(
+            w * np.log(p.histogramize(edges).masses / grid.widths + floor)
+            for w, p in pairs
+        )
+        expected = np.exp(log_pool - log_pool.max(axis=1, keepdims=True))
+        expected = expected * grid.widths
+    assert pooled.masses.tobytes() == expected.tobytes()
+
+
+def test_a_pooled_sum_of_negative_zeros_is_zero_as_with_sum():
+    weights = np.array([0.3, 0.7])
+    terms = [np.array([-0.0, -0.0, 1.0]), np.array([-0.0, 2.0, -0.0])]
+    expected = sum(w * term for w, term in zip(weights, terms))
+    pooled = ensemble._pooled_sum(weights, iter(terms))
+    assert pooled.tobytes() == expected.tobytes()
+    assert not np.signbit(pooled[0])
+
+
 def test_pool_bins_sets_the_resolution(gaussian_data):
     model = _fit_gaussians("linear", gaussian_data, pool_bins=300)
     assert model.native_grid_.n_bins == 300

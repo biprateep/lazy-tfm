@@ -44,6 +44,11 @@ change the API.
   `LazyEnsembleModel`'s peak memory falls from 119 to 99 MiB, and a bagged
   5,000-bucket model's `predict_quantiles` from 301 to 269 MiB, with the
   same results to the bit.
+- `LazyEnsembleModel` pools its members one at a time, into one running sum,
+  so it holds one member's distribution of a chunk instead of all of them.
+  With two members on the CPU benchmark, its peak memory falls from 99 to
+  96 MiB; the saving grows with the number of members. The results are the
+  same to the bit.
 - `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
   the model's `chunk_size` chunks of rows as it is predicted, instead of every
   row's distribution at once, so their peak memory no longer grows with the

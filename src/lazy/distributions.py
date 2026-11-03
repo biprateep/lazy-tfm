@@ -42,6 +42,7 @@ from typing import Any, TypeAlias
 import numpy as np
 import numpy.typing as npt
 
+from lazy import _arrays
 from lazy import _typing
 from lazy import grid as grid_lib
 
@@ -933,13 +934,7 @@ class MixtureDistribution(_Base):
 
         A generator of the arrays keeps only the running sum and one array.
         """
-        total = None
-        for weight, value in zip(self.weights, values, strict=True):
-            if total is None:
-                total = weight * value
-            else:
-                total += weight * value
-        return total
+        return _arrays.weighted_sum(self.weights, values)
 
     def _histogram_blocks(
         self,
