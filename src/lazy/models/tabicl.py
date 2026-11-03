@@ -516,6 +516,9 @@ class TabICLQuantile(
         machine, rather than at the pickled path. A fitted regressor that
         holds its network already is left as it is.
 
+        Safe from several threads: the attach runs under the regressor's
+        lock, and a thread that waited for it finds the network attached.
+
         Args:
             regressor: A fitted ``TabICLRegressor``.
         """
@@ -523,11 +526,16 @@ class TabICLQuantile(
             type(regressor), "_load_model"
         ):
             return
-        regressor.model_path = str(self._checkpoint())
-        with self._shared_network(regressor):
-            regressor._load_model()  # noqa: SLF001 - the shared loader.
-            # As upstream's fit does: a network just loaded is on the CPU.
-            regressor.model_.to(regressor.device_)
+        # The regressor's lock, not the network's, which _shared_network
+        # takes inside it.
+        with _locks.network_lock(regressor):
+            if hasattr(regressor, "model_"):
+                return
+            regressor.model_path = str(self._checkpoint())
+            with self._shared_network(regressor):
+                regressor._load_model()  # noqa: SLF001 - the shared loader.
+                # As upstream's fit does: a network just loaded is on the CPU.
+                regressor.model_.to(regressor.device_)
 
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray

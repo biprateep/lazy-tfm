@@ -126,6 +126,9 @@ change the API.
 
 ### Fixed
 
+- An unpickled TabICL model predicting from two threads at once could load
+  a second copy of its network from the checkpoint and then raise an
+  `AttributeError`. The network is now attached once, under a lock.
 - An unpickled Kumo, LimiX or TabICL model predicting from two threads at
   once could read the checkpoint path of the machine that made the pickle,
   which on another machine does not exist. The path is now found again
