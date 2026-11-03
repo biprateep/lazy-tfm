@@ -7,7 +7,7 @@ the real ones: 5,000 buckets as TabPFN predicts, four bagged members whose
 buckets differ, as a bagged TabPFN or LimiX pools, and 999 quantiles as
 TabICL predicts. Their own work, a nearest-neighbour lookup, is cached after
 the first call, so the timed calls are mostly lazy's: densities, point
-estimates, quantiles, scores and pooling.
+estimates, quantiles, scores, ``evaluate`` and pooling.
 
 Run it from the repository root::
 
@@ -130,7 +130,13 @@ MODELS = ("buckets", "bagged", "quantiles", "pooled")
 """The models: one bar model, four bagged ones, a quantile model, and the
 first and third pooled by ``LazyEnsembleModel``."""
 
-METHODS = ("predict_proba", "predict", "predict_quantiles", "score")
+METHODS = (
+    "predict_proba",
+    "predict",
+    "predict_quantiles",
+    "score",
+    "evaluate",
+)
 """The calls timed on each model."""
 
 CASES = tuple(f"{m}.{x}" for m, x in itertools.product(MODELS, METHODS))
@@ -162,8 +168,8 @@ def _call(case: str) -> Callable[[], object]:
     name, method = case.split(".")
     model = _model(name)
     _, _, X, y = _data(0)
-    if method == "score":
-        return lambda: model.score(X, y)
+    if method in ("score", "evaluate"):
+        return lambda: getattr(model, method)(X, y)
     if method == "predict_quantiles":
         return lambda: model.predict_quantiles(X, QUANTILES)
     return lambda: getattr(model, method)(X)

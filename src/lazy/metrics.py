@@ -767,10 +767,8 @@ def per_object_scores(
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
     """Each object's contribution to the CDE loss, and its PIT.
 
-    Every PDF metric is a statistic of these two per-object arrays, so they
-    can be computed a block of rows at a time and joined:
-    :func:`cde_loss` is the mean of the first, and :func:`summarize_scores`
-    turns both, with the point estimates, into the :func:`summarize` table.
+    :func:`cde_loss` is the mean of the first. For the CRPS and NLL as
+    well, from one normalisation, use :func:`per_object_metrics`.
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
@@ -792,8 +790,17 @@ def per_object_scores(
     grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
         y_true, y_grid, pdfs, bin_edges=bin_edges
     )
-    squared = _integral_of_square(grid, density, bin_edges)
-    return squared - 2.0 * pdf_at_truth, pit
+    return _cde_terms(grid, density, pdf_at_truth, bin_edges), pit
+
+
+def _cde_terms(
+    grid: _typing.FloatArray,
+    density: _typing.FloatArray,
+    pdf_at_truth: _typing.FloatArray,
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray:
+    """``integral p_i^2 - 2 p_i(y_true_i)`` of each normalised row."""
+    return _integral_of_square(grid, density, bin_edges) - 2.0 * pdf_at_truth
 
 
 def crps(
@@ -959,33 +966,50 @@ def per_object_nll(
     return _nll_terms(pdf_at_truth, floor)
 
 
-def _per_object_all(
+def per_object_metrics(
     y_true: npt.ArrayLike,
     y_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
-    bin_edges: npt.ArrayLike | None,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+    floor: float = NLL_DENSITY_FLOOR,
 ) -> tuple[
     _typing.FloatArray,
     _typing.FloatArray,
     _typing.FloatArray,
     _typing.FloatArray,
 ]:
-    """Returns a tuple (cde_terms, pit, crps_terms, nll_terms), shape (n,).
+    """Every per-object score of each row, from one normalisation.
 
-    The four per-object scores from one normalisation of ``pdfs``; each
-    equals what its own function returns.
+    Each array equals what its own function returns:
+    :func:`per_object_scores` (the CDE terms and PIT values),
+    :func:`per_object_crps` and :func:`per_object_nll`. One normalisation
+    makes this cheaper than calling the three. :func:`summarize_scores`
+    turns the arrays of blocks of rows, joined, into the :func:`summarize`
+    table.
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g); normalised here.
+        bin_edges: The grid's bin edges, as in :func:`per_object_scores`.
+        floor: The NLL's density floor, as in :func:`per_object_nll`.
+
+    Returns:
+        A tuple (cde_terms, pit, crps_terms, nll_terms), each of shape (n,).
     """
+    _check_floor(floor)
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     truth = np.asarray(y_true, dtype=float)
     grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
         truth, y_grid, pdfs, bin_edges=bin_edges
     )
-    squared = _integral_of_square(grid, density, bin_edges)
     return (
-        squared - 2.0 * pdf_at_truth,
+        _cde_terms(grid, density, pdf_at_truth, bin_edges),
         pit,
         _crps_terms(truth, grid, density, bin_edges),
-        _nll_terms(pdf_at_truth, NLL_DENSITY_FLOOR),
+        _nll_terms(pdf_at_truth, floor),
     )
 
 
@@ -1234,8 +1258,8 @@ def pdf_metrics(
         A tuple (metrics, pit): the metric bundle and the per-object PIT
         values, shape (n,).
     """
-    terms, pit, crps_terms, nll_terms = _per_object_all(
-        y_true, y_grid, pdfs, bin_edges
+    terms, pit, crps_terms, nll_terms = per_object_metrics(
+        y_true, y_grid, pdfs, bin_edges=bin_edges
     )
     return _pdf_metrics_from(terms, pit, crps_terms, nll_terms), pit
 
@@ -1362,8 +1386,8 @@ def summarize(
         raise ValueError(f"scale must be one of {SCALES}: {scale=}")
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     estimate = _checked_point_estimate(y_grid, pdfs, point, bin_edges)
-    cde_terms, pit, crps_terms, nll_terms = _per_object_all(
-        y_true, y_grid, pdfs, bin_edges
+    cde_terms, pit, crps_terms, nll_terms = per_object_metrics(
+        y_true, y_grid, pdfs, bin_edges=bin_edges
     )
     return summarize_scores(
         y_true,
@@ -1393,10 +1417,9 @@ def summarize_scores(
     """The :func:`summarize` table from per-object pieces.
 
     For data too large to hold as one ``(n, g)`` array: compute the point
-    estimates, :func:`per_object_scores`, :func:`per_object_crps` and
-    :func:`per_object_nll` a block of rows at a time, join them, and pass
-    them here. The table is the one :func:`summarize` gives on the whole
-    array; a score left out gives a NaN column.
+    estimates and :func:`per_object_metrics` a block of rows at a time, join
+    them, and pass them here. The table is the one :func:`summarize` gives
+    on the whole array; a score left out gives a NaN column.
 
     Args:
         y_true: Finite true values, shape (n,).
