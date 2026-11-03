@@ -113,6 +113,7 @@ dev = [
     "mypy>=2.3",
     "pandas-stubs>=3.0.5.260914",
     "astropy>=6",
+    "hypothesis>=6.100",
 ]
 docs = [
     "sphinx>=8",

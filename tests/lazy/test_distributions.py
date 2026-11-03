@@ -79,6 +79,20 @@ def test_an_empty_histogram_row_is_uniform_in_probability(histogram):
     np.testing.assert_allclose(histogram.probabilities[2], 1 / 30)
 
 
+def test_an_empty_row_puts_no_probability_on_a_zero_width_bucket():
+    dist = distributions.HistogramDistribution(
+        [0.0, 1.0, 1.0, 2.0], [[0, 0, 0]]
+    )
+    np.testing.assert_array_equal(dist.probabilities, [[0.5, 0.0, 0.5]])
+    # No point mass at the zero-width bucket.
+    np.testing.assert_allclose(
+        dist.cdf([0.999, 1.0, 1.001]), [[0.4995, 0.5, 0.5005]]
+    )
+    # With no width at all, there is nowhere else for the probability to go.
+    point = distributions.HistogramDistribution([1.0, 1.0], [[0.0]])
+    np.testing.assert_array_equal(point.probabilities, [[1.0]])
+
+
 def test_histogram_moments_match_integration(histogram):
     mean, var = _integral_moments(histogram, 0.0, histogram.bins[-1])
     np.testing.assert_allclose(histogram.mean(), mean, rtol=1e-6)

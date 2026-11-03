@@ -42,6 +42,9 @@ change the API.
 
 ### Fixed
 
+- An empty row of a `HistogramDistribution` (all masses zero) put
+  probability on its zero-width buckets, which made a point mass at each.
+  It is now uniform over the buckets of positive width only.
 - On Windows, two processes downloading the same dataset file into a
   shared cache no longer fail with a `PermissionError`: the one that finishes
   second keeps the copy already in place.
