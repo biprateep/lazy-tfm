@@ -70,6 +70,11 @@ change the API.
 
 ### Fixed
 
+- TabPFN no longer claims that chunking the queries gives the same bits on a
+  CPU (`exact_chunking` is now `False`), and Kumo Tabular's docs no longer
+  claim a bit-for-bit cache there: on a 4-core x86 CPU both agree only to
+  float rounding. Kumo Tabular's `kv_cache_rtol` is 1e-3, above the largest
+  difference measured there, 2.2e-4 of a density.
 - LimiX-2's `provenance_["kv_cache"]` is `False` when no member's cache fit
   in the device's memory, as `kv_cache_` already was. It said `True`. The
   warning about uncached members now also says that a smaller `bag_size` or

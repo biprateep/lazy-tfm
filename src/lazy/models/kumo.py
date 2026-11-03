@@ -191,10 +191,8 @@ class KumoQuantile(
         kv_cache: Fit upstream's context cache (``fit`` then ``predict``),
             so each chunk of queries skips the context's forward pass; False
             runs the whole forward pass, recipe included, for every chunk.
-            On a CPU the two agree bit for bit in most cases and otherwise
-            to float rounding, within 2e-5 of the quantiles' spread where
-            measured (a one-row chunk, or bagged members whose columns lazy
-            permutes, with missing values); on a GPU with
+            On a CPU the two agree to float rounding, within 2e-5 of the
+            quantiles' spread where measured; on a GPU with
             ``mixed_precision=True`` they agree to float16 rounding.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an array of
             bin centres, ``"native"``, or None for the native grid (1,000
@@ -277,8 +275,11 @@ class KumoQuantile(
     )
     # Not bit for bit on a CPU: a one-row chunk takes a different
     # matrix-multiply path, cached or not, and lands about 6e-6 of the
-    # quantiles' spread away; other chunk sizes give the same bits.
+    # quantiles' spread away.
     exact_chunking = False
+    # On a 4-core x86 CPU the cached and uncached densities on the DC1 grid
+    # differ by up to 2.2e-4 of a density, and 1.2e-4 of the peak.
+    kv_cache_rtol = 1e-3
     cpu_friendly_versions = ("v1-small",)
 
     def __init__(  # noqa: D107 - arguments documented on the class.

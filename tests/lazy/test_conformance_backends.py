@@ -7,9 +7,8 @@ LAZY_RUN_CHECKPOINT_TESTS=1. Parametrised over the registry: a newly
 registered backend is tested here automatically, and fails at once if it has
 no entry in backend_settings.BACKEND_SETTINGS.
 
-Runs on CPU: bit-identity (chunking, the cache) is a property of the maths,
-and a GPU's kernel choice and mixed precision change the last digits with
-the batch shape.
+Runs on CPU, where chunking and the cache agree to float rounding; a GPU's
+kernel choice and mixed precision change more digits with the batch shape.
 """
 
 import warnings

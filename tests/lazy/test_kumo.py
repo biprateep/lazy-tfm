@@ -466,17 +466,21 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
 
 @pytest.mark.checkpoint
 @pytest.mark.parametrize(
-    ("params", "exact"),
+    ("params", "rtol"),
     [
-        ({}, True),
-        ({"chunk_size": 1}, False),
+        ({}, 1e-5),
+        ({"chunk_size": 1}, None),
         # Each bag's columns permuted by lazy, with missing values.
-        ({"n_estimators": 5, "bag_size": 80}, False),
-        ({"n_estimators": 5, "bag_size": 80, "feature_shuffle": False}, True),
+        ({"n_estimators": 5, "bag_size": 80}, None),
+        ({"n_estimators": 5, "bag_size": 80, "feature_shuffle": False}, 1e-5),
     ],
 )
-def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, exact):
-    """Bit for bit in most cases, else within 2e-5 of the spread."""
+def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, rtol):
+    """Within 2e-5 of the quantiles' spread, closer where marked.
+
+    The marked cases agree bit for bit on some CPUs, and within 1.5e-6
+    relatively on a 4-core x86 one.
+    """
     pytest.importorskip("sdm")
     rng = np.random.default_rng(3)
     X = rng.normal(size=(150, 4))
@@ -495,7 +499,7 @@ def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, exact):
         .locs
         for kv_cache in (True, False)
     )
-    if exact:
-        np.testing.assert_array_equal(cached, uncached)
+    if rtol is not None:
+        np.testing.assert_allclose(cached, uncached, rtol=rtol)
     spread = (uncached[:, -1] - uncached[:, 0]).min()
     np.testing.assert_allclose(cached, uncached, rtol=0, atol=2e-5 * spread)

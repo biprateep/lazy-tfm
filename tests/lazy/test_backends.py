@@ -1006,28 +1006,6 @@ class TestTabICL:
         with pytest.raises(ValueError, match="chunk_size"):
             lazy.get_estimator("tabicl", chunk_size=-1).fit(X, z)
 
-    @pytest.mark.checkpoint
-    def test_chunking_the_query_rows_is_bit_identical(self):
-        """Same claim as for TabFM, and the reason chunking is the default."""
-        generator = np.random.default_rng(0)
-        z = generator.uniform(0.2, 1.8, 260)
-        X = pd.DataFrame(
-            {
-                "a": z + generator.normal(0, 0.1, 260),
-                "b": generator.normal(size=260),
-                "c": z**2,
-            }
-        )
-        X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
-
-        def run(chunk_size):
-            model = lazy.LazyModel(
-                "tabicl", n_estimators=2, device="cpu", chunk_size=chunk_size
-            )
-            return model.fit(X_ctx, z[:200]).predict_proba(X_q)
-
-        assert np.array_equal(run(0), run(7))
-
     def test_the_native_grid_leaves_room_to_extrapolate(self):
         """Padded by a quarter of the range, at the same bin width."""
         est = tabicl.TabICLQuantile()
@@ -1305,28 +1283,6 @@ class TestTabPFN:
             tabpfn.bucket_masses(
                 {"criterion": criterion, "logits": torch.zeros((2, 5))}
             )
-
-    @pytest.mark.checkpoint
-    def test_chunking_the_query_rows_is_bit_identical(self):
-        """Same claim as for the other two, and why chunking is the default."""
-        generator = np.random.default_rng(0)
-        z = generator.uniform(0.2, 1.8, 260)
-        X = pd.DataFrame(
-            {
-                "a": z + generator.normal(0, 0.1, 260),
-                "b": generator.normal(size=260),
-                "c": z**2,
-            }
-        )
-        X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
-
-        def run(chunk_size):
-            model = lazy.LazyModel(
-                "tabpfn", n_estimators=2, device="cpu", chunk_size=chunk_size
-            )
-            return model.fit(X_ctx, z[:200]).predict_proba(X_q)
-
-        assert np.array_equal(run(0), run(7))
 
     @pytest.mark.checkpoint
     @pytest.mark.parametrize("version", lazy.list_versions("tabpfn"))

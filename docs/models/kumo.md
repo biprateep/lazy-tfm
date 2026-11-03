@@ -99,11 +99,11 @@ network is run and not a choice of the recipe.
 
 On a CPU, our prediction with the small size matches NVIDIA's own
 implementation to about $3\times 10^{-7}$ in the units of the target on our
-test problem. The cached and uncached predictions are identical bit for bit on
-a CPU, except for a query predicted on its own, which takes a different
-matrix-multiply path and differs by up to about $10^{-6}$ of the quantiles'
-spread, and for a bagged member with missing values whose columns LAZY
-permutes, which differs by up to about $10^{-5}$. On a GPU, the cached and
+test problem. The cached and uncached predictions agree to float rounding on
+a CPU. A query predicted on its own takes a
+different matrix-multiply path and differs by up to about $10^{-6}$ of the
+quantiles' spread, and a bagged member with missing values whose columns LAZY
+permutes differs by up to about $10^{-5}$. On a GPU, the cached and
 uncached quantiles of the large size differ by at most $5\times 10^{-4}$ in the
 units of the target (0.7% of a row's quantile spread) on the 50 test rows of
 our golden problem, which we attribute to float16 rounding.
