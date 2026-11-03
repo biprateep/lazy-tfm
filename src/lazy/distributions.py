@@ -78,6 +78,22 @@ def _freeze(array: npt.ArrayLike) -> _typing.FloatArray:
     return out
 
 
+def _normalized(weights: npt.ArrayLike, n: int) -> _typing.FloatArray:
+    """``weights`` over their sum: n finite, non-negative values, sum > 0."""
+    weights = np.asarray(weights, dtype=np.float64)
+    if (
+        weights.shape != (n,)
+        or not np.isfinite(weights).all()
+        or np.any(weights < 0)
+        or not 0 < weights.sum() < np.inf
+    ):
+        raise ValueError(
+            f"weights must be {n} finite, non-negative values with a positive "
+            f"sum: {weights=}"
+        )
+    return weights / weights.sum()
+
+
 def _check_ancil(ancil: Ancil | None, n_rows: int) -> dict[str, Any] | None:
     """Validates that every metadata column has one entry per row."""
     if ancil is None:
@@ -532,7 +548,8 @@ class QuantileDistribution(_Base):
         quants: The cumulative levels, shape (n_levels,), strictly
             increasing inside [0, 1].
         locs: The value at each level, shape (n_rows, n_levels), made
-            non-decreasing on construction (crossing quantiles are sorted).
+            non-decreasing on construction (a value below the one before it
+            is raised to it).
         ancil: Optional per-row metadata, each value of length n_rows.
     """
 
@@ -588,8 +605,7 @@ class QuantileDistribution(_Base):
         if weights is None:
             weight = np.full(len(parts), 1.0 / len(parts))
         else:
-            weight = np.asarray(weights, dtype=np.float64)
-            weight = weight / weight.sum()
+            weight = _normalized(weights, len(parts))
         locs = np.tensordot(weight, np.stack([p.locs for p in parts]), axes=1)
         return cls(quants, locs, parts[0].ancil)
 
@@ -839,11 +855,9 @@ class MixtureDistribution(_Base):
             raise TypeError("mixture components must be HistogramDistribution")
         if len({c.npdf for c in components}) != 1:
             raise ValueError("every component must have the same rows")
-        weights = np.asarray(self.weights, dtype=np.float64)
-        if weights.shape != (len(components),) or np.any(weights < 0):
-            raise ValueError("weights must be non-negative, one per component")
+        weights = _normalized(self.weights, len(components))
         object.__setattr__(self, "components", components)
-        object.__setattr__(self, "weights", _freeze(weights / weights.sum()))
+        object.__setattr__(self, "weights", _freeze(weights))
         object.__setattr__(
             self, "ancil", _check_ancil(self.ancil, components[0].npdf)
         )

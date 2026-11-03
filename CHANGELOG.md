@@ -55,6 +55,10 @@ change the API.
   a slice of it differed from `predict_quantiles` in the last bits. They now
   agree exactly, and `predict_distribution` returns weights that differ from
   before by at most one unit in the last place.
+- `MixtureDistribution` and `QuantileDistribution.average` raise a
+  `ValueError` for weights that are not finite, are negative, or do not have
+  a positive finite sum. All-zero or infinite weights used to give NaN
+  weights, and so NaN results, with only a `RuntimeWarning`.
 - An empty row of a `HistogramDistribution` (all masses zero) put
   probability on its zero-width buckets, which made a point mass at each.
   It is now uniform over the buckets of positive width only.

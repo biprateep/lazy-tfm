@@ -412,6 +412,26 @@ def test_mixture_quantiles_and_mode_go_a_block_of_rows_at_a_time(
     np.testing.assert_array_equal(mixture.mode(), expected.mode())
 
 
+INVALID_WEIGHTS = [
+    [0.0, 0.0],
+    [np.inf, 1.0],
+    [np.nan, 1.0],
+    [-1.0, 2.0],
+    [1e308, 1e308],
+    [1.0],
+]
+
+
+@pytest.mark.parametrize("weights", INVALID_WEIGHTS)
+def test_invalid_weights_raise(histogram, quantiles, weights):
+    with pytest.raises(ValueError, match="weights must be 2 finite"):
+        distributions.MixtureDistribution((histogram, histogram), weights)
+    with pytest.raises(ValueError, match="weights must be 2 finite"):
+        distributions.QuantileDistribution.average(
+            [quantiles, quantiles], weights
+        )
+
+
 def test_mixtures_take_histograms_only(histogram, quantiles):
     with pytest.raises(TypeError, match="HistogramDistribution"):
         distributions.MixtureDistribution((histogram, quantiles), [0.5, 0.5])
