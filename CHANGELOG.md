@@ -16,6 +16,10 @@ change the API.
 - The package is marked typed (`py.typed`), so type checkers read its
   annotations.
 - The source distribution includes the tests and the docs pages they read.
+- `lazy.metrics.grid_point_estimate` computes one point estimate, where
+  `grid_point_estimates` computes all four. `predict`, `evaluate`,
+  `evaluate_grid_pdfs` and `summarize` now compute only the one they return,
+  with the same results to the bit.
 
 ### Changed
 
