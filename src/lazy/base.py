@@ -78,7 +78,7 @@ DEFAULT_PADDING = 0.05
 range on each side.
 """
 
-POINT_ESTIMATORS = ("mode", "peak_mean", "mean", "median")
+POINT_ESTIMATORS = metrics.POINT_ESTIMATORS
 """Reductions of a density to a single value, accepted by the ``method``
 argument of :meth:`BaseDensityRegressor.predict`. ``mode`` and ``peak_mean`` are
 the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see :mod:`lazy.metrics`).
@@ -480,7 +480,7 @@ class BaseDensityRegressor(
         X = self._check_features(X)
         return np.concatenate(
             [
-                metrics.grid_point_estimates(grid, density)[method]
+                metrics.grid_point_estimate(grid, density, method)
                 for _, density in self._density_blocks(X, grid)
             ]
         )
@@ -559,7 +559,7 @@ class BaseDensityRegressor(
         y = _check_target(y, len(X))
         y_pred, cde_terms, pit, crps_terms, nll_terms = [], [], [], [], []
         for rows, density in self._density_blocks(X, grid):
-            y_pred.append(metrics.grid_point_estimates(grid, density)[method])
+            y_pred.append(metrics.grid_point_estimate(grid, density, method))
             terms, values = metrics.per_object_scores(y[rows], grid, density)
             cde_terms.append(terms)
             pit.append(values)

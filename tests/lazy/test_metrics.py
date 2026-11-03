@@ -515,3 +515,30 @@ def test_a_truth_on_the_last_edge_of_a_histogram_grid_is_inside():
     np.testing.assert_allclose(density, 1.0 / 3.0)
     scores = metrics.per_object_scores(y_true, grid, pdfs)[0]
     np.testing.assert_allclose(scores, scores[1])
+
+
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+def test_one_point_estimate_equals_its_entry_in_the_full_set(normalization):
+    rng = np.random.default_rng(3)
+    edges = np.sort(rng.normal(size=41))
+    grid = grid_lib.Grid.from_edges(edges, normalization=normalization)
+    pdfs = rng.random((20, grid.n_bins)) ** 8
+    pdfs[3] = 0.0  # An empty row takes the uniform fallback.
+    every = metrics.grid_point_estimates(grid, pdfs)
+    for method in metrics.POINT_ESTIMATORS:
+        np.testing.assert_array_equal(
+            metrics.grid_point_estimate(grid, pdfs, method), every[method]
+        )
+
+
+def test_an_unknown_point_estimate_is_refused():
+    with pytest.raises(ValueError, match="method must be one of"):
+        metrics.grid_point_estimate(np.linspace(0, 1, 5), np.ones((1, 5)), "x")
+
+
+@pytest.mark.parametrize(
+    "function", [metrics.evaluate_grid_pdfs, metrics.summarize]
+)
+def test_a_bad_grid_is_reported_before_a_bad_point(function):
+    with pytest.raises(ValueError, match="expected y_grid shape"):
+        function(np.ones(2), np.linspace(0, 1, 5), np.ones((2, 4)), point="x")

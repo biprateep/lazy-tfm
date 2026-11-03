@@ -494,6 +494,11 @@ def peak_mean(
     return out
 
 
+POINT_ESTIMATORS = ("mode", "peak_mean", "mean", "median")
+"""The point estimates of a density, in the order :func:`grid_point_estimates`
+returns them."""
+
+
 def grid_point_estimates(
     y_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
@@ -503,6 +508,7 @@ def grid_point_estimates(
     """Every point estimate of each row: mode, peak mean, mean and median.
 
     The densities are normalised first (see :func:`normalize_grid_pdfs`).
+    For one estimate, :func:`grid_point_estimate` is cheaper.
 
     Args:
         y_grid: Strictly increasing bin centres, shape (g,), or the
@@ -520,26 +526,129 @@ def grid_point_estimates(
         ``"median"``, each an array of shape (n,).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    if bin_edges is not None:
-        return _histogram_point_estimates(y_grid, pdfs, bin_edges)
-    grid, density = normalize_grid_pdfs(y_grid, pdfs)
-    cdf = grid_cdf(grid, density)
+    grid, density = normalize_grid_pdfs(y_grid, pdfs, bin_edges=bin_edges)
+    return {
+        method: _point_estimate(grid, density, method, bin_edges)
+        for method in POINT_ESTIMATORS
+    }
+
+
+def grid_point_estimate(
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    method: str,
+    *,
+    bin_edges: npt.ArrayLike | None = None,
+) -> _typing.FloatArray:
+    """One point estimate of each row, as :func:`grid_point_estimates` gives it.
+
+    Args:
+        y_grid: Strictly increasing bin centres, shape (g,), or the
+            :class:`~lazy.grid.Grid` itself (see the module docstring).
+        pdfs: Densities at those centres, shape (n, g).
+        method: One of :data:`POINT_ESTIMATORS`.
+        bin_edges: The grid's bin edges, as in :func:`grid_point_estimates`.
+
+    Returns:
+        The estimate of each row, shape (n,).
+
+    Raises:
+        ValueError: If ``method`` is not one of :data:`POINT_ESTIMATORS`.
+    """
+    # A set, so that an unhashable method raises TypeError.
+    if method not in frozenset(POINT_ESTIMATORS):
+        raise ValueError(
+            f"method must be one of {POINT_ESTIMATORS}, got {method!r}"
+        )
+    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
+    grid, density = normalize_grid_pdfs(y_grid, pdfs, bin_edges=bin_edges)
+    return _point_estimate(grid, density, method, bin_edges)
+
+
+def _checked_point_estimate(
+    y_grid: npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    point: str,
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray:
+    """:func:`grid_point_estimate` for ``point``, checked after the densities.
+
+    The grid and densities are validated first, and an unhashable ``point``
+    raises TypeError, as ``evaluate_grid_pdfs`` and ``summarize`` always have.
+    """
+    grid, density = normalize_grid_pdfs(y_grid, pdfs, bin_edges=bin_edges)
+    if point not in frozenset(POINT_ESTIMATORS):
+        raise ValueError(f"point must be one of {sorted(POINT_ESTIMATORS)}")
+    return _point_estimate(grid, density, point, bin_edges)
+
+
+def _point_estimate(
+    grid: _typing.FloatArray,
+    density: _typing.FloatArray,
+    method: str,
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray:
+    """One point estimate of normalised densities.
+
+    On a histogram grid (``bin_edges`` given), ``mode`` is the centre of the
+    densest bin, ``mean`` the exact mean of the piecewise-constant density,
+    ``median`` the exact inverse of its CDF at one half, and ``peak_mean``
+    the main-peak mean with bin masses as weights.
+    """
+    if method == "mode":
+        return mode(grid, density)
+    if method == "peak_mean":
+        return peak_mean(grid, density, bin_edges=bin_edges)
+    if bin_edges is None:
+        if method == "mean":
+            return np.asarray(
+                np.trapezoid(density * grid[None, :], grid, axis=1),
+                dtype=np.float64,
+            )
+        return _trapezoid_median(grid, density)
+    edges = np.asarray(bin_edges, dtype=float)
+    widths = _bin_widths(edges, grid.size)
+    mass = density * widths
+    if method == "mean":
+        return mass @ grid
+    return _histogram_median(edges, widths, mass)
+
+
+def _trapezoid_median(
+    grid: _typing.FloatArray, density: _typing.FloatArray
+) -> _typing.FloatArray:
+    """Each row's median, interpolating its trapezoid CDF linearly."""
     rows = np.arange(len(density))
+    cdf = grid_cdf(grid, density)
     right = np.clip(np.argmax(cdf >= 0.5, axis=1), 1, grid.size - 1)
     left = right - 1
     span = cdf[rows, right] - cdf[rows, left]
     frac = np.divide(
-        0.5 - cdf[rows, left], span, out=np.zeros(len(density)), where=span > 0
+        0.5 - cdf[rows, left],
+        span,
+        out=np.zeros(len(density)),
+        where=span > 0,
     )
-    mean: _typing.FloatArray = np.asarray(
-        np.trapezoid(density * grid[None, :], grid, axis=1), dtype=np.float64
+    return grid[left] + frac * (grid[right] - grid[left])
+
+
+def _histogram_median(
+    edges: _typing.FloatArray,
+    widths: _typing.FloatArray,
+    mass: _typing.FloatArray,
+) -> _typing.FloatArray:
+    """Each row's median: the exact inverse of its piecewise-linear CDF."""
+    rows = np.arange(len(mass))
+    cumulative = np.cumsum(mass, axis=1)
+    index = np.clip(np.argmax(cumulative >= 0.5, axis=1), 0, widths.size - 1)
+    below = cumulative[rows, index] - mass[rows, index]
+    fraction = np.divide(
+        0.5 - below,
+        mass[rows, index],
+        out=np.zeros(len(mass)),
+        where=mass[rows, index] > 0,
     )
-    return {
-        "mode": mode(grid, density),
-        "peak_mean": peak_mean(grid, density),
-        "mean": mean,
-        "median": grid[left] + frac * (grid[right] - grid[left]),
-    }
+    return edges[index] + np.clip(fraction, 0.0, 1.0) * widths[index]
 
 
 def evaluate_grid_at_truth(
@@ -1193,12 +1302,10 @@ def evaluate_grid_pdfs(
         values, shape (n,).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    estimates = grid_point_estimates(y_grid, pdfs, bin_edges=bin_edges)
-    if point not in estimates:
-        raise ValueError(f"point must be one of {sorted(estimates)}")
+    estimate = _checked_point_estimate(y_grid, pdfs, point, bin_edges)
     distribution, pit = pdf_metrics(y_true, y_grid, pdfs, bin_edges=bin_edges)
     return (
-        point_metrics(y_true, estimates[point], scale=scale),
+        point_metrics(y_true, estimate, scale=scale),
         distribution,
         pit,
     )
@@ -1254,15 +1361,13 @@ def summarize(
     if scale not in SCALES:
         raise ValueError(f"scale must be one of {SCALES}: {scale=}")
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    estimates = grid_point_estimates(y_grid, pdfs, bin_edges=bin_edges)
-    if point not in estimates:
-        raise ValueError(f"point must be one of {sorted(estimates)}")
+    estimate = _checked_point_estimate(y_grid, pdfs, point, bin_edges)
     cde_terms, pit, crps_terms, nll_terms = _per_object_all(
         y_true, y_grid, pdfs, bin_edges
     )
     return summarize_scores(
         y_true,
-        estimates[point],
+        estimate,
         cde_terms,
         pit,
         point=point,
@@ -1410,35 +1515,3 @@ def _histogram_at_truth(
     )
     # A cumulative sum of unit mass can round to just above one.
     return pdf_at_truth, np.clip(pit, 0.0, 1.0)
-
-
-def _histogram_point_estimates(
-    y_grid: npt.ArrayLike, pdfs: npt.ArrayLike, bin_edges: npt.ArrayLike
-) -> dict[str, _typing.FloatArray]:
-    """The point estimates of :func:`grid_point_estimates` on a histogram grid.
-
-    ``mode`` is the centre of the densest bin, ``mean`` the exact mean of
-    the piecewise-constant density, ``median`` the exact inverse of its
-    CDF at one half, and ``peak_mean`` the main-peak mean with bin masses as
-    weights.
-    """
-    grid, density = normalize_grid_pdfs(y_grid, pdfs, bin_edges=bin_edges)
-    edges = np.asarray(bin_edges, dtype=float)
-    widths = _bin_widths(edges, grid.size)
-    mass = density * widths
-    cumulative = np.cumsum(mass, axis=1)
-    rows = np.arange(len(density))
-    index = np.clip(np.argmax(cumulative >= 0.5, axis=1), 0, grid.size - 1)
-    below = cumulative[rows, index] - mass[rows, index]
-    fraction = np.divide(
-        0.5 - below,
-        mass[rows, index],
-        out=np.zeros(len(density)),
-        where=mass[rows, index] > 0,
-    )
-    return {
-        "mode": mode(grid, density),
-        "peak_mean": peak_mean(grid, density, bin_edges=edges),
-        "mean": mass @ grid,
-        "median": edges[index] + np.clip(fraction, 0.0, 1.0) * widths[index],
-    }
