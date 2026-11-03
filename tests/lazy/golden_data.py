@@ -12,6 +12,8 @@ to ``SeedSequence([random_state, i])``.
 changes, update it to the same model in the new API, never the files.
 """
 
+from collections.abc import Iterator
+import contextlib
 import pathlib
 from typing import Any
 
@@ -83,6 +85,26 @@ as every GPU run does, so the golden still guards the precision the GPU results
 are computed in. TabFM chooses its precision at prediction, so setting the
 resolved flag after ``fit`` is enough.
 """
+
+
+THREADS = 4
+"""Torch threads the golden densities are recorded and checked at, as many as a
+GitHub Linux runner has CPUs. TabPFN's CPU densities move with the count by
+up to 8% of the peak.
+"""
+
+
+@contextlib.contextmanager
+def pinned_threads() -> Iterator[None]:
+    """Runs torch at :data:`THREADS` threads, then restores the count."""
+    import torch  # noqa: PLC0415 - collected without torch installed.
+
+    before = torch.get_num_threads()
+    torch.set_num_threads(THREADS)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(before)
 
 
 def fit(name: str) -> Any:

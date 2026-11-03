@@ -52,7 +52,8 @@ def test_the_default_path_reproduces_the_golden_densities(name):
         pytest.skip(f"{name} is not installed: {error}")
     reference = np.load(golden_data.GOLDEN_DIR / f"{name}.npz")
     _, _, X_test = golden_data.problem()
-    pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)
+    with golden_data.pinned_threads():
+        pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)
     np.testing.assert_array_equal(reference["edges"], golden_data.GRID.edges)
     np.testing.assert_allclose(
         pdfs,

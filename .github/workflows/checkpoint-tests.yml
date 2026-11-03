@@ -2,7 +2,9 @@
 # a CPU: from the Actions tab ("Checkpoint tests" -> Run workflow, optionally
 # with a pytest -k expression), or by adding the label "checkpoints" to a pull
 # request; to run it again on a pull request, remove the label and add it
-# back. Nothing runs on a schedule. No login is needed: every pinned checkpoint
+# back. Nothing runs on a schedule. Run by hand with "record" naming backends,
+# it re-records their golden densities instead of testing, and uploads them as
+# the artifact "golden". No login is needed: every pinned checkpoint
 # downloads anonymously from Hugging Face.
 #
 # The pinned checkpoints come to about 11 GB (their size_bytes in
@@ -16,6 +18,10 @@ on:
     inputs:
       select:
         description: "pytest -k expression; empty runs every checkpoint test"
+        required: false
+        default: ""
+      record:
+        description: "backends to re-record golden densities for, instead of testing"
         required: false
         default: ""
   pull_request:
@@ -37,6 +43,7 @@ jobs:
     env:
       LAZY_RUN_CHECKPOINT_TESTS: "1"
       SELECT: ${{ inputs.select }}
+      RECORD: ${{ inputs.record }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
@@ -53,7 +60,17 @@ jobs:
     - name: Install the locked triton for LimiX
       run: uv pip install "$(grep -E '^triton==' requirements.txt)"
     - name: Run the checkpoint tests
+      if: env.RECORD == ''
       run: |
         args=(-m checkpoint -rs)
         if [[ -n "$SELECT" ]]; then args+=(-k "$SELECT"); fi
         .venv/bin/python -m pytest "${args[@]}"
+    - name: Record the golden densities
+      if: env.RECORD != ''
+      run: .venv/bin/python tests/lazy/record_golden.py $RECORD
+    - name: Upload the golden densities
+      if: env.RECORD != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: golden
+        path: tests/lazy/golden/

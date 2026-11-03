@@ -33,10 +33,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _, _, X_test = golden_data.problem()
     golden_data.GOLDEN_DIR.mkdir(exist_ok=True)
-    recorded = _recording()
-    for name in args.backends:
-        model = golden_data.fit(name)
-        pdfs = model.predict_proba(X_test, golden_data.GRID)
+    with golden_data.pinned_threads():
+        recorded = _recording()
+        fitted = {name: golden_data.fit(name) for name in args.backends}
+        predicted = {
+            name: model.predict_proba(X_test, golden_data.GRID)
+            for name, model in fitted.items()
+        }
+    for name, pdfs in predicted.items():
+        model = fitted[name]
         path = golden_data.GOLDEN_DIR / f"{name}.npz"
         np.savez_compressed(
             path,
@@ -68,6 +73,8 @@ def _recording() -> dict[str, object]:
         "commit": commit,
         "machine": platform.platform(),
         "cpus": os.cpu_count(),
+        # TabPFN's and TabFM's CPU densities differ between processors.
+        "cpu_capability": torch.backends.cpu.get_cpu_capability(),
         "torch_threads": torch.get_num_threads(),
         "thread_variables": {
             name: os.environ.get(name)
