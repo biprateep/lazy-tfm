@@ -150,7 +150,10 @@ def layout() -> tuple[dict[str, list[np.ndarray]], np.ndarray, np.ndarray]:
             for c in curves
         ]
         edges.append(edges[-1] + points[:, 0].max() - x0 + 2 * PAD)
-    ys = np.vstack([c for curves in placed.values() for c in curves])[:, 1]
+    every_curve = []
+    for letter in placed.values():
+        every_curve += letter
+    ys = np.vstack(every_curve)[:, 1]
     return (
         placed,
         np.array(edges),
@@ -230,7 +233,10 @@ def draw(
                 solid_capstyle="round",
                 solid_joinstyle="round",
             )
-    data = np.vstack([c for name in "LAY" for c in placed[name]])
+    curves = []
+    for name in "LAY":
+        curves += placed[name]
+    data = np.vstack(curves)
     points, stroke_of = z_points(placed["Z"], spacing)
     distance = np.min(
         np.hypot(*(points[:, None] - data[None]).transpose(2, 0, 1)), axis=1

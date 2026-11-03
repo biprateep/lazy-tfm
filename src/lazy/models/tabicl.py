@@ -813,13 +813,10 @@ def _members_run(regressor: Any) -> collections.Counter[str]:
 def _n_shuffles(regressor: Any) -> int:
     """How many distinct column orders a fitted regressor's members see."""
     configs = regressor.ensemble_generator_.ensemble_configs_
-    return len(
-        {
-            tuple(int(i) for i in shuffle)
-            for members in configs.values()
-            for shuffle, _ in members
-        }
-    )
+    orders: set[tuple[int, ...]] = set()
+    for members in configs.values():
+        orders.update(tuple(int(i) for i in shuffle) for shuffle, _ in members)
+    return len(orders)
 
 
 def _order_members(regressor: Any, norm_methods: list[str]) -> Any:

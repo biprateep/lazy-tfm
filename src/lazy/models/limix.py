@@ -374,15 +374,14 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             else group
             for group in self.member_groups_
         )
-        tokens = {
-            member.index: entry["pipeline"].token
-            for group, handle in zip(
-                self.member_groups_, self.handles_, strict=True
-            )
+        tokens: dict[int, str] = {}
+        for group, handle in zip(
+            self.member_groups_, self.handles_, strict=True
+        ):
             for member, entry in zip(
                 group.members, handle["members"], strict=True
-            )
-        }
+            ):
+                tokens[member.index] = entry["pipeline"].token
         pipelines: dict[str, Any] = {
             "limix_pipelines": [tokens[index] for index in sorted(tokens)]
         }

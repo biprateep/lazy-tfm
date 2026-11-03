@@ -83,15 +83,14 @@ def _fetch_tutorials() -> None:
         RuntimeError: If a notebook is neither present nor on the branch.
     """
     scripts = sorted(TUTORIALS.glob("*.py"))
-    missing = [
-        path
-        for script in scripts
+    missing = []
+    for script in scripts:
         for path in (
             script.with_suffix(".ipynb"),
             THUMBNAILS / f"{script.stem}.png",
-        )
-        if not path.exists()
-    ]
+        ):
+            if not path.exists():
+                missing.append(path)
     if not missing:
         return
     git = ["git", "-C", str(TUTORIALS)]
