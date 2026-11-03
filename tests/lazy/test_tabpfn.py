@@ -8,6 +8,7 @@ marked ``checkpoint`` load one, on the CPU, and run only with
 """
 
 import dataclasses
+import inspect
 import json
 import threading
 import types
@@ -244,6 +245,20 @@ def test_concurrent_fits_share_the_network_and_restore_the_loader(
     assert len(fitted) == 4
     assert len(recorder.loads) == 1
     assert base.initialize_tabpfn_model is upstream
+
+
+@pytest.mark.parametrize("kv_cache", [True, False])
+def test_no_regressor_argument_is_left_to_upstream(monkeypatch, kv_cache):
+    """A default the installed tabpfn picks could change an answer."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=1, kv_cache=kv_cache, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    accepted = inspect.signature(fake_tabpfn.Regressor.upstream).parameters
+    # Deprecated: one acts only on n_estimators="auto", one does nothing.
+    unused = {"auto_scale_n_estimators", "n_jobs"}
+    assert set(est.regressor_.kwargs) == set(accepted) - unused
 
 
 def test_bucket_masses_returns_float64_borders():
