@@ -26,7 +26,6 @@ from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import ensemble
-from lazy.models import registry
 
 # Every test but the warning's own fits on fewer rows than the warning's
 # threshold.
@@ -81,18 +80,6 @@ def gaussian_data():
     y = np.linspace(-3.0, 3.0, 50)
     query = np.array([[-0.3], [0.0], [0.2]])
     return X, y, query
-
-
-@pytest.fixture
-def standin_backends(monkeypatch):
-    """The stand-ins, registered under the names of three real backends."""
-    monkeypatch.setitem(
-        registry.ESTIMATORS, "tabpfn", standins.HistogramStandIn
-    )
-    monkeypatch.setitem(registry.ESTIMATORS, "tabicl", standins.QuantileStandIn)
-    monkeypatch.setitem(
-        registry.ESTIMATORS, "limix", standins.ScaffoldedHistogramStandIn
-    )
 
 
 @pytest.fixture

@@ -6,15 +6,23 @@ The backends get only the checks that need no fitting, since fitting would
 load a checkpoint. Between them they hold ``__init__`` to storing its
 arguments and nothing else, and ``get_params``/``set_params``/``clone`` to
 agreeing with one another. The stand-ins, which run the shared layer with no
-checkpoint, and a pool of them get scikit-learn's whole suite.
+checkpoint, and a pool of them get scikit-learn's whole suite. The
+meta-estimators users run on a model (a pipeline, parallel cross-validation,
+a search over backends) get one test each.
 """
 
+import numpy as np
 import pytest
+from sklearn import base as sklearn_base
+from sklearn import model_selection
+from sklearn import pipeline
+from sklearn import preprocessing
 from sklearn import utils as sklearn_utils
 from sklearn.utils import estimator_checks
 import standins
 
 import lazy
+from lazy.models import registry
 
 ESTIMATORS = [
     *(lazy.LazyModel(name) for name in lazy.list_estimators()),
@@ -86,3 +94,55 @@ def _expected_failures(estimator):
 )
 def test_scikit_learns_whole_suite(estimator, check):
     check(estimator)
+
+
+# -- meta-estimators -----------------------------------------------------------
+
+
+@pytest.fixture
+def regression():
+    """Features, shape (60, 3), and a target that follows the first."""
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(60, 3))
+    return X, 2.0 * X[:, 0] + rng.normal(0.0, 0.1, 60)
+
+
+def test_a_pipeline_predicts_as_its_model_on_the_scaled_features(regression):
+    X, y = regression
+    model = standins.HistogramStandIn(n_estimators=2, progress=False)
+    piped = pipeline.make_pipeline(preprocessing.StandardScaler(), model)
+    piped = sklearn_base.clone(piped).fit(X, y)
+    scaled = preprocessing.StandardScaler().fit_transform(X)
+    np.testing.assert_array_equal(
+        piped.predict_proba(X), model.fit(scaled, y).predict_proba(scaled)
+    )
+
+
+def test_cross_validation_in_worker_processes_scores_as_in_this_one(
+    regression,
+):
+    """Each fold's model is pickled into a worker process and back."""
+    X, y = regression
+    model = standins.QuantileStandIn(n_estimators=2, progress=False)
+    np.testing.assert_allclose(
+        model_selection.cross_val_score(model, X, y, cv=2, n_jobs=2),
+        model_selection.cross_val_score(model, X, y, cv=2),
+        rtol=1e-12,
+    )
+
+
+def test_a_grid_search_over_backends_refits_the_best(
+    regression, standin_backends
+):
+    X, y = regression
+    search = model_selection.GridSearchCV(
+        lazy.LazyModel("tabpfn", n_estimators=2, progress=False),
+        {"model": ["tabpfn", "tabicl"]},
+        cv=2,
+    ).fit(X, y)
+    # Two backends, two different scores: each candidate ran its own.
+    assert len(set(search.cv_results_["mean_test_score"])) == 2
+    best = search.best_estimator_
+    assert isinstance(best.estimator_, registry.ESTIMATORS[best.model])
+    assert best.estimator_.n_estimators == 2
+    assert search.predict_proba(X).shape == (len(X), best.grid_.n_bins)

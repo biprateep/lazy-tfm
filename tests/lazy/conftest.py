@@ -7,9 +7,11 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pytest
+import standins
 
 from lazy import datasets
 from lazy import selection
+from lazy.models import registry
 
 # Every plotting test runs headless. Nothing above draws, and switching to Agg
 # is allowed even after pyplot has been imported.
@@ -28,6 +30,18 @@ def pytest_collection_modifyitems(
     for item in items:
         if item.get_closest_marker("checkpoint"):
             item.add_marker(skip)
+
+
+@pytest.fixture
+def standin_backends(monkeypatch):
+    """The stand-ins, registered under the names of three real backends."""
+    monkeypatch.setitem(
+        registry.ESTIMATORS, "tabpfn", standins.HistogramStandIn
+    )
+    monkeypatch.setitem(registry.ESTIMATORS, "tabicl", standins.QuantileStandIn)
+    monkeypatch.setitem(
+        registry.ESTIMATORS, "limix", standins.ScaffoldedHistogramStandIn
+    )
 
 
 @pytest.fixture
