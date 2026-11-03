@@ -60,6 +60,9 @@ itself. Nothing runs on a schedule. The smoke-test workflow, run by hand from
 the Actions tab, tests against the newest resolvable dependencies, backend
 packages included, to warn of an upstream release that breaks `lazy`. It also
 tries Python 3.15, which `lazy` does not support yet, without failing the run.
+The upstream-check workflow, also run by hand, reports what upstream has
+published since `lazy` pinned it: newer checkpoint revisions, new checkpoint
+repositories and newer backend packages.
 
 ## How changes are reviewed
 
