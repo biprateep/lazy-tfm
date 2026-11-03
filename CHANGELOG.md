@@ -100,6 +100,9 @@ change the API.
 
 ### Fixed
 
+- An unpickled Kumo model predicting from two threads at once recorded each
+  key/value cache twice, one recording after the other, and briefly held
+  two caches on the device. It now records each cache once, under a lock.
 - The warning that a cached checkpoint snapshot may be incomplete names the
   user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a
