@@ -180,6 +180,31 @@ def test_equal_grids_hash_alike():
     assert len({grid, nudged}) == 1
 
 
+def test_a_grid_leaves_the_callers_edges_writeable():
+    edges = np.linspace(0.0, 1.0, 11)
+    grid = lazy.Grid.from_edges(edges)
+    assert edges.flags.writeable
+    assert not grid.edges.flags.writeable
+
+
+def test_a_rebuilt_grid_equals_itself_far_from_zero():
+    grid = lazy.Grid.linear(1e7, 1e7 + 10.0, 100)
+    assert lazy.Grid.from_centers(grid.centers) == grid
+
+
+def test_grids_whose_narrow_bins_differ_are_not_equal_far_from_zero():
+    edges = np.array([0.0, 1e-7, 2e-7, 1.0])
+    moved = np.array([0.0, 9e-7, 9.5e-7, 1.0])
+    assert lazy.Grid.from_edges(1e6 + edges) != lazy.Grid.from_edges(
+        1e6 + moved
+    )
+
+
+def test_grids_of_tiny_values_that_differ_are_not_equal():
+    tiny = lazy.Grid.from_edges([0.0, 1e-14, 2e-14, 3e-14])
+    assert tiny != lazy.Grid.from_edges(10 * tiny.edges)
+
+
 def test_from_quantiles_names_a_one_dimensional_input():
     with pytest.raises(ValueError, match="values must be a 2D"):
         lazy.datasets.DC1_GRID.from_quantiles(

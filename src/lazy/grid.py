@@ -53,6 +53,16 @@ NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
 """The accepted values of Grid.normalization."""
 
 
+def _edges_agree(a: _typing.FloatArray, b: _typing.FloatArray) -> bool:
+    """Whether two edge arrays agree to rounding; see :class:`Grid`."""
+    if a.shape != b.shape:
+        return False
+    scale = max(np.abs(a).max(), np.abs(b).max())
+    width = min(np.diff(a).min(), np.diff(b).min())
+    tolerance = min(1e-12 * scale, 1e-6 * width)
+    return bool(np.allclose(a, b, rtol=0, atol=tolerance))
+
+
 @dataclasses.dataclass(frozen=True)
 class Grid:
     """A binned axis of the target, defined by its ``n_bins + 1`` edges.
@@ -67,6 +77,10 @@ class Grid:
             -- exact for the strongly non-uniform native grids of the
             bar-distribution models, where the trapezoid rule is not.
 
+    Two grids are equal when their normalizations match and their edges
+    agree to 1e-12 of the largest edge's magnitude, and to 1e-6 of the
+    narrowest bin's width.
+
     Examples:
         >>> grid = Grid.linear(0.0, 2.0, 200)
         >>> grid.n_bins, float(grid.centers[0]), float(grid.centers[-1])
@@ -77,7 +91,7 @@ class Grid:
     normalization: Normalization = "trapezoid"
 
     def __post_init__(self) -> None:
-        edges = np.asarray(self.edges, dtype=float)
+        edges = np.array(self.edges, dtype=float)
         if edges.ndim != 1 or edges.size < 3:
             raise ValueError(
                 "edges must be a 1D array of at least three values"
@@ -224,10 +238,8 @@ class Grid:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Grid):
             return NotImplemented
-        return (
-            self.normalization == other.normalization
-            and self.edges.shape == other.edges.shape
-            and bool(np.allclose(self.edges, other.edges, rtol=0, atol=1e-12))
+        return self.normalization == other.normalization and _edges_agree(
+            self.edges, other.edges
         )
 
     def __hash__(self) -> int:
