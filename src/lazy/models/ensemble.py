@@ -26,7 +26,8 @@ search objects reach the members' parameters as ``<member>__<parameter>``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+import functools
 import inspect
 import math
 from typing import Any, Literal, TypeAlias
@@ -36,6 +37,7 @@ import pandas as pd
 from sklearn import base as sklearn_base
 from sklearn import utils as sklearn_utils
 
+from lazy import _arrays
 from lazy import _typing
 from lazy import _warnings
 from lazy import base
@@ -361,10 +363,12 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             # Through each member's public method, which checks the features
             # against what the member was fitted on.
             query = block if named else block.to_numpy()
-            parts = [
+            # One member at a time, so that each member's distribution is
+            # freed once the pool has added it.
+            parts = (
                 member.predict_distribution(query)
                 for member in self.estimators_
-            ]
+            )
             yield _pool(parts, self.weights_, self.pooling_, self.native_grid_)
 
 
@@ -592,7 +596,7 @@ def _median_width(grid: grid_lib.Grid, start: float, stop: float) -> float:
 
 
 def _pool(
-    parts: Sequence[distributions.Distribution],
+    parts: Iterable[distributions.Distribution],
     weights: _typing.FloatArray,
     pooling: Pooling,
     grid: grid_lib.Grid,
@@ -600,7 +604,8 @@ def _pool(
     """The members' distributions of the same rows, pooled.
 
     Args:
-        parts: One distribution per member, all with the same n_rows rows.
+        parts: One distribution per member, all with the same n_rows rows,
+            in member order.
         weights: The members' weights, shape (n_members,), summing to one.
         pooling: ``"geometric"``, ``"linear"`` or ``"quantile"``.
         grid: The pooling grid.
@@ -611,28 +616,56 @@ def _pool(
         :class:`~lazy.distributions.QuantileDistribution` at
         :data:`QUANTILE_LEVELS`.
     """
+    # Through map, which holds no member's distribution once its term is
+    # made, where a generator expression would hold the last one.
     if pooling == "quantile":
-        locs = sum(
-            weight * _quantiles(part, grid)
-            for weight, part in zip(weights, parts, strict=True)
-        )
+        quantiles = functools.partial(_quantiles, grid=grid)
+        locs = _pooled_sum(weights, map(quantiles, parts))
         return distributions.QuantileDistribution(QUANTILE_LEVELS, locs)
     edges = grid.edges
     if pooling == "linear":
         # The mixture restricted to the grid: the mass each member puts in
         # each bin, averaged before the row is renormalized.
-        masses = sum(
-            weight * part.histogramize(edges).masses
-            for weight, part in zip(weights, parts, strict=True)
+        masses = functools.partial(_masses, edges=edges)
+        return distributions.HistogramDistribution(
+            edges, _pooled_sum(weights, map(masses, parts))
         )
-        return distributions.HistogramDistribution(edges, masses)
     floor = LOG_FLOOR / (grid.y_max - grid.y_min)
-    log_pool = sum(
-        weight * np.log(part.histogramize(edges).masses / grid.widths + floor)
-        for weight, part in zip(weights, parts, strict=True)
-    )
-    pooled = np.exp(log_pool - np.max(log_pool, axis=1, keepdims=True))
-    return distributions.HistogramDistribution(edges, pooled * grid.widths)
+    log_density = functools.partial(_log_density, grid=grid, floor=floor)
+    log_pool = _pooled_sum(weights, map(log_density, parts))
+    log_pool -= np.max(log_pool, axis=1, keepdims=True)
+    pooled = np.exp(log_pool, out=log_pool)
+    pooled *= grid.widths
+    return distributions.HistogramDistribution(edges, pooled)
+
+
+def _pooled_sum(
+    weights: _typing.FloatArray, terms: Iterable[_typing.FloatArray]
+) -> _typing.FloatArray:
+    """``sum(weight * term)`` over the members, as Python's ``sum`` gives it.
+
+    ``sum`` starts from 0, which turns a sum of only -0.0 into 0.0; adding
+    0.0 at the end does the same, so the bits match.
+    """
+    total = _arrays.weighted_sum(weights, terms)
+    total += 0.0
+    return total
+
+
+def _masses(
+    part: distributions.Distribution, edges: _typing.FloatArray
+) -> _typing.FloatArray:
+    """A member's masses in the pooling grid's bins, shape (n_rows, n_bins)."""
+    return part.histogramize(edges).masses
+
+
+def _log_density(
+    part: distributions.Distribution, grid: grid_lib.Grid, floor: float
+) -> _typing.FloatArray:
+    """A member's log density on the pooling grid, floored at ``floor``."""
+    density = part.histogramize(grid.edges).masses / grid.widths
+    density += floor
+    return np.log(density, out=density)
 
 
 def _quantiles(
