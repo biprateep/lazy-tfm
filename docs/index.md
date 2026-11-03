@@ -37,11 +37,11 @@ X_train, X_test, y_train, y_test = datasets.load_dataset(
     "chirp", split=True, return_X_y=True, random_state=0
 )
 
-
-
-model = lazy.LazyModel( # Equivalent to lazy.LazyModel("tabpfn", version="v3.5-fast").
-    "tabpfn", # The defaults are spelled out for clarity.
-    version="v3.5-fast", # Can be run on CPU
+# Equivalent to lazy.LazyModel("tabpfn", version="v3.5-fast").
+model = lazy.LazyModel(
+    "tabpfn",
+    version="v3.5-fast",  # Not the default (v3.5); runs on a CPU.
+    # The remaining arguments are the defaults, spelled out for clarity.
     n_estimators=8,
     transforms="auto",
     feature_shuffle=True,
