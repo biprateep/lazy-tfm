@@ -57,6 +57,21 @@ def test_histogram_on_grid_is_exactly_the_normalized_rebinning(histogram):
     )
 
 
+def test_histogram_on_its_own_buckets_is_each_mass_over_its_width():
+    rng = np.random.default_rng(4)
+    edges = np.sort(rng.normal(size=301))
+    masses = rng.random((6, 300)) ** 8  # Many small bins.
+    dist = distributions.HistogramDistribution(edges, masses)
+    grid = lazy.Grid.from_edges(edges, normalization="histogram")
+    exact = grid.normalize(dist.probabilities / np.diff(edges))
+    np.testing.assert_array_equal(dist.on_grid(grid), exact)
+    # Rebinning reaches the same densities, to the rounding of its sums.
+    rebinned = grid.normalize(grid.rebin(dist.probabilities, edges))
+    np.testing.assert_allclose(
+        rebinned, exact, rtol=0, atol=1e-12 * exact.max()
+    )
+
+
 def test_histogram_cdf_at_the_edges_is_the_cumulative_mass(histogram):
     cdf = histogram.cdf(histogram.bins)
     expected = np.concatenate(

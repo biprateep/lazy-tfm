@@ -362,8 +362,9 @@ class HistogramDistribution(_Base):
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        Each bin gets the exact mass the buckets put in it
-        (:meth:`lazy.grid.Grid.rebin`), divided by its width; the
+        Each bin gets the exact mass the buckets put in it, divided by its
+        width (:meth:`lazy.grid.Grid.rebin`, or the bucket's own mass on
+        the buckets' own edges); the
         probability outside the grid is dropped and each row is normalized
         by the grid's convention (:meth:`lazy.grid.Grid.normalize`). For
         the masses before that normalization, use
@@ -381,8 +382,12 @@ class HistogramDistribution(_Base):
         """The mass in each bin of ``grid`` over its width, unnormalized.
 
         From :attr:`probabilities`, so that an empty row is treated here as
-        in every other method.
+        in every other method. On the buckets' own edges, each bin is one
+        bucket: its mass over its width, without the cumulative sums of
+        :meth:`lazy.grid.Grid.rebin`, which lose a small bin's precision.
         """
+        if np.array_equal(grid.edges, self.bins):
+            return self.probabilities / self.widths
         return grid.rebin(self.probabilities, self.bins)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
