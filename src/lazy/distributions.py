@@ -78,6 +78,22 @@ def _freeze(array: npt.ArrayLike) -> _typing.FloatArray:
     return out
 
 
+def _normalized(weights: npt.ArrayLike, n: int) -> _typing.FloatArray:
+    """``weights`` over their sum: n finite, non-negative values, sum > 0."""
+    weights = np.asarray(weights, dtype=np.float64)
+    if (
+        weights.shape != (n,)
+        or not np.isfinite(weights).all()
+        or np.any(weights < 0)
+        or not 0 < weights.sum() < np.inf
+    ):
+        raise ValueError(
+            f"weights must be {n} finite, non-negative values with a positive "
+            f"sum: {weights=}"
+        )
+    return weights / weights.sum()
+
+
 def _check_ancil(ancil: Ancil | None, n_rows: int) -> dict[str, Any] | None:
     """Validates that every metadata column has one entry per row."""
     if ancil is None:
@@ -532,7 +548,8 @@ class QuantileDistribution(_Base):
         quants: The cumulative levels, shape (n_levels,), strictly
             increasing inside [0, 1].
         locs: The value at each level, shape (n_rows, n_levels), made
-            non-decreasing on construction (crossing quantiles are sorted).
+            non-decreasing on construction (a value below the one before it
+            is raised to it).
         ancil: Optional per-row metadata, each value of length n_rows.
     """
 
@@ -588,8 +605,7 @@ class QuantileDistribution(_Base):
         if weights is None:
             weight = np.full(len(parts), 1.0 / len(parts))
         else:
-            weight = np.asarray(weights, dtype=np.float64)
-            weight = weight / weight.sum()
+            weight = _normalized(weights, len(parts))
         locs = np.tensordot(weight, np.stack([p.locs for p in parts]), axes=1)
         return cls(quants, locs, parts[0].ancil)
 
@@ -839,11 +855,9 @@ class MixtureDistribution(_Base):
             raise TypeError("mixture components must be HistogramDistribution")
         if len({c.npdf for c in components}) != 1:
             raise ValueError("every component must have the same rows")
-        weights = np.asarray(self.weights, dtype=np.float64)
-        if weights.shape != (len(components),) or np.any(weights < 0):
-            raise ValueError("weights must be non-negative, one per component")
+        weights = _normalized(self.weights, len(components))
         object.__setattr__(self, "components", components)
-        object.__setattr__(self, "weights", _freeze(weights / weights.sum()))
+        object.__setattr__(self, "weights", _freeze(weights))
         object.__setattr__(
             self, "ancil", _check_ancil(self.ancil, components[0].npdf)
         )
@@ -872,11 +886,25 @@ class MixtureDistribution(_Base):
         return np.unique(np.concatenate([c.bins for c in self.components]))
 
     def __getitem__(self, rows: Any) -> MixtureDistribution:
-        return MixtureDistribution(
+        return self._with_components(
             tuple(c[rows] for c in self.components),
-            self.weights,
             _slice_ancil(self.ancil, rows),
         )
+
+    def _with_components(
+        self,
+        components: tuple[HistogramDistribution, ...],
+        ancil: dict[str, Any] | None,
+    ) -> MixtureDistribution:
+        """A mixture of ``components`` with this one's weights, bit for bit.
+
+        Normalizing weights that already sum to one can move them by an ulp
+        (six weights of 1/6 sum to just under one), so they are not
+        normalized again.
+        """
+        out = MixtureDistribution(components, self.weights, ancil)
+        object.__setattr__(out, "weights", self.weights)
+        return out
 
     def to_histogram(self) -> HistogramDistribution:
         """The mixture as one histogram on the union of edges; exact."""
@@ -900,10 +928,6 @@ class MixtureDistribution(_Base):
     ) -> Iterator[tuple[slice, HistogramDistribution]]:
         """The union histogram a block of rows at a time.
 
-        Each block is :meth:`histogramize` on the union of edges, with this
-        mixture's weights: a sliced mixture would renormalize them, which can
-        move them by an ulp.
-
         Yields:
             Tuples (rows, histogram): the slice of rows a block covers, and
             those rows' histogram on the union of edges. No rows give one
@@ -913,11 +937,7 @@ class MixtureDistribution(_Base):
         size = max(1, _MIXTURE_BLOCK_BYTES // (8 * bins.size))
         for start in range(0, max(self.npdf, 1), size):
             rows = slice(start, start + size)
-            cdf = _unit(
-                self._weighted(c[rows].cdf(bins) for c in self.components)
-            )
-            masses = np.maximum(np.diff(cdf, axis=1), 0.0)
-            yield rows, HistogramDistribution(bins, masses)
+            yield rows, self[rows].histogramize(bins)
 
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
@@ -1055,11 +1075,7 @@ def concatenate(parts: Sequence[Distribution]) -> Distribution:
         concatenate([p.components[k] for p in pieces_m])
         for k in range(len(first.components))
     )
-    return MixtureDistribution(
-        components,  # type: ignore[arg-type]  # histograms stay histograms
-        first.weights,
-        ancil,
-    )
+    return pieces_m[0]._with_components(components, ancil)  # noqa: SLF001 - same module.
 
 
 def _same_kind(part: Distribution, kind: type[Any]) -> Any:
