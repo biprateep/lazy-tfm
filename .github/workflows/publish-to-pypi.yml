@@ -1,6 +1,7 @@
 # Build, check and publish the package. See CONTRIBUTING.md, "Making a release".
 #
-#   * A published GitHub release uploads to PyPI.
+#   * A published GitHub release uploads to PyPI, once the test suite passes
+#     on the tagged commit.
 #   * Running this workflow by hand (Actions -> Publish -> Run workflow) uploads
 #     to TestPyPI instead: a dry run of the whole path, safe to repeat.
 #
@@ -55,9 +56,25 @@ jobs:
         name: dist
         path: dist/
 
+  # The suite on the commit being released, so that a release cannot go out
+  # before CI has passed on it.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+    - name: Install the locked environment
+      run: uv sync --locked --python 3.12
+    - name: Run unit tests with pytest
+      run: uv run --no-sync pytest
+
   testpypi:
     if: github.event_name == 'workflow_dispatch'
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -79,7 +96,7 @@ jobs:
 
   pypi:
     if: github.event_name == 'release'
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
