@@ -129,8 +129,11 @@ def _test_gaps(name, cls):
             f"no golden file tests/lazy/golden/{name}.npz (record it with "
             f"tests/lazy/record_golden.py {name})"
         )
-    if name not in test_golden.RTOL:
-        found.append("no golden tolerance in tests/lazy/test_golden.RTOL")
+    for table in ("RTOL", "ATOL"):
+        if name not in getattr(test_golden, table):
+            found.append(
+                f"no golden tolerance in tests/lazy/test_golden.{table}"
+            )
     if name not in backend_settings.BACKEND_SETTINGS:
         found.append(
             "no CPU settings in tests/lazy/backend_settings.BACKEND_SETTINGS"
@@ -187,6 +190,7 @@ def test_a_new_backend_is_told_everything_it_lacks(monkeypatch):
         "RECORDED_PARAMS",
         "golden/newcomer.npz",
         "RTOL",
+        "ATOL",
         "BACKEND_SETTINGS",
         "fakes/newcomer.py",
         "_REAL",
