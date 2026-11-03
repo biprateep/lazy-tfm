@@ -552,24 +552,23 @@ class BaseDensityRegressor(
         X = self._check_features(X)
         self._check_not_empty(X)
         y = _check_target(y, len(X))
-        y_pred, cde_terms, pit, crps_terms, nll_terms = [], [], [], [], []
+        y_pred, scores = [], []
         for rows, density in self._density_blocks(X, grid):
             y_pred.append(metrics.grid_point_estimate(grid, density, method))
-            terms, values = metrics.per_object_scores(y[rows], grid, density)
-            cde_terms.append(terms)
-            pit.append(values)
-            crps_terms.append(metrics.per_object_crps(y[rows], grid, density))
-            nll_terms.append(metrics.per_object_nll(y[rows], grid, density))
+            scores.append(metrics.per_object_metrics(y[rows], grid, density))
+        cde_terms, pit, crps_terms, nll_terms = (
+            np.concatenate(parts) for parts in zip(*scores, strict=True)
+        )
         return metrics.summarize_scores(
             y,
             np.concatenate(y_pred),
-            np.concatenate(cde_terms),
-            np.concatenate(pit),
+            cde_terms,
+            pit,
             point=method,
             label=self.name_,
             scale=scale,
-            crps_terms=np.concatenate(crps_terms),
-            nll_terms=np.concatenate(nll_terms),
+            crps_terms=crps_terms,
+            nll_terms=nll_terms,
         )
 
     # -- helpers -----------------------------------------------------------

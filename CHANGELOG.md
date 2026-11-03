@@ -20,6 +20,10 @@ change the API.
   `grid_point_estimates` computes all four. `predict`, `evaluate`,
   `evaluate_grid_pdfs` and `summarize` now compute only the one they return,
   with the same results to the bit.
+- `lazy.metrics.per_object_metrics` returns the CDE terms, PIT values, CRPS
+  and NLL of each row from one normalization, where `per_object_scores`,
+  `per_object_crps` and `per_object_nll` normalize once each. `evaluate`
+  uses it, with the same results to the bit.
 
 ### Changed
 

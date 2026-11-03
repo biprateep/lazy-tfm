@@ -71,8 +71,8 @@ repositories and newer backend packages.
 
 A change expected to affect speed or memory reports a benchmark against
 `main`. `benchmarks/cpu.py` times lazy's own prediction code (densities, point
-estimates, quantiles, scores and ensemble pooling) on test stand-ins sized
-like the real models, with no network or checkpoint:
+estimates, quantiles, scores, `evaluate` and ensemble pooling) on test
+stand-ins sized like the real models, with no network or checkpoint:
 
 ```bash
 git fetch origin main

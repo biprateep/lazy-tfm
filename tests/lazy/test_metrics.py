@@ -460,6 +460,25 @@ def test_crps_and_nll_validate_their_inputs():
         metrics.crps(np.array([0.5, 1.0]), GRID, pdfs[:, :-1])
 
 
+@pytest.mark.parametrize("histogram", [False, True])
+def test_per_object_metrics_equals_the_three_functions_to_the_bit(histogram):
+    grid, pdfs, y_true = _histogram_case()
+    # Two truths off the grid, where the density and PIT are clipped.
+    y_true[:2] = grid.y_min - 1.0, grid.y_max + 1.0
+    if not histogram:
+        grid = grid.centers
+    cde_terms, pit = metrics.per_object_scores(y_true, grid, pdfs)
+    expected = (
+        cde_terms,
+        pit,
+        metrics.per_object_crps(y_true, grid, pdfs),
+        metrics.per_object_nll(y_true, grid, pdfs, floor=1e-3),
+    )
+    got = metrics.per_object_metrics(y_true, grid, pdfs, floor=1e-3)
+    for value, reference in zip(got, expected, strict=True):
+        np.testing.assert_array_equal(value, reference)
+
+
 def test_the_summary_table_adds_crps_and_nll():
     grid, pdfs, y_true = _histogram_case()
     table = metrics.summarize(y_true, grid, pdfs)
