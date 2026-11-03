@@ -391,6 +391,27 @@ def test_mixture_ppf_inverts_the_cdf(mixture):
         )
 
 
+def test_mixture_quantiles_and_mode_go_a_block_of_rows_at_a_time(
+    mixture, monkeypatch
+):
+    # Six equal weights do not survive a second normalization exactly, so
+    # a block that renormalized them would differ in the last bits.
+    mixture = distributions.MixtureDistribution.equal(mixture.components * 3)
+    expected = mixture.to_histogram()
+    monkeypatch.setattr(
+        distributions, "_MIXTURE_BLOCK_BYTES", 8 * 4 * mixture.bins.size
+    )
+    blocks = list(mixture._histogram_blocks())
+    assert [rows.indices(mixture.npdf)[:2] for rows, _ in blocks] == [
+        (0, 4),
+        (4, 6),
+    ]
+    for rows, block in blocks:
+        np.testing.assert_array_equal(block.masses, expected.masses[rows])
+    np.testing.assert_array_equal(mixture.ppf(LEVELS), expected.ppf(LEVELS))
+    np.testing.assert_array_equal(mixture.mode(), expected.mode())
+
+
 def test_mixtures_take_histograms_only(histogram, quantiles):
     with pytest.raises(TypeError, match="HistogramDistribution"):
         distributions.MixtureDistribution((histogram, quantiles), [0.5, 0.5])

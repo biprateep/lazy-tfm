@@ -27,6 +27,12 @@ change the API.
   1.2 GiB with the default `chunk_size`, as measured. Their results are
   unchanged, but for float rounding: at most 1e-14 relatively, measured in
   one row of 120.
+- A bagged model's quantiles and intervals, and the `mode` of its
+  `predict_distribution`, build the histogram on its members' combined bucket
+  edges for a block of rows at a time, instead of for every row at once, with
+  identical results. With eight members of 5,000 buckets, the peak memory of
+  `predict_quantiles` on 311 rows falls from 1,069 MiB to 295 MiB, and its
+  time from 5.6 s to 1.8 s, as measured.
 - The minimum dependency versions are raised to ones that install and work
   together: scipy 1.13, scikit-learn 1.6, pandas 2.2.2, matplotlib 3.8.4 and
   h5py 3.11. The old floors allowed pandas and h5py builds for NumPy 1, with
