@@ -34,7 +34,11 @@ these works to cite.
 
 ## Licenses
 
-The package is MIT-licensed. The pretrained checkpoints carry their own
+The package is MIT-licensed. Its spectroscopic selection function,
+{func}`lazy.selection.grid_selection`, is ported from RAIL's
+`rail_astro_tools`, also MIT-licensed (Copyright (c) 2023 LSST Dark Energy
+Science Collaboration), whose notice `selection.py` carries. The pretrained
+checkpoints carry their own
 licenses, several of which are non-commercial, and
 {data}`lazy.CHECKPOINTS <lazy.models.CHECKPOINTS>` quotes each one. Therefore,
 please check the license of the checkpoint you are using before applying it
