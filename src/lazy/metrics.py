@@ -316,7 +316,9 @@ def normalize_grid_pdfs(
         raise ValueError(
             "y_grid must be strictly increasing with at least two points"
         )
-    density = np.nan_to_num(density, nan=0.0, posinf=0.0, neginf=0.0)
+    finite = np.isfinite(density)
+    if not finite.all():
+        density[~finite] = 0.0
     np.clip(density, 0.0, None, out=density)
     if bin_edges is not None:
         widths = _bin_widths(bin_edges, grid.size)
@@ -325,13 +327,15 @@ def normalize_grid_pdfs(
         if bad.any():
             density[bad] = 1.0
             mass = _row_masses(density, widths)
-        return grid, density / mass[:, None]
+        density /= mass[:, None]
+        return grid, density
     mass = np.trapezoid(density, grid, axis=1)
     bad = ~(mass > 0)
     if bad.any():
         density[bad] = 1.0
         mass = np.trapezoid(density, grid, axis=1)
-    return grid, density / mass[:, None]
+    density /= mass[:, None]
+    return grid, density
 
 
 def _row_masses(

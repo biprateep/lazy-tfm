@@ -36,6 +36,10 @@ change the API.
   toward the exact values: by up to 2.8e-11 of a row's peak on 1,000 rows of
   5,000 uneven buckets, and more for very narrow buckets carrying little mass,
   which the old sums could round to zero.
+- Normalizing densities builds fewer temporary arrays, so a 5,000-bucket
+  model's `predict_proba`, `predict` and `score` are 1.7 to 2.0 times faster,
+  and their peak memory falls from 88 MiB to 60 to 76 MiB
+  (`benchmarks/cpu.py`), with the same results to the bit.
 - `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
   the model's `chunk_size` chunks of rows as it is predicted, instead of every
   row's distribution at once, so their peak memory no longer grows with the

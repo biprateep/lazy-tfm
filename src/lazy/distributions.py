@@ -342,15 +342,18 @@ class HistogramDistribution(_Base):
 
         An empty row is uniform in probability over the buckets of positive
         width, so that a zero-width bucket carries none; over every bucket
-        if none has a width.
+        if none has a width. Each access returns a new array, which the
+        caller may modify.
         """
         total = self.masses.sum(axis=1, keepdims=True)
-        empty = total[:, 0] <= 0
-        wide = self.widths > 0
-        weights = wide if wide.any() else np.ones_like(wide)
-        uniform = weights / weights.sum()
         with np.errstate(divide="ignore", invalid="ignore"):
-            return np.where(empty[:, None], uniform, self.masses / total)
+            probabilities = self.masses / total
+        empty = total[:, 0] <= 0
+        if empty.any():
+            wide = self.widths > 0
+            weights = wide if wide.any() else np.ones_like(wide)
+            probabilities[empty] = weights / weights.sum()
+        return probabilities
 
     def __getitem__(self, rows: Any) -> HistogramDistribution:
         return HistogramDistribution(
@@ -387,7 +390,9 @@ class HistogramDistribution(_Base):
         :meth:`lazy.grid.Grid.rebin`, which lose a small bin's precision.
         """
         if np.array_equal(grid.edges, self.bins):
-            return self.probabilities / self.widths
+            densities = self.probabilities
+            densities /= self.widths
+            return densities
         return grid.rebin(self.probabilities, self.bins)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
