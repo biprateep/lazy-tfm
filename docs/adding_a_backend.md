@@ -102,17 +102,34 @@ Kumo Tabular do this). TabPFN loads its network the same way and hands it to
 each upstream regressor as a model spec; its pickle leaves the network out
 and hands it to the regressors again on unpickling.
 
-A pickle holds no key/value cache either, which can be many times the size
-of its context. The base class pickles each handle as `_pickled_handle`
-returns it, without its caches but with what rebuilds them, such as the
-context, and calls `_rebuild_caches` on an unpickled estimator, before its
-first prediction, under the estimator's lock, so that threads predicting at
-once rebuild once. A rebuild that raises is tried again by the next
-prediction, so it must be safe to run again. `copy.deepcopy` goes through the
-same methods, so a deep copy rebuilds its caches too. TabICL, Kumo Tabular
-and LimiX implement both; a backend whose handles hold no cache leaves the
-defaults, which pickle the handle whole and rebuild nothing. TabPFN's
-regressors still pickle their caches.
+A pickle also leaves out each handle's key/value cache. A cache holds the
+network's work on the context rows. It can be many times the size of the
+context, and the context rebuilds it. A backend with a cache implements two
+hooks:
+
+- `_pickled_handle(handle)` returns a copy of a handle without its cache. It
+  keeps what rebuilds the cache, such as the context.
+- `_rebuild_caches()` records the caches again. The base class calls it
+  before the first prediction of an unpickled model, under the estimator's
+  lock, so threads that predict at once rebuild once. If it raises, the next
+  prediction calls it again, so it must be safe to run twice.
+
+Kumo Tabular's hooks show the pattern:
+
+```python
+def _pickled_handle(self, handle):
+    return dataclasses.replace(handle, cache=None)
+
+def _rebuild_caches(self):
+    for handle in self.handles_:
+        self._record_missing(handle)
+```
+
+TabICL, Kumo Tabular and LimiX-2 implement both hooks. A backend whose
+handles hold no cache keeps the defaults, which pickle a handle whole and
+rebuild nothing. TabPFN's regressors still pickle their caches.
+`copy.deepcopy` goes through the same hooks, so a deep copy also rebuilds
+its caches.
 
 The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
