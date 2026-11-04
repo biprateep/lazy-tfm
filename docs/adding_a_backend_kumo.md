@@ -236,16 +236,17 @@ trimmed mean of the group's own members.
 
 ### The network
 
-`_load_network` builds `sdm.models.KumoTabular` for the version's size on
-PyTorch's meta device, which allocates no memory, and assigns the tensors of
-the pinned checkpoint file to it, as upstream does for its own download. The
-network is held in `lazy.models._weights` under a key of the backend, version,
-file, revision, device and precision, so every fit with the same weights runs
-on one network, and the estimator keeps its reference through
-`_memoized_network`, which pickling drops. Since upstream keeps the context of
-its last fit on the network, every fit on the shared network and every
-prediction from a group's cache holds a lock on that network, so that two
-threads never see each other's context. A pickle also leaves out each group's
+`_network_loader` returns float32 and the module's `_load_network`, which
+`_read_network` calls. `_load_network` builds `sdm.models.KumoTabular` for
+the version's size on PyTorch's meta device, which allocates no memory, and
+assigns the tensors of the pinned checkpoint file to it, as upstream does for
+its own download. The base class's `_network` holds the network in
+`lazy.models._weights` under a key of the backend, version, file, revision,
+device, precision and loader, so every fit with the same weights runs on one
+network, and the estimator keeps its own reference, which pickling drops.
+Since upstream keeps the context of its last fit on the network, every fit on
+the shared network and every prediction from a group's cache holds a lock on
+that network, so that two threads never see each other's context. A pickle also leaves out each group's
 cache, which can run to gigabytes and lives on the device it was fitted on,
 and keeps the group's context instead, from which the first prediction after
 unpickling records the same cache again on the device then in use. The weights stay in single

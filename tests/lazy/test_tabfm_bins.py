@@ -7,6 +7,7 @@ and the probability bookkeeping are checked without a checkpoint. The last
 loads TabFM on the CPU, and runs only with ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 """
 
+import dataclasses
 import pickle
 import warnings
 
@@ -16,6 +17,7 @@ import pytest
 
 import lazy
 from lazy import datasets
+from lazy.models import _hub
 from lazy.models import tabfm
 
 GRID_25 = lazy.Grid.linear(0.0, 1.75, 25)
@@ -71,7 +73,7 @@ def _fit(monkeypatch, X, z, **params):
         n_estimators=1, kv_cache=False, device="cpu", progress=False, **params
     )
     monkeypatch.setattr(est, "_classifier", lambda *args: _Nearest())
-    monkeypatch.setattr(est, "_backbone", lambda: None)
+    monkeypatch.setattr(est, "_network", lambda: None)
     return est.fit(X, z)
 
 
@@ -236,6 +238,25 @@ def test_the_bin_prior_is_set_by_fitting_and_left_alone_by_predicting(
     # The prior the last group used at the last dither, as predictions see it.
     np.testing.assert_array_equal(prior, seen[-1])
     assert any(not np.array_equal(seen[0], other) for other in seen[1:])
+
+
+def test_a_refit_at_another_version_loads_that_versions_checkpoint(
+    monkeypatch,
+):
+    pinned = _hub.get_checkpoint("tabfm", "v1.0")
+    other = dataclasses.replace(
+        pinned, version="v-other", repo_id="google/tabfm-other"
+    )
+    monkeypatch.setitem(_hub.CHECKPOINTS, "tabfm:v-other", other)
+    monkeypatch.setattr(tabfm, "_RECIPE_VERSIONS", ("v1.0", "v-other"))
+    recorder = fakes.Recorder()
+    cls = fakes.install("tabfm", monkeypatch, recorder)
+    X, z, X_query = _problem(100)
+    est = cls(n_estimators=1, device="cpu", progress=False).fit(X, z)
+    est.predict_distribution(X_query)
+    est.set_params(version="v-other").fit(X, z)
+    est.predict_distribution(X_query)
+    assert recorder.loads == [str(pinned.download()), str(other.download())]
 
 
 def test_a_pickle_without_the_bin_prior_gets_it(monkeypatch):

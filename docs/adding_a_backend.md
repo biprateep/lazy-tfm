@@ -77,10 +77,15 @@ lazily, must still record the checkpoint's keys.
 
 A fitted estimator must survive pickling and give the same predictions
 afterwards. A network shared between estimators through `lazy.models._weights`
-should not travel with it: a backend that loads its network outside
-`_fit_group` keeps it through `_memoized_network`, whose reference the base
-class drops on pickling and which loads the network again on first use, so a
-pickle does not carry gigabytes of weights (TabFM and LimiX do this). The base
+should not travel with it. A backend that loads its network itself, rather
+than handing the checkpoint to upstream, calls `_network` and implements two
+methods: `_network_loader` returns the precision of the weights and the
+function that loads them, which together with the backend, version,
+checkpoint and device file the network in the cache, and `_read_network`
+loads it from a checkpoint path onto `device_`. `_network` keeps the
+network on the estimator, which drops it on pickling and finds it again on
+first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
+Kumo Tabular do this). The base
 class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
