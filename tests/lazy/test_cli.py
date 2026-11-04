@@ -197,13 +197,31 @@ def test_models_lists_every_version_and_marks_the_defaults(monkeypatch, capsys):
     monkeypatch.setattr(_hub, "is_cached", lambda name, version: False)
     assert _cli.main(["models"]) == 0
     rows = [line.split() for line in capsys.readouterr().out.splitlines()]
-    assert rows[0] == ["MODEL", "VERSION", "DEFAULT", "CACHED"]
+    assert rows[0] == [
+        "MODEL",
+        "VERSION",
+        "DEFAULT",
+        "CACHED",
+        "COMMERCIAL",
+    ]
     expected = []
     for name in lazy.list_estimators():
         expected.extend([name, version] for version in lazy.list_versions(name))
     assert [row[:2] for row in rows[1:]] == expected
     defaults = {row[0]: row[1] for row in rows[1:] if row[2] == "yes"}
     assert defaults == lazy.DEFAULT_VERSIONS
+
+
+def test_models_reports_which_licences_allow_commercial_use(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(_hub, "is_cached", lambda name, version: False)
+    assert _cli.main(["models"]) == 0
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
+    assert {(row[0], row[1]): row[4] == "yes" for row in rows} == {
+        (spec.backend, spec.version): spec.commercial_use
+        for spec in _hub.CHECKPOINTS.values()
+    }
 
 
 def test_models_reports_which_checkpoints_are_cached(monkeypatch, capsys):
@@ -214,7 +232,7 @@ def test_models_reports_which_checkpoints_are_cached(monkeypatch, capsys):
     )
     assert _cli.main(["models"]) == 0
     rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
-    assert {(row[0], row[1]) for row in rows if row[-1] == "yes"} == {
+    assert {(row[0], row[1]) for row in rows if row[3] == "yes"} == {
         ("tabpfn", "v2")
     }
 

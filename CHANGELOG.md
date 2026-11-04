@@ -25,6 +25,9 @@ change the API.
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
   pinned file itself, so the user never saw it.
+- Each pinned checkpoint has a `commercial_use` flag, which says whether the
+  licence of its weights allows commercial use. `lazy models` and the docs'
+  table of the models show it.
 - The package is marked typed (`py.typed`), so type checkers read its
   annotations.
 - The source distribution includes the tests and the docs pages they read.
