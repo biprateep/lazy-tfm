@@ -35,7 +35,6 @@ import tomllib
 
 __all__ = [
     "CHECKOUT_SYNC",
-    "in_uv_project",
     "install",
     "install_command",
     "uv_project",
@@ -144,14 +143,6 @@ def _is_checkout(project: pathlib.Path) -> bool:
     except (OSError, tomllib.TOMLDecodeError):
         return False
     return name == "lazy-tfm"
-
-
-def in_uv_project() -> bool:
-    """Whether this interpreter runs a uv project's environment.
-
-    See :func:`uv_project` for the rule.
-    """
-    return uv_project() is not None
 
 
 def install(

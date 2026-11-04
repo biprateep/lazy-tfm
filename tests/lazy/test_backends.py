@@ -1034,7 +1034,7 @@ class TestTabICL:
         est = tabicl.TabICLQuantile()
         est._support = (0.0, 1.0)
         est.native_grid_ = est._native_grid()
-        outside = _quantile_head.mass_outside(dist, est.native_grid_)
+        outside = dist._on_grid_and_outside(est.native_grid_)[1]
         assert outside[0] == 0.0
         assert outside[1] == pytest.approx(3 / 16, abs=0.011)
 

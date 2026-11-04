@@ -436,25 +436,36 @@ class BaseDensityRegressor(
     def predict_cdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:
-        """Cumulative distributions on ``y_grid``, at the bin centres.
+        """Each row's cumulative distribution at the centres of ``y_grid``.
+
+        Computed on the native distribution (:meth:`predict_distribution`),
+        never on a grid, as in :meth:`predict_quantiles`: column ``j`` of
+        row ``i`` is ``F_i(y_grid.centers[j])``. It includes the probability
+        below the grid, which :meth:`predict_proba` drops, so column 0
+        need not be zero, nor the last column one. A model that predicts
+        only densities answers from its default grid's histogram, so
+        ``y_grid`` sets where the CDF is read, not its resolution.
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y_grid: The grid to evaluate on; ``None`` for this model's
-                default.
+            y_grid: The grid whose bin centres to evaluate at; ``None`` for
+                this model's default.
 
         Returns:
-            The mass below each bin centre, shape (n_samples, n_bins), by
-            the grid's convention (:meth:`lazy.grid.Grid.cdf`): column 0 is
-            zero on a trapezoid grid, and half the first bin's mass on a
-            histogram grid.
+            The probability below each bin centre, within [0, 1], shape
+            (n_samples, n_bins).
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
-        grid = self._resolve_grid(y_grid)
-        return grid.cdf(self.predict_proba(X, grid))
+        centers = self._resolve_grid(y_grid).centers
+        return np.concatenate(
+            [
+                dist.cdf(centers)
+                for dist in self._chunked(self._check_features(X))
+            ]
+        )
 
     def predict(  # noqa: GS030 - scikit-learn's X, y.
         self,
