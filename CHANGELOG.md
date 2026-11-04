@@ -85,6 +85,11 @@ change the API.
   on. Without a name, `lazy setup` does nothing for Kumo Tabular. A source
   checkout gets every backend with `uv sync --extra all`; the `backends`
   dependency group is gone.
+- On its native grid, TabICL and Kumo Tabular take each row's probability
+  outside the grid from the CDF that tabulating the density already
+  evaluates at the grid's ends, instead of interpolating every row's
+  quantiles a second time. Densities, scores and the warning about that
+  probability are unchanged to the bit.
 
 ### Deprecated
 

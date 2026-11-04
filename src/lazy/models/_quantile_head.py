@@ -37,7 +37,6 @@ __all__ = [
     "NATIVE_QUANTILE_BINS",
     "OUTSIDE_TOLERANCE",
     "QuantileHead",
-    "mass_outside",
     "quantile_levels",
     "target_scaling",
 ]
@@ -99,24 +98,6 @@ def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
     return float(np.mean(targets)), scale if scale > 0 else 1.0
 
 
-def mass_outside(
-    dist: distributions.QuantileDistribution, grid: grid_lib.Grid
-) -> _typing.FloatArray:
-    """Each row's probability outside the grid, exactly.
-
-    Args:
-        dist: The predicted quantiles.
-        grid: The grid they are tabulated on.
-
-    Returns:
-        The probability below ``grid.y_min`` plus that above ``grid.y_max``,
-        tails included (they reach one quantile spacing beyond the outermost
-        quantiles), shape ``(n_rows,)``.
-    """
-    cdf = dist.cdf([grid.y_min, grid.y_max])
-    return cdf[:, 0] + (1.0 - cdf[:, 1])
-
-
 class QuantileHead:
     """The native grid and density tabulation of a quantile-head backend.
 
@@ -161,15 +142,14 @@ class QuantileHead:
         blocks = []
         outside = 0
         for dist in self._distribution_chunks(X):
-            blocks.append(dist.on_grid(grid))
             if grid == self.native_grid_ and isinstance(
                 dist, distributions.QuantileDistribution
             ):
-                outside += int(
-                    np.count_nonzero(
-                        mass_outside(dist, grid) > OUTSIDE_TOLERANCE
-                    )
-                )
+                density, mass = dist._on_grid_and_outside(grid)  # noqa: SLF001 - one interpolation.
+                outside += int(np.count_nonzero(mass > OUTSIDE_TOLERANCE))
+            else:
+                density = dist.on_grid(grid)
+            blocks.append(density)
         if outside:
             _warnings.warn(
                 f"{outside} of {len(X)} rows put more than "

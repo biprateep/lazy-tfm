@@ -388,6 +388,23 @@ class Grid:
         Returns:
             Normalised densities on this grid, shape (n_rows, n_bins).
         """
+        return self._from_quantiles(values, levels)[0]
+
+    def _from_quantiles(
+        self, values: npt.ArrayLike, levels: npt.ArrayLike
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """:meth:`from_quantiles`, and the CDF it evaluates at the edges.
+
+        Args:
+            values: Quantiles of the target, shape (n_rows, n_quantiles).
+            levels: The cumulative probabilities of the quantile columns,
+                shape (n_quantiles,).
+
+        Returns:
+            A tuple ``(density, cdf)``: the normalised densities, shape
+            (n_rows, n_bins), and the CDF at this grid's edges, unclipped,
+            shape (n_rows, n_bins + 1).
+        """
         q = np.asarray(values, dtype=np.float64)
         alphas = np.asarray(levels, dtype=np.float64)
         if q.ndim != 2:
@@ -399,7 +416,7 @@ class Grid:
         for i in range(q.shape[0]):
             cdf[i] = np.interp(self.edges, q[i], alphas, left=0.0, right=1.0)
         density = np.diff(cdf, axis=1) / self.widths
-        return self.normalize(np.clip(density, 0.0, None))
+        return self.normalize(np.clip(density, 0.0, None)), cdf
 
     def bin_index(self, values: npt.ArrayLike) -> _typing.IntArray:
         """Index of the bin each value falls in, clipped to the grid.

@@ -724,8 +724,29 @@ class QuantileDistribution(_Base):
         Returns:
             Normalized densities, shape (n_rows, grid.n_bins).
         """
+        return self._on_grid_and_outside(grid)[0]
+
+    def _on_grid_and_outside(
+        self, grid: grid_lib.Grid
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """:meth:`on_grid`, and each row's probability outside ``grid``.
+
+        The probability outside comes from the CDF that the tabulation
+        evaluates at the grid's ends, so it costs no second interpolation,
+        and it equals ``cdf([grid.y_min, grid.y_max])``'s to the bit.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            A tuple ``(density, outside)``: the normalized densities, shape
+            (n_rows, grid.n_bins), and the probability below ``grid.y_min``
+            plus that above ``grid.y_max``, tails included, shape (n_rows,).
+        """
         levels, locs = self._knots()
-        return grid.from_quantiles(locs, levels)
+        density, cdf = grid._from_quantiles(locs, levels)  # noqa: SLF001 - its CDF.
+        ends = _unit(cdf[:, [0, -1]])
+        return density, ends[:, 0] + (1.0 - ends[:, 1])
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
