@@ -72,7 +72,7 @@ def _recording() -> dict[str, object]:
         "commit": commit,
         "machine": platform.platform(),
         "cpus": os.cpu_count(),
-        # TabPFN's and TabFM's CPU densities differ between processors.
+        # TabPFN's CPU densities differ between processors.
         "cpu_capability": torch.backends.cpu.get_cpu_capability(),
         "torch_threads": torch.get_num_threads(),
         "thread_variables": {

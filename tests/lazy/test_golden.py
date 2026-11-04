@@ -27,10 +27,10 @@ most. LimiX moves by 4e-6 with the thread count alone.
 
 TabPFN's file holds on a GitHub Linux runner (AVX2), where the checkpoint
 workflow recorded it: two runners gave the same densities to the bit. Another
-processor moves them by 3% to 5% of the peak, so its golden test passes only
-on that platform: TabPFN hashes each row of its float32 preprocessed data into
-a fingerprint feature, so a last-bit difference gives a different feature. See
-"Across machines" in the reproducibility guide.
+processor moves its densities by 3% to 5% of the peak, so its golden test
+passes only on that platform: TabPFN hashes each row of its float32
+preprocessed data into a fingerprint feature, so a last-bit difference gives a
+different feature. See "Across machines" in the reproducibility guide.
 """
 
 ATOL = {
