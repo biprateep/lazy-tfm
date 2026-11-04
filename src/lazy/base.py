@@ -779,9 +779,7 @@ class BaseDensityRegressor(
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
-        return metrics.grid_point_estimates(
-            grid.centers, pdfs, bin_edges=grid.histogram_edges
-        )
+        return metrics.grid_point_estimates(grid, pdfs)
 
     @property
     def grid(self) -> grid_lib.Grid:

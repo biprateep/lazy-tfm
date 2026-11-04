@@ -159,6 +159,10 @@ change the API.
   backends' `setup` hook, which only this path uses, goes with it.
   `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
   install, also warns and will be removed in 0.7.0.
+- The `bin_edges` argument of the `lazy.metrics` functions warns with a
+  `FutureWarning` and will be removed in 0.7.0. Results are unchanged. Pass
+  `lazy.Grid.from_edges(bin_edges, normalization="histogram")` as the grid
+  instead.
 
 ### Removed
 

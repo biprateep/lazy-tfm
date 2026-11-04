@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
 
+import dataclasses
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -145,51 +148,6 @@ def _histogram_case():
     return grid, pdfs, y_true
 
 
-def test_a_histogram_grid_brings_its_own_edges_to_every_metric():
-    grid, pdfs, y_true = _histogram_case()
-    edges = grid.edges
-    pd.testing.assert_frame_equal(
-        metrics.summarize(y_true, grid, pdfs),
-        metrics.summarize(y_true, grid.centers, pdfs, bin_edges=edges),
-    )
-    assert metrics.cde_loss(y_true, grid, pdfs) == metrics.cde_loss(
-        y_true, grid.centers, pdfs, bin_edges=edges
-    )
-    for got, want in zip(
-        metrics.evaluate_grid_at_truth(y_true, grid, pdfs),
-        metrics.evaluate_grid_at_truth(
-            y_true, grid.centers, pdfs, bin_edges=edges
-        ),
-    ):
-        np.testing.assert_array_equal(got, want)
-    np.testing.assert_array_equal(
-        metrics.normalize_grid_pdfs(grid, pdfs)[1], grid.normalize(pdfs)
-    )
-    density = grid.normalize(pdfs)
-    np.testing.assert_array_equal(
-        metrics.grid_cdf(grid, density),
-        metrics.grid_cdf(grid.centers, density, bin_edges=edges),
-    )
-    np.testing.assert_allclose(
-        metrics.normalization_error(grid, density), 0.0, atol=1e-12
-    )
-    np.testing.assert_array_equal(
-        metrics.peak_mean(grid, density),
-        metrics.peak_mean(grid.centers, density, bin_edges=edges),
-    )
-    np.testing.assert_array_equal(
-        metrics.mode(grid, density), metrics.mode(grid.centers, density)
-    )
-    estimates = metrics.grid_point_estimates(grid, pdfs)
-    expected = metrics.grid_point_estimates(grid.centers, pdfs, bin_edges=edges)
-    for name, values in expected.items():
-        np.testing.assert_array_equal(estimates[name], values)
-    assert (
-        metrics.pdf_metrics(y_true, grid, pdfs)[0]
-        == (metrics.pdf_metrics(y_true, grid.centers, pdfs, bin_edges=edges)[0])
-    )
-
-
 def test_a_trapezoid_grid_scores_like_its_centres():
     grid = grid_lib.Grid.linear(0.0, 2.0, 100)
     rng = np.random.default_rng(4)
@@ -204,10 +162,15 @@ def test_explicit_bin_edges_must_agree_with_the_grid():
     grid, pdfs, y_true = _histogram_case()
     trapezoid = grid_lib.Grid.from_edges(grid.edges)
     # Matching edges win, and score a trapezoid grid as a histogram.
-    assert metrics.cde_loss(
-        y_true, trapezoid, pdfs, bin_edges=grid.edges
-    ) == metrics.cde_loss(y_true, grid, pdfs)
-    with pytest.raises(ValueError, match="differ from the edges"):
+    with pytest.warns(FutureWarning, match="bin_edges is deprecated"):
+        matching = metrics.cde_loss(
+            y_true, trapezoid, pdfs, bin_edges=grid.edges
+        )
+    assert matching == metrics.cde_loss(y_true, grid, pdfs)
+    with (
+        pytest.warns(FutureWarning, match="bin_edges is deprecated"),
+        pytest.raises(ValueError, match="differ from the edges"),
+    ):
         metrics.cde_loss(y_true, grid, pdfs, bin_edges=grid.edges * 1.01)
 
 
@@ -216,9 +179,9 @@ def test_bin_edges_rebuilt_far_from_zero_agree_with_their_grid():
     edges = grid_lib.Grid.from_centers(grid.centers).edges
     pdfs = np.full((1, 100), 0.1)
     # The edges agree to rounding, so the grid's own edges score them.
-    assert metrics.cde_loss(
-        [1e7 + 5.0], grid, pdfs, bin_edges=edges
-    ) == metrics.cde_loss([1e7 + 5.0], grid, pdfs)
+    with pytest.warns(FutureWarning, match="bin_edges is deprecated"):
+        rebuilt = metrics.cde_loss([1e7 + 5.0], grid, pdfs, bin_edges=edges)
+    assert rebuilt == metrics.cde_loss([1e7 + 5.0], grid, pdfs)
 
 
 def test_point_metrics_leave_residuals_unscaled_by_default():
@@ -330,9 +293,6 @@ def test_crps_on_a_random_histogram_matches_brute_force():
         expected.append(np.sum((cdf - step) ** 2 * np.diff(fine)))
     np.testing.assert_allclose(
         metrics.per_object_crps(y_true, grid, pdfs), expected, rtol=1e-8
-    )
-    assert metrics.crps(y_true, grid, pdfs) == metrics.crps(
-        y_true, grid.centers, pdfs, bin_edges=grid.edges
     )
 
 
@@ -515,8 +475,10 @@ def test_the_summary_table_adds_crps_and_nll():
 def test_normalizing_leaves_the_callers_densities_unchanged(histogram):
     pdfs = np.array([[np.nan, -1.0, 2.0, np.inf], [0.0, 0.0, 0.0, 0.0]])
     before = pdfs.copy()
-    edges = np.linspace(0.0, 4.0, 5) if histogram else None
-    metrics.normalize_grid_pdfs(np.arange(4.0) + 0.5, pdfs, bin_edges=edges)
+    grid = grid_lib.Grid.linear(
+        0.0, 4.0, 4, normalization="histogram" if histogram else "trapezoid"
+    )
+    metrics.normalize_grid_pdfs(grid, pdfs)
     np.testing.assert_array_equal(pdfs, before)
 
 
@@ -570,3 +532,60 @@ def test_an_unknown_point_estimate_is_refused():
 def test_a_bad_grid_is_reported_before_a_bad_point(function):
     with pytest.raises(ValueError, match="expected y_grid shape"):
         function(np.ones(2), np.linspace(0, 1, 5), np.ones((2, 4)), point="x")
+
+
+_DEPRECATED_BIN_EDGES = [
+    ("normalize_grid_pdfs", False),
+    ("normalization_error", False),
+    ("grid_cdf", False),
+    ("peak_mean", False),
+    ("grid_point_estimates", False),
+    ("grid_point_estimate", False),
+    ("evaluate_grid_at_truth", True),
+    ("cde_loss", True),
+    ("per_object_scores", True),
+    ("crps", True),
+    ("per_object_crps", True),
+    ("nll", True),
+    ("per_object_nll", True),
+    ("per_object_metrics", True),
+    ("pdf_metrics", True),
+    ("evaluate_grid_pdfs", True),
+    ("summarize", True),
+]
+
+
+@pytest.mark.parametrize("name, has_truth", _DEPRECATED_BIN_EDGES)
+def test_bin_edges_warns_once_and_means_a_histogram_grid(name, has_truth):
+    grid, pdfs, y_true = _histogram_case()
+    function = getattr(metrics, name)
+    extra = {"method": "mean"} if name == "grid_point_estimate" else {}
+    if name in ("grid_cdf", "peak_mean", "normalization_error"):
+        pdfs = grid.normalize(pdfs)
+    args = (y_true,) if has_truth else ()
+    expected = function(*args, grid, pdfs, **extra)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        got = function(*args, grid.centers, pdfs, bin_edges=grid.edges, **extra)
+    deprecations = [w for w in caught if w.category is FutureWarning]
+    assert len(deprecations) == 1
+    assert "removed in lazy 0.7.0" in str(deprecations[0].message)
+    assert deprecations[0].filename == __file__
+    for a, b in zip(_leaves(got), _leaves(expected), strict=True):
+        np.testing.assert_array_equal(a, b)
+
+
+def _leaves(result):
+    """The arrays inside a metric's result: tuples, dicts and dataclasses."""
+    if isinstance(result, pd.DataFrame):
+        return [result[c].to_numpy() for c in result]
+    if isinstance(result, dict):
+        result = tuple(result.values())
+    elif dataclasses.is_dataclass(result):
+        result = dataclasses.astuple(result)
+    if isinstance(result, tuple):
+        leaves = []
+        for part in result:
+            leaves.extend(_leaves(part))
+        return leaves
+    return [np.asarray(result)]

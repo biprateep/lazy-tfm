@@ -156,9 +156,10 @@ them according to the grid's own normalization. On a model's
 histogram-normalized native grid it scores them exactly, bin by bin, and on
 grids such as {data}`~lazy.datasets.DC1_GRID` it uses the Data Challenge's
 trapezoid rule, so that the numbers are the challenge's, byte for byte. Bin
-centers alone also work, and are read as a trapezoid grid. The metrics
-take `bin_edges=` to score a histogram grid exactly, and `score`, `evaluate`
-and `point_estimates` pass it automatically.
+centers alone also work, and are read as a trapezoid grid. To score
+densities that are constant across each bin on edges `e`, pass
+`lazy.Grid.from_edges(e, normalization="histogram")`. The `bin_edges=`
+argument is deprecated and is removed in 0.7.0.
 
 The PDF metrics apply to any target. The conditional density estimate (CDE)
 loss, {func}`~lazy.metrics.cde_loss`, is the mean over objects of the integral

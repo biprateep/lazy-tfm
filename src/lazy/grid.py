@@ -262,8 +262,8 @@ class Grid:
     def histogram_edges(self) -> _typing.FloatArray | None:
         """The edges when the grid is ``"histogram"``-normalised, else None.
 
-        This is the ``bin_edges`` argument the :mod:`lazy.metrics` functions
-        take to score densities on this grid by its own convention.
+        The :mod:`lazy.metrics` functions read it from the grid to score
+        densities by the grid's own convention.
         """
         return self.edges if self.normalization == "histogram" else None
 
@@ -285,9 +285,7 @@ class Grid:
         Returns:
             The normalised densities, shape (n_rows, n_bins).
         """
-        return metrics.normalize_grid_pdfs(
-            self.centers, pdfs, bin_edges=self.histogram_edges
-        )[1]
+        return metrics.normalize_grid_pdfs(self, pdfs)[1]
 
     def cdf(self, density: npt.ArrayLike) -> _typing.FloatArray:
         """Cumulative distribution at the bin centres.
@@ -305,11 +303,7 @@ class Grid:
             histogram grid it is half the first bin's mass, since the mass
             starts at the first edge.
         """
-        return metrics.grid_cdf(
-            self.centers,
-            np.asarray(density, dtype=float),
-            bin_edges=self.histogram_edges,
-        )
+        return metrics.grid_cdf(self, np.asarray(density, dtype=float))
 
     def rebin(
         self, probs: npt.ArrayLike, edges: npt.ArrayLike
