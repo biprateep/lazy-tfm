@@ -13,15 +13,17 @@ which is similar to and compatible with scikit-learn's. **LAZY** also provides a
 
 ### Installation
 
-**LAZY** is on PyPI as `lazy-tfm` and is imported as `lazy`. To install it with every supported model:
+**LAZY** is on PyPI as `lazy-tfm` and is imported as `lazy`. The demo below
+uses TabPFN, so install that model:
 
 ```console
-pip install 'lazy-tfm[all]'
+pip install 'lazy-tfm[tabpfn]'
 ```
 
-With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[all]'` in a
-project or `uv pip install 'lazy-tfm[all]'` in an environment. For detailed
-installation instructions, including support for specific models, refer to the {doc}`installation` page.
+With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[tabpfn]'` in a
+project or `uv pip install 'lazy-tfm[tabpfn]'` in an environment. For the other
+models, and for `[all]`, which installs every supported model, see the
+{doc}`installation` page.
 
 ### Usage
 
@@ -29,42 +31,33 @@ As a quick demonstration, we predict the mean
 and 68% interval for the missing segments of a noisy curve. The `"chirp"` dataset of {func}`~lazy.datasets.load_dataset` is a noisy sinusoid, and
 `split=True` returns the three gaps cut out of it as the test set.
 
-```python
-import lazy
-from lazy import datasets
+```{literalinclude} snippets/quickstart.py
+:language: python
+:start-at: import lazy
+```
 
-X_train, X_test, y_train, y_test = datasets.load_dataset(
-    "chirp", split=True, return_X_y=True, random_state=0
-)
+Every other argument of `LazyModel` has a default, listed in the
+[shared parameters table](guide/interface.md#shared-parameters-and-defaults).
+The first run downloads the model's weights, about 334 MB. The snippet prints
+the first three rows of each prediction; their last digits differ from one
+processor to another:
 
-# Equivalent to lazy.LazyModel("tabpfn", version="v3.5-fast").
-model = lazy.LazyModel(
-    "tabpfn",
-    version="v3.5-fast",  # Not the default (v3.5); runs on a CPU.
-    # The remaining arguments are the defaults, spelled out for clarity.
-    n_estimators=8,
-    transforms="auto",
-    feature_shuffle=True,
-    bag_size=None,
-    kv_cache=True,
-    y_grid=None,
-    device="auto",
-    random_state=0,
-    chunk_size=8192,
-    softmax_temperature="auto",
-    mixed_precision=True,
-    outlier_threshold="auto",
-)
-model.fit(X_train, y_train)
-
-y_mean = model.predict(X_test, method="mean")
-y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
+```text
+[0.64850495 0.62743615 0.62331416]
+[0.45311083 0.44126895 0.43087525]
+[0.84825626 0.82071483 0.82279941]
 ```
 
 ```{figure} figures/figs/chirp_demo.svg
 :alt: A noisy chirp with three gaps, filled by TabPFN-3.5-fast's mean and 68% interval.
 :width: 100%
 ```
+
+### Next
+
+- {doc}`guide/index`: how the models work and how to choose one.
+- {doc}`tutorials/index`: worked examples.
+- {doc}`models/index`: each model's checkpoints, limits and parameters.
 
 <!-- The sidebar. :titlesonly: keeps a page's own sections out of it, so
 Installation and Citing show no sub-list, and Contributing lists only the
