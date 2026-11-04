@@ -110,14 +110,6 @@ class TestTabFM:
         assert est.provenance_["revision"]
         assert est.name_ == "tabfm:v1.0"
 
-    def test_an_unknown_version_is_rejected_at_fit(self, tiny):
-        """Not at the first prediction, an hour later."""
-        X, z = tiny
-        with pytest.raises(ValueError, match="unknown version"):
-            lazy.get_estimator(
-                "tabfm", version="v9", n_coarse_bins=2, n_fine_bins=2
-            ).fit(X, z)
-
     def test_more_than_ten_classes_per_level_is_rejected(self, tiny):
         X, z = tiny
         with pytest.raises(ValueError, match="at most 10 classes"):
@@ -1137,13 +1129,6 @@ class TestTabPFN:
             lazy.get_estimator("tabpfn", version=version, kv_cache="int8").fit(
                 X, z
             )
-
-    def test_an_unknown_version_is_rejected_before_anything_is_downloaded(
-        self, tiny
-    ):
-        X, z = tiny
-        with pytest.raises(ValueError, match=r"unknown version 'v9'"):
-            lazy.get_estimator("tabpfn", version="v9").fit(X, z)
 
     def test_a_safetensors_checkpoint_keeps_a_readable_suffix(self, tmp_path):
         """The suffix has to survive resolving the HF cache's symlink.

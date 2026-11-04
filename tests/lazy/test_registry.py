@@ -4,8 +4,10 @@
 import json
 import pathlib
 import re
+import warnings
 
 import huggingface_hub
+import numpy as np
 import pytest
 import standins
 
@@ -52,11 +54,6 @@ def test_get_estimator_forwards_parameters():
     assert lazy.get_estimator("tabfm", n_dither=3).n_dither == 3
 
 
-def test_unknown_estimator_names_the_alternatives():
-    with pytest.raises(KeyError, match="tabicl"):
-        lazy.get_estimator("tabdpt")
-
-
 def test_unknown_parameter_is_rejected_by_the_constructor():
     with pytest.raises(TypeError):
         lazy.get_estimator("tabicl", not_a_parameter=1)
@@ -91,16 +88,6 @@ def test_a_version_is_reachable_by_name_or_key():
     assert (
         lazy.get_checkpoint("tabpfn").version == lazy.DEFAULT_VERSIONS["tabpfn"]
     )
-
-
-def test_an_unknown_version_names_the_ones_that_exist():
-    with pytest.raises(KeyError, match=r"v3\.5-fast"):
-        lazy.get_checkpoint("tabpfn", "v4")
-
-
-def test_an_unknown_backend_is_reported_as_such():
-    with pytest.raises(KeyError, match="unknown backend"):
-        lazy.get_checkpoint("tabdpt", "v1")
 
 
 def test_list_versions_is_sorted_and_scoped_to_one_backend():
@@ -224,3 +211,85 @@ def test_shared_code_reaches_a_backend_through_its_hooks(monkeypatch):
         ("clear_upstream_caches",),
         ("setup", True, False),
     ]
+
+
+def _fit_data():
+    generator = np.random.default_rng(0)
+    return generator.normal(size=(20, 2)), generator.uniform(size=20)
+
+
+_UNKNOWN_BACKEND = {
+    "get_estimator": lambda: lazy.get_estimator("tabpf"),
+    "get_checkpoint": lambda: lazy.get_checkpoint("tabpf"),
+    "download_checkpoint": lambda: lazy.download_checkpoint("tabpf"),
+    "LazyModel": lambda: lazy.LazyModel("tabpf").fit(*_fit_data()),
+    "LazyEnsembleModel": lambda: lazy.LazyEnsembleModel(["tabpf"]).fit(
+        *_fit_data()
+    ),
+}
+_UNKNOWN_VERSION = {
+    "get_checkpoint": lambda: lazy.get_checkpoint("tabpfn", "v9"),
+    "download_checkpoint": lambda: lazy.download_checkpoint("tabpfn:v9"),
+    "LazyModel": lambda: lazy.LazyModel("tabpfn", version="v9").fit(
+        *_fit_data()
+    ),
+    "LazyEnsembleModel": lambda: lazy.LazyEnsembleModel(
+        [lazy.get_estimator("tabpfn", version="v9")]
+    ).fit(*_fit_data()),
+    "backend fit": lambda: lazy.TabPFNBarDistribution(version="v9").fit(
+        *_fit_data()
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("call", "word", "choices"),
+    [
+        pytest.param(call, "backend", lazy.list_estimators(), id=f"backend-{k}")
+        for k, call in _UNKNOWN_BACKEND.items()
+    ]
+    + [
+        pytest.param(
+            call, "version", lazy.list_versions("tabpfn"), id=f"version-{k}"
+        )
+        for k, call in _UNKNOWN_VERSION.items()
+    ],
+)
+def test_every_entry_point_rejects_an_unknown_name_with_the_same_error(
+    call, word, choices
+):
+    with pytest.raises(lazy.UnknownNameError) as caught:
+        call()
+    message = str(caught.value)
+    assert message.startswith(f"unknown {word} '")
+    assert all(repr(choice) in message for choice in choices)
+
+
+def test_unknown_name_error_is_both_a_key_error_and_a_value_error():
+    error = lazy.UnknownNameError("unknown backend 'x'; known: ['a']")
+    assert isinstance(error, KeyError)
+    assert isinstance(error, ValueError)
+    assert str(error) == "unknown backend 'x'; known: ['a']"
+    assert str(lazy.UnknownNameError()) == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "version"), [("tabpf", None), ("tabpfn", "v9")]
+)
+def test_is_cached_is_false_with_a_warning_for_an_unknown_name(name, version):
+    with pytest.warns(FutureWarning, match="raises lazy.UnknownNameError") as w:
+        assert not lazy.is_cached(name, version)
+    assert len(w) == 1
+    assert "known: [" in str(w[0].message)
+
+
+def test_is_cached_is_false_for_a_known_checkpoint_that_is_not_cached(
+    monkeypatch,
+):
+    def offline(self, *, local_files_only=False):
+        raise OSError("not in the cache")
+
+    monkeypatch.setattr(_hub.Checkpoint, "_fetch", offline)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert not lazy.is_cached("tabpfn")

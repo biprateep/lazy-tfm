@@ -31,6 +31,7 @@ from lazy.models._hub import get_checkpoint
 from lazy.models._hub import is_cached
 from lazy.models._hub import LicenseWarning
 from lazy.models._hub import list_versions
+from lazy.models._hub import UnknownNameError
 from lazy.models._limix_source import LimiXSourceWarning
 from lazy.models._quantile_head import GridCoverageWarning
 from lazy.models._weights import clear_model_cache
@@ -68,6 +69,7 @@ __all__ = [
     "TabFMPerformanceWarning",
     "TabICLQuantile",
     "TabPFNBarDistribution",
+    "UnknownNameError",
     "clear_model_cache",
     "download_checkpoint",
     "get_checkpoint",

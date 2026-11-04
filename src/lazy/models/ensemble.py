@@ -44,6 +44,7 @@ from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
+from lazy.models import _hub
 from lazy.models import lazy_model
 from lazy.models import registry
 
@@ -465,8 +466,8 @@ def _check_models(models: object) -> list[tuple[str, Member]]:
 
     Raises:
         TypeError: If an item is neither a name nor a density regressor.
-        ValueError: If ``models`` is not a non-empty list, or names an
-            unknown backend.
+        ValueError: If ``models`` is not a non-empty list.
+        UnknownNameError: If ``models`` names an unknown backend.
     """
     if not isinstance(models, list | tuple) or not models:
         raise ValueError(
@@ -476,9 +477,11 @@ def _check_models(models: object) -> list[tuple[str, Member]]:
     for item in models:
         if isinstance(item, str):
             if item not in registry.ESTIMATORS:
-                raise ValueError(
-                    f"unknown model {item!r} in models; "
-                    f"known: {registry.list_estimators()}"
+                raise _hub.unknown_name(
+                    "backend",
+                    item,
+                    registry.list_estimators(),
+                    argument="models",
                 )
         elif not isinstance(item, base.BaseDensityRegressor):
             raise TypeError(
