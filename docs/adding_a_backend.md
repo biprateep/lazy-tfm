@@ -100,8 +100,21 @@ network on the estimator, which drops it on pickling and finds it again on
 first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
 Kumo Tabular do this). TabPFN loads its network the same way and hands it to
 each upstream regressor as a model spec; its pickle leaves the network out
-and hands it to the regressors again on unpickling. The base class
-resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
+and hands it to the regressors again on unpickling.
+
+A pickle holds no key/value cache either, which can be many times the size
+of its context. The base class pickles each handle as `_pickled_handle`
+returns it, without its caches but with what rebuilds them, such as the
+context, and calls `_rebuild_caches` on an unpickled estimator, before its
+first prediction, under the estimator's lock, so that threads predicting at
+once rebuild once. A rebuild that raises is tried again by the next
+prediction, so it must be safe to run again. `copy.deepcopy` goes through the
+same methods, so a deep copy rebuilds its caches too. TabICL, Kumo Tabular
+and LimiX implement both; a backend whose handles hold no cache leaves the
+defaults, which pickle the handle whole and rebuild nothing. TabPFN's
+regressors still pickle their caches.
+
+The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
 and raises a clear error on a device its model does not support, before the
@@ -114,8 +127,8 @@ predicts on the CPU where there is none. A backend whose handles hold the
 device moves them to the new `device_` in its own `__setstate__` (TabICL and
 TabPFN move their upstream regressors). For the move from a GPU to work,
 handles that hold device tensors must pickle them so that they load on a
-CPU. TabICL's regressors move their key/value cache to the CPU when
-pickled; TabPFN writes its regressors with `torch.save` and reads them with
+CPU. TabICL's handles hold no cache when pickled; TabPFN writes its
+regressors with `torch.save` and reads them with
 `torch.load(..., map_location="cpu")`. A backend whose `_recipe` records
 a setting that follows the device returns it, recomputed, from
 `_relocated_provenance` (TabICL's `use_amp`, Kumo Tabular's autocast dtype and
