@@ -126,6 +126,10 @@ change the API.
 
 ### Fixed
 
+- An unpickled Kumo, LimiX or TabICL model predicting from two threads at
+  once could read the checkpoint path of the machine that made the pickle,
+  which on another machine does not exist. The path is now found again
+  before the model marks it found.
 - LimiX-2 predicting from two threads at once could leave `sys.stdout` on
   a discarded buffer, so that later prints vanished. The threads now take
   turns to silence upstream's prints.

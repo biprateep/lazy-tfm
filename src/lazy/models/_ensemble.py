@@ -34,6 +34,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Callable, Hashable, Iterator, Mapping
 import numbers
+import pathlib
 import sys
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
@@ -428,9 +429,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         in :data:`lazy.models._hub.PROVENANCE_KEYS`, as
         ``Checkpoint.provenance`` gives it.
         """
-        spec = _hub.get_checkpoint(self.backend or "", self.version)
+        spec = self._checkpoint_spec()
         self.checkpoint_ = spec.download()
+        self.__dict__.pop("_relocate_checkpoint", None)
         self.provenance_ = spec.provenance(device=self.device_)
+
+    def _checkpoint_spec(self) -> _hub.Checkpoint:
+        """The pinned checkpoint of this backend and version."""
+        return _hub.get_checkpoint(self.backend or "", self.version)
 
     def _progress_postfix(
         self, dist: distributions.Distribution
@@ -1027,6 +1033,34 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         state = dict(super().__getstate__())
         state.pop("_network_cache", None)
         return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle; its checkpoint path is found again on next use.
+
+        The pickled ``checkpoint_`` names a file on the machine that made the
+        pickle. :meth:`_checkpoint` looks the pinned checkpoint up again
+        through the hub, which downloads it only if this machine lacks it.
+        Only a backend that reads its checkpoint after fitting calls it; for
+        the others the flag stays unread.
+        """
+        super().__setstate__(state)
+        if "checkpoint_" in state:
+            self._relocate_checkpoint = True
+
+    def _checkpoint(self) -> pathlib.Path:
+        """The checkpoint path on this machine, relocated after unpickling.
+
+        Safe from several threads: the path is assigned before the flag is
+        cleared, so a second thread either relocates again, to the same path,
+        or reads the new one, never the pickled one.
+
+        Returns:
+            ``checkpoint_``, a :class:`pathlib.Path`.
+        """
+        if self.__dict__.get("_relocate_checkpoint", False):
+            self.checkpoint_ = self._checkpoint_spec().download()
+            self.__dict__.pop("_relocate_checkpoint", None)
+        return self.checkpoint_
 
     def _log(self, message: str) -> None:
         """Prints a log line when ``verbose``."""
