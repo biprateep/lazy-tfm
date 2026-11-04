@@ -158,6 +158,21 @@ uv run python docs/logo/make_logo.py
 The output is deterministic, so a rerun with no change leaves the files
 untouched.
 
+### The figures
+
+`docs/figures/make_figures.py` draws the figures of the docs that show a
+model's output, with TabPFN-3.5-fast on a CPU, and writes them as SVG into
+`docs/figures/figs/`. It needs the `tabpfn` extra and the TabPFN checkpoint.
+Rerun it after a change to a model's output or to the landing snippet
+`docs/snippets/quickstart.py`:
+
+```bash
+uv run --extra tabpfn python docs/figures/make_figures.py
+```
+
+The output is deterministic, so a rerun with no change leaves the files
+untouched.
+
 ### Tutorials
 
 Tutorials are py:percent scripts in `docs/tutorials/`, and main tracks only

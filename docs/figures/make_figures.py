@@ -79,6 +79,8 @@ RC_PARAMS = {
     "axes.formatter.use_mathtext": True,
 }
 plt.rcParams.update(RC_PARAMS)
+# No creation date in the files, so a rerun leaves them untouched.
+METADATA = {"Date": None}
 
 # %% [markdown]
 # ## Filling in a curve
@@ -145,7 +147,7 @@ ax.set_ylabel(r"$y$")
 ax.set_xlim(0, 10)
 ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncols=4)
 FIGS.mkdir(exist_ok=True)
-fig.savefig(FIGS / "chirp_demo.svg", bbox_inches="tight")
+fig.savefig(FIGS / "chirp_demo.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -247,7 +249,7 @@ for i, (loc, scale) in enumerate([(-0.8, 0.5), (0.4, 0.9), (1.0, 0.35)]):
     ax.plot(xs, y_base + 0.55 * pdf / pdf.max(), c="C1", lw=1)
     ax.plot([7.5, 9.7], [y_base, y_base], c=INK, lw=0.5)
 ax.text(8.6, 3.35, r"$p(y \mid x, \mathrm{context})$", ha="center", va="bottom")
-fig.savefig(FIGS / "tfm_schematic.svg", bbox_inches="tight")
+fig.savefig(FIGS / "tfm_schematic.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -295,7 +297,7 @@ for ax in axes[-1]:
     ax.set_xlabel(r"$x$")
 for ax in axes[:, 0]:
     ax.set_ylabel(r"$y$")
-fig.savefig(FIGS / "prior_draws.svg", bbox_inches="tight")
+fig.savefig(FIGS / "prior_draws.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -361,5 +363,5 @@ fig.legend(
     loc="outside upper center",
     ncols=4,
 )
-fig.savefig(FIGS / "context_size.svg", bbox_inches="tight")
+fig.savefig(FIGS / "context_size.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
