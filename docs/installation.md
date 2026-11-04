@@ -78,7 +78,7 @@ lazy setup
 `lazy models` lists every pinned checkpoint, marks each backend's default
 version, and says whether the weights are in the local cache. It uses no
 network. `lazy download` fetches the weights of the checkpoints named, as
-{func}`lazy.download_checkpoint` does, and prints any licence notice. It exits
+{func}`lazy.download_checkpoint` does, and prints any license notice. It exits
 with status 2, and downloads nothing, when a name or version is unknown:
 
 ```console

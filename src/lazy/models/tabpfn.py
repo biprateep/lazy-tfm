@@ -33,7 +33,7 @@ with fewer than four distinct values for a category).
 
 ``bag_size`` runs one regressor per member, fitted on that member's bag
 alone. TabPFN's own row subsampling (``SUBSAMPLE_SAMPLES``) would fit each
-member's preprocessing on its rows but standardise the target, and place the
+member's preprocessing on its rows but standardize the target, and place the
 buckets, with the whole context's mean and standard deviation, and it checks
 the whole context against the size limits; a regressor per bag fits all of
 it on the bag, as every other model does, and only the bag meets the limits.
@@ -359,7 +359,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ``"v3.5-fast"``. Each is a separately pinned checkpoint, so
             sweeping this parameter compares model versions on equal terms.
             They differ in more than accuracy: ``"v2"`` is the only one under
-            a commercial-use licence, and it and ``"v2.5"`` declare much
+            a commercial-use license, and it and ``"v2.5"`` declare much
             smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
         n_estimators: Ensemble members, each a forward pass over a
@@ -373,11 +373,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             SVD and the identity target transform. TabPFN runs only ``none``
             natively (its other transforms are not the package's) and lazy
             applies the rest. What runs whatever the recipe: the removal of
-            constant columns and TabPFN's internal standardisation.
+            constant columns and TabPFN's internal standardization.
         feature_shuffle: TabPFN's own feature shuffling.
         bag_size: Context rows per member. Each member is then a regressor
             of its own, fitted on its bag: its preprocessing, outlier clip,
-            target standardisation and buckets all come from those rows, and
+            target standardization and buckets all come from those rows, and
             only the bag must lie within the limits
             ``ignore_pretraining_limits`` describes, so bagging is how TabPFN
             takes a context larger than them.
@@ -442,7 +442,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     upstream_package = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()
-    # A regressor per bag: upstream's own subsampling standardises the
+    # A regressor per bag: upstream's own subsampling standardizes the
     # target on the whole context (see the module docstring).
     supports_native_bagging = False
     native_outlier_clipping = True

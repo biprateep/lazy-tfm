@@ -54,7 +54,7 @@ and the ensemble that answered, and no local paths, so it means the same thing
 on another machine and survives a trip through JSON:
 
 ```python
-model.fit(X_train, z_train).provenance_
+model.fit(X_train, y_train).provenance_
 # {'backend': 'tabpfn', 'version': 'v2.5',
 #  'repo_id': 'Prior-Labs/tabpfn_2_5',
 #  'filename': 'tabpfn-v2.5-regressor-v2.5_default.ckpt',
@@ -135,7 +135,7 @@ float32, so a difference in its last bit, which another processor's
 arithmetic produces, gives that row a different hash. The model then sees a
 different value of that feature, and its density moves by several percent of
 the peak. Without the fingerprint, TabPFN differs across machines by about
-$10^{-5}$ of the peak. This is upstream TabPFN's behaviour, which LAZY's pinned
+$10^{-5}$ of the peak. This is upstream TabPFN's behavior, which LAZY's pinned
 recipe keeps.
 
 So compare results from different machines with scores over many rows (the

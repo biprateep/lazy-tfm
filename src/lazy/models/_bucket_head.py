@@ -3,7 +3,7 @@
 """What every backend with a bucket head shares.
 
 A model whose regressor is a classifier over fixed buckets of the
-standardised target, such as TabPFN or LimiX-2, answers with logits over
+standardized target, such as TabPFN or LimiX-2, answers with logits over
 those buckets. Its density is a
 :class:`~lazy.distributions.HistogramDistribution` over the buckets' borders
 in the target's units, and its native grid is every member group's buckets.
@@ -65,7 +65,7 @@ def bucket_edges(
     """The buckets' borders in the target's units.
 
     Args:
-        borders: The borders in standardised units, shape
+        borders: The borders in standardized units, shape
             ``(n_buckets + 1,)``.
         mean: The context targets' mean.
         std: Their standard deviation, positive.
@@ -79,7 +79,7 @@ def bucket_edges(
 def native_grid(edges: Iterable[_typing.FloatArray]) -> grid_lib.Grid:
     """The histogram grid over every member group's buckets.
 
-    Under bagging each member standardises its target on its own bag, and so
+    Under bagging each member standardizes its target on its own bag, and so
     places its buckets there; the grid holds all of them.
 
     Args:

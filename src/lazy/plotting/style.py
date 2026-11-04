@@ -95,7 +95,7 @@ def _deprecated(func: _FuncT) -> _FuncT:
         func: The function to deprecate.
 
     Returns:
-        A function with the same signature, docstring and behaviour that
+        A function with the same signature, docstring and behavior that
         warns on every call.
     """
 
@@ -289,7 +289,7 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
 :func:`verify_style` checks them.
 """
 
-# Colour is not in RC_PARAMS. DEFAULT_PALETTE holds matplotlib's default
+# Color is not in RC_PARAMS. DEFAULT_PALETTE holds matplotlib's default
 # property cycle (tab10, addressed as C0, C1, ...) for categorical series and
 # default colormap (viridis) for continuous data. They are read from
 # matplotlib rather than retyped, so they track the installed version and
@@ -315,13 +315,13 @@ def set_palette(
 
     Args:
         colors: The new property cycle, so series keep addressing it by
-            ``C0``, ``C1``, ...: a list of colours, or the name of a
+            ``C0``, ``C1``, ...: a list of colors, or the name of a
             matplotlib colormap — a qualitative one (``"Dark2"``,
-            ``"Set2"``, ``"tab20"``) contributes its colours as-is, a
+            ``"Set2"``, ``"tab20"``) contributes its colors as-is, a
             continuous one is sampled at ``n_colors`` evenly spaced points.
         cmap: Name of the default colormap for ``scatter(c=...)``,
             ``imshow``, ``pcolormesh`` and friends.
-        n_colors: Number of colours taken from a colormap named by
+        n_colors: Number of colors taken from a colormap named by
             ``colors``: the first ``n_colors`` of a qualitative map (default
             all of them), or the number of samples of a continuous one
             (default 10).
@@ -370,7 +370,7 @@ def use_style(
     Prefers the ``paper.mplstyle`` sheet shipped alongside this module and
     falls back to the equivalent ``RC_PARAMS`` dict if it is missing. Then
     calls :func:`set_palette` with ``palette`` and ``cmap``: with neither,
-    colour is matplotlib's default cycle and colormap.
+    color is matplotlib's default cycle and colormap.
 
     Args:
         style_file: A matplotlib style sheet to use instead of the shipped
@@ -414,7 +414,7 @@ def verify_style(
 
     Returns:
         A dict with the keys ``font`` (the path of the font file matplotlib
-        will use), ``palette`` (the colours of the active property cycle),
+        will use), ``palette`` (the colors of the active property cycle),
         ``cmap`` (the default colormap's name), ``default_palette`` (whether
         the palette is matplotlib's default) and ``problems`` (a list of
         messages, empty when the style is intact).
@@ -664,7 +664,7 @@ def stacked_hist(
         datasets: One array of values per stacked component.
         labels: Legend label of each component.
         bins: Number of bins, spanning the pooled data, or the bin edges.
-        colors: Colour of each component; ``C0``, ``C1``, ... by default.
+        colors: Color of each component; ``C0``, ``C1``, ... by default.
         alpha: Opacity of the filled bars.
         rwidth: Width of each bar as a fraction of its bin.
         **kwargs: Passed to both ``ax.hist`` calls.
@@ -719,7 +719,7 @@ def binned_quantiles(
         y_values: The values summarized in each bin, shape (n,).
         nbins: Number of bins, when ``bins`` is not given.
         equal_count: Put an equal number of points in each bin (the
-            ``pd.qcut`` behaviour) so the scatter band is equally well
+            ``pd.qcut`` behavior) so the scatter band is equally well
             determined everywhere; set it False for equal-width bins.
         bins: Explicit bin edges, overriding ``nbins`` and ``equal_count``;
             at least two distinct finite values. Each bin holds its left
@@ -787,7 +787,7 @@ def running_median(
     """Overlays a binned median with a 25–75 percentile band.
 
     Draws the median as a :func:`better_step` staircase with a shaded IQR,
-    and (by default) the global median as a dashed line in the same colour.
+    and (by default) the global median as a dashed line in the same color.
 
     .. deprecated:: 0.6.0
         Removed in lazy 0.7.0; nothing in lazy uses it.
@@ -800,7 +800,7 @@ def running_median(
         equal_count: Equal-count rather than equal-width bins, as in
             :func:`binned_quantiles`.
         bins: Explicit bin edges, as in :func:`binned_quantiles`.
-        color: Colour of the staircase, band and global median.
+        color: Color of the staircase, band and global median.
         global_median: Also draw the median of all ``y_values``.
         **kwargs: Passed to :func:`better_step`.
 
@@ -838,7 +838,7 @@ def one_to_one(
         ax: The axes to draw into.
         lo: Lower limit of both axes and of the line.
         hi: Upper limit of both axes and of the line.
-        color: Line colour.
+        color: Line color.
         ls: Line style.
         equal: Also set an equal aspect ratio.
         **kwargs: Passed to ``ax.plot``.
