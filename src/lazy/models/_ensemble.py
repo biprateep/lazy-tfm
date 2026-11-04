@@ -177,9 +177,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     (``member_combination="quantile_trimmed_average"``) also implements
     :meth:`_predict_members`, which answers for each member of a group
     separately, so that the trim spans the whole ensemble. After ``_fit``,
-    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`, which is
-    checked: :meth:`_load_checkpoint` records the checkpoint's and
-    :meth:`_recipe` the ensemble's.
+    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`:
+    :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
+    ensemble's.
 
     A fitted estimator pickles and predicts the same after unpickling; a network
     shared through :mod:`lazy.models._weights` is kept through
@@ -439,10 +439,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         del dist  # Unused.
         return {}
 
-    def _recommended_max_context(self) -> int | None:
-        """The context size above which the model wants bagging."""
-        return self.recommended_max_context
-
     def _auto_softmax_temperature(self) -> float | None:
         """The checkpoint's calibrated temperature, or None without a softmax.
 
@@ -571,7 +567,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             if self.softmax_temperature == AUTO
             else float(self.softmax_temperature)
         )
-        self.outlier_threshold_ = self._resolve_outlier_threshold()
+        specs = _transforms.parse(self.transforms)
+        self.outlier_threshold_ = self._resolve_outlier_threshold(specs)
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
         self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
@@ -581,7 +578,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.kv_cache_: bool | str = self.kv_cache
         self.member_groups_ = _members.plan(
             n_estimators=self._n_members(),
-            transforms=_transforms.parse(self.transforms),
+            transforms=specs,
             native_transforms=self.native_transforms,
             feature_shuffle=self.feature_shuffle,
             bag_rows=self.bag_rows_,
@@ -632,20 +629,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             **getattr(self, "provenance_", {}),
             **self._recipe(),
         }
-        self._check_provenance()
         self._after_fit()
-
-    def _check_provenance(self) -> None:
-        """Raises unless ``provenance_`` holds :data:`REQUIRED_PROVENANCE`."""
-        missing = [
-            key for key in REQUIRED_PROVENANCE if key not in self.provenance_
-        ]
-        if missing:
-            raise RuntimeError(
-                f"{type(self).__name__}.provenance_ lacks {missing}: "
-                "_load_checkpoint records the checkpoint's keys "
-                "(Checkpoint.provenance) and _recipe the ensemble's"
-            )
 
     def _check_uniform_params(self) -> None:
         """Validates the uniform parameters, before anything is loaded."""
@@ -704,12 +688,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"of standard deviations: {self.outlier_threshold=}"
             )
 
-    def _resolve_outlier_threshold(self) -> float | None:
-        """The clip threshold in force: ``"auto"`` follows ``transforms``."""
+    def _resolve_outlier_threshold(
+        self, specs: tuple[_transforms.TransformSpec, ...] | None
+    ) -> float | None:
+        """The clip threshold in force: ``"auto"`` follows ``transforms``.
+
+        Args:
+            specs: The parsed ``transforms``; None for the model's own recipe.
+
+        Returns:
+            The threshold in standard deviations, or None for no clip.
+        """
         if self.outlier_threshold is None:
             return None
         if self.outlier_threshold == AUTO:
-            if _transforms.parse(self.transforms) is None:
+            if specs is None:
                 return self._auto_outlier_threshold()
             return None
         return float(self.outlier_threshold)
@@ -771,7 +764,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
         """Warns when a member's context exceeds what the model handles."""
-        limit = self._recommended_max_context()
+        limit = self.recommended_max_context
         if limit is None or self.bag_rows_ <= limit:
             return
         needed = -(-n_rows // limit)
@@ -843,11 +836,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self, features: _typing.FloatArray
     ) -> distributions.Distribution:
         """Every group's prediction for some query features, combined."""
-        clippers = getattr(self, "clippers_", None) or [None] * len(
-            self.handles_
-        )
         if self.member_combination == "quantile_trimmed_average":
-            return self._predict_trimmed(features, clippers)
+            return self._predict_trimmed(features)
         parts = [
             self._check_group_output(
                 self._predict_group(
@@ -859,16 +849,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 self.handles_,
                 self.member_groups_,
                 self.transformers_,
-                clippers,
+                self.clippers_,
                 strict=True,
             )
         ]
         return self._combine(parts)
 
     def _predict_trimmed(
-        self,
-        features: _typing.FloatArray,
-        clippers: list[_transforms.SoftClip | None],
+        self, features: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
         """Every member's prediction, combined by a trimmed average."""
         members: list[distributions.QuantileDistribution] = []
@@ -876,7 +864,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             self.handles_,
             self.member_groups_,
             self.transformers_,
-            clippers,
+            self.clippers_,
             strict=True,
         ):
             answers = self._predict_members(

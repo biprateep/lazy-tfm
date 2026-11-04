@@ -678,14 +678,6 @@ class _DropsARow(standins.HistogramStandIn):
         return super()._predict_group(handle, X)[1:]
 
 
-class _ForgetsTheRevision(standins.HistogramStandIn):
-    """Records a provenance without the checkpoint's revision."""
-
-    def _load_checkpoint(self):
-        super()._load_checkpoint()
-        del self.provenance_["revision"]
-
-
 # One group serves the whole ensemble, or a scaffolded transform splits it.
 GROUPINGS = [
     pytest.param({}, 1, id="one-group"),
@@ -709,12 +701,6 @@ def test_a_group_answering_the_wrong_rows_is_refused(params, n_groups, data):
     assert len(model.member_groups_) == n_groups
     with pytest.raises(RuntimeError, match="19 rows for 20 query rows"):
         model.predict_distribution(X_test)
-
-
-def test_a_provenance_without_a_required_key_is_refused(data):
-    X, z, _ = data
-    with pytest.raises(RuntimeError, match=r"lacks \['revision'\]"):
-        _ForgetsTheRevision().fit(X, z)
 
 
 def test_a_fitted_provenance_holds_every_required_key(cls, data):
