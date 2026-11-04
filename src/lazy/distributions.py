@@ -193,6 +193,14 @@ class _Base:
         """Each row's CDF at its own value, shape (n_rows,)."""
         raise NotImplementedError
 
+    def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
+        """Each row's point mass at ``values``, shape (n_rows, len(values)).
+
+        None when the distribution has no point mass at all, so that callers
+        skip the correction.
+        """
+        raise NotImplementedError
+
     def pit(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The probability integral transform: each row's CDF at its value.
 
@@ -274,7 +282,10 @@ class _Base:
     def histogramize(self, bins: npt.ArrayLike) -> HistogramDistribution:
         """The masses this distribution puts in ``bins``, exactly.
 
-        Probability outside ``bins`` is dropped and each row renormalised.
+        Each bucket holds ``bins[i] <= y < bins[i + 1]``, and the last also
+        its upper edge, as :meth:`lazy.grid.Grid.bin_index` assigns values;
+        a point mass on an edge goes to the bucket above it. Probability
+        outside ``bins`` is dropped and each row renormalised.
 
         Args:
             bins: The bucket edges, shape (n_buckets + 1,), non-decreasing.
@@ -283,9 +294,57 @@ class _Base:
             The distribution's masses in those buckets, with its ``ancil``.
         """
         target = np.asarray(bins, dtype=np.float64)
-        masses = np.diff(self.cdf(target), axis=1)
-        np.maximum(masses, 0.0, out=masses)
+        masses, _ = self._masses(target)
         return HistogramDistribution(target, masses, self.ancil)
+
+    def _masses(
+        self, edges: _typing.FloatArray
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """The mass in each bucket of ``edges``, as :meth:`histogramize`'s.
+
+        The CDF at the last edge, and its left limit at every other one, so
+        that a point mass on an edge counts in the bucket above it.
+
+        Args:
+            edges: Non-decreasing bucket edges, shape (n_buckets + 1,).
+
+        Returns:
+            A tuple ``(masses, outside)``: the non-negative masses, shape
+            (n_rows, n_buckets), and the probability below ``edges[0]``
+            plus that above ``edges[-1]``, shape (n_rows,).
+        """
+        cdf = self.cdf(edges)
+        atoms = self._atoms(edges[:-1])
+        if atoms is not None:
+            cdf[:, :-1] -= atoms
+            _unit(cdf)
+        masses = np.diff(cdf, axis=1)
+        np.maximum(masses, 0.0, out=masses)
+        return masses, cdf[:, 0] + (1.0 - cdf[:, -1])
+
+    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
+        """The mass in each bin of ``grid`` over its width, unnormalized."""
+        return self._bin_densities_and_outside(grid)[0]
+
+    def _bin_densities_and_outside(
+        self, grid: grid_lib.Grid
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+        """:meth:`_bin_densities`, and each row's probability outside ``grid``.
+
+        Both come from one evaluation of the CDF at the grid's edges
+        (:meth:`_masses`), so the probability outside costs no second one.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            A tuple ``(density, outside)``: the unnormalized densities, shape
+            (n_rows, grid.n_bins), and the probability below ``grid.y_min``
+            plus that above ``grid.y_max``, shape (n_rows,).
+        """
+        masses, outside = self._masses(grid.edges)
+        masses /= grid.widths
+        return masses, outside
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -293,8 +352,11 @@ class HistogramDistribution(_Base):
     """Probability masses in buckets shared by all rows, uniform within each.
 
     This is a bar distribution (TabPFN, LimiX) or a histogram over bins
-    (TabFM). Buckets may be of any widths; a zero-width bucket must carry no
-    mass.
+    (TabFM). Buckets may be of any widths. The mass of a zero-width bucket
+    is a point mass at its edge: the CDF steps there, and the quantiles, the
+    moments and :meth:`on_grid` (in the bin above the edge) include it, but
+    :meth:`pdf`, :meth:`mode` and :meth:`to_qp` do not, since it has no
+    density.
 
     Attributes:
         bins: Bucket edges, shape (n_buckets + 1,), non-decreasing, finite.
@@ -368,13 +430,12 @@ class HistogramDistribution(_Base):
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        Each bin gets the exact mass the buckets put in it, divided by its
-        width (:meth:`lazy.grid.Grid.rebin`, or the bucket's own mass on
-        the buckets' own edges); the
-        probability outside the grid is dropped and each row is normalized
-        by the grid's convention (:meth:`lazy.grid.Grid.normalize`). For
-        the masses before that normalization, use
-        ``histogramize(grid.edges).masses``.
+        Each bin gets the exact mass the buckets put in it, as
+        :meth:`histogramize` counts it, divided by its width (on the
+        buckets' own edges, each bucket's own mass); the probability outside
+        the grid is dropped and each row is normalized by the grid's
+        convention (:meth:`lazy.grid.Grid.normalize`). For the masses before
+        that normalization, use ``histogramize(grid.edges).masses``.
 
         Args:
             grid: The grid to put the densities on.
@@ -387,16 +448,15 @@ class HistogramDistribution(_Base):
     def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """The mass in each bin of ``grid`` over its width, unnormalized.
 
-        From :attr:`probabilities`, so that an empty row is treated here as
-        in every other method. On the buckets' own edges, each bin is one
-        bucket: its mass over its width, without the cumulative sums of
-        :meth:`lazy.grid.Grid.rebin`, which lose a small bin's precision.
+        On the buckets' own edges, each bin is one bucket: its mass over its
+        width, without the cumulative sums of :meth:`cdf`, which lose a
+        small bin's precision.
         """
         if np.array_equal(grid.edges, self.bins):
             densities = self.probabilities
             densities /= self.widths
             return densities
-        return grid.rebin(self.probabilities, self.bins)
+        return super()._bin_densities(grid)
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
@@ -442,6 +502,13 @@ class HistogramDistribution(_Base):
         value[values < self.bins[0]] = 0.0
         value[values >= self.bins[-1]] = 1.0
         return _unit(value)
+
+    def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
+        zero = self.widths == 0
+        if not zero.any():
+            return None
+        at = values[:, None] == self.bins[:-1][zero]
+        return self.probabilities[:, zero] @ at.T
 
     def _locate(
         self, values: _typing.FloatArray
@@ -725,10 +792,9 @@ class QuantileDistribution(_Base):
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        :meth:`lazy.grid.Grid.from_quantiles` on the knots, the ends of the
-        tails included: the mass in each bin over its width, with the
-        probability outside the grid dropped and each row normalized by the
-        grid's convention.
+        The mass in each bin, as :meth:`histogramize` counts it, tails
+        included, over the bin's width, with the probability outside the
+        grid dropped and each row normalized by the grid's convention.
 
         Args:
             grid: The grid to put the densities on.
@@ -738,31 +804,20 @@ class QuantileDistribution(_Base):
         """
         return grid.normalize(self._bin_densities(grid))
 
-    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
-        """The mass in each bin of ``grid`` over its width, unnormalized."""
-        return self._bin_densities_and_outside(grid)[0]
-
-    def _bin_densities_and_outside(
-        self, grid: grid_lib.Grid
-    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-        """:meth:`_bin_densities`, and each row's probability outside ``grid``.
-
-        The probability outside comes from the CDF that the tabulation
-        evaluates at the grid's ends, so it costs no second interpolation,
-        and it equals ``cdf([grid.y_min, grid.y_max])``'s to the bit.
-
-        Args:
-            grid: The grid to put the densities on.
-
-        Returns:
-            A tuple ``(density, outside)``: the unnormalized densities, shape
-            (n_rows, grid.n_bins), and the probability below ``grid.y_min``
-            plus that above ``grid.y_max``, tails included, shape (n_rows,).
-        """
+    def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
+        # A tail has no width only in a row of equal values, so every point
+        # mass is a tie between values; most rows have none to look for.
+        if not (self.locs[:, 1:] == self.locs[:, :-1]).any():
+            return None
         levels, locs = self._knots()
-        density, cdf = grid._from_quantiles(locs, levels)  # noqa: SLF001 - its CDF.
-        ends = _unit(cdf[:, [0, -1]])
-        return density, ends[:, 0] + (1.0 - ends[:, 1])
+        steps = np.diff(levels)
+        tied = (np.diff(locs, axis=1) == 0) & (steps > 0)
+        if not tied.any():
+            return None
+        out = np.zeros((self.npdf, values.size))
+        for row, knot in zip(*np.nonzero(tied), strict=True):
+            out[row] += steps[knot] * (values == locs[row, knot])
+        return out
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
@@ -1033,6 +1088,13 @@ class MixtureDistribution(_Base):
                 for c in self.components
             )
         )
+
+    def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
+        atoms = [c._atoms(values) for c in self.components]  # noqa: SLF001 - same module.
+        if all(a is None for a in atoms):
+            return None
+        zero = np.zeros((self.npdf, values.size))
+        return self._weighted(zero if a is None else a for a in atoms)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         # The union histogram is the same distribution, so its inverse is

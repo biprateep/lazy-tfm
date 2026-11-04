@@ -37,6 +37,7 @@ import numpy as np
 import numpy.typing as npt
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import metrics
 
 __all__ = [
@@ -51,6 +52,16 @@ Normalization: TypeAlias = Literal["trapezoid", "histogram"]
 """How a density on a grid integrates to one; see Grid."""
 NORMALIZATIONS: tuple[str, ...] = ("trapezoid", "histogram")
 """The accepted values of Grid.normalization."""
+
+
+def _deprecated(method: str, replacement: str, difference: str) -> None:
+    """Warns that ``Grid.<method>`` is deprecated, naming its replacement."""
+    _warnings.warn(
+        f"Grid.{method} is deprecated and will be removed in 0.7.0. "
+        f"lazy.distributions.{replacement}.on_grid(grid) replaces it, but "
+        f"{difference}",
+        FutureWarning,
+    )
 
 
 def _edges_agree(a: _typing.FloatArray, b: _typing.FloatArray) -> bool:
@@ -316,6 +327,11 @@ class Grid:
     ) -> _typing.FloatArray:
         """Density on this grid from bin *probabilities* on other bin edges.
 
+        Deprecated, to be removed in 0.7.0. It is
+        ``HistogramDistribution(edges, probs)``'s densities before
+        :meth:`~lazy.distributions.HistogramDistribution.on_grid` normalizes
+        them by this grid's convention, except that an empty row stays zero.
+
         Each output bin is given the exact probability mass the input
         histogram places inside it. The input is piecewise constant, so its
         CDF is piecewise linear and evaluating that CDF at this grid's edges
@@ -333,6 +349,11 @@ class Grid:
         Returns:
             Densities on this grid, shape (n_rows, n_bins).
         """
+        _deprecated(
+            "rebin",
+            "HistogramDistribution(edges, probs)",
+            "normalizes the densities by the grid's convention",
+        )
         p = np.asarray(probs, dtype=float)
         in_edges = np.asarray(edges, dtype=float)
         if p.ndim != 2:
@@ -347,31 +368,23 @@ class Grid:
             raise ValueError("edges must be non-decreasing")
         if not np.isfinite(p).all() or np.any(p < 0):
             raise ValueError("probs must be finite and non-negative")
-        p = p / np.maximum(p.sum(axis=1, keepdims=True), 1e-300)
-        widths = np.diff(in_edges)
-        out_edges = self.edges
-        cum = np.concatenate(
-            [np.zeros((len(p), 1)), np.cumsum(p, axis=1)], axis=1
-        )
-        idx = np.clip(
-            np.searchsorted(in_edges, out_edges, side="right") - 1,
-            0,
-            len(widths) - 1,
-        )
-        frac = np.divide(
-            out_edges - in_edges[idx],
-            widths[idx],
-            out=np.zeros(out_edges.size),
-            where=widths[idx] > 0,
-        )
-        cdf_at_edges = cum[:, idx] + p[:, idx] * np.clip(frac, 0.0, 1.0)
-        mass = np.diff(cdf_at_edges, axis=1)
-        return np.clip(mass, 0.0, None) / self.widths
+        from lazy import distributions  # noqa: PLC0415 - it imports grid.py.
+
+        dist = distributions.HistogramDistribution(in_edges, p)
+        density = dist._bin_densities(self)  # noqa: SLF001 - one implementation.
+        # An empty row has no mass here, where a distribution spreads it.
+        density[p.sum(axis=1) <= 0] = 0.0
+        return density
 
     def from_quantiles(
         self, values: npt.ArrayLike, levels: npt.ArrayLike
     ) -> _typing.FloatArray:
         """Density on this grid from per-row quantiles of the predictive CDF.
+
+        Deprecated, to be removed in 0.7.0. The replacement,
+        ``QuantileDistribution(levels, values).on_grid(grid)``, differs: it
+        spreads the probability beyond the outermost levels over a tail,
+        where this method puts it at the outermost values.
 
         ``values[i]`` are the values at cumulative probabilities
         ``levels``. Those pairs define a CDF; evaluating it at this grid's
@@ -388,23 +401,12 @@ class Grid:
         Returns:
             Normalised densities on this grid, shape (n_rows, n_bins).
         """
-        return self.normalize(self._from_quantiles(values, levels)[0])
-
-    def _from_quantiles(
-        self, values: npt.ArrayLike, levels: npt.ArrayLike
-    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-        """:meth:`from_quantiles` unnormalized, and the CDF at the edges.
-
-        Args:
-            values: Quantiles of the target, shape (n_rows, n_quantiles).
-            levels: The cumulative probabilities of the quantile columns,
-                shape (n_quantiles,).
-
-        Returns:
-            A tuple ``(density, cdf)``: the densities before
-            normalization, shape (n_rows, n_bins), and the CDF at this
-            grid's edges, unclipped, shape (n_rows, n_bins + 1).
-        """
+        _deprecated(
+            "from_quantiles",
+            "QuantileDistribution(levels, values)",
+            "adds tails beyond the outermost levels and normalizes the "
+            "densities by the grid's convention",
+        )
         q = np.asarray(values, dtype=np.float64)
         alphas = np.asarray(levels, dtype=np.float64)
         if q.ndim != 2:
@@ -416,7 +418,7 @@ class Grid:
         for i in range(q.shape[0]):
             cdf[i] = np.interp(self.edges, q[i], alphas, left=0.0, right=1.0)
         density = np.diff(cdf, axis=1) / self.widths
-        return np.clip(density, 0.0, None, out=density), cdf
+        return self.normalize(np.clip(density, 0.0, None, out=density))
 
     def bin_index(self, values: npt.ArrayLike) -> _typing.IntArray:
         """Index of the bin each value falls in, clipped to the grid.
