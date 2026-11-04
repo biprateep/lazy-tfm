@@ -27,6 +27,9 @@ change the API.
 
 ### Changed
 
+- `import lazy` no longer imports h5py or scikit-learn's dataset loaders.
+  `lazy.datasets` and `lazy.selection` load when first accessed, as
+  attributes of `lazy` or by import, so code that uses them is unchanged.
 - TabFM's `bin_prior_` is set by `fit` instead of written by every
   prediction, so threads predicting on one model no longer change it. Its
   value is the same: the bin fractions of the last member group's context,
