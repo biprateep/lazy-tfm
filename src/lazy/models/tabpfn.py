@@ -44,9 +44,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 import copy
 import inspect
+import io
 import itertools
 import os
 import pathlib
+import pickle
 import sys
 import types
 from typing import Any
@@ -702,24 +704,65 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             )
         }
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickles the regressors without the network, loadable anywhere.
+
+        The regressors share one network (:meth:`_model_specs`), which is
+        left out and attached again on unpickling. The rest of each
+        regressor, its key/value cache included, goes through
+        ``torch.save``, so that :meth:`__setstate__` can load its tensors
+        on the CPU, which a plain pickle of CUDA tensors cannot. The live
+        model is only read.
+
+        Returns:
+            The state to pickle, with ``handles_`` as bytes.
+        """
+        state = super().__getstate__()
+        if "handles_" in state:
+            state["handles_"] = _without_networks(state["handles_"])
+            state.pop("regressor_", None)
+        return state
+
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restores a pickle, its regressors on this model's device.
 
-        Upstream's ``to`` moves each regressor's network and key/value cache
-        and sets its precision again, from ``inference_precision``, which is
-        therefore set first. A regressor pickled with CUDA tensors still
-        needs CUDA to unpickle (#197). Estimators pickled together share one
-        network, which ``to`` moves in place, so they should share a device.
+        Regressors written by :meth:`__getstate__` load on the CPU and get
+        the network from :meth:`_network`, as a fit's do, which needs the
+        pinned checkpoint on this machine and downloads it if it is missing.
+        A ``handles_`` of whole regressors, each with its network, loads as
+        it is; regressors pickled together share that network, which
+        ``to`` moves in place, so they should share a device. Upstream's
+        ``to`` then moves each regressor's network and key/value cache and
+        sets its precision again, from ``inference_precision``, which is
+        therefore set first.
 
         Args:
             state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
-        if "handles_" in state:
-            precision = self._inference_precision()
+        if "handles_" not in state:
+            return
+        if isinstance(self.handles_, bytes):
+            import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+            self.handles_ = torch.load(
+                io.BytesIO(self.handles_),
+                map_location="cpu",
+                weights_only=False,
+            )
+            (network,), *_ = self._network()
             for regressor in self.handles_:
-                regressor.inference_precision = precision
-                regressor.to(self.device_)
+                regressor.models_ = [network]
+                # A constant target runs no network, so has no engine.
+                engine = getattr(regressor, "executor_", None)
+                if engine is not None:
+                    engine._set_models([network])  # noqa: SLF001 - upstream's.
+            if len(self.handles_) == 1:
+                self.regressor_ = self.handles_[0]
+        precision = self._inference_precision()
+        for regressor in self.handles_:
+            regressor.inference_precision = precision
+            regressor.to(self.device_)
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
@@ -822,6 +865,51 @@ def _shortest_period(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
         if all(token == tokens[i % length] for i, token in enumerate(tokens)):
             return tokens[:length]
     return tokens
+
+
+def _without_networks(regressors: list[Any]) -> bytes:
+    """Fitted regressors as ``torch.save`` writes them, without the networks.
+
+    Each network unpickles as ``None``, wherever a regressor refers to it.
+
+    Args:
+        regressors: Fitted ``tabpfn.TabPFNRegressor`` instances.
+
+    Returns:
+        What ``torch.load`` reads back.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    networks: set[int] = set()
+    for regressor in regressors:
+        networks.update(id(network) for network in regressor.models_)
+
+    class Pickler(pickle.Pickler):
+        """Pickles each of ``networks`` as ``None``."""
+
+        def reducer_override(self, obj: Any) -> Any:
+            """Writes ``obj`` as ``None`` if it is one of ``networks``.
+
+            Args:
+                obj: An object being pickled.
+
+            Returns:
+                A reduction to ``None`` for a network, or
+                ``NotImplemented``, which pickles ``obj`` as usual.
+            """
+            if id(obj) in networks:
+                return type(None), ()
+            return NotImplemented
+
+    buffer = io.BytesIO()
+    torch.save(
+        regressors,
+        buffer,
+        # torch.save reads only these two of a pickle module.
+        pickle_module=types.SimpleNamespace(__name__="pickle", Pickler=Pickler),
+        pickle_protocol=pickle.HIGHEST_PROTOCOL,
+    )
+    return buffer.getvalue()
 
 
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:
