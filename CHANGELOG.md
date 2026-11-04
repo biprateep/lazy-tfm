@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- `lazy models` lists every pinned checkpoint, its default version and
+  whether it is cached, and `lazy download NAME[:VERSION]` downloads the
+  weights of the checkpoints named, with the licence notice, so the cache
+  can be warmed from the command line.
 - The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
