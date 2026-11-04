@@ -463,6 +463,30 @@ def test_threads_predicting_on_an_unpickled_model_wait_for_its_caches(
         np.testing.assert_array_equal(answer, expected)
 
 
+def test_overlapping_silenced_calls_give_stdout_back():
+    stdout = sys.stdout
+    first_in = threading.Event()
+    second_in = threading.Event()
+    first_out = threading.Event()
+
+    def first():
+        with _limix_stream._silenced():
+            first_in.set()
+            # Without the lock, the second call is inside by now and would
+            # restore stdout to this call's buffer after it leaves.
+            second_in.wait(0.2)
+        first_out.set()
+
+    def second():
+        first_in.wait(threads.TIMEOUT)
+        with _limix_stream._silenced():
+            second_in.set()
+            first_out.wait(threads.TIMEOUT)
+
+    assert threads.run(first, second)
+    assert sys.stdout is stdout
+
+
 def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
     monkeypatch.setitem(sys.modules, "torch", None)  # as if not installed
     X, z, _ = data

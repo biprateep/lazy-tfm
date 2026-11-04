@@ -100,6 +100,9 @@ change the API.
 
 ### Fixed
 
+- LimiX-2 predicting from two threads at once could leave `sys.stdout` on
+  a discarded buffer, so that later prints vanished. The threads now take
+  turns to silence upstream's prints.
 - An unpickled LimiX model predicting from two threads at once could fail
   with a `TypeError`, or leave members uncached depending on timing: the
   second thread used the key/value caches before the first had rebuilt
