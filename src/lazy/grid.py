@@ -123,8 +123,8 @@ class Grid:
 
         Args:
             y_min: Left edge of the first bin.
-            y_max: Right edge of the last bin.
-            n_bins: Number of bins.
+            y_max: Right edge of the last bin, above ``y_min``.
+            n_bins: Number of bins, at least 2.
             normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
 
         Returns:
@@ -435,14 +435,11 @@ def as_grid(grid: GridLike) -> Grid:
 
     Args:
         grid: A :class:`Grid`, or an array of evenly spaced bin centres
-            (see :meth:`Grid.from_centers`).
+            (see :meth:`Grid.from_centers`). ``None`` and ``"native"`` are
+            not accepted: only an estimator can resolve them.
 
     Returns:
         The grid.
-
-    Raises:
-        ValueError: If ``grid`` is None or ``"native"``, which only an
-            estimator can resolve.
 
     Examples:
         >>> as_grid(np.linspace(0.005, 2.995, 300)).n_bins

@@ -388,10 +388,6 @@ def build_features(
         names chosen to be
         readable in feature-importance output (``"G-R"``, ``"G-RERR"``, ...).
 
-    Raises:
-        KeyError: If ``raw`` lacks a magnitude or error column for one of
-            ``bands``.
-
     Examples:
         >>> raw = pd.DataFrame(
         ...     {b: np.full(3, 20.0) for b in BANDS}

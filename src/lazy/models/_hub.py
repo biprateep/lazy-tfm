@@ -163,6 +163,10 @@ class Checkpoint:
         Returns:
             The checkpoint file, or the snapshot directory when the
             checkpoint is a filtered snapshot rather than one file.
+
+        Raises:
+            FileNotFoundError: If the weights are not cached and
+                ``local_files_only`` is true or the Hub cannot be reached.
         """
         if self.revision is None:
             return self._fetch(local_files_only=local_files_only)

@@ -555,9 +555,6 @@ def grid_point_estimate(
 
     Returns:
         The estimate of each row, shape (n,).
-
-    Raises:
-        ValueError: If ``method`` is not one of :data:`POINT_ESTIMATORS`.
     """
     # A set, so that an unhashable method raises TypeError.
     if method not in frozenset(POINT_ESTIMATORS):
@@ -744,7 +741,7 @@ def cde_loss(
     truth's density. It is the single number this project optimises.
 
     Args:
-        y_true: True values, one per PDF, shape (n,).
+        y_true: Finite true values, one per PDF, shape (n,).
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
@@ -1247,7 +1244,7 @@ def pdf_metrics(
     """Scores grid PDFs with the CDE loss, the PIT statistics, CRPS and NLL.
 
     Args:
-        y_true: True values, one per PDF, shape (n,).
+        y_true: Finite true values, one per PDF, shape (n,).
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
@@ -1308,7 +1305,7 @@ def evaluate_grid_pdfs(
     """Convenience: point metrics from a PDF reduction plus the PDF metrics.
 
     Args:
-        y_true: True values, one per PDF, shape (n,).
+        y_true: Finite true values, one per PDF, shape (n,).
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
@@ -1355,7 +1352,7 @@ def summarize(
     gives the comparison table that the tutorials and the paper both report.
 
     Args:
-        y_true: True values, one per PDF, shape (n,).
+        y_true: Finite true values, one per PDF, shape (n,).
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
