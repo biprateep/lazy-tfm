@@ -24,11 +24,8 @@ def _explode(*args, **kwargs):
 def test_the_default_model_is_tabpfn():
     model = lazy.LazyModel()
     assert model.model == "tabpfn"
+    assert model.name_ == "tabpfn:v3.5"
     assert isinstance(model._build(), lazy.TabPFNBarDistribution)
-
-
-def test_the_default_model_is_tabpfn_3_5():
-    assert lazy.LazyModel().name_ == "tabpfn:v3.5"
 
 
 @pytest.mark.parametrize("name", sorted(lazy.ESTIMATORS))

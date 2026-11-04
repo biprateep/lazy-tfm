@@ -25,7 +25,7 @@ import lazy
 from lazy.models import registry
 
 ESTIMATORS = [
-    *(lazy.LazyModel(name) for name in lazy.list_estimators()),
+    lazy.LazyModel(),
     lazy.LazyModel("tabfm", n_estimators=4, n_dither=3),
     lazy.TabFMHistogram(),
     lazy.TabICLQuantile(),

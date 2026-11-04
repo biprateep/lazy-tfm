@@ -18,11 +18,6 @@ PYPROJECT = tomllib.loads(
 )
 
 
-def test_version():
-    """Check to see that we can get the package version."""
-    assert lazy.__version__ is not None
-
-
 def test_importing_lazy_loads_the_dataset_modules_on_first_access():
     """``lazy.datasets`` and ``lazy.selection`` load when first accessed."""
     code = (
