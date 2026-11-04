@@ -54,12 +54,17 @@ The nearest-grid-point likelihood (rather than linear interpolation) is also
 what the Cal-PIT reference implementation uses, and is exact for the
 piecewise-constant densities this package produces.
 
-Every function that takes ``y_grid`` accepts either the bin centres or the
-:class:`lazy.grid.Grid` itself. Pass the grid: its normalisation convention
-then comes with it (``bin_edges`` is taken from
-:attr:`~lazy.grid.Grid.histogram_edges`), so densities from a model's
+Every function that takes ``y_grid`` accepts either the bin centres, shape
+(g,), or the :class:`lazy.grid.Grid` itself. Pass the grid: its normalisation
+convention then comes with it, so densities from a model's
 histogram-normalised native grid are scored exactly rather than by the
-trapezoid rule over their centres.
+trapezoid rule over their centres. With bare centres, the densities are
+trapezoid-normalised. Passing ``bin_edges``, shape (g + 1,), instead treats
+each density as constant across its bin (a ``"histogram"`` grid). A
+histogram-normalised Grid supplies its edges itself
+(:attr:`~lazy.grid.Grid.histogram_edges`). Edges passed with a Grid must be
+its own, or ``ValueError`` is raised, and they make even a trapezoid Grid's
+densities scored as histograms.
 
 Typical usage example::
 
@@ -296,12 +301,8 @@ def normalize_grid_pdfs(
         y_grid: Strictly increasing bin centres, shape (g,) with g >= 2, or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         A tuple (grid, density): the centres as a float array, shape (g,),
@@ -363,12 +364,8 @@ def normalization_error(
         y_grid: Bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The absolute normalisation error of each row, shape (n,).
@@ -395,12 +392,8 @@ def grid_cdf(
         y_grid: Bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The cumulative mass below each centre, shape (n, g). By trapezoid
@@ -455,12 +448,8 @@ def peak_mean(
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
         frac: Fraction of the peak density that bounds the main peak.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The main-peak weighted mean of each row, shape (n,). A peak one grid
@@ -518,12 +507,8 @@ def grid_point_estimates(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         A dict with keys ``"mode"``, ``"peak_mean"``, ``"mean"`` and
@@ -677,14 +662,10 @@ def evaluate_grid_at_truth(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
-            Then the density at the truth is its bin's, zero outside the
-            edges, and the PIT is the exact piecewise-linear CDF.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring. With them, the density at the truth is its
+            bin's, zero outside the edges, and the PIT is the exact
+            piecewise-linear CDF.
 
     Returns:
         A tuple (grid, density, pdf_at_truth, pit): the centres, shape (g,);
@@ -745,12 +726,8 @@ def cde_loss(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The loss, averaged over objects.
@@ -776,12 +753,8 @@ def per_object_scores(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         A tuple (cde_terms, pit): ``integral p_i^2 - 2 p_i(z_true_i)`` per
@@ -825,12 +798,8 @@ def crps(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The score, averaged over objects, in the target's units.
@@ -865,12 +834,8 @@ def per_object_crps(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         The score of each object, shape (n,), in the target's units.
@@ -905,12 +870,8 @@ def nll(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
 
@@ -948,12 +909,8 @@ def per_object_nll(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
 
@@ -1248,12 +1205,8 @@ def pdf_metrics(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
 
     Returns:
         A tuple (metrics, pit): the metric bundle and the per-object PIT
@@ -1312,12 +1265,8 @@ def evaluate_grid_pdfs(
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"mode"``, ``"peak_mean"``,
             ``"mean"`` or ``"median"``).
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
         scale: How the point metrics scale residuals: ``"none"`` (the
             default) or ``"1+y"`` (DC1's); see :func:`point_metrics`.
 
@@ -1360,12 +1309,8 @@ def summarize(
             :func:`evaluate_grid_pdfs`.
         label: Model name for a leading ``model`` column; no such column
             when ``None``.
-        bin_edges: The grid's bin edges, shape (g + 1,), to treat each
-            density as constant across its bin (a ``"histogram"`` grid)
-            instead of using the trapezoid rule over the centres.
-            A histogram-normalised :class:`~lazy.grid.Grid` passed as
-            ``y_grid`` supplies them; given with a Grid, they must be its
-            edges.
+        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
+            the module docstring.
         scale: How the point metrics scale residuals: ``"none"`` (the
             default) for plain residuals, or ``"1+y"`` for DC1's
             photometric-redshift convention; see :func:`point_metrics`.
