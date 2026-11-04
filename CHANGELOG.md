@@ -360,6 +360,12 @@ change the API.
   `predict_proba` with a `TabFMPerformanceWarning`. Prediction raised
   `AttributeError` before. `lazy setup` now installs the pinned repository
   build over such a build.
+- The documentation no longer calls TabPFN-3.5-fast a smaller copy of
+  TabPFN-3.5, which it is not, and no longer gives a CDE loss for it that
+  disagrees with the scaling page's table. Several facts that pages
+  repeated, such as TabPFN's pretraining limits on the limits page, now
+  link to the page that holds them, and the pages no longer describe plans, past behaviour
+  or the test suite.
 
 ### Security
 

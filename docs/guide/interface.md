@@ -75,8 +75,7 @@ The table below shows how each model provides these parameters;
 | members combined      | averaged buckets / mixture               | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed | 20% trimmed mean of quantiles      |
 
 This contract is enforced: {func}`lazy.models.registry.register` refuses a
-backend that lacks any of these parameters or their shared defaults, and the
-conformance tests run every registered backend through every feature. A new
+backend that lacks any of these parameters or their shared defaults. A new
 model joins by subclassing {class}`~lazy.models.ContextEnsembleEstimator`.
 
 ## Ensembling and feature shuffling
@@ -94,9 +93,9 @@ own random subset of the context (below, and {doc}`scaling`).
 With `bag_size` set, each member sees its own random subset of the context
 rows, and LAZY draws these subsets for every model. The rows are drawn without
 replacement within a member and independently across members, from one
-generator seeded with `random_state`, exactly as our own bagged LimiX-2 tests
-drew them. Therefore, member `i` sees the same rows whichever model runs it,
-TabFM included, which would otherwise draw rows of its own. On TabFM the
+generator seeded with `random_state`. Therefore, member `i` sees the same
+rows whichever model runs it, TabFM included, which would otherwise draw rows
+of its own. On TabFM the
 member's coarse classifier sees its bag, and its classifier for coarse bin `j`
 sees the rows of its bag that fall in that bin.
 
@@ -170,8 +169,8 @@ transform such as `robust` changes nothing on them.
 
 `"limix"` is LimiX-2's two pipelines written in the shared vocabulary,
 `("quantile_uniform+original", "power")`, and it can be used on any model. It
-is what our own "with LimiX transforms" tests use. It lacks the SVD components
-of LimiX-2's own quantile pipeline, so on LimiX-2 it differs from `"auto"`.
+lacks the SVD components of LimiX-2's own quantile pipeline, so on LimiX-2 it
+differs from `"auto"`.
 
 ## Outlier clipping
 

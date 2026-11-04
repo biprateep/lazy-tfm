@@ -28,14 +28,14 @@ accuracy at this context size and not a ranking.
 | LimiX-2 | 46 s | 17.5 GB | 102 s | −13.71 |
 | TabFM v1.0 | 132 s | 7.8 GB | 8 min 16 s | −13.30 |
 
-\*Measured later under the same conditions, alongside TabPFN-3.5 at 26 s. With
-4 members (the fast checkpoint's own count), it takes 6 s.
+\*Measured in a separate run under the same conditions, in which TabPFN-3.5
+took 26 s. With 4 members (the fast checkpoint's own count), it takes 6 s.
 
-TabFM was measured with 4 members, which was its default at the time. The
-shared default is now 8, which roughly doubles its time, and the other rows
-used 8 members. Since these measurements, every model runs in float32 on a CPU
-(TabFM computed in bfloat16 there), and TabICL uses mixed precision on a GPU
-at every context size.
+TabFM was measured with 4 members and the other rows with the default of 8;
+8 members roughly double TabFM's time. These runs predate two settings of
+the current code: every model computes in float32 on a CPU (TabFM computed in
+bfloat16 there), and TabICL uses mixed precision on a GPU at every context
+size.
 
 ## How time and memory grow
 
@@ -76,9 +76,9 @@ GB per member at 20,000 context rows, so its eight members want a GPU with
 16–24 GB or more at that size. LimiX-2 has no cache upstream, so LAZY ports
 one, which falls back, with a warning, when the device lacks the room.
 
-TabPFN caches at full precision. Its own default, which is also what earlier
-`fit_mode="fit_with_cache"` runs used, is an int8 cache that moves densities
-by up to about half a percent, and `kv_cache="int8"` (or `"fp8"`) asks for it.
+TabPFN caches at full precision. Its own default is an int8 cache that moves
+densities by up to about half a percent, and `kv_cache="int8"` (or `"fp8"`)
+asks for it.
 TabICL caches keys and values, while `kv_cache="repr"` stores the smaller row
 representations instead and re-runs its in-context layers. TabFM uses its
 streaming prefill/decode path, which needs the repository build (see
@@ -88,9 +88,9 @@ every `predict` call, the cache serves the chunks of that call.
 
 ## Bagging
 
-`bag_size` gives each member a random subset of the context, with rows drawn
-without replacement within a member and independently across members. This
-matters when the context outgrows what a model was pretrained on. LimiX-2
+`bag_size` gives each member a random subset of the context (see
+[Bagging](interface.md#bagging)). This matters when the context outgrows what
+a model was pretrained on. LimiX-2
 degrades above about 20,000 context rows, and a
 {class}`~lazy.models.ContextSizeWarning` says so whenever a member's context
 is larger (the whole context without bagging, or a bag of more than 20,000
@@ -153,11 +153,11 @@ needs the least.
 
 Every model chooses its device when it is fitted, and `device="auto"` selects
 CUDA if it is available and the CPU otherwise (see {doc}`../installation`).
-Most of the models need a GPU to be practical. TabPFN refuses CPU contexts
-above 1,000 rows (v2 to v2.6) or 5,000 rows (v3 and later) unless
-`ignore_pretraining_limits=True` or a `bag_size` keeps every bag below that
-size, and `lazy` warns at `fit` when it finds no GPU for TabPFN-3.5. TabICLv2
-fits on 1,000 rows and predicts 1,000 in 7 s on a CPU (in the table above),
+Most of the models need a GPU to be practical. TabPFN refuses large CPU
+contexts (see [Context and feature limits](limits.md#context-and-feature-limits))
+unless `ignore_pretraining_limits=True` or a `bag_size` keeps every bag within
+that limit, and `lazy` warns at `fit` when it finds no GPU for TabPFN-3.5.
+TabICLv2 fits on 1,000 rows and predicts 1,000 in 7 s on a CPU (in the table above),
 and Kumo Tabular Small (`version="v1-small"`, 28 M parameters) is small
 enough for a CPU, while LimiX-2, TabFM and Kumo Tabular's Medium and Large
 need a GPU.
