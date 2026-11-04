@@ -27,6 +27,10 @@ change the API.
 
 ### Changed
 
+- TabFM's `bin_prior_` is set by `fit` instead of written by every
+  prediction, so threads predicting on one model no longer change it. Its
+  value is the same: the bin fractions of the last member group's context,
+  at the last dither. A model pickled without it gets it when unpickled.
 - On its own buckets (the default grid of TabPFN, LimiX, a bagged model and
   TabFM's `"grid"` bins), a histogram's densities are each bucket's mass over
   its width, computed directly instead of through differences of cumulative
