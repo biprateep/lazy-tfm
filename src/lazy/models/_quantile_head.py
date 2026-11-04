@@ -43,14 +43,10 @@ __all__ = [
 ]
 
 NATIVE_QUANTILE_BINS = 1000
-"""Bins of the native grid across the training targets' range: as fine as 999
-quantiles resolve. The padding adds bins of the same width.
-"""
+"""Described at ``lazy.models.tabicl.NATIVE_QUANTILE_BINS``."""
 
 NATIVE_PAD = 0.25
-"""How far the native grid extends beyond the training targets on each side, as
-a fraction of their range: the quantiles extrapolate.
-"""
+"""Described at ``lazy.models.tabicl.NATIVE_PAD``."""
 
 OUTSIDE_TOLERANCE = 0.01
 """The probability a row may put outside the native grid before tabulating it

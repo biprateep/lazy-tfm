@@ -544,9 +544,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
         # Every other argument is passed too, at the value upstream defaults
-        # to today, so that a later default cannot change a prediction. Two
-        # deprecated ones are left out: auto_scale_n_estimators acts only on
-        # n_estimators="auto", and n_jobs does nothing.
+        # to today, so that a later default cannot change a prediction.
+        # auto_scale_n_estimators acts only on n_estimators="auto", and
+        # n_jobs does nothing; both are deprecated upstream.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
@@ -564,6 +564,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             memory_saving_mode="auto",
             keep_cache_on_device=True,
             n_preprocessing_jobs=1,
+            n_jobs=None,
+            auto_scale_n_estimators=True,
             differentiable_input=False,
             eval_metric=None,
             **_cache_options(self.kv_cache),
