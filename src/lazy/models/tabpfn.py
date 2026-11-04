@@ -350,66 +350,53 @@ def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
 class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     """Target distributions from the bucket masses TabPFN predicts.
 
+    The parameters every backend shares mean what :doc:`/guide/interface`
+    states; each entry below adds only what differs on TabPFN.
+
     Args:
         version: Which TabPFN to run, in upstream's own vocabulary: ``"v2"``,
             ``"v2.5"``, ``"v2.6"``, ``"v3"``, ``"v3.5"`` (the default) or
-            ``"v3.5-fast"``. Each is a separately pinned checkpoint
-            (:func:`lazy.list_versions`), so sweeping this parameter compares
-            model versions on equal terms, and ``provenance_`` records which
-            one answered. They differ in more than accuracy: ``"v2"`` is the
-            only one under a commercial-use licence, and it and ``"v2.5"``
-            declare much smaller context limits than v3 (see
+            ``"v3.5-fast"``. Each is a separately pinned checkpoint, so
+            sweeping this parameter compares model versions on equal terms.
+            They differ in more than accuracy: ``"v2"`` is the only one under
+            a commercial-use licence, and it and ``"v2.5"`` declare much
+            smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
-        n_estimators: Ensemble members, each a forward pass over a differently
-            preprocessed view of the data; costs scale linearly. Exactly this
-            many run.
-        transforms: Per-member feature transforms: ``"auto"`` (the version's
-            own recipe, pinned in :data:`_AUTO_RECIPES`: its preprocessors,
-            including any SVD components and original columns they append,
-            the fingerprint feature, polynomial features on v2.6, the target
-            transforms, and on v3.5 a 12-sigma soft clip), a recipe name, a
-            transform name or a sequence of them; see
-            :mod:`lazy.models._transforms`. An explicit value is all the
-            model sees: no fingerprint or polynomial features, no SVD, the
-            identity target transform, and outlier clipping only if
-            ``outlier_threshold`` asks for it. TabPFN runs only ``none``
+        n_estimators: Ensemble members, each a forward pass over a
+            differently preprocessed view of the data.
+        transforms: Per-member feature transforms. ``"auto"`` is the
+            version's own recipe, pinned in :data:`_AUTO_RECIPES`: its
+            preprocessors, including any SVD components and original columns
+            they append, the fingerprint feature, polynomial features on
+            v2.6, the target transforms, and on v3.5 a 12-sigma soft clip.
+            An explicit value has no fingerprint or polynomial features, no
+            SVD and the identity target transform. TabPFN runs only ``none``
             natively (its other transforms are not the package's) and lazy
             applies the rest. What runs whatever the recipe: the removal of
             constant columns and TabPFN's internal standardisation.
-        feature_shuffle: Whether members see the columns in different orders
-            (TabPFN's own feature shuffling).
-        bag_size: Context rows per member: an int is a row count (1 means
-            one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Each member is then a regressor of its own,
-            fitted on its bag: its preprocessing, outlier clip, target
-            standardisation and buckets all come from those rows, and only
-            the bag must lie within the limits ``ignore_pretraining_limits``
-            describes, so bagging is how TabPFN takes a context larger than
-            them.
-        kv_cache: Cache the context's keys and values at fit, so each chunk
-            of queries skips the context forward pass: ``True`` (exact, full
-            precision), ``"int8"`` or ``"fp8"`` (quantised: smaller, not
-            exact; v3 and later only), or ``False``. Worth its memory
-            whenever the query set is much larger than the context.
-        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
-            array of bin centres, ``"native"``, or None for the native grid
-            (the bar distribution's own buckets, in full).
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed for the ensemble. None draws a fresh seed at fit,
-            recorded as ``random_state_`` and in ``provenance_``.
-        softmax_temperature: Temperature on the bucket logits, which sets how
-            sharp the densities are. ``"auto"`` takes the version's
-            calibrated value (0.9, and 1.0 on v3.5 and v3.5-fast), recorded in
-            ``provenance_``; lower sharpens, higher broadens.
-        mixed_precision: On CUDA, run in TabPFN's autocast (float16) path;
-            otherwise, and always on a CPU, in float32 (upstream would choose
-            bfloat16 on CPUs with fast bfloat16).
-        outlier_threshold: TabPFN's soft clip of each feature at this many
-            standard deviations of the context (``OUTLIER_REMOVAL_STD``).
-            ``"auto"`` is the version's own under ``transforms="auto"``
-            (12.0 on v3.5 and v3.5-fast, none on the others) and none under
-            an explicit recipe; None is none.
+        feature_shuffle: TabPFN's own feature shuffling.
+        bag_size: Context rows per member. Each member is then a regressor
+            of its own, fitted on its bag: its preprocessing, outlier clip,
+            target standardisation and buckets all come from those rows, and
+            only the bag must lie within the limits
+            ``ignore_pretraining_limits`` describes, so bagging is how TabPFN
+            takes a context larger than them.
+        kv_cache: Cache the context's keys and values at fit: ``True``
+            (exact, full precision), ``"int8"`` or ``"fp8"`` (quantised:
+            smaller, not exact; v3 and later only), or ``False``.
+        y_grid: Default output grid; the native grid is the bar
+            distribution's own buckets, in full.
+        device: Where to run.
+        random_state: The ensemble's seed.
+        softmax_temperature: Temperature on the bucket logits. ``"auto"`` is
+            the version's calibrated value: 0.9, and 1.0 on v3.5 and
+            v3.5-fast.
+        mixed_precision: On CUDA, TabPFN's autocast (float16) path; float32
+            on a CPU, where upstream would choose bfloat16 on CPUs with fast
+            bfloat16.
+        outlier_threshold: TabPFN's own soft clip (``OUTLIER_REMOVAL_STD``).
+            Under ``transforms="auto"``, ``"auto"`` is 12.0 on v3.5 and
+            v3.5-fast and none on the others.
         ignore_pretraining_limits: Pass ``True`` to run a context larger than
             the row count the checkpoint declares it was pretrained for, or
             more than upstream allows on a CPU, which otherwise raises.
@@ -417,14 +404,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             opt-in -- though TabPFN-3 declares a million rows. Under
             bagging only each member's bag is checked, so a ``bag_size``
             within the limit runs any context without it.
-        chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. A row's answer never depends on the
-            other rows in its chunk: TabPFN's attention builds its keys and
-            values from the context rows alone and its preprocessors are
-            fitted on the context. To float rounding on a CPU; under mixed
-            precision on a GPU, to float16 rounding.
-        progress: A progress bar over the query rows: ``"auto"`` shows it
-            on a terminal or in a notebook, ``True`` always, ``False`` never.
+        chunk_size: Query rows per forward pass. TabPFN's attention builds
+            its keys and values from the context rows alone and its
+            preprocessors are fitted on the context, so a row's answer does
+            not depend on its chunk, to float rounding on a CPU.
+        progress: A progress bar over the query rows.
         verbose: Print log messages to stdout.
 
     Attributes:

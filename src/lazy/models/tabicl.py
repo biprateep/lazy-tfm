@@ -136,84 +136,70 @@ class TabICLQuantile(
 ):
     """Target distributions from the quantiles TabICLv2's regressor predicts.
 
+    The parameters every backend shares mean what :doc:`/guide/interface`
+    states; each entry below adds only what differs on TabICL.
+
     Args:
-        version: Which pinned TabICL checkpoint to load; see
-            :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: Ensemble members, exactly; costs scale linearly, and 8
-            is the value the benchmarks use. A TabICL regressor pairs each
-            of its column shuffles with each norm method, and has only one
-            shuffle per column (a Latin square), so where it would run fewer
-            members than asked, further regressors with seeds of their own
-            run the rest; with a single column order (``feature_shuffle=
-            False``, or one usable column) members with the same transform
-            are identical, so each runs once and is weighted by its count.
-            Member ``i`` takes transform ``i`` of the cycle, as TabICL's
-            own do.
-        transforms: Per-member feature transforms: ``"auto"`` (TabICL's own
+        version: Which pinned TabICL checkpoint to load.
+        n_estimators: Ensemble members; 8 is the value the benchmarks use. A
+            TabICL regressor pairs each of its column shuffles with each norm
+            method, and has only one shuffle per column (a Latin square), so
+            where it would run fewer members than asked, further regressors
+            with seeds of their own run the rest; with a single column order
+            (``feature_shuffle=False``, or one usable column) members with
+            the same transform are identical, so each runs once and is
+            weighted by its count. Member ``i`` takes transform ``i`` of the
+            cycle, as TabICL's own do.
+        transforms: Per-member feature transforms. ``"auto"`` is TabICL's own
             recipe, ``none`` and ``power`` alternating, with the 4-sigma
-            clip), a recipe name, a transform name or a sequence of them;
-            see :mod:`lazy.models._transforms`. Only ``none`` maps onto
-            TabICL's norm methods; every other name is applied by lazy and
-            TabICL is run with no norm method of its own. An explicit
-            recipe therefore differs from ``"auto"`` even when it names the
-            same transforms: TabICL's ``power`` is fitted on z-scored
-            columns.
-        feature_shuffle: Whether members see the columns in different orders
-            (TabICL's Latin-square shuffles, ``feat_shuffle_method="latin"``;
-            ``"none"`` when False). A regressor running one member keeps the
-            columns in their given order.
-        bag_size: Context rows per member: an int is a row count (1 means
-            one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Scaffolded: one regressor per bag, with lazy's
-            own column permutation when ``feature_shuffle=True``, its
-            transforms, clip and target standardisation fitted on the bag.
-        kv_cache: Cache the context's keys and values at fit, so each chunk
-            of queries skips the context forward pass: ``True`` (TabICL's
-            ``"kv"`` cache), ``"repr"`` (cached row representations, far
-            smaller, re-running the in-context layers) or ``False``. Exact
-            on a CPU, to float32 rounding; on a GPU with
+            clip. Only ``none`` maps onto TabICL's norm methods; every other
+            name is applied by lazy and TabICL is run with no norm method of
+            its own. An explicit recipe therefore differs from ``"auto"``
+            even when it names the same transforms: TabICL's ``power`` is
+            fitted on z-scored columns.
+        feature_shuffle: TabICL's Latin-square shuffles
+            (``feat_shuffle_method="latin"``; ``"none"`` when False). A
+            regressor running one member keeps the columns in their given
+            order.
+        bag_size: Context rows per member. Scaffolded: one regressor per
+            bag, with lazy's own column permutation when
+            ``feature_shuffle=True``, its transforms, clip and target
+            standardisation fitted on the bag.
+        kv_cache: ``True`` (TabICL's ``"kv"`` cache), ``"repr"`` (cached row
+            representations, far smaller, re-running the in-context layers)
+            or ``False``. Exact on a CPU, to float32 rounding; on a GPU with
             ``mixed_precision=True`` the cache is stored in float16, and the
             cached and uncached answers agree to float16 rounding (about
             1e-3 of the quantiles' spread).
-        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
-            array of bin centres, ``"native"``, or None for the native grid
-            (equal-width bins, 1,000 across the training targets' range,
-            which extend a quarter of that range beyond it on each side).
-            Densities on a grid carry only the mass inside it, renormalised;
-            tabulating a row that puts more than 1% of its probability
-            outside the native grid warns.
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed for the ensemble. A group's first regressor is
+        y_grid: Default output grid; the native grid has equal-width bins,
+            1,000 across the training targets' range, which extend a quarter
+            of that range beyond it on each side. Densities on a grid carry
+            only the mass inside it, renormalised; tabulating a row that puts
+            more than 1% of its probability outside the native grid warns.
+        device: Where to run.
+        random_state: The ensemble's seed. A group's first regressor is
             seeded by the group's first member,
             ``SeedSequence([random_state, i])``, and every other seed is
-            derived from that one. None draws a fresh seed at fit, recorded as
-            ``random_state_`` and in ``provenance_``.
-        chunk_size: Query rows predicted at a time, to bound peak memory
-            (999 quantiles per row is about 8 kB); ``0`` does them in one
-            pass. TabICL builds its keys and values from the context rows
-            alone, so a row's answer never depends on the other rows in its
-            chunk beyond float rounding: the batch shape can change the
-            kernels (on a CPU, a one-row chunk differs by a few parts in a
-            million of the quantiles' spread), and with
-            ``mixed_precision=True`` on a GPU the answers agree to float16
-            rounding.
+            derived from that one.
+        chunk_size: Query rows per forward pass (999 quantiles per row is
+            about 8 kB). TabICL builds its keys and values from the context
+            rows alone, but the batch shape can change the kernels: on a
+            CPU, a one-row chunk differs by a few parts in a million of the
+            quantiles' spread.
         softmax_temperature: Only ``"auto"``: TabICL's quantile head has no
             softmax for a temperature to divide, so any other value raises
             ValueError. Recorded in ``provenance_`` as None.
         mixed_precision: On CUDA, TabICL's float16 autocast for every
             context size (``use_amp=True``; upstream's own ``"auto"`` would
-            turn it on only from 1,024 context rows or 60 features). False,
-            or any device other than CUDA, runs in float32
-            (``use_amp=False``). FlashAttention-3 is pinned off either way.
-        outlier_threshold: TabICL's soft outlier clip, applied to each
-            member's z-scored and transformed columns, at this many standard
-            deviations of the context (``outlier_threshold`` upstream).
-            ``"auto"`` is 4.0 under ``transforms="auto"`` and off under an
-            explicit ``transforms``; None is off (upstream's bounds are made
-            infinite, which leaves every value unchanged).
-        progress: A progress bar over the query rows: ``"auto"`` shows it
-            on a terminal or in a notebook, ``True`` always, ``False`` never.
+            turn it on only from 1,024 context rows or 60 features).
+            Otherwise float32 (``use_amp=False``). FlashAttention-3 is
+            pinned off either way.
+        outlier_threshold: TabICL's own soft clip (``outlier_threshold``
+            upstream), applied to each member's z-scored and transformed
+            columns. ``"auto"`` is 4.0 under ``transforms="auto"``; None
+            makes upstream's bounds infinite, which leaves every value
+            unchanged.
+        progress: A progress bar over the query rows.
         verbose: Print log messages to stdout.
 
     Attributes:

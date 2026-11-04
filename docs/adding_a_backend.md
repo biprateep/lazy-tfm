@@ -70,10 +70,10 @@ False`, as TabFM does.
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
 `Checkpoint.provenance` (in `lazy.models._hub`), the base class adds the
-resolved uniform settings, and a fit that ends without every key in
-`lazy.models._ensemble.REQUIRED_PROVENANCE` raises. A backend that overrides
-`_load_checkpoint`, for instance to load its weights lazily, must still
-record the checkpoint's keys.
+resolved uniform settings, and a fit must end with every key in
+`lazy.models._ensemble.REQUIRED_PROVENANCE`, which the backend tests check.
+A backend that overrides `_load_checkpoint`, for instance to load its weights
+lazily, must still record the checkpoint's keys.
 
 A fitted estimator must survive pickling and give the same predictions
 afterwards. A network shared between estimators through `lazy.models._weights`

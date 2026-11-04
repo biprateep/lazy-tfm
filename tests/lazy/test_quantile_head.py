@@ -18,7 +18,7 @@ def test_mass_outside_counts_a_tail_beyond_the_grid_exactly():
     )
     spacing = 1.0 / 98
     grid = lazy.Grid.linear(-0.5 * spacing, 1.0 + 0.25 * spacing, 10)
-    outside = _quantile_head.mass_outside(dist, grid)
+    outside = dist._on_grid_and_outside(grid)[1]
     np.testing.assert_allclose(outside, [0.005 + 0.0075], rtol=1e-12)
     np.testing.assert_allclose(
         outside, 1.0 - dist.histogramize(grid.edges).masses.sum(), rtol=1e-12
@@ -33,7 +33,25 @@ def test_no_mass_is_outside_a_grid_that_holds_the_tails(pad):
     )
     low, high = dist.ppf([0.0, 1.0])[0]
     grid = lazy.Grid.linear(low - pad, high + pad, 10)
-    np.testing.assert_array_equal(_quantile_head.mass_outside(dist, grid), 0)
+    np.testing.assert_array_equal(dist._on_grid_and_outside(grid)[1], 0)
+
+
+def test_the_mass_outside_from_the_tabulation_is_the_cdf_at_the_ends():
+    """To the bit, on rows outside either end, both, or neither."""
+    rng = np.random.default_rng(0)
+    levels = _quantile_head.quantile_levels(999)
+    centres = np.array([-0.9, 0.9, 0.0, 0.0, 0.0])
+    spreads = np.array([0.3, 0.3, 2.0, 0.1, 0.0])
+    locs = np.sort(rng.normal(size=(5, 999)), axis=1) * spreads[:, None]
+    dist = lazy.distributions.QuantileDistribution(
+        levels, centres[:, None] + locs
+    )
+    grid = lazy.Grid.linear(-1.0, 1.0, 1500, normalization="histogram")
+    density, outside = dist._on_grid_and_outside(grid)
+    cdf = dist.cdf([grid.y_min, grid.y_max])
+    assert outside.tobytes() == (cdf[:, 0] + (1.0 - cdf[:, 1])).tobytes()
+    assert density.tobytes() == dist.on_grid(grid).tobytes()
+    assert (outside[:3] > 0.01).all() and (outside[3:] == 0).all()
 
 
 @pytest.mark.parametrize("value", [0.1, 0.3, -1e4])

@@ -9,11 +9,15 @@ the stand-in classes of TabPFN and TabICL are the ones checked here. The
 TabPFN fake also binds its constructor's arguments to upstream's signature.
 """
 
+import importlib
 import inspect
 
+import fakes
 from fakes import tabicl as fake_tabicl
 from fakes import tabpfn as fake_tabpfn
 import pytest
+
+import lazy
 
 STAND_INS = {
     "tabpfn.TabPFNRegressor": fake_tabpfn.Regressor,
@@ -58,3 +62,21 @@ def test_every_method_of_a_fake_exists_upstream_with_its_parameters(dotted):
         accepted, any_keyword = _parameters(real)
         missing = set() if any_keyword else _parameters(member)[0] - accepted
         assert not missing, f"{dotted}.{name} takes no {sorted(missing)}"
+
+
+def _seams():
+    """Each private lazy name a fake lists, with the fake that lists it."""
+    listed = [("fakes", fakes.SHARED_SEAMS)]
+    for backend in lazy.list_estimators():
+        module = importlib.import_module(f"fakes.{backend}")
+        listed.append((backend, module.LAZY_SEAMS))
+    pairs = []
+    for who, seams in listed:
+        pairs.extend((who, dotted) for dotted in seams)
+    return pairs
+
+
+@pytest.mark.parametrize(("who", "dotted"), _seams())
+def test_every_private_seam_a_fake_patches_exists_in_lazy(who, dotted):
+    assert dotted.startswith("lazy."), f"{who}: {dotted} is not in lazy"
+    fakes.resolve(dotted)

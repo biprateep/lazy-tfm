@@ -11,10 +11,16 @@ first use, so that running it warms the cache before going offline. A backend
 whose extra is not installed is skipped, and one already complete is left
 alone, so the command is safe to run again.
 
+``lazy models`` lists the pinned checkpoints and whether each is cached, with
+no network. ``lazy download NAME[:VERSION]`` fetches the weights of each
+checkpoint named, as :func:`lazy.download_checkpoint` does.
+
 Typical usage example:
 
   pip install 'lazy-tfm[all]'
   lazy setup
+  lazy models
+  lazy download tabpfn:v2.5 tabicl
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import argparse
 from collections.abc import Sequence
 
 from lazy.models import _ensemble
+from lazy.models import _hub
 from lazy.models import registry
 
 
@@ -34,7 +41,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             ``sys.argv[1:]``.
 
     Returns:
-        The exit status: 0 when every installed backend is complete.
+        The exit status: 0 on success; 1 when a backend is incomplete after
+        ``setup``; 2 for an unknown checkpoint, as ``argparse`` reports it.
     """
     parser = argparse.ArgumentParser(
         prog="lazy", description="Tools for the lazy-tfm package."
@@ -64,7 +72,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="BACKEND",
         help="set up only these backends; all of them when none is named",
     )
+    commands.add_parser(
+        "models",
+        help="list the pinned checkpoints and whether each is cached",
+        description=(
+            "List every backend, its versions, the default version and "
+            "whether the weights are in the local cache. Uses no network."
+        ),
+    )
+    download = commands.add_parser(
+        "download",
+        help="download the weights of checkpoints into the local cache",
+        description=(
+            "Download the weights of each checkpoint named, so that a "
+            "machine with no network can load them. Prints the licence "
+            "notice of a checkpoint that has one."
+        ),
+    )
+    download.add_argument(
+        "checkpoints",
+        nargs="+",
+        metavar="NAME[:VERSION]",
+        help="a backend, with its default version, or a backend and version",
+    )
     args = parser.parse_args(argv)
+    if args.command == "models":
+        return _models()
+    if args.command == "download":
+        return _download(parser, args.checkpoints)
     unknown = sorted(set(args.backends) - set(registry.ESTIMATORS))
     if unknown:
         parser.error(
@@ -76,3 +111,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.backends or name in args.backends
     ]
     return 0 if all(complete) else 1
+
+
+def _models() -> int:
+    """Prints a table of every pinned checkpoint, with its cache status.
+
+    Returns:
+        0.
+    """
+    rows = [("MODEL", "VERSION", "DEFAULT", "CACHED")]
+    for name in registry.list_estimators():
+        for version in _hub.list_versions(name):
+            rows.append(
+                (
+                    name,
+                    version,
+                    "yes"
+                    if _hub.DEFAULT_VERSIONS.get(name) == version
+                    else "no",
+                    "yes" if _hub.is_cached(name, version) else "no",
+                )
+            )
+    widths = [max(len(row[i]) for row in rows) for i in range(4)]
+    for row in rows:
+        print("  ".join(row[i].ljust(widths[i]) for i in range(4)).rstrip())
+    return 0
+
+
+def _download(parser: argparse.ArgumentParser, specs: Sequence[str]) -> int:
+    """Downloads each checkpoint named, after checking that all exist.
+
+    Args:
+        parser: The parser, which reports an unknown checkpoint and exits 2.
+        specs: Checkpoint keys, ``NAME`` or ``NAME:VERSION``, as
+            :func:`lazy.download_checkpoint` takes them.
+
+    Returns:
+        0.
+    """
+    for spec in specs:
+        try:
+            _hub.get_checkpoint(spec)
+        except KeyError as error:
+            parser.error(error.args[0])
+    for spec in specs:
+        print(_hub.download_checkpoint(spec))
+    return 0

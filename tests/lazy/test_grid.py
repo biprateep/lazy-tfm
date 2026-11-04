@@ -169,7 +169,6 @@ def test_cdf_column_zero_follows_the_normalisation_convention():
         histogram.cdf(density)[:, 0], 0.5 * density[:, 0] * 0.25
     )
     assert "histogram grid" in lazy.Grid.cdf.__doc__
-    assert "histogram grid" in lazy.BaseDensityRegressor.predict_cdf.__doc__
 
 
 def test_equal_grids_hash_alike():

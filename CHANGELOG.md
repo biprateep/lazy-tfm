@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- `lazy models` lists every pinned checkpoint, its default version and
+  whether it is cached, and `lazy download NAME[:VERSION]` downloads the
+  weights of the checkpoints named, with the licence notice, so the cache
+  can be warmed from the command line.
 - The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
@@ -27,6 +31,13 @@ change the API.
 
 ### Changed
 
+- `predict_cdf` returns each row's native CDF at the bin centres, exactly,
+  as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
+  densities on the grid, which drops the probability outside the grid and
+  adds a discretisation error. On the test fakes and stand-ins, on 50 and
+  500 bins over a range partly outside the support, values moved by up to
+  0.32, mostly from the probability outside the grid; the median move was
+  at most 0.006.
 - `lazy.plotting.diagnostics.diagnostic_panel` computes the point estimates
   once instead of twice, with the same figure to the bit. On 5,000 rows and
   500 bins its median time fell from 0.59 s to 0.54 s.
@@ -91,6 +102,11 @@ change the API.
   on. Without a name, `lazy setup` does nothing for Kumo Tabular. A source
   checkout gets every backend with `uv sync --extra all`; the `backends`
   dependency group is gone.
+- On its native grid, TabICL and Kumo Tabular take each row's probability
+  outside the grid from the CDF that tabulating the density already
+  evaluates at the grid's ends, instead of interpolating every row's
+  quantiles a second time. Densities, scores and the warning about that
+  probability are unchanged to the bit.
 
 ### Deprecated
 

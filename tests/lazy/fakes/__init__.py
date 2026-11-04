@@ -16,6 +16,12 @@ the parameters that keep the backend small. A fake that needs the upstream
 package itself (for its preprocessing, say) skips the test without it.
 tests/lazy/test_backend_completeness.py requires a module for every
 registered backend.
+
+A fake also replaces private names of lazy itself, its seams. Each module
+lists them in ``LAZY_SEAMS`` as dotted names, and installs them through
+:func:`patch`, which requires the list and the patches to match;
+tests/lazy/test_fakes.py requires every listed name to exist in lazy. The seams
+that every fake shares are ``SHARED_SEAMS``.
 """
 
 import collections
@@ -24,9 +30,6 @@ import pathlib
 import types
 
 import numpy as np
-
-from lazy.models import _hub
-from lazy.models import _weights
 
 FAKES_DIR = pathlib.Path(__file__).parent
 """The directory holding one fake per registered backend."""
@@ -93,6 +96,61 @@ def bucket_logits(signal, n_buckets):
     )
 
 
+SHARED_SEAMS = (
+    "lazy.models._weights._NETWORKS",
+    "lazy.models._hub.Checkpoint.download",
+)
+"""The private lazy names that :func:`install` patches for every backend."""
+
+
+def resolve(dotted):
+    """The object named by a dotted path, importing its longest module prefix.
+
+    Args:
+        dotted: A path such as ``lazy.models.limix.LimiXBarDistribution.fit``.
+
+    Returns:
+        The object.
+
+    Raises:
+        AttributeError: If the path does not name an object.
+    """
+    parts = dotted.split(".")
+    for end in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:end])
+        try:
+            obj = importlib.import_module(prefix)
+        except ModuleNotFoundError as error:
+            # Only the prefix itself being no module means "shorten it"; a
+            # module that fails on a missing dependency is a real error.
+            if error.name is None or not (
+                prefix == error.name or prefix.startswith(error.name + ".")
+            ):
+                raise
+            continue
+        for part in parts[end:]:
+            obj = getattr(obj, part)
+        return obj
+    raise AttributeError(f"cannot resolve {dotted}")
+
+
+def patch(monkeypatch, seams, patches):
+    """Replaces the private lazy names in ``patches``, which must be ``seams``.
+
+    Args:
+        monkeypatch: The test's ``monkeypatch`` fixture.
+        seams: The dotted names the fake lists.
+        patches: Maps each dotted name to its replacement.
+
+    Raises:
+        AssertionError: If ``patches`` and ``seams`` name different things.
+    """
+    assert set(patches) == set(seams), "the fake's seams are out of date"
+    for dotted, value in patches.items():
+        owner, _, name = dotted.rpartition(".")
+        monkeypatch.setattr(resolve(owner), name, value)
+
+
 def _download(checkpoint, *, local_files_only=False):
     """Where a checkpoint would be, without fetching it."""
     del local_files_only  # Unused: nothing is fetched.
@@ -117,8 +175,14 @@ def install(name, monkeypatch, recorder=None, **options):
         The backend's class.
     """
     module = importlib.import_module(f"fakes.{name}")
-    monkeypatch.setattr(_weights, "_NETWORKS", {})
-    monkeypatch.setattr(_hub.Checkpoint, "download", _download)
+    patch(
+        monkeypatch,
+        SHARED_SEAMS,
+        {
+            "lazy.models._weights._NETWORKS": {},
+            "lazy.models._hub.Checkpoint.download": _download,
+        },
+    )
     return module.install(
         monkeypatch, Recorder() if recorder is None else recorder, **options
     )

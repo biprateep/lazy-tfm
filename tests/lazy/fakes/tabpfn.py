@@ -7,6 +7,9 @@ borders are fixed in standardized units and stretched by the
 targets it is given, as upstream's are. It loads its "network" through
 upstream's loader, as the real regressor does, and the loader counts the
 networks it builds in ``recorder.loads``. Needs the tabpfn package.
+
+It replaces no private lazy name; ``tabpfn.base.initialize_tabpfn_model`` and
+``tabpfn.TabPFNRegressor`` are upstream's.
 """
 
 import inspect
@@ -17,6 +20,9 @@ import pytest
 
 import fakes
 from lazy.models import tabpfn
+
+LAZY_SEAMS = ()
+"""The private lazy names that :func:`install` replaces: none."""
 
 SETTINGS = {"n_estimators": 2}
 """Small enough for the behavioral suite."""
