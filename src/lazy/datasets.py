@@ -117,7 +117,7 @@ __all__ = [
 _LOG = logging.getLogger(__name__)
 
 DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200)
-"""The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
+"""The LSST DESC PZ Data Challenge output format, 200 bins of width 0.01 over
 ``0 < z < 2``. The published DC1 numbers are on this grid; pass it as ``y_grid``
 to reproduce them.
 """
@@ -1234,7 +1234,7 @@ def _solve_holdout(
             :func:`~lazy.selection.grid_selection`.
 
     Returns:
-        A tuple (holdout, pool, biased_rows, history): the hold-out rows, in
+        A tuple (holdout, pool, biased_rows, history) -- the hold-out rows, in
         draw order; the rest of the catalogue, sorted; the pool rows the
         selection kept; and one record per pass.
 

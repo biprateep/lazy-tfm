@@ -9,7 +9,7 @@ sees them in float32, a native grid wide enough for the quantiles to
 extrapolate into, and a warning when a row puts noticeable probability
 outside that grid. :class:`QuantileHead` holds them, so that such a backend
 declares ``native_output = "quantiles"``, mixes the class in before
-:class:`~lazy.models._ensemble.ContextEnsembleEstimator` and implements only
+:class:`~lazy.models.ContextEnsembleEstimator` and implements only
 what is its own.
 
 Typical usage example:
@@ -102,7 +102,7 @@ def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
 class QuantileHead:
     """The native grid and density tabulation of a quantile-head backend.
 
-    Mixed in before :class:`~lazy.models._ensemble.ContextEnsembleEstimator`,
+    Mixed in before :class:`~lazy.models.ContextEnsembleEstimator`,
     whose ``_distribution_chunks`` and ``native_grid_`` it uses. The native
     grid has :data:`NATIVE_QUANTILE_BINS` equal-width bins across the range of
     every context target (bagged or not), padded by :data:`NATIVE_PAD` of that

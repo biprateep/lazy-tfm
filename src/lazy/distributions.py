@@ -431,7 +431,7 @@ class HistogramDistribution(_Base):
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
         Each bin gets the exact mass the buckets put in it, as
-        :meth:`histogramize` counts it, divided by its width (on the
+        ``histogramize`` counts it, divided by its width (on the
         buckets' own edges, each bucket's own mass); the probability outside
         the grid is dropped and each row is normalized by the grid's
         convention (:meth:`lazy.grid.Grid.normalize`). For the masses before
@@ -792,7 +792,7 @@ class QuantileDistribution(_Base):
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
-        The mass in each bin, as :meth:`histogramize` counts it, tails
+        The mass in each bin, as ``histogramize`` counts it, tails
         included, over the bin's width, with the probability outside the
         grid dropped and each row normalized by the grid's convention.
 

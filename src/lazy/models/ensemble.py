@@ -87,7 +87,7 @@ logarithm, as a fraction of the uniform density over the pooling grid.
 """
 
 QUANTILE_LEVELS: _typing.FloatArray = np.linspace(0.0, 1.0, 1001)
-"""The cumulative levels the quantile pool averages the members at: 0, 0.001,
+"""The cumulative levels the quantile pool averages the members at -- 0, 0.001,
 ..., 1, the ends included, so that the pool has no point masses.
 """
 
@@ -110,10 +110,10 @@ class EnsembleSizeWarning(_warnings.LazyWarning):
 class LazyEnsembleModel(base.BaseDensityRegressor):
     """Several models fitted on the same context, their densities pooled.
 
-    Each member is cloned and fitted on the same rows at :meth:`fit`, and
+    Each member is cloned and fitted on the same rows at ``fit``, and
     every prediction pools the members' distributions with equal weights.
     Construction stores the arguments and nothing else, as scikit-learn
-    requires; the members are checked and built at :meth:`fit`.
+    requires; the members are checked and built at ``fit``.
 
     Members are named after their backend (``"tabpfn"``, ``"limix"``, ...),
     with ``_2``, ``_3``, ... appended to repeats, and a member that is not a

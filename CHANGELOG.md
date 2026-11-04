@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `Checkpoint`, the record that `lazy.get_checkpoint` returns, is now
+  exported from `lazy` and `lazy.models` and documented in the API
+  reference. The page of each package with an `__all__` (`lazy`,
+  `lazy.models` and `lazy.plotting`) lists the names it exports, and the
+  reference builds with no unresolved cross-reference.
 - `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
   warning classes, and `lazy.GridCoverageWarning`, issued when densities are
   renormalised because the native grid misses part of their probability.
