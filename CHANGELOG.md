@@ -39,6 +39,12 @@ change the API.
   and NLL of each row from one normalization, where `per_object_scores`,
   `per_object_crps` and `per_object_nll` normalize once each. `evaluate`
   uses it, with the same results to the bit.
+- The user guide has four new pages: a glossary, how the models work with
+  scikit-learn's tools, saving and loading a fitted model, and every warning
+  that lazy issues. The scaling page states how `n_jobs` uses the model cache
+  and the GPU, and how `chunk_size` multiplies the cost of the context when
+  `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
+  the title's capitals.
 
 ### Changed
 
