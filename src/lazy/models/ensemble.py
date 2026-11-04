@@ -325,6 +325,25 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             recipe["quantile_levels"] = int(QUANTILE_LEVELS.size)
         return recipe
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle; the members' provenance is read again.
+
+        A member unpickled under ``device="auto"`` records its new device in
+        a new ``provenance_``, which the pickled copy here would miss.
+
+        Args:
+            state: The pickled ``__dict__``.
+        """
+        super().__setstate__(state)
+        if "provenance_" in state:
+            self.provenance_ = {
+                **self.provenance_,
+                "members": {
+                    name: getattr(member, "provenance_", None)
+                    for name, member in self.named_estimators_.items()
+                },
+            }
+
     def _default_grid(self) -> grid_lib.Grid:
         """The constructor's grid, else the pooling grid."""
         if self.y_grid is None:

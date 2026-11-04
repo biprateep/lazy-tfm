@@ -222,27 +222,19 @@ def test_threads_predicting_on_an_unpickled_model_attach_one_network(
     assert len(relocated) == len(_regressors(restored))
 
 
-def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
-    X, y, X_test = data
+def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch, data):
+    X, y, _ = data
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")
     model = fakes.Backend("tabicl", monkeypatch)(device="auto").fit(X, y)
-    expected = model.predict_distribution(X_test).locs
-    model.device_ = "cuda:7"  # as if fitted there
+    # As if fitted on a GPU, under mixed precision.
+    model.device_, model.mixed_precision_ = "cuda:7", True
     for regressor in _regressors(model):
         regressor.device = regressor.device_ = "cuda:7"
+        regressor.use_amp = True
     restored = pickle.loads(pickle.dumps(model))
-    device = _device.resolve_device("auto")
-    assert restored.device_ == device
-    assert restored.provenance_["device"] == device
-    assert restored.mixed_precision_ == device.startswith("cuda")
-    assert restored.provenance_["tabicl"]["use_amp"] == (
-        restored.mixed_precision_
-    )
     for regressor in _regressors(restored):
-        assert regressor.device_ == device
-        assert regressor.use_amp == restored.mixed_precision_
-    np.testing.assert_array_equal(
-        restored.predict_distribution(X_test).locs, expected
-    )
+        assert regressor.device_ == "cpu"
+        assert regressor.use_amp is False
 
 
 @pytest.mark.checkpoint

@@ -85,6 +85,14 @@ class Regressor:
         self.y_train_std_ = float(np.std(y))
         return self
 
+    def to(self, device):
+        """Records the device and, as upstream does, reads the precision.
+
+        The fake's arithmetic runs on the CPU.
+        """
+        self.device = device
+        self.use_autocast_ = self.inference_precision == "autocast"
+
     def predict(self, X, output_type):
         import torch  # noqa: PLC0415 - optional extra.
 

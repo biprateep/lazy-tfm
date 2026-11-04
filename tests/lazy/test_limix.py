@@ -18,6 +18,7 @@ import pytest
 import threads
 
 import lazy
+from lazy.models import _device
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _locks
@@ -342,7 +343,7 @@ def test_an_unpickled_model_finds_its_device_and_checkpoint_afresh(
     model.device_ = "cuda:7"
     model.checkpoint_ = pathlib.Path("/elsewhere/LimiX-2.ckpt")
     pickled = pickle.dumps(model)
-    monkeypatch.setattr(limix._device, "resolve_device", lambda device: "cpu")
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")
     restored = pickle.loads(pickled)
     assert restored.device_ == "cpu"
     assert restored.provenance_["device"] == "cpu"
