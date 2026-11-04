@@ -161,6 +161,23 @@ change the API.
   evaluates at the grid's ends, instead of interpolating every row's
   quantiles a second time. Densities, scores and the warning about that
   probability are unchanged to the bit.
+- Densities of a histogram or a mixture of histograms on a grid other than
+  their own buckets now come from differencing the distribution's CDF at the
+  grid's edges, as quantile distributions' already did. They move by float
+  rounding only. On the test fakes of every backend, the test stand-ins,
+  the `LazyEnsembleModel` pools and the stand-ins of `benchmarks/cpu.py`,
+  densities moved by at most 3.3e-13 of a row's peak (8.7e-12 absolute),
+  and medians and scores by at most 5.2e-13 and 4.3e-13, both on the bagged
+  benchmark stand-in. Densities on a model's own buckets, and those of
+  TabICL and Kumo Tabular, are unchanged to the bit. The native grid of a
+  bagged TabPFN or LimiX model, or of TabFM with more than one dither, joins
+  the members' edges, so its densities move by rounding too. Where a bucket
+  spans several bins of equal density, rounding can now pick another of
+  those tied bins as the mode. With `benchmarks/cpu.py --repeats 5` (500
+  query rows, a 4-CPU Linux machine, four threads, NumPy 2.5.3), the median
+  time of `predict_proba` fell from 0.33 s to 0.27 s and its peak memory
+  from 229 MiB to 172 MiB for four bagged members of 5,000 buckets, and from
+  0.0132 s to 0.0117 s for 999 quantiles.
 
 ### Deprecated
 
@@ -186,6 +203,13 @@ change the API.
   backends' `setup` hook, which only this path uses, goes with it.
   `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
   install, also warns and will be removed in 0.7.0.
+- `Grid.rebin` and `Grid.from_quantiles` warn with a `FutureWarning` and
+  will be removed in 0.7.0, since nothing in LAZY uses them now.
+  `HistogramDistribution(edges, probs).on_grid(grid)` and
+  `QuantileDistribution(levels, values).on_grid(grid)` replace them, but
+  they normalize the densities by the grid's convention, and the second adds
+  tails beyond the outermost levels. `Grid.rebin` now computes its densities
+  as `HistogramDistribution` does, so it gets the point-mass fix below.
 - The `bin_edges` argument of the `lazy.metrics` functions warns with a
   `FutureWarning` and will be removed in 0.7.0. Results are unchanged. Pass
   `lazy.Grid.from_edges(bin_edges, normalization="histogram")` as the grid
@@ -207,6 +231,20 @@ change the API.
 
 ### Fixed
 
+- `on_grid`, and so `predict_proba`, keeps the mass of a zero-width bucket of
+  a histogram, which `cdf`, `ppf` and `mean` already counted as a point mass.
+  It dropped that mass before: masses `[0.5, 0.5]` in buckets with edges
+  `[0, 1, 1]` gave bin masses `[0.5, 0.5, 0, 0]` on the edges
+  `[0, 0.5, 1, 1.5, 2]`; they are now `[0.25, 0.25, 0.5, 0]`. Such buckets
+  arise from TabPFN's float32 borders, which `bucket_masses` returns without
+  the regressor.
+- A point mass on a bin edge, from a zero-width bucket or from tied
+  quantiles, now falls in the bin above the edge, and one on the grid's top
+  edge in the last bin, as `Grid.bin_index` assigns a true value there for
+  the scores. `histogramize` counted it in the bin below, and dropped one on
+  the grid's bottom edge, as did the probability outside the grid that the
+  native-grid warning counts. Distributions without point masses are
+  unchanged to the bit.
 - A TabPFN model fitted on a GPU can now be unpickled on a machine without
   one. Its pickle held the regressors' CUDA tensors, which torch refuses to
   load there. A TabPFN pickle also no longer holds the network. Unpickling

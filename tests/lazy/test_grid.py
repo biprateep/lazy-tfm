@@ -48,6 +48,7 @@ def test_normalize_rescues_a_zero_row_instead_of_returning_nan():
     assert np.allclose(np.trapezoid(out, grid.centers, axis=1), 1.0)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_conserves_mass_onto_a_coarser_grid():
     """The whole point of rebin: no probability is created or lost."""
     fine = lazy.Grid.linear(0.0, 2.0, 1000)
@@ -58,6 +59,7 @@ def test_rebin_conserves_mass_onto_a_coarser_grid():
     assert np.allclose((density * coarse.widths).sum(axis=1), 1.0)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_keeps_mass_from_bins_narrower_than_the_output_bin():
     """Sampling the density at output centres drops them; integrating cannot.
 
@@ -73,12 +75,14 @@ def test_rebin_keeps_mass_from_bins_narrower_than_the_output_bin():
     assert mass.sum() == pytest.approx(1.0)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_rejects_mismatched_edges():
     grid = lazy.Grid.linear(0.0, 1.0, 4)
     with pytest.raises(ValueError, match="one more entry"):
         grid.rebin(np.ones((2, 5)), np.linspace(0, 1, 5))
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_from_quantiles_recovers_a_known_uniform_distribution():
     grid = lazy.Grid.linear(0.0, 1.0, 100)
     levels = np.linspace(0.0, 1.0, 101)[1:-1]
@@ -87,6 +91,7 @@ def test_from_quantiles_recovers_a_known_uniform_distribution():
     assert np.allclose(density, 1.0, atol=0.05)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_from_quantiles_conserves_mass_for_a_narrow_distribution():
     grid = lazy.Grid.linear(0.0, 2.0, 200)
     levels = np.linspace(0.0, 1.0, 101)[1:-1]
@@ -134,6 +139,7 @@ def test_from_centers_accepts_float_rounded_uniform_centres():
     assert np.allclose(lazy.Grid.from_centers(centers).centers, centers)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 @pytest.mark.parametrize(
     ("probs", "edges", "match"),
     [
@@ -151,6 +157,7 @@ def test_rebin_refuses_what_a_histogram_distribution_refuses(
         lazy.Grid.linear(0.0, 2.0, 10).rebin(probs, edges)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_accepts_zero_width_input_bins_without_mass():
     edges = [0.0, 0.5, 0.5, 1.5, 2.0]
     density = lazy.Grid.linear(0.0, 2.0, 10).rebin(
@@ -204,8 +211,34 @@ def test_grids_of_tiny_values_that_differ_are_not_equal():
     assert tiny != lazy.Grid.from_edges(10 * tiny.edges)
 
 
+@pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_from_quantiles_names_a_one_dimensional_input():
     with pytest.raises(ValueError, match="values must be a 2D"):
         lazy.datasets.DC1_GRID.from_quantiles(
             [0.2, 0.5, 0.9], [0.16, 0.5, 0.84]
         )
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "expected"),
+    [
+        (
+            "rebin",
+            ([[1.0, 3.0]], [0.0, 1.0, 2.0]),
+            [[0.25, 0.25, 0.75, 0.75]],
+        ),
+        (
+            "from_quantiles",
+            ([[0.5, 1.5]], [0.25, 0.75]),
+            [[0.5, 0.5, 0.5, 0.5]],
+        ),
+    ],
+)
+def test_a_deprecated_grid_method_warns_once_and_still_works(
+    method, args, expected
+):
+    grid = lazy.Grid.linear(0.0, 2.0, 4, normalization="histogram")
+    with pytest.warns(FutureWarning, match="removed in 0.7.0") as record:
+        density = getattr(grid, method)(*args)
+    assert len(record) == 1
+    np.testing.assert_allclose(density, expected)

@@ -14,9 +14,10 @@ That is already a conditional density estimate, so
 :class:`TabPFNBarDistribution` does no post-processing: its predictions are
 :class:`~lazy.distributions.HistogramDistribution` objects over those buckets,
 mapped onto any grid by exact, mass-conserving integration
-(:meth:`lazy.grid.Grid.rebin`), and its native grid is the buckets
-themselves, in full. The bucket masses rather than quantiles, because upstream
-computes its quantiles by inverting this same piecewise-uniform CDF.
+(:meth:`~lazy.distributions.HistogramDistribution.on_grid`), and its native
+grid is the buckets themselves, in full. The bucket masses rather than
+quantiles, because upstream computes its quantiles by inverting this same
+piecewise-uniform CDF.
 
 The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
 fit-time key/value cache (at full precision, so exact to float rounding on

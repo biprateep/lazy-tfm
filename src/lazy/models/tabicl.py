@@ -7,8 +7,8 @@ regressor answers with a *distribution*: 999 quantiles of the predictive CDF
 per query row, not a single number. :class:`TabICLQuantile` returns them as a
 :class:`~lazy.distributions.QuantileDistribution`, whose densities on any
 grid come from evaluating the quantile CDF at the bin edges and differencing
-(:meth:`lazy.grid.Grid.from_quantiles`): every bin gets exactly the
-mass the quantiles place inside it.
+(:meth:`~lazy.distributions.QuantileDistribution.on_grid`): every bin gets
+exactly the mass the quantiles place inside it.
 
 The uniform features map onto TabICL's own machinery: ``kv_cache`` onto its
 key/value cache, ``feature_shuffle`` onto its Latin-square column shuffles,
