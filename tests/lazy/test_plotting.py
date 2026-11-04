@@ -4,6 +4,7 @@
 
 import warnings
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -173,6 +174,19 @@ def test_bin_edges_stand_in_for_the_grid(native):
     )
 
 
+def test_bin_edges_score_the_callers_centres_without_a_warning():
+    pdfs = np.array([[0.1, 0.2, 0.9], [0.9, 0.2, 0.1]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        fig = plotting.diagnostic_panel(
+            [5.0, 0.5], [0.2, 1.5, 5.9], pdfs, bin_edges=[0, 1, 3, 6]
+        )
+    # The one-to-one line spans the modes, 5.9 and 0.2, which are the
+    # caller's centres and not the edges' midpoints, 4.5 and 0.5.
+    line = fig.axes[0].lines[0].get_xdata()
+    assert (line[0], line[-1]) == (0.2, 5.9)
+
+
 @pytest.mark.parametrize(
     "plot", [plotting.plot_stacked_pdfs, plotting.plot_pdfs, "diagnostic_panel"]
 )
@@ -188,9 +202,7 @@ def test_bare_non_uniform_centres_are_refused(native, plot):
 def test_the_panel_scores_a_native_grid_by_its_histograms(native):
     y_true, native_grid, pdfs = native
     fig = plotting.diagnostic_panel(y_true, native_grid, pdfs)
-    _, _, pit = metrics.evaluate_grid_pdfs(
-        y_true, native_grid.centers, pdfs, bin_edges=native_grid.edges
-    )
+    _, _, pit = metrics.evaluate_grid_pdfs(y_true, native_grid, pdfs)
     np.testing.assert_allclose(fig.axes[2].lines[0].get_ydata(), np.sort(pit))
     assert fig.axes[3].get_xlim()[1] < 2.5
 
@@ -318,3 +330,71 @@ def test_save_adds_png_unless_the_suffix_is_a_format(tmp_path, name, written):
     path = plotting.save(fig, tmp_path / "out" / name)
     assert path == tmp_path / "out" / written
     assert path.is_file()
+
+
+def test_the_style_sheet_holds_the_settings_of_rc_params_and_the_palette():
+    sheet = mpl.rc_params_from_file(
+        plotting.style.STYLE_FILE, use_default_template=False
+    )
+    code = mpl.RcParams(
+        {**plotting.style.RC_PARAMS, **plotting.style.DEFAULT_PALETTE}
+    )
+    assert sheet.keys() == code.keys()
+    for key in code:
+        if key == "axes.prop_cycle":  # The sheet spells colours as hex.
+            sheet_cycle = sheet[key].by_key()
+            code_cycle = code[key].by_key()
+            assert sheet_cycle.keys() == code_cycle.keys()
+            for name, values in code_cycle.items():
+                normalize = mpl.colors.to_rgba if name == "color" else str
+                assert [normalize(v) for v in sheet_cycle[name]] == [
+                    normalize(v) for v in values
+                ], name
+        else:
+            assert sheet[key] == code[key], key
+
+
+@pytest.mark.parametrize(
+    ("name", "call", "check"),
+    [
+        (
+            "grid_figsize",
+            lambda ax: plotting.grid_figsize(2, 3, width=6.0),
+            lambda out: out == (6.0, 2 * plotting.style.GOLDEN * 6.0 / 3),
+        ),
+        (
+            "better_step",
+            lambda ax: plotting.style.better_step([0, 1, 2], [3, 4], ax=ax),
+            lambda out: out.lines[0].get_ydata().tolist() == [3, 3, 4, 4],
+        ),
+        (
+            "stacked_hist",
+            lambda ax: plotting.style.stacked_hist(
+                ax, [[0.5, 1.5], [1.5]], bins=[0, 1, 2]
+            ),
+            lambda out: out[0].tolist() == [[1, 1], [1, 2]],
+        ),
+        (
+            "running_median",
+            lambda ax: plotting.style.running_median(
+                ax, [0, 1, 2, 3], [1, 2, 3, 4], nbins=2, global_median=False
+            ),
+            lambda out: out[2].tolist() == [1.5, 3.5],
+        ),
+        (
+            "side_colorbar",
+            lambda ax: plotting.style.side_colorbar(
+                ax.figure, ax.imshow([[0, 1]]), label="c"
+            ),
+            lambda out: out.ax.get_ylabel() == "c",
+        ),
+    ],
+)
+def test_a_deprecated_style_helper_warns_once_and_still_works(
+    name, call, check
+):
+    _, ax = plt.subplots()
+    with pytest.warns(FutureWarning, match=f"style.{name} .*lazy 0.7.0") as w:
+        out = call(ax)
+    assert sum(issubclass(r.category, FutureWarning) for r in w) == 1
+    assert check(out)

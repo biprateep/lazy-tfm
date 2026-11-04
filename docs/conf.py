@@ -356,6 +356,7 @@ def _overview_table() -> list[str]:
                     _gigabytes(checkpoint.size_bytes),
                     _parameter_count(checkpoint.parameters),
                     checkpoint.license_name,
+                    "yes" if checkpoint.commercial_use else "no",
                     checkpoint.gpu,
                     cpu,
                 ]
@@ -367,10 +368,11 @@ def _overview_table() -> list[str]:
             "Weights",
             "Parameters",
             "License of the weights",
+            "Commercial use",
             "GPU",
             "CPU-friendly",
         ],
-        ["left", "left", "right", "right", "left", "left", "left"],
+        ["left", "left", "right", "right", "left", "left", "left", "left"],
         rows,
     )
 

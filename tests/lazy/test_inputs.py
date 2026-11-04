@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Biprateep Dey
 """Every supported feature table is read the same way, following sklearn."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,6 +13,7 @@ from sklearn import exceptions
 import lazy
 from lazy import _inputs
 from lazy import base
+from lazy.models import ensemble
 
 
 class _Echo(base.BaseDensityRegressor):
@@ -248,3 +251,113 @@ def test_complex_features_are_refused_not_truncated(masked):
 def test_a_one_dimensional_x_gets_scikit_learns_reshape_hint():
     with pytest.raises(ValueError, match=r"array\.reshape\(-1, 1\)"):
         _inputs.as_feature_frame(np.arange(5.0))
+
+
+# -- Deprecated lenient coercions, through an ensemble of two members --------
+
+
+@pytest.fixture
+def ensemble_data(standin_backends):
+    rng = np.random.default_rng(5)
+    n = ensemble.SMALL_CONTEXT_ROWS  # No small-context warning.
+    X = rng.normal(size=(n, 3))
+    y = X[:, 0] + rng.normal(0.0, 0.2, n)
+    model = lazy.LazyEnsembleModel(["tabpfn", "tabicl"], chunk_size=20)
+    return model, X, y
+
+
+def _deprecations(record):
+    return [w for w in record if w.category is FutureWarning]
+
+
+def _text(X):
+    return X.astype(str)
+
+
+def _bytes(X):
+    return X.astype("S32")
+
+
+def _list_of_text(X):
+    return X.astype(str).tolist()
+
+
+@pytest.mark.parametrize("convert", [_text, _bytes, _list_of_text])
+def test_numeric_strings_still_work_and_warn_once_in_every_entry_point(
+    ensemble_data, convert
+):
+    model, X, y = ensemble_data
+    expected = model.fit(X, y).predict_proba(X[:30])
+    text = convert(X)
+    with pytest.warns(FutureWarning, match=r"0\.7\.0.*ValueError") as fit:
+        model.fit(text, y)
+    assert len(_deprecations(fit)) == 1
+    assert fit[0].filename == __file__
+    for call in (
+        model.predict,
+        model.predict_proba,
+        model.predict_quantiles,
+        lambda X: model.score(X, y[:30]),
+        lambda X: model.evaluate(X, y[:30]),
+    ):
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            call(convert(X[:30]))
+        (warning,) = _deprecations(record)
+        assert warning.filename == __file__
+    with pytest.warns(FutureWarning):
+        got = model.predict_proba(convert(X[:30]))
+    np.testing.assert_array_equal(got, expected)
+
+
+def test_mixed_column_names_still_work_and_warn_once(ensemble_data):
+    model, X, y = ensemble_data
+    plain = model.fit(X, y).predict_proba(X[:30])
+    mixed = pd.DataFrame(X, columns=["a", 1, "c"])
+    with pytest.warns(FutureWarning, match=r"0\.7\.0.*TypeError") as fit:
+        model.fit(mixed, y)
+    assert len(_deprecations(fit)) == 1
+    assert fit[0].filename == __file__
+    assert not hasattr(model, "feature_names_in_")
+    with pytest.warns(FutureWarning) as record:
+        got = model.predict_proba(mixed[:30])
+    assert len(_deprecations(record)) == 1
+    np.testing.assert_array_equal(got, plain)
+
+
+def test_a_dataframe_of_strings_is_accepted_silently_as_in_scikit_learn(
+    ensemble_data,
+):
+    model, X, y = ensemble_data
+    expected = model.fit(X, y).predict_proba(X[:30])
+    for dtype in (object, "string"):
+        frame = pd.DataFrame(X.astype(str), columns=["a", "b", "c"])
+        frame = frame.astype(dtype)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            model.fit(frame, y)
+            got = model.predict_proba(frame[:30])
+        assert got.shape == expected.shape
+
+
+def test_integer_column_names_are_unnamed_without_a_warning(ensemble_data):
+    model, X, y = ensemble_data
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        model.fit(pd.DataFrame(X), y)
+
+
+def test_a_column_vector_target_warns_once_and_fits(ensemble_data):
+    model, X, y = ensemble_data
+    expected = model.fit(X, y).predict_proba(X[:30])
+    with pytest.warns(exceptions.DataConversionWarning) as record:
+        model.fit(X, y[:, None])
+    assert len(record) == 1
+    assert record[0].filename == __file__
+    np.testing.assert_array_equal(model.predict_proba(X[:30]), expected)
+
+
+def test_the_non_numeric_error_names_only_the_failing_columns():
+    features = np.array([["1", "a"], ["3", "b"]])
+    with pytest.raises(ValueError, match=r"not numeric: \['1'\]$"):
+        _inputs.as_feature_frame(features)

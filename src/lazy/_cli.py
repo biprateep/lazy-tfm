@@ -114,12 +114,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _models() -> int:
-    """Prints a table of every pinned checkpoint, with its cache status.
+    """Prints a table of every pinned checkpoint.
+
+    The columns are the default version, the cache status and whether the
+    licence allows commercial use.
 
     Returns:
         0.
     """
-    rows = [("MODEL", "VERSION", "DEFAULT", "CACHED")]
+    rows = [("MODEL", "VERSION", "DEFAULT", "CACHED", "COMMERCIAL")]
     for name in registry.list_estimators():
         for version in _hub.list_versions(name):
             rows.append(
@@ -130,11 +133,14 @@ def _models() -> int:
                     if _hub.DEFAULT_VERSIONS.get(name) == version
                     else "no",
                     "yes" if _hub.is_cached(name, version) else "no",
+                    "yes"
+                    if _hub.get_checkpoint(name, version).commercial_use
+                    else "no",
                 )
             )
-    widths = [max(len(row[i]) for row in rows) for i in range(4)]
+    widths = [max(len(cell) for cell in column) for column in zip(*rows)]
     for row in rows:
-        print("  ".join(row[i].ljust(widths[i]) for i in range(4)).rstrip())
+        print("  ".join(map(str.ljust, row, widths)).rstrip())
     return 0
 
 

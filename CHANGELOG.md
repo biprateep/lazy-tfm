@@ -25,6 +25,9 @@ change the API.
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
   pinned file itself, so the user never saw it.
+- Each pinned checkpoint has a `commercial_use` flag, which says whether the
+  licence of its weights allows commercial use. `lazy models` and the docs'
+  table of the models show it.
 - The package is marked typed (`py.typed`), so type checkers read its
   annotations.
 - The source distribution includes the tests and the docs pages they read.
@@ -61,6 +64,10 @@ change the API.
   of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
   0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
   `predict` from 0.075 s to 0.048 s.
+- The `sklearn.exceptions.DataConversionWarning` for a target of shape
+  `(n_samples, 1)` points at the caller's line.
+- The error for a non-numeric feature table names only the columns that
+  fail to convert, not every column of an array.
 - `lazy.datasets` reports each download at level INFO to the
   `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
   do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
@@ -160,6 +167,13 @@ change the API.
 - `lazy.is_cached` returns `False` for an unknown backend or version and
   warns with a `FutureWarning`. From 0.7.0 it raises
   `lazy.UnknownNameError`.
+- Features given as an array or list of strings that hold numbers (`str` or
+  `bytes`) are still converted to float64, but warn with a `FutureWarning`.
+  A DataFrame column of strings is still accepted without a warning, as in
+  scikit-learn. From 0.7.0 they raise `ValueError`, as scikit-learn does.
+- A DataFrame whose column names mix strings with other types is still read
+  as having no feature names, but warns with a `FutureWarning`. From 0.7.0
+  it raises `TypeError`, as scikit-learn does.
 - Predicting on an `X` with no rows warns with a `FutureWarning` in
   `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
   `predict_quantiles`, `predict_interval`, `predict_pit` and
@@ -172,6 +186,14 @@ change the API.
   backends' `setup` hook, which only this path uses, goes with it.
   `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
   install, also warns and will be removed in 0.7.0.
+- The `bin_edges` argument of the `lazy.metrics` functions warns with a
+  `FutureWarning` and will be removed in 0.7.0. Results are unchanged. Pass
+  `lazy.Grid.from_edges(bin_edges, normalization="histogram")` as the grid
+  instead.
+- `lazy.plotting.style.better_step`, `stacked_hist`, `running_median`,
+  `side_colorbar` and `grid_figsize` (also `lazy.plotting.grid_figsize`) warn
+  with a `FutureWarning` and will be removed in 0.7.0. Nothing in lazy uses
+  them, and they still work.
 
 ### Removed
 
@@ -185,6 +207,18 @@ change the API.
 
 ### Fixed
 
+- A TabPFN model fitted on a GPU can now be unpickled on a machine without
+  one. Its pickle held the regressors' CUDA tensors, which torch refuses to
+  load there. A TabPFN pickle also no longer holds the network. Unpickling
+  reattaches the network, so it needs the pinned checkpoint on that machine:
+  it is downloaded through the hub if missing, and `lazy download` fetches
+  it in advance. A pickle made by this version does not load in earlier
+  versions of lazy; pickles made by earlier versions still load. A v3.5
+  model with 8 members and 500 context rows, fitted on a CPU, pickled to
+  935.6 MB before and 59.4 MB now. Loading it in a fresh process took a
+  median of 2.77 s before and 3.59 s now, since the network is read from
+  the checkpoint (5 interleaved runs, 4 torch threads, 4-core Xeon at
+  2.8 GHz, torch 2.14.0, tabpfn 9.0.0).
 - A LimiX or TabFM model fitted on a GPU with `device="auto"` and unpickled
   on a machine without one now runs on the CPU with mixed precision off, and
   its `provenance_` says so. LimiX already moved to the CPU but kept mixed
@@ -271,6 +305,12 @@ change the API.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
+- A TabFM build that has `TabFM.prefill` and `TabFM.decode` but lacks
+  another API that lazy's KV-cache path calls, such as
+  `EnsembleGenerator.transform_context_only`, now falls back to upstream
+  `predict_proba` with a `TabFMPerformanceWarning`. Prediction raised
+  `AttributeError` before. `lazy setup` now installs the pinned repository
+  build over such a build.
 
 ### Security
 
