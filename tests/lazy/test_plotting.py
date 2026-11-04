@@ -174,6 +174,19 @@ def test_bin_edges_stand_in_for_the_grid(native):
     )
 
 
+def test_bin_edges_score_the_callers_centres_without_a_warning():
+    pdfs = np.array([[0.1, 0.2, 0.9], [0.9, 0.2, 0.1]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        fig = plotting.diagnostic_panel(
+            [5.0, 0.5], [0.2, 1.5, 5.9], pdfs, bin_edges=[0, 1, 3, 6]
+        )
+    # The one-to-one line spans the modes, 5.9 and 0.2, which are the
+    # caller's centres and not the edges' midpoints, 4.5 and 0.5.
+    line = fig.axes[0].lines[0].get_xdata()
+    assert (line[0], line[-1]) == (0.2, 5.9)
+
+
 @pytest.mark.parametrize(
     "plot", [plotting.plot_stacked_pdfs, plotting.plot_pdfs, "diagnostic_panel"]
 )
@@ -189,9 +202,7 @@ def test_bare_non_uniform_centres_are_refused(native, plot):
 def test_the_panel_scores_a_native_grid_by_its_histograms(native):
     y_true, native_grid, pdfs = native
     fig = plotting.diagnostic_panel(y_true, native_grid, pdfs)
-    _, _, pit = metrics.evaluate_grid_pdfs(
-        y_true, native_grid.centers, pdfs, bin_edges=native_grid.edges
-    )
+    _, _, pit = metrics.evaluate_grid_pdfs(y_true, native_grid, pdfs)
     np.testing.assert_allclose(fig.axes[2].lines[0].get_ydata(), np.sort(pit))
     assert fig.axes[3].get_xlim()[1] < 2.5
 
