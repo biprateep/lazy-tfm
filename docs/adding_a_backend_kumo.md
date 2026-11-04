@@ -189,8 +189,8 @@ The group's seed, which the base class draws for its first member, seeds a
 CPU `torch.Generator`, from which the recipe draws the members' column
 shuffles and sign flips. Upstream's two steps would draw on the device, where
 a CPU and a GPU give different draws for one seed, so the recipe uses
-subclasses of them (`_kumo_draws`) that draw on the generator's device and
-move the draws to the data's. With the cache off, the handle keeps the prepared
+subclasses of them (`_kumo_draws`) that run upstream's draw on an empty copy
+of the table on the generator's device, and move the draws to the data's. With the cache off, the handle keeps the prepared
 context, and every prediction reruns the whole forward pass with a generator
 seeded the same way, so that the members are the same in every chunk.
 

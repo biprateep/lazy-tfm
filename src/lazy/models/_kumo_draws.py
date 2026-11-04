@@ -3,12 +3,14 @@
 """Kumo Tabular's random recipe steps, drawn the same on every device.
 
 Upstream's ``FlipSign`` and ``ShuffleColumns`` draw each member's sign flips
-and column permutations with the generator on the data's device, and a CUDA
-generator gives another stream than a CPU one for the same seed
-(NVIDIA/structured-data-models#1339). These subclasses draw on the
-generator's own device, a CPU one in :mod:`lazy.models.kumo`, and move the
-draws to the data's device. On a CPU they are upstream's own draws. They
-override upstream's private ``_fit_ensemble`` as of
+and column permutations on the data's device, and a CUDA generator gives
+another stream than a CPU one for the same seed
+(NVIDIA/structured-data-models#1339). These subclasses run upstream's own
+draw on a table with no rows on the generator's device, a CPU one in
+:mod:`lazy.models.kumo`, and move the drawn buffers to the data's device.
+Upstream's draws read only the table's shape, dtype and member layout, so on
+a CPU these are upstream's draws. They wrap upstream's private
+``_fit_ensemble`` and ``EnsembleTable._apply_tensor`` as of
 :data:`lazy.models.kumo.REPOSITORY_COMMIT`.
 
 This module imports ``sdm``, so :mod:`lazy.models.kumo` imports it only when
@@ -20,72 +22,30 @@ from __future__ import annotations
 from typing import Any
 
 from sdm import processing
-import torch
 
 
 class FlipSign(processing.FlipSign):
     """Upstream's ``FlipSign``, drawn on the generator's device."""
 
-    _signs: Any  # Upstream's list of buffers, one per member.
-
-    def _fit_ensemble(
-        self, ensemble_table: Any, *, generator: Any = None
-    ) -> None:
-        signs = []
-        for member_id in range(len(ensemble_table)):
-            numerical = ensemble_table[member_id].numerical
-            sign = torch.empty(
-                (*numerical.shape[:-2], 1, numerical.shape[-1]),
-                dtype=numerical.dtype,
-                device=_draw_device(generator, numerical),
-            )
-            sign.bernoulli_(self.probability, generator=generator)
-            signs.append(sign.mul_(-2).add_(1).to(numerical.device))
-        self._signs = type(self._signs)(signs)
+    def _fit_ensemble(self, ensemble_table: Any, *, generator: Any) -> None:
+        super()._fit_ensemble(
+            _empty_on(ensemble_table, generator.device), generator=generator
+        )
+        self.to(ensemble_table.device)
 
 
 class ShuffleColumns(processing.ShuffleColumns):
-    """Upstream's Latin ``ShuffleColumns``, drawn on the generator's device.
+    """Upstream's ``ShuffleColumns``, drawn on the generator's device."""
 
-    Raises:
-        ValueError: At fit, for any method but ``"latin"``.
-    """
-
-    _permutations: Any  # Upstream's list of buffers, one per member.
-
-    def _fit_ensemble(
-        self, ensemble_table: Any, *, generator: Any = None
-    ) -> None:
-        if self.method != "latin":
-            raise ValueError(
-                f"only the latin method is drawn, not {self.method!r}"
-            )
-        numerical = ensemble_table[0].numerical
-        widths = [
-            ensemble_table[member_id].numerical.shape[-1]
-            for member_id in range(len(ensemble_table))
-        ]
-        width = max(widths)
-        device = _draw_device(generator, numerical)
-        base_rank = torch.randperm(width, generator=generator, device=device)
-        row_rank = torch.randperm(width, generator=generator, device=device)
-        permutations = []
-        for member_id, n_features in enumerate(widths):
-            if n_features <= 1:
-                permutations.append(torch.arange(n_features, device=device))
-                continue
-            base = base_rank[base_rank < n_features]
-            rows = row_rank[row_rank < n_features]
-            pattern = member_id % n_features
-            permutations.append(base[(pattern - rows) % n_features])
-        self._permutations = type(self._permutations)(
-            [permutation.to(numerical.device) for permutation in permutations]
+    def _fit_ensemble(self, ensemble_table: Any, *, generator: Any) -> None:
+        super()._fit_ensemble(
+            _empty_on(ensemble_table, generator.device), generator=generator
         )
-        self._host_permutations = tuple(
-            tuple(permutation.tolist()) for permutation in permutations
-        )
+        self.to(ensemble_table.device)
 
 
-def _draw_device(generator: Any, data: Any) -> Any:
-    """The generator's device, or the data's for torch's global generator."""
-    return data.device if generator is None else generator.device
+def _empty_on(ensemble_table: Any, device: Any) -> Any:
+    """The ensemble table with no rows, on ``device``: its shape alone."""
+    return ensemble_table._apply_tensor(  # noqa: SLF001 - upstream's map.
+        lambda table: table.narrow(-2, 0, 0).to(device)
+    )
