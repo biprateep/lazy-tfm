@@ -83,13 +83,18 @@ def test_an_explicit_recipe_drops_the_clip_and_the_shuffle():
     assert _find(recipe.features, "FlipSign")
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
 @pytest.mark.parametrize(
     ("step", "argument"), [("FlipSign", 0.5), ("ShuffleColumns", "latin")]
 )
-def test_the_random_steps_draw_as_upstreams_do_on_a_cpu(step, argument):
+def test_the_random_steps_draw_upstreams_cpu_draws_on_any_device(
+    step, argument, device
+):
     sdm = pytest.importorskip("sdm")
     torch = pytest.importorskip("torch")
     draws = pytest.importorskip("lazy.models._kumo_draws")
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("needs a GPU")
     rng = np.random.default_rng(5)
     # Members of unequal widths, one of a single column.
     tables = [
@@ -100,15 +105,18 @@ def test_the_random_steps_draw_as_upstreams_do_on_a_cpu(step, argument):
         for width in (6, 4, 1)
     ]
     ensemble = sdm.EnsembleTable.from_tables(tables, (0, 1, 0, 2, 1, 0))
-    theirs, ours = (
-        cls(argument).fit_transform_ensemble(
-            ensemble, generator=torch.Generator().manual_seed(7)
-        )
-        for cls in (getattr(sdm.processing, step), getattr(draws, step))
+    theirs = getattr(sdm.processing, step)(argument).fit_transform_ensemble(
+        ensemble, generator=torch.Generator().manual_seed(7)
+    )
+    ours = getattr(draws, step)(argument).fit_transform_ensemble(
+        ensemble.to(device), generator=torch.Generator().manual_seed(7)
     )
     for member in range(len(ensemble)):
         assert ours[member].columns == theirs[member].columns
-        assert torch.equal(ours[member].numerical, theirs[member].numerical)
+        assert ours[member].numerical.device.type == device
+        assert torch.equal(
+            ours[member].numerical.cpu(), theirs[member].numerical
+        )
 
 
 def test_fitted_groups_draw_on_a_cpu_and_older_pickles_on_the_device(

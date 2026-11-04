@@ -50,8 +50,8 @@ change the API.
   are the golden densities. On a GPU, results change for the same seed: on
   50 `california_housing` rows, the quantiles moved by up to 0.28 of a row's
   5% to 95% range, and now agree with the CPU's to 6.6e-6. A Kumo model
-  saved before this release keeps drawing on its device when it is loaded,
-  so it repeats its answers.
+  saved before this release still draws on the device it runs on, so it
+  repeats its answers on the same kind of device.
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.

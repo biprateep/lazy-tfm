@@ -34,10 +34,10 @@ random half of the columns, and at most 500 columns are kept. The target is
 z-scored and its sign flipped at random per member, and the answers are
 mapped back. The random sign flips of the columns and of the target are part
 of how the network is run rather than of the recipe, so they stay under an
-explicit ``transforms``. They and the column shuffles are drawn on a CPU
-generator and moved to the device (:mod:`lazy.models._kumo_draws`), so they
-are the same on every device. Kumo has no imputation step: missing values reach
-the network, which embeds them itself.
+explicit ``transforms``. A fit draws them and the column shuffles on a CPU
+generator and moves them to the device (:mod:`lazy.models._kumo_draws`), so
+they are the same on every device. Kumo has no imputation step: missing
+values reach the network, which embeds them itself.
 """
 
 from __future__ import annotations
@@ -205,8 +205,9 @@ class KumoQuantile(
         random_state: The ensemble's seed. A group of members runs on a
             CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
-            column shuffles and sign flips, so they are the same on every
-            device.
+            column shuffles and sign flips, so a fit draws them the same on
+            every device. A model saved before lazy 0.6 draws them on the
+            device it runs on.
         chunk_size: Query rows per forward pass. The batch shape can change
             the kernels: on a CPU, a one-row chunk differs by a few parts in
             a million of the quantiles' spread.
@@ -644,7 +645,7 @@ class _KumoGroup:
             the cache from them again.
         cpu_draws: Whether the recipe draws on a CPU generator, the same
             on every device. A group unpickled from a lazy release before
-            0.6 lacks it and draws on the model's device, as it was fitted.
+            0.6 lacks it and draws on the model's device, as it did then.
     """
 
     n_members: int

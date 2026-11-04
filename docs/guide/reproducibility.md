@@ -163,8 +163,8 @@ for the same seed, and NVIDIA's package draws on the device that runs the
 model (NVIDIA/structured-data-models#1339). So LAZY draws them on a CPU
 generator on every device and moves them to the device, and the same
 `random_state` gives the same ensemble on a CPU and on a GPU. On a CPU these
-are NVIDIA's own draws. A Kumo model saved by LAZY before 0.6 keeps drawing on
-its device when it is loaded, so it repeats the answers it gave.
+are NVIDIA's own draws. A Kumo model saved by LAZY before 0.6 still draws on
+the device it runs on, so it repeats its answers on the same kind of device.
 
 Each backend was fitted afresh on each device, in float32 with
 `random_state=0`, on 300 `california_housing` rows, and predicted 50 more:
