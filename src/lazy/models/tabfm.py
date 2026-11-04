@@ -44,8 +44,9 @@ Because the bins are equal-mass they are narrow where the targets are crowded,
 so in the busy part of the distribution they are routinely *narrower* than
 the output bin.
 Mapping them onto the output grid is therefore done by exact, mass-conserving
-integration (:meth:`lazy.grid.Grid.rebin`), not by sampling the density
-at the output bin centres, which would drop whole bins and lose probability.
+integration (:meth:`~lazy.distributions.HistogramDistribution.on_grid`),
+not by sampling the density at the output bin centres, which would drop whole
+bins and lose probability.
 
 The ten-class limit constrains the hierarchy, never the output: ``y_grid`` can
 have any number of bins, at any spacing, over any range.

@@ -49,14 +49,6 @@ def _integral_moments(dist, lo, hi, n=400_001):
 # -- histograms --------------------------------------------------------------
 
 
-def test_histogram_on_grid_is_exactly_the_normalized_rebinning(histogram):
-    grid = lazy.Grid.linear(0.0, 3.0, 57)
-    np.testing.assert_array_equal(
-        histogram.on_grid(grid),
-        grid.normalize(grid.rebin(histogram.probabilities, histogram.bins)),
-    )
-
-
 def test_histogram_on_its_own_buckets_is_each_mass_over_its_width():
     rng = np.random.default_rng(4)
     edges = np.sort(rng.normal(size=301))
@@ -65,10 +57,11 @@ def test_histogram_on_its_own_buckets_is_each_mass_over_its_width():
     grid = lazy.Grid.from_edges(edges, normalization="histogram")
     exact = grid.normalize(dist.probabilities / np.diff(edges))
     np.testing.assert_array_equal(dist.on_grid(grid), exact)
-    # Rebinning reaches the same densities, to the rounding of its sums.
-    rebinned = grid.normalize(grid.rebin(dist.probabilities, edges))
+    # The CDF's differences reach the same densities, to the rounding of
+    # its cumulative sums.
+    differenced = grid.normalize(dist.histogramize(edges).masses / grid.widths)
     np.testing.assert_allclose(
-        rebinned, exact, rtol=0, atol=1e-12 * exact.max()
+        differenced, exact, rtol=0, atol=1e-12 * exact.max()
     )
 
 
@@ -165,16 +158,6 @@ def test_histogram_validation(bins, masses, match):
 
 
 # -- quantiles ---------------------------------------------------------------
-
-
-def test_quantile_on_grid_is_from_quantiles_on_the_knots(quantiles):
-    """The knots include the ends of the tails, at the levels 0 and 1."""
-    grid = lazy.Grid.linear(0.0, 2.0, 80)
-    levels = np.r_[0.0, quantiles.quants, 1.0]
-    np.testing.assert_array_equal(
-        quantiles.on_grid(grid),
-        grid.from_quantiles(quantiles.ppf(levels), levels),
-    )
 
 
 def test_quantile_ppf_returns_the_knots_and_inverts_the_cdf(quantiles):
@@ -470,6 +453,53 @@ def test_on_grid_is_normalized_by_the_grid_even_when_it_cuts_mass(
         lazy.metrics.normalization_error(grid, pdfs), 0.0, atol=1e-12
     )
     np.testing.assert_allclose(grid.normalize(pdfs), pdfs, rtol=1e-12)
+
+
+@pytest.mark.parametrize("name", ["histogram", "quantiles"])
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+def test_on_grid_is_exactly_the_normalized_histogramized_masses(
+    request, name, normalization
+):
+    dist = request.getfixturevalue(name)
+    grid = lazy.Grid.linear(0.0, 2.0, 57, normalization=normalization)
+    masses = dist.histogramize(grid.edges).masses
+    np.testing.assert_array_equal(
+        dist.on_grid(grid), grid.normalize(masses / grid.widths)
+    )
+
+
+def _point_masses(at):
+    """Half the probability at ``at`` and half uniform on [-1, 2], 3 ways.
+
+    Returns:
+        The histogram, mixture and quantile forms of that distribution, and
+        each one's weight on the point mass.
+    """
+    uniform = distributions.HistogramDistribution([-1.0, 2.0], [[1.0]])
+    point = distributions.HistogramDistribution([at, at], [[1.0]])
+    histogram = distributions.HistogramDistribution(
+        [-1.0, at, at, 2.0], [[(at + 1.0) / 6.0, 0.5, (2.0 - at) / 6.0]]
+    )
+    mixture = distributions.MixtureDistribution.equal([point, uniform])
+    quantiles = distributions.QuantileDistribution([0.25, 0.75], [[at, at]])
+    return [(histogram, 0.5), (mixture, 0.5), (quantiles, 1.0)]
+
+
+@pytest.mark.parametrize("at", [-0.5, 0.0, 0.3, 0.5, 1.0, 1.5])
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+def test_a_point_mass_falls_in_the_bin_that_bin_index_gives(at, normalization):
+    """Bins are [lo, hi), the last [lo, hi]; nothing outside the grid."""
+    grid = lazy.Grid.linear(0.0, 1.0, 4, normalization=normalization)
+    inside = grid.y_min <= at <= grid.y_max
+    for dist, weight in _point_masses(at):
+        expected = (1.0 - weight) * np.full((1, 4), 0.25 / 3.0)
+        if inside:
+            expected[0, grid.bin_index(at)] += weight
+        masses = dist.histogramize(grid.edges).masses
+        np.testing.assert_allclose(masses, expected, atol=1e-15)
+        np.testing.assert_allclose(
+            dist.on_grid(grid), grid.normalize(expected / grid.widths)
+        )
 
 
 @pytest.mark.parametrize("name", KINDS)

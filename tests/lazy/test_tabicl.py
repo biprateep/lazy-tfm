@@ -23,6 +23,7 @@ import threads
 import lazy
 from lazy.models import _device
 from lazy.models import _hub
+from lazy.models import tabicl
 
 
 @pytest.fixture
@@ -145,6 +146,30 @@ def test_a_pickle_holds_no_network_and_shares_one_again(
     assert len(fake_tabicl.Regressor.recorder.loads) == loads
 
 
+def test_a_pickle_whose_regressors_hold_their_caches_still_loads(
+    monkeypatch, data
+):
+    X, y, X_test = data
+    backend = fakes.Backend("tabicl", monkeypatch)
+    model = backend(n_estimators=4, bag_size=40).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    with monkeypatch.context() as patch:
+        # The older format: each regressor as upstream's pickle holds it.
+        patch.setattr(
+            tabicl._PickledRegressor,
+            "of",
+            classmethod(lambda cls, r: cls(type(r), r.__getstate__())),
+        )
+        blob = pickle.dumps(model)
+    restored = pickle.loads(blob)
+    assert all(r.model_kv_cache_ is not None for r in _regressors(restored))
+    # Their caches are used as they are, not recorded again.
+    monkeypatch.setattr(fake_tabicl.Regressor, "_build_kv_cache", None)
+    np.testing.assert_array_equal(
+        restored.predict_distribution(X_test).locs, expected
+    )
+
+
 def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
     X, y, X_test = data
     backend = fakes.Backend("tabicl", monkeypatch)
@@ -171,16 +196,29 @@ def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
     assert len(fake_tabicl.Regressor.recorder.loads) == loads + 1
 
 
+@pytest.mark.parametrize("kv_cache", [True, False])
 def test_threads_predicting_on_an_unpickled_model_attach_one_network(
-    monkeypatch, data
+    monkeypatch, data, kv_cache
 ):
     X, y, X_test = data
-    model = fakes.Backend("tabicl", monkeypatch)(n_estimators=2).fit(X, y)
+    backend = fakes.Backend("tabicl", monkeypatch)
+    model = backend(n_estimators=2, kv_cache=kv_cache).fit(X, y)
     expected = model.predict_distribution(X_test).locs
     restored = pickle.loads(pickle.dumps(model))
+    # The model's lock guards the cache rebuild, which attaches the network;
+    # each regressor's guards the attach without a cache.
     contended = threads.watch_contention(
-        monkeypatch, lambda obj: isinstance(obj, fake_tabicl.Regressor)
+        monkeypatch,
+        lambda obj: obj is restored or isinstance(obj, fake_tabicl.Regressor),
     )
+    built = []
+    build = fake_tabicl.Regressor._build_kv_cache
+
+    def counted_build(regressor):
+        built.append(regressor)
+        build(regressor)
+
+    monkeypatch.setattr(fake_tabicl.Regressor, "_build_kv_cache", counted_build)
     relocate = restored._checkpoint
     relocated = []
 
@@ -200,8 +238,10 @@ def test_threads_predicting_on_an_unpickled_model_attach_one_network(
     )
     for answer in answers:
         np.testing.assert_array_equal(answer, expected)
-    # Each regressor attached once: a thread that waited found it attached.
+    # Each regressor attached, and recorded its cache, once: a thread that
+    # waited found it done.
     assert len(relocated) == len(_regressors(restored))
+    assert len(built) == (len(relocated) if kv_cache else 0)
 
 
 def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch, data):
@@ -231,15 +271,15 @@ def test_a_pickle_predicts_bit_for_bit_on_a_cpu():
     ).fit(X[:100], y[:100])
     expected = model.predict_distribution(X[100:]).locs
     blob = pickle.dumps(model)
-    # The key/value caches stay in, but no copy of the weights.
-    assert len(blob) < model.checkpoint_.stat().st_size / 2
     unpickler = _Classes(blob)
     restored = unpickler.load()
+    # Neither the weights nor the key/value caches.
     assert not any(
         issubclass(found, torch.nn.Module)
         for found in unpickler.found
         if isinstance(found, type)
     )
+    assert all(r.model_kv_cache_ is None for r in _regressors(restored))
     np.testing.assert_array_equal(
         restored.predict_distribution(X[100:]).locs, expected
     )

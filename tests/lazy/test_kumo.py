@@ -167,22 +167,6 @@ def data():
     return X[:60], X[:60, 0] + 0.1 * rng.normal(size=60), X[60:]
 
 
-def test_a_pickle_leaves_the_caches_out_and_records_them_again(
-    monkeypatch, data
-):
-    X, y, X_test = data
-    model = fakes.Backend("kumo", monkeypatch)(n_estimators=3).fit(X, y)
-    expected = model.predict_distribution(X_test).locs
-    restored = pickle.loads(pickle.dumps(model))
-    assert all(handle.cache is None for handle in restored.handles_)
-    assert restored.regressor_ is restored.handles_[0]
-    assert all(handle.cache is not None for handle in model.handles_)
-    np.testing.assert_array_equal(
-        restored.predict_distribution(X_test).locs, expected
-    )
-    assert restored.handles_[0].cache is not None
-
-
 def _no_download(checkpoint, **kwargs):
     del checkpoint, kwargs  # Unused.
     raise AssertionError("the checkpoint was fetched")
@@ -312,6 +296,17 @@ def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
     assert restored.checkpoint_.parent.parent == elsewhere
     # One network for every group of the bagged model.
     assert len(recorder.loads) == loads + 1
+
+
+def test_switching_the_cache_on_after_a_fit_records_it(monkeypatch, data):
+    X, y, X_test = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    model = backend(n_estimators=3, kv_cache=False).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    model.set_params(kv_cache=True)
+    answer = model.predict_distribution(X_test).locs
+    assert all(handle.cache is not None for handle in model.handles_)
+    np.testing.assert_allclose(answer, expected, rtol=1e-6)
 
 
 def test_threads_predicting_on_an_unpickled_model_record_its_cache_once(

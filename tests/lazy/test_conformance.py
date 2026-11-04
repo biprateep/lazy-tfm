@@ -513,6 +513,73 @@ def test_a_pickled_model_predicts_the_same(cls, bag_size, kv_cache, data):
     assert restored.provenance_ == model.provenance_
 
 
+def _limix_caches(model):
+    caches = []
+    for handle in model.handles_:
+        caches.extend(entry["cache"] for entry in handle["members"])
+    return caches
+
+
+def _tabicl_caches(model):
+    caches = []
+    for handle in model.handles_:
+        caches.extend(r.model_kv_cache_ for r in handle.regressors)
+    return caches
+
+
+_CACHES = {
+    "kumo": lambda model: [handle.cache for handle in model.handles_],
+    "limix": _limix_caches,
+    "tabicl": _tabicl_caches,
+}
+"""Each backend's key/value caches in a fitted model, by name. TabPFN's
+upstream regressors keep theirs, which its pickle still holds."""
+
+
+@pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
+@pytest.mark.parametrize("name", sorted(_CACHES))
+def test_a_pickle_leaves_the_caches_out_and_a_prediction_rebuilds_them(
+    name, bag_size, monkeypatch, data
+):
+    X, z, X_test = data
+    caches = _CACHES[name]
+    model = fakes.Backend(name, monkeypatch)(n_estimators=3, bag_size=bag_size)
+    model.fit(X, z)
+    expected = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    assert all(cache is not None for cache in caches(model))
+    assert all(cache is None for cache in caches(restored))
+    if getattr(model, "regressor_", None) is model.handles_[0]:
+        assert restored.regressor_ is restored.handles_[0]
+    np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
+    assert all(cache is not None for cache in caches(restored))
+
+
+def test_a_failed_cache_rebuild_is_tried_again_by_the_next_prediction(
+    cls, data, monkeypatch
+):
+    X, z, X_test = data
+    model = cls(n_estimators=3).fit(X, z)
+    expected = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    rebuild = restored._rebuild_caches
+    calls = []
+
+    def fails_once():
+        calls.append(True)
+        if len(calls) == 1:
+            raise RuntimeError("out of memory")
+        rebuild()
+
+    monkeypatch.setattr(restored, "_rebuild_caches", fails_once)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        restored.predict_proba(X_test)
+    assert restored._caches_pending
+    np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
+    restored.predict_proba(X_test)
+    assert len(calls) == 2
+
+
 @pytest.mark.filterwarnings("ignore::lazy.PerformanceWarning")
 def test_an_auto_device_is_resolved_again_when_a_gpu_pickle_loads(
     cls, data, monkeypatch

@@ -203,8 +203,9 @@ the duration of one prediction (`_lending`), and the quantiles are mapped
 back to the units of the target:
 
 ```python
-if self.kv_cache and handle.cache is None:
-    handle.cache = self._record(handle)  # unpickled: record it again
+if self.kv_cache and handle.cache is None:  # switched on since the fit
+    with _locks.network_lock(self):
+        self._record_missing(handle)
 network = self._network()
 (queries,) = self._tensors(X)
 with self._autocast():
@@ -255,9 +256,10 @@ network, and the estimator keeps its own reference, which pickling drops.
 Since upstream keeps the context of its last fit on the network, every fit on
 the shared network and every prediction from a group's cache holds a lock on
 that network, so that two threads never see each other's context. A pickle also leaves out each group's
-cache, which can run to gigabytes and lives on the device it was fitted on,
-and keeps the group's context instead, from which the first prediction after
-unpickling records the same cache again on the device then in use. The weights stay in single
+cache, which can run to gigabytes and lives on the device it was fitted on
+(`_pickled_handle`), and keeps the group's context instead, from which
+`_rebuild_caches` records the same cache again before the first prediction
+after unpickling, on the device then in use. The weights stay in single
 precision, and `mixed_precision` only switches on upstream's float16 autocast,
 as NVIDIA runs the model.
 

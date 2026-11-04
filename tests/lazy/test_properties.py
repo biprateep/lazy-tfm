@@ -128,10 +128,10 @@ def test_histogramizing_on_a_covering_grid_keeps_the_mass(dist):
 
 @SETTINGS
 @hypothesis.given(histograms(), st.integers(2, 40))
-def test_rebinning_onto_a_covering_grid_keeps_the_mass(dist, n_bins):
+def test_densities_on_a_covering_grid_keep_the_mass(dist, n_bins):
     low, high = dist.bins[0], dist.bins[-1]
     # Room for n_bins strictly increasing edges.
     hypothesis.assume(high - low > 1e-9 * n_bins * max(1.0, abs(high)))
     grid = lazy.Grid.linear(low, high, n_bins, normalization="histogram")
-    density = grid.rebin(dist.probabilities, dist.bins)
+    density = dist._bin_densities(grid)
     np.testing.assert_allclose(density @ grid.widths, 1.0)
