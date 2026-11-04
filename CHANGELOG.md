@@ -194,6 +194,18 @@ change the API.
 
 ### Fixed
 
+- A TabPFN model fitted on a GPU can now be unpickled on a machine without
+  one. Its pickle held the regressors' CUDA tensors, which torch refuses to
+  load there. A TabPFN pickle also no longer holds the network. Unpickling
+  reattaches the network, so it needs the pinned checkpoint on that machine:
+  it is downloaded through the hub if missing, and `lazy download` fetches
+  it in advance. A pickle made by this version does not load in earlier
+  versions of lazy; pickles made by earlier versions still load. A v3.5
+  model with 8 members and 500 context rows, fitted on a CPU, pickled to
+  935.6 MB before and 59.4 MB now. Loading it in a fresh process took a
+  median of 2.77 s before and 3.59 s now, since the network is read from
+  the checkpoint (5 interleaved runs, 4 torch threads, 4-core Xeon at
+  2.8 GHz, torch 2.14.0, tabpfn 9.0.0).
 - A LimiX or TabFM model fitted on a GPU with `device="auto"` and unpickled
   on a machine without one now runs on the CPU with mixed precision off, and
   its `provenance_` says so. LimiX already moved to the CPU but kept mixed

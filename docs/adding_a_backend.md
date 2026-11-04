@@ -99,9 +99,9 @@ loads it from a checkpoint path onto `device_`. `_network` keeps the
 network on the estimator, which drops it on pickling and finds it again on
 first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
 Kumo Tabular do this). TabPFN loads its network the same way and hands it to
-each upstream regressor as a model spec, but its regressors still pickle it.
-The base
-class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
+each upstream regressor as a model spec; its pickle leaves the network out
+and hands it to the regressors again on unpickling. The base class
+resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
 and raises a clear error on a device its model does not support, before the
@@ -112,10 +112,12 @@ An estimator unpickled under `device="auto"` resolves `device_` and
 `mixed_precision_` again on the machine at hand, so a model fitted on a GPU
 predicts on the CPU where there is none. A backend whose handles hold the
 device moves them to the new `device_` in its own `__setstate__` (TabICL and
-TabPFN move their upstream regressors). Handles must pickle without device
-tensors for the move from a GPU to work: TabICL's do, while TabPFN's still
-hold CUDA tensors (#197). A backend whose `_recipe` records a
-setting that follows the device returns it, recomputed, from
+TabPFN move their upstream regressors). For the move from a GPU to work,
+handles that hold device tensors must pickle them so that they load on a
+CPU. TabICL's regressors move their key/value cache to the CPU when
+pickled; TabPFN writes its regressors with `torch.save` and reads them with
+`torch.load(..., map_location="cpu")`. A backend whose `_recipe` records
+a setting that follows the device returns it, recomputed, from
 `_relocated_provenance` (TabICL's `use_amp`, Kumo Tabular's autocast dtype and
 TabPFN's inference precision).
 
