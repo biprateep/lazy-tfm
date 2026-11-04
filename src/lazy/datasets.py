@@ -88,10 +88,12 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
+from lazy import _home
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
 from lazy import selection
+from lazy._home import data_home  # noqa: GS001 - re-exports the public name.
 
 __all__ = [
     "BANDS",
@@ -448,35 +450,6 @@ def build_features(
     return pd.DataFrame(out, index=raw.index)
 
 
-def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
-    """Returns the directory cached catalogues live in, creating it if needed.
-
-    Resolution order: the ``data_home`` argument, then ``$LAZY_DATA_HOME``,
-    then ``$XDG_CACHE_HOME/lazy-tfm``, then ``~/.cache/lazy-tfm``.
-
-    Nothing about the location is baked in, so a shared scratch filesystem or
-    a node-local disk is one environment variable away and the same code runs
-    unchanged on a laptop and on a cluster.
-
-    Args:
-        data_home: An explicit cache directory, overriding the environment.
-
-    Returns:
-        The cache directory, with ``~`` expanded.
-    """
-    explicit = data_home or os.environ.get("LAZY_DATA_HOME")
-    root = pathlib.Path(explicit) if explicit else _default_home("lazy-tfm")
-    root = root.expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _default_home(name: str) -> pathlib.Path:
-    """The default cache directory ``name``, under the user's cache."""
-    cache = os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
-    return pathlib.Path(cache).expanduser() / name
-
-
 def _legacy_copy(
     filename: str, root: str | pathlib.Path | None, size: int
 ) -> pathlib.Path | None:
@@ -491,7 +464,7 @@ def _legacy_copy(
     """
     if root or os.environ.get("LAZY_DATA_HOME"):
         return None
-    legacy = _default_home(_LEGACY_HOME) / filename
+    legacy = _home.default_home(_LEGACY_HOME) / filename
     if not _is_complete(legacy, size):
         return None
     if legacy.parent not in _warned_legacy:

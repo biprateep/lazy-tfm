@@ -49,8 +49,8 @@ import tempfile
 import types
 import urllib.request
 
+from lazy import _home
 from lazy import _warnings
-from lazy import datasets
 
 __all__ = [
     "ENV_VARS",
@@ -198,7 +198,7 @@ def cache_dir() -> pathlib.Path:
     Returns:
         The directory, which holds the source once :func:`fetch` has run.
     """
-    return datasets.data_home() / "limix" / LIMIX_COMMIT
+    return _home.data_home() / "limix" / LIMIX_COMMIT
 
 
 def fetch() -> pathlib.Path:

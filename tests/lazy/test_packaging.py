@@ -2,9 +2,12 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import pathlib
+import subprocess
+import sys
 import tomllib
 
 from packaging import requirements
+import pytest
 
 import lazy
 from lazy.models import kumo
@@ -18,6 +21,26 @@ PYPROJECT = tomllib.loads(
 def test_version():
     """Check to see that we can get the package version."""
     assert lazy.__version__ is not None
+
+
+def test_importing_lazy_loads_the_dataset_modules_on_first_access():
+    """``lazy.datasets`` and ``lazy.selection`` load when first accessed."""
+    code = (
+        "import sys, lazy\n"
+        "heavy = {'h5py', 'lazy.datasets', 'lazy.selection', "
+        "'sklearn.datasets'}\n"
+        "print(sorted(heavy & set(sys.modules)))\n"
+        "print(lazy.datasets.data_home.__name__, lazy.selection.__name__)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.split("\n")[:2] == ["[]", "data_home lazy.selection"]
+
+
+def test_an_unknown_attribute_of_lazy_raises_attribute_error():
+    with pytest.raises(AttributeError, match="no_such_name"):
+        lazy.no_such_name  # noqa: B018 - the access is the test.
 
 
 def test_public_api_is_importable():
