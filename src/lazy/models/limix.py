@@ -125,7 +125,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             upstream's column shuffler, seeded per member as upstream seeds
             it, permuting every column a member's pipeline outputs (the
             original columns and SVD components among the rest) -- bagged
-            members too, as in the paper's bagged runs.
+            members too.
         bag_size: Context rows per member: an int is a row count (``1``
             means one row), a float a fraction in (0, 1] (``1.0`` means all
             rows), and None all of them. Above about 20,000 context rows
@@ -396,9 +396,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         # A bagged member is a group of its own, planned with a permutation
         # of the input columns. LimiX's own shuffler permutes the columns its
         # pipeline outputs instead -- the original columns and the SVD
-        # components among the rest, as upstream and the paper's bagged runs
-        # do -- so the member keeps its input order here and shuffles
-        # natively (_fit_group).
+        # components among the rest, as upstream does -- so the member keeps
+        # its input order here and shuffles natively (_fit_group).
         if group.permutation is not None:
             group = dataclasses.replace(group, permutation=None)
         return super()._prepare(features, group, transformer, clipper)
