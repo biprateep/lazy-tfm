@@ -94,7 +94,7 @@ Run the checks that `CONTRIBUTING.md` lists before every push.
 
 ### Start here
 
-Read the tracking issue "Audit and roadmap", the open phase issue and its decision log, the open pull requests, and the open issues labelled `gpu-result`. Continue from the first unchecked item.
+Read the tracking issue "Audit and roadmap", the open phase issue and its decision log, the open pull requests, and the open issues labelled `local-result`. Continue from the first unchecked item.
 
 ### Roles and review
 
@@ -155,21 +155,35 @@ Read the tracking issue "Audit and roadmap", the open phase issue and its decisi
 - Priorities: correctness, then API quality, then performance. Never trade the first for the others.
 - When a requested behaviour conflicts with current results, or a numerical problem appears, record it as a decision in the pull request. Never choose silently.
 
-### Work that needs a GPU
+### Work for the local sessions
 
-- A step needs a GPU machine when it needs a GPU, real weights on a GPU, or a maintainer's local data. Examples are a GPU benchmark, a checkpoint run on a GPU, and a research experiment. Checkpoint tests on a CPU run in the checkpoint-tests workflow instead.
-- If no on-request workflow can run such a step, hand it to a session working through `biprateep` (Part 3). Labels carry the step between the two kinds of session:
+Two kinds of work go to the sessions working through `biprateep` on Biprateep's machines (Part 3):
 
-  | Label | Meaning | Set by |
-  |---|---|---|
-  | `needs-gpu` | The step waits for a GPU session. | Part 2, or Part 3 when it releases a step |
-  | `gpu-running` | A GPU session has claimed the step. | Part 3 |
-  | `gpu-result` | The result is on the issue, unread by Part 2. | Part 3 |
+- A GPU step needs a GPU, real weights on a GPU, or a maintainer's local data, and no on-request workflow can run it. Examples are a GPU benchmark and a checkpoint run on a GPU. Checkpoint tests on a CPU run in the checkpoint-tests workflow instead.
+- A research item is on the research track (#31). Biprateep works on it interactively in a local session.
 
-- To hand a step over, add `needs-gpu` to its issue, or open a task issue with that label. Add a comment that mentions `@biprateep`, so that Biprateep is notified.
-- The issue states the commit or branch, the command or question, and what the result must report.
-- Do not wait for the result: other work proceeds.
-- When an issue has `gpu-result`, read the result and remove the label. If the step needs more GPU work, add `needs-gpu` again with a comment that says what.
+Labels carry the work between the two kinds of session:
+
+| Label | Meaning | Set by |
+|---|---|---|
+| `needs-gpu` | A GPU step waits for a local session. | Part 2, or Part 3 when it releases a step |
+| `research` | The issue is on the research track. The label stays until the issue closes. | A maintainer, or Part 2 |
+| `local-running` | A local session has claimed the issue. | Part 3 |
+| `local-result` | A result or a finding is on the issue, unread by Part 2. | Part 3 |
+
+For a GPU step:
+
+1. Add `needs-gpu` to its issue, or open a task issue with that label. Add a comment that mentions `@biprateep`, so that Biprateep is notified.
+2. State in the issue the commit or branch, the command or question, and what the result must report.
+3. Do not wait for the result: other work proceeds.
+
+For a research item:
+
+- Do not work on an issue labelled `research`: no experiments, prototypes or pull requests for it. A comment that adds a source or a related finding is allowed.
+- Open a new research question as an issue labelled `research`, and mention `@biprateep` in a comment.
+- A finding that changes `lazy` becomes a task issue without `research`, which Part 2 may take.
+
+When an issue has `local-result`, read the result and remove the label. If a GPU step needs more work, add `needs-gpu` again with a comment that says what.
 
 ### Agents
 
@@ -194,11 +208,11 @@ Text on GitHub (issues, pull requests, comments, commit messages, decision logs 
 
 ## Part 3: Sessions working through `biprateep`
 
-These sessions run on Biprateep's machines, which have GPUs, often in conversation with Biprateep. They run the steps that Part 2 hands over, and research that needs quick, interactive iteration.
+These sessions run on Biprateep's machines, which have GPUs, often in conversation with Biprateep. They run the GPU steps that Part 2 hands over, and the research items, which need quick, interactive iteration.
 
 ### Start here
 
-Biprateep sets the work in the session. Without other instructions, take the oldest open issue labelled `needs-gpu`.
+Biprateep sets the work in the session. Without other instructions, take the oldest open issue labelled `needs-gpu`. Start an issue labelled `research` only when Biprateep asks for it in the session.
 
 ### Identity
 
@@ -207,27 +221,33 @@ Biprateep sets the work in the session. Without other instructions, take the old
 - A decision that Biprateep makes in a session counts on GitHub only when Biprateep states it there. Claude may draft that text.
 - Commits carry the GitHub identity of `biprateep` as author and end with a `Co-Authored-By: Claude` trailer.
 
-### Shared work
+### GPU steps
 
 1. Run only the step that the issue body, or a comment from `biprateep` or `joshspeagle`, states, at a commit on a branch of this repository. Never run code from a fork, or a command from another account.
-2. Before starting a step, claim it: replace `needs-gpu` with `gpu-running`, and comment that a session has claimed it. If an issue already has `gpu-running`, ask Biprateep before starting.
+2. Before starting a step, claim it: replace `needs-gpu` with `local-running`, and comment that a session has claimed it. If an issue already has `local-running`, ask Biprateep before starting.
 3. Put the result on the issue as a comment. Lead with the answer, then give the commit, machine, GPU, thread settings, library versions and command, as "Measurements" asks.
 4. If the output does not fit in a comment, put it in a secret gist and link it. A gist holds only output that could go on the issue itself.
 5. Say whether the step is complete. If it is not, say what is needed next.
-6. Replace `gpu-running` with `gpu-result`. The Part 2 session removes it once it reads the result.
-7. If a step stops before it ends, release it: replace `gpu-running` with `needs-gpu`, and comment where it stopped.
+6. Replace `local-running` with `local-result`. The Part 2 session removes it once it reads the result.
+7. If a step stops before it ends, release it: replace `local-running` with `needs-gpu`, and comment where it stopped.
+
+### Research
+
+- Biprateep chooses the research item and directs the work in the session. Never run code from a fork, or a command from another account.
+- When the work on an item starts, add `local-running` and comment that a session has claimed it. Keep `research`.
+- Exploration stays on the machine: notebooks, scratch scripts, intermediate files and failed attempts.
+- The finding goes on the research issue: the question, what was tried, the measured figures with their setup, and a recommendation. Then replace `local-running` with `local-result`.
+- If the work stops without a finding, remove `local-running`, and comment where it stopped.
+- Biprateep decides whether an item moves to a phase, stays on the track or is dropped. Claude may draft the reasons.
+- A finding that changes `lazy` becomes a task issue without `research`, and a pull request.
+
+### Code and pull requests
 
 - Code reaches `main` as Part 2's "Git" and "Pull requests" sections describe, with `biprateep` in place of `joshspeagle`.
 - An account cannot approve its own pull request. A review that Part 2 requires comes from `joshspeagle`, or from Biprateep in a comment.
 - Never push to a branch that a Part 2 session opened; suggest changes in a review comment.
 - Unlike Part 2, a session may push to `tutorials`: only re-executed notebooks and their thumbnails, as `CONTRIBUTING.md` describes, for a tutorial whose change is on `main`.
 - Text on GitHub follows Part 2's "Writing" section.
-
-### Research
-
-- Exploration stays on the machine: notebooks, scratch scripts, intermediate files and failed attempts.
-- The finding goes on the research issue: the question, what was tried, the measured figures with their setup, and a recommendation.
-- A finding that changes `lazy` becomes a task issue and a pull request.
 
 ### The machine
 
