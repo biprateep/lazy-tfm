@@ -12,13 +12,14 @@
 #
 # Every figure in the documentation that shows a model's output is made here,
 # so each one can be remade from the code that the page shows. The model is
-# TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU in seconds at these
-# sizes. Running the script rewrites every SVG in `docs/figures/figs/`:
+# TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU. Running the
+# script rewrites every SVG in `docs/figures/figs/`:
 #
 #     python docs/figures/make_figures.py
 
 # %%
 import pathlib
+import runpy
 
 import matplotlib as mpl
 
@@ -86,30 +87,14 @@ plt.rcParams.update(RC_PARAMS)
 # chunks cut out, and TabPFN-3.5-fast's mean and 68% interval in the gaps.
 
 # %%
-X_train, X_test, y_train, y_test = datasets.load_dataset(
-    "chirp", split=True, return_X_y=True, random_state=0
+# The landing page includes this file, so the model code exists once.
+demo = runpy.run_path(
+    str(pathlib.Path(__file__).resolve().parents[1] / "snippets/quickstart.py")
 )
-
-model = lazy.LazyModel(
-    "tabpfn",
-    version="v3.5-fast",
-    n_estimators=8,
-    transforms="auto",
-    feature_shuffle=True,
-    bag_size=None,
-    kv_cache=True,
-    y_grid=None,
-    device="auto",
-    random_state=0,
-    chunk_size=8192,
-    softmax_temperature="auto",
-    mixed_precision=True,
-    outlier_threshold="auto",
+X_train, X_test, y_train, y_test = (
+    demo[name] for name in ("X_train", "X_test", "y_train", "y_test")
 )
-model.fit(X_train, y_train)
-
-y_mean = model.predict(X_test, method="mean")
-y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
+y_mean, y_low, y_high = (demo[name] for name in ("y_mean", "y_low", "y_high"))
 
 
 # %%
