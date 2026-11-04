@@ -19,7 +19,10 @@ in features and targets alike, never as the values underneath. Missing
 values are NaN and pass through untouched, for each model to handle in its
 own way; infinities are rejected. Column names are kept when the input has
 them (all strings), and then enforced at predict time, as
-``feature_names_in_`` is in scikit-learn.
+``feature_names_in_`` is in scikit-learn. Two lenient readings are
+deprecated, each with a ``FutureWarning``, and become errors in 0.7.0:
+an array or list of strings that hold numbers, and column names that mix
+strings with other types.
 
 Typical usage example:
 
@@ -33,13 +36,29 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from scipy import sparse
+from sklearn import exceptions
 from sklearn.utils import validation
 
 from lazy import _typing
+from lazy import _warnings
 
 __all__ = ["as_feature_frame", "as_target"]
 
 _COMPLEX = "Complex data not supported"
+_NUMERIC_STRINGS = (
+    "X is an array or list of strings that hold numbers. It is converted to "
+    "float64 now. From 0.7.0 this raises ValueError, as "
+    "scikit-learn does; convert it first, for example with X.astype(float)."
+)
+_MIXED_NAMES = (
+    "X has column names of both str and non-str types: {types}. They are "
+    "read as no feature names now. From 0.7.0 this raises TypeError, as "
+    "scikit-learn does; make every name a string."
+)
+_COLUMN_VECTOR = (
+    "A column-vector y was passed when a 1d array was expected. Please "
+    "change the shape of y to (n_samples, ), for example using ravel()."
+)
 
 
 def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
@@ -77,9 +96,7 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         values = frame.to_numpy(dtype=np.float64, na_value=np.nan)
     except (TypeError, ValueError) as error:
         bad = [
-            str(name)
-            for name in frame.columns
-            if not pd.api.types.is_numeric_dtype(frame[name])
+            str(name) for name in frame.columns if not _converts(frame[name])
         ]
         raise ValueError(
             f"every feature column must be numeric; not numeric: {bad}"
@@ -98,8 +115,8 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
 def as_target(target: Any) -> _typing.FloatArray:
     """Converts target values to a flat float64 array; masked become NaN.
 
-    A column vector, shape (n_samples, 1), is flattened with a warning, as
-    scikit-learn's regressors do.
+    A column vector, shape (n_samples, 1), is flattened with a
+    ``DataConversionWarning``, as scikit-learn's regressors do.
 
     Args:
         target: Target values, shape (n_samples,): an array, list, pandas
@@ -112,6 +129,10 @@ def as_target(target: Any) -> _typing.FloatArray:
     Raises:
         ValueError: If the target is None, a scalar, complex, or has more
             than one column.
+
+    Warns:
+        sklearn.exceptions.DataConversionWarning: If the target is a column
+            vector.
     """
     if target is None:
         raise ValueError(
@@ -122,7 +143,9 @@ def as_target(target: Any) -> _typing.FloatArray:
     values = np.asarray(data, dtype=np.float64)
     if mask is not None:
         values = np.where(mask, np.nan, values)
-    return validation.column_or_1d(values, warn=True)
+    if values.ndim == 2 and values.shape[1] == 1:
+        _warnings.warn(_COLUMN_VECTOR, exceptions.DataConversionWarning)
+    return validation.column_or_1d(values)
 
 
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
@@ -138,6 +161,13 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
     if isinstance(features, np.ndarray) and features.dtype.names is not None:
         return _from_structured(features), True
     array, mask = _unmask(features)
+    if array.dtype.kind in "SU":  # scikit-learn refuses these; see above.
+        try:
+            array = array.astype(np.float64)
+        except ValueError:
+            pass  # as_feature_frame names the columns that fail.
+        else:
+            _warnings.warn(_NUMERIC_STRINGS, FutureWarning)
     if mask is not None:
         _reject_complex(array)
         array = np.where(mask, np.nan, array.astype(np.float64))
@@ -228,9 +258,26 @@ def _unmask(
     return data, np.broadcast_to(np.asarray(mask, dtype=bool), data.shape)
 
 
+def _converts(column: pd.Series) -> bool:
+    """Whether a column converts to float64."""
+    try:
+        column.to_numpy(dtype=np.float64, na_value=np.nan)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _all_strings(columns: pd.Index) -> bool:
-    """Whether every column name is a string, as scikit-learn requires."""
-    return not columns.empty and all(isinstance(name, str) for name in columns)
+    """Whether every column name is a string, as scikit-learn requires.
+
+    Warns:
+        FutureWarning: If the names mix strings with other types.
+    """
+    kinds = {isinstance(name, str) for name in columns}
+    if kinds == {True, False}:
+        types = sorted({type(name).__name__ for name in columns})
+        _warnings.warn(_MIXED_NAMES.format(types=types), FutureWarning)
+    return kinds == {True}
 
 
 def _default_names(n_columns: int) -> list[str]:

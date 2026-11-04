@@ -48,6 +48,10 @@ change the API.
   of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
   0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
   `predict` from 0.075 s to 0.048 s.
+- The `sklearn.exceptions.DataConversionWarning` for a target of shape
+  `(n_samples, 1)` points at the caller's line.
+- The error for a non-numeric feature table names only the columns that
+  fail to convert, not every column of an array.
 - `lazy.datasets` reports each download at level INFO to the
   `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
   do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
@@ -147,6 +151,13 @@ change the API.
 - `lazy.is_cached` returns `False` for an unknown backend or version and
   warns with a `FutureWarning`. From 0.7.0 it raises
   `lazy.UnknownNameError`.
+- Features given as an array or list of strings that hold numbers (`str` or
+  `bytes`) are still converted to float64, but warn with a `FutureWarning`.
+  A DataFrame column of strings is still accepted without a warning, as in
+  scikit-learn. From 0.7.0 they raise `ValueError`, as scikit-learn does.
+- A DataFrame whose column names mix strings with other types is still read
+  as having no feature names, but warns with a `FutureWarning`. From 0.7.0
+  it raises `TypeError`, as scikit-learn does.
 - Predicting on an `X` with no rows warns with a `FutureWarning` in
   `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
   `predict_quantiles`, `predict_interval`, `predict_pit` and
