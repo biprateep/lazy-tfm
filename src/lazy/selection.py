@@ -164,6 +164,10 @@ class HSCGrid:
 
         Returns:
             The grid, with evenly spaced bin edges across the two spans.
+
+        Raises:
+            OSError: If ``path`` is missing or is not a readable HDF5 file.
+            KeyError: If the file lacks the ``ratios`` or ``data`` entries.
         """
         with h5py.File(path, "r") as saved:
             ratios = np.asarray(saved["ratios"][...], dtype=float)

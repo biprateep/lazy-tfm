@@ -529,6 +529,9 @@ class HistogramDistribution(_Base):
 
         Zero-width buckets are merged away, since qp requires strictly
         increasing bins.
+
+        Raises:
+            ImportError: If qp is not installed.
         """
         qp = _import_qp()
         keep = np.concatenate([[True], np.diff(self.bins) > 0])
@@ -617,6 +620,15 @@ class QuantileDistribution(_Base):
 
         This is how TabICL combines its own ensemble members, so bagged
         TabICL members are combined the same way.
+
+        Args:
+            parts: One distribution per member, at the same levels and with
+                the same rows.
+            weights: One finite, non-negative weight per part with a positive
+                sum, normalised here; ``None`` for equal weights.
+
+        Returns:
+            The weighted average, with the first part's ``ancil``.
         """
         quants = parts[0].quants
         if any(not np.array_equal(p.quants, quants) for p in parts):
@@ -837,6 +849,9 @@ class QuantileDistribution(_Base):
         quantile function its own way, so its values there differ slightly
         from the piecewise-linear CDF used here. For an exact copy, export
         ``histogramize(bins).to_qp()``.
+
+        Raises:
+            ImportError: If qp is not installed.
         """
         qp = _import_qp()
         levels, locs = self._knots()
@@ -1024,7 +1039,11 @@ class MixtureDistribution(_Base):
         )
 
     def to_qp(self) -> Any:
-        """The mixture as a ``qp.Ensemble`` (``hist`` on the union edges)."""
+        """The mixture as a ``qp.Ensemble`` (``hist`` on the union edges).
+
+        Raises:
+            ImportError: If qp is not installed.
+        """
         return self.to_histogram().to_qp()
 
 
@@ -1120,7 +1139,7 @@ def from_qp(ensemble: Any) -> HistogramDistribution | QuantileDistribution:
         The equivalent distribution, with the ensemble's ancil, if any.
 
     Raises:
-        TypeError: If the ensemble is of another parameterisation.
+        ImportError: If qp is not installed.
     """
     qp = _import_qp()
     data = ensemble.objdata
