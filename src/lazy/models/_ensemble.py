@@ -946,7 +946,15 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _distribution_chunks(
         self, X: pd.DataFrame
     ) -> Iterator[distributions.Distribution]:
-        """The predicted distributions, chunk by chunk, with a progress bar."""
+        """The predicted distributions, chunk by chunk, with a progress bar.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features), with
+                n_samples >= 1.
+
+        Yields:
+            One distribution per chunk of rows, in order.
+        """
         features = X.to_numpy(dtype=np.float64)
         if not self.chunks_queries:
             yield self._predict_chunk(features)
@@ -960,7 +968,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             unit="row",
         ) as progress:
             progress.set_postfix(context=self.n_context_)
-            for start in range(0, len(features), max(size, 1)):
+            for start in range(0, len(features), size):
                 stop = min(start + size, len(features))
                 self._log(f"rows {start}:{stop} of {len(features)}")
                 dist = self._predict_chunk(features[start:stop])
@@ -975,19 +983,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
-        if X.shape[0] == 0:
-            # The empty answer still carries the model's buckets or levels,
-            # which only a prediction reveals: predict one placeholder row
-            # and keep none of it.
-            placeholder = np.zeros((1, X.shape[1]))
-            return self._predict_chunk(placeholder)[:0]
         return distributions.concatenate(list(self._distribution_chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        if X.shape[0] == 0:
-            return np.empty((0, grid.n_bins))
         # Chunk by chunk, so the full native container never exists at once.
         blocks = [dist.on_grid(grid) for dist in self._distribution_chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
