@@ -12,6 +12,7 @@ their own, from the pickled path, as soon as they are unpickled.
 import io
 import pathlib
 import pickle
+import threading
 import time
 
 import fakes
@@ -23,6 +24,7 @@ import threads
 import lazy
 from lazy.models import _device
 from lazy.models import _hub
+from lazy.models import _locks
 
 
 @pytest.fixture
@@ -169,6 +171,55 @@ def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
     }
     # One network for every regressor of the bagged model.
     assert len(fake_tabicl.Regressor.recorder.loads) == loads + 1
+
+
+def test_threads_predicting_on_an_unpickled_model_attach_one_network(
+    monkeypatch, data
+):
+    X, y, X_test = data
+    model = fakes.Backend("tabicl", monkeypatch)(n_estimators=2).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    restored = pickle.loads(pickle.dumps(model))
+    contended = threading.Event()
+    lock_of = _locks.network_lock
+
+    class WatchedLock:
+        """A regressor's lock, noting a thread that finds it held."""
+
+        def __init__(self, obj):
+            self.lock = lock_of(obj)
+            self.watched = isinstance(obj, fake_tabicl.Regressor)
+
+        def __enter__(self):
+            if not self.lock.acquire(blocking=False):
+                if self.watched:
+                    contended.set()
+                self.lock.acquire()
+
+        def __exit__(self, *exc):
+            self.lock.release()
+
+    relocate = restored._checkpoint
+    first = threading.Lock()  # Only the first caller acquires it.
+    relocated = []
+
+    def held_checkpoint():
+        # The first attach waits until the other thread finds the
+        # regressor's lock held: without that lock, both attach at once.
+        if first.acquire(blocking=False):
+            assert contended.wait(threads.TIMEOUT)
+        relocated.append(True)
+        return relocate()
+
+    monkeypatch.setattr(_locks, "network_lock", WatchedLock)
+    monkeypatch.setattr(restored, "_checkpoint", held_checkpoint)
+    answers = _in_threads(
+        lambda i: restored.predict_distribution(X_test).locs, 2
+    )
+    for answer in answers:
+        np.testing.assert_array_equal(answer, expected)
+    # Each regressor attached once: a thread that waited found it attached.
+    assert len(relocated) == len(_regressors(restored))
 
 
 def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch, data):
