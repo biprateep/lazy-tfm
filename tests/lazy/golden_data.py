@@ -78,15 +78,6 @@ Kumo Tabular later still, at its small size with five members, the fewest its
 trimmed mean drops one from each tail of.
 """
 
-RECORDED_IN_MIXED_PRECISION = {"tabfm"}
-"""Backends recorded in a reduced precision that lazy now uses only on CUDA
-(``mixed_precision``; a CPU runs float32). TabFM's recording ran it in bfloat16,
-as every GPU run does, so the golden still guards the precision the GPU results
-are computed in. TabFM chooses its precision at prediction, so setting the
-resolved flag after ``fit`` is enough.
-"""
-
-
 THREADS = 4
 """Torch threads the golden densities are recorded and checked at, as many as a
 GitHub Linux runner has CPUs. TabPFN's CPU densities move with the count by
@@ -118,10 +109,7 @@ def fit(name: str) -> Any:
         The fitted :class:`lazy.LazyModel`, ready to predict on the problem.
     """
     X_train, z, _ = problem()
-    model = lazy.LazyModel(name, **RECORDED_PARAMS[name]).fit(X_train, z)
-    if name in RECORDED_IN_MIXED_PRECISION:
-        model.estimator_.mixed_precision_ = True
-    return model
+    return lazy.LazyModel(name, **RECORDED_PARAMS[name]).fit(X_train, z)
 
 
 def problem() -> tuple[np.ndarray, np.ndarray, np.ndarray]:

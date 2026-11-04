@@ -25,29 +25,30 @@ RTOL = {
 differently, which the narrowly spaced quantiles of TabICL and Kumo amplify
 most. LimiX moves by 4e-6 with the thread count alone.
 
-TabPFN's and TabFM's files hold on a GitHub Linux runner (AVX2), where the
-checkpoint workflow recorded them: two runners gave the same densities to the
-bit. Another processor moves them by 3% to 5% of the peak, so their golden
-test passes only on that platform. TabPFN hashes each row of its float32
+TabPFN's file holds on a GitHub Linux runner (AVX2), where the checkpoint
+workflow recorded it: two runners gave the same densities to the bit. Another
+processor moves its densities by 3% to 5% of the peak, so its golden test
+passes only on that platform: TabPFN hashes each row of its float32
 preprocessed data into a fingerprint feature, so a last-bit difference gives a
-different feature; TabFM's golden runs in bfloat16. See "Across machines" in
-the reproducibility guide.
+different feature. See "Across machines" in the reproducibility guide.
 """
 
 ATOL = {
     "kumo": 3e-6,
     "tabpfn": 1e-5,
     "tabicl": 3e-6,
-    "tabfm": 1e-5,
+    "tabfm": 2.5e-5,
     "limix": 1e-6,
 }
 """Absolute tolerance per backend, as a fraction of the peak density. Two
-runners agreed to the bit on TabPFN and TabFM, so their 1e-5 (and their 1e-4
-relative) are a margin chosen, not measured, for a change of runner image on
-the same processor. Kumo's and TabICL's far-tail bins move by more
-than their relative tolerance on another CPU: by up to 7.1e-7 and 2.4e-7 of
-the peak on a 4-core x86 machine (TabICL's at one thread and at four), so
-3e-6 leaves a margin of four.
+runners agreed to the bit on TabPFN, so its 1e-5 (and its 1e-4 relative) are a
+margin chosen, not measured, for a change of runner image on the same
+processor. TabFM's file, in float32, differed by up to 6.1e-6 of the peak
+between the runner (AVX2) that recorded it and a 4-core AVX-512 machine, so
+2.5e-5 leaves a margin of four. Kumo's and TabICL's
+far-tail bins move by more than their relative tolerance on another CPU: by up
+to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine (TabICL's at one
+thread and at four), so 3e-6 leaves a margin of four.
 """
 
 
