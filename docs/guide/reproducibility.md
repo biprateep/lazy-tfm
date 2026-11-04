@@ -1,8 +1,9 @@
 # Reproducibility and provenance
 
 A prediction from LAZY is fixed by the checkpoint, the context, the seed and
-the shared parameters, and by nothing on the machine it runs on. This page
-describes how each is pinned and recorded, and which settings change a
+the shared parameters, up to the rounding of the machine it runs on, and for
+Kumo Tabular by the kind of device (see [Across devices](#across-devices)).
+This page describes how each is pinned and recorded, and which settings change a
 prediction.
 
 ## Seeds
@@ -153,3 +154,16 @@ random generator (upstream draws it from the global one after advancing it by
 an amount that depends on the chunk's size). The third is the ported cache.
 The answers are statistically, not bitwise, those of upstream's
 `LimiXPredictor`.
+
+## Across devices
+
+Kumo Tabular draws each member's sign flips and column shuffles with a torch
+random generator on the device that runs the model. A CPU generator and a CUDA
+generator give different streams for the same seed, so the same
+`random_state` gives two different ensembles on a CPU and on a GPU. Neither is
+more correct: the two differ as much as two seeds on one device do. On 50
+`california_housing` rows, the 5%, 50% and 95% quantiles moved by up to 28%
+of a row's 5% to 95% range between a CPU and a GPU, and by up to 19% between
+two seeds on the GPU; the CRPS moved by about 2% in both cases. With the
+random draws turned off, the two devices agreed to $2 \times 10^{-5}$ of that
+range. Kumo's golden densities are recorded on a CPU.
