@@ -128,6 +128,8 @@ class Checkpoint:
         package: The distribution providing the backend. Its *installed*
             version is half of "which model was this": the weights are the
             other half.
+        commercial_use: Whether the licence of the weights allows commercial
+            use. Read the licence itself before relying on it.
         allow_patterns: ``snapshot_download`` patterns, for repositories
             holding several models.
         filename: A single file to fetch instead of a filtered snapshot.
@@ -162,6 +164,7 @@ class Checkpoint:
     version: str
     repo_id: str
     package: str
+    commercial_use: bool
     allow_patterns: tuple[str, ...] | None = None
     filename: str | None = None
     revision: str | None = None
@@ -428,6 +431,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v1-large",
             repo_id="nvidia/Kumo-Tabular",
             package="structured-data-models",
+            commercial_use=True,
             filename="large/regressor.pt",
             revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
             license_note=_KUMO_LICENSE,
@@ -444,6 +448,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v1-medium",
             repo_id="nvidia/Kumo-Tabular",
             package="structured-data-models",
+            commercial_use=True,
             filename="medium/regressor.pt",
             revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
             license_note=_KUMO_LICENSE,
@@ -460,6 +465,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v1-small",
             repo_id="nvidia/Kumo-Tabular",
             package="structured-data-models",
+            commercial_use=True,
             filename="small/regressor.pt",
             revision="3c3e10bbdb590ace29e7026847f92db3c603096d",
             license_note=_KUMO_LICENSE,
@@ -476,6 +482,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v1.0",
             repo_id="google/tabfm-1.0.0-pytorch",
             package="tabfm",
+            commercial_use=False,
             revision="77cb9cc1b4fd3a9c77fbb9552c218200bb4dab83",
             allow_patterns=(
                 "classification/**",
@@ -501,6 +508,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v2",
             repo_id="stable-ai/LimiX-2",
             package="LimiX",
+            commercial_use=False,
             filename="LimiX-2.ckpt",
             revision="de07b679e74a41b50b9de18251a8fa245e537440",
             license_note=(
@@ -524,6 +532,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v2",
             repo_id="jingang/TabICL",
             package="tabicl",
+            commercial_use=True,
             filename="tabicl-regressor-v2-20260212.ckpt",
             revision="4dcd344ece2c00be9e831fdd35bed57b5ad83e19",
             license_note=(
@@ -547,6 +556,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v2",
             repo_id="Prior-Labs/TabPFN-v2-reg",
             package="tabpfn",
+            commercial_use=True,
             filename="tabpfn-v2-regressor.ckpt",
             revision="4972a65a1b30806315c6f92499959ffbfc69a673",
             license_note=(
@@ -569,6 +579,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v2.5",
             repo_id="Prior-Labs/tabpfn_2_5",
             package="tabpfn",
+            commercial_use=False,
             filename="tabpfn-v2.5-regressor-v2.5_default.ckpt",
             revision="6c45f3a6d0d07c6c5f62572e04a0c2929de91b8b",
             license_note=(
@@ -590,6 +601,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v2.6",
             repo_id="Prior-Labs/tabpfn_2_6",
             package="tabpfn",
+            commercial_use=False,
             filename="tabpfn-v2.6-regressor-v2.6_default.ckpt",
             revision="24148873a9a5992b429833d07363690dcffd02a8",
             license_note=(
@@ -611,6 +623,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v3",
             repo_id="Prior-Labs/tabpfn_3",
             package="tabpfn",
+            commercial_use=False,
             filename="tabpfn-v3-regressor-v3_default.ckpt",
             revision="24a16a89d245878b846555110985634aa2e656d7",
             license_note=(
@@ -634,6 +647,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v3.5",
             repo_id="Prior-Labs/tabpfn_3_5",
             package="tabpfn",
+            commercial_use=False,
             filename="tabpfn-v3.5-20260909.safetensors",
             revision="06bf2ba35c80a92a3b9abb436b99cf49e7a0365e",
             license_note=(
@@ -655,6 +669,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             version="v3.5-fast",
             repo_id="Prior-Labs/tabpfn_3_5",
             package="tabpfn",
+            commercial_use=False,
             filename="tabpfn-v3.5-fast-20260909.safetensors",
             revision="06bf2ba35c80a92a3b9abb436b99cf49e7a0365e",
             license_note=(
