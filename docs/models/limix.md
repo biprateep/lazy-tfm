@@ -65,10 +65,11 @@ queries together), so that the prediction for a query does not depend on the
 other queries, and we treat every column as numeric. The member recipe,
 the transforms, the column permutations and their seeds are LimiX's. However,
 the random feature embeddings inside the network are drawn from a separate
-generator per member rather than from PyTorch's global one, so LAZY's answers
-agree with LimiX's only within the variation between random seeds, not bit
-for bit. LAZY also adds a key/value cache, which upstream LimiX lacks, and
-lets `n_estimators` take any value by repeating the eight-member recipe. LimiX
+CPU generator per member rather than from PyTorch's global one, so LAZY's
+answers agree with LimiX's only within the variation between random seeds,
+not bit for bit. They are drawn on the CPU and moved to the GPU, so a GPU
+starts from the same draw as a CPU. LAZY also adds a key/value cache, which
+upstream LimiX lacks, and lets `n_estimators` take any value by repeating the eight-member recipe. LimiX
 states no maximum context size, but in our tests on DC1 photometry its
 accuracy degrades above about 20,000 context rows, so LAZY warns above that
 size; bagging (e.g., `bag_size=20_000`, so that each member sees at most

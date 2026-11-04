@@ -167,3 +167,11 @@ of a row's 5% to 95% range between a CPU and a GPU, and by up to 19% between
 two seeds on the GPU; the CRPS moved by about 2% in both cases. With the
 random draws turned off, the two devices agreed to $2 \times 10^{-5}$ of that
 range. Kumo's golden densities are recorded on a CPU.
+
+LimiX-2 adds a random feature positional embedding to its feature tokens.
+LAZY draws it with a generator seeded per member. A CPU generator and a CUDA
+generator give different streams for the same seed, so LAZY draws it on a CPU
+generator, in float32, on every device, and moves it to the device that runs
+the model. So a CPU and a GPU start from the same draw for the same
+`random_state`; with `mixed_precision=True` on a GPU it is then rounded to
+half precision. LimiX-2's golden densities are recorded on a CPU.

@@ -21,7 +21,7 @@ context and never on the other queries in its chunk:
   (:mod:`lazy.models._limix_preprocess`), with upstream's own classes and
   seeds, where upstream's column filter and categorical detection and
   encoding also see the queries;
-* the feature positional embedding is drawn from a dedicated generator;
+* the feature positional embedding is drawn from a dedicated CPU generator;
 * the key/value cache (``kv_cache``, default on) is a port: the context goes
   through the network once, at fit, and each chunk of queries attends to it
   (:mod:`lazy.models._limix_stream`). Exact: equal to upstream's forward pass

@@ -39,6 +39,11 @@ change the API.
 
 ### Changed
 
+- LimiX-2 on a GPU draws its feature positional embedding as on a CPU, with
+  a CPU generator seeded per member, and moves it to the GPU. LAZY drew it
+  with a GPU generator, which gives another stream for the same seed, so the
+  same `random_state` gave different densities on the two devices. Densities
+  on a GPU change; on a CPU they are unchanged.
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.

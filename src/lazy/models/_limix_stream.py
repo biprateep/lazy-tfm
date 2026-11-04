@@ -13,7 +13,7 @@ only the query rows, attending to the cache. The answers equal upstream's
 forward pass on the stacked rows up to float rounding: on CPU the logits
 agree to about 2e-5, as closely as two chunkings of the same queries do.
 
-Two further differences from upstream's ``LimiXPredictor``, both removing a
+Two further differences from upstream's ``LimiXPredictor`` remove a
 dependence on how the queries are chunked:
 
 * the feature positional embedding -- a random draw -- comes from a dedicated
@@ -22,6 +22,11 @@ dependence on how the queries are chunked:
   drawing it (a draw of noise for masked cells, discarded at inference);
 * the features arrive already preprocessed on the context alone
   (:mod:`lazy.models._limix_preprocess`).
+
+A third removes a dependence on the device: the generator is a CPU one, and
+the embedding is drawn in float32 on the CPU and moved to the network's
+device (:func:`_add_embeddings`), since a CUDA generator gives another stream
+than a CPU one for the same seed.
 
 :func:`forward` is the uncached path (``kv_cache=False``): upstream's own
 forward pass on context and queries stacked. This is a private module.
@@ -108,7 +113,8 @@ def load_network(checkpoint: pathlib.Path, device: str) -> Any:
         device: The torch device to put it on.
 
     Returns:
-        The upstream ``FeaturesTransformer``, in eval mode.
+        The upstream ``FeaturesTransformer``, in eval mode, drawing its
+        feature positional embedding with :func:`_add_embeddings`.
     """
     import torch  # noqa: PLC0415 - an optional, heavy extra.
 
@@ -116,6 +122,9 @@ def load_network(checkpoint: pathlib.Path, device: str) -> Any:
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     with _silenced():  # upstream prints
         network, _ = loading.load_from_checkpoint(state)
+    network.add_embeddings = functools.partial(
+        _add_embeddings, network.feature_positional_embedding
+    )
     return network.to(device).eval()
 
 
@@ -261,9 +270,7 @@ def forward(
             y=_tensor(member.y, device)[None],
             eval_pos=len(member.y),
             task_type="Regression",
-            feature_positional_embedding_generator=_generator(
-                member.seed, device
-            ),
+            feature_positional_embedding_generator=_generator(member.seed),
         )
         return _numpy(output["reg_output"][0])
 
@@ -298,7 +305,7 @@ def _encode(
             None,
             None,
             "Regression",
-            _generator(member.seed, device),
+            _generator(member.seed),
         )
     return tokens, feature_mask, y_type
 
@@ -368,11 +375,42 @@ def _inference(device: Any, *, mixed_precision: bool) -> Any:
     return stack
 
 
-def _generator(seed: int, device: Any) -> Any:
-    """A fresh generator for the feature positional embedding."""
+def _generator(seed: int) -> Any:
+    """A fresh CPU generator for the feature positional embedding."""
     import torch  # noqa: PLC0415 - an optional, heavy extra.
 
-    return torch.Generator(device=device).manual_seed(int(seed))
+    return torch.Generator().manual_seed(int(seed))
+
+
+def _add_embeddings(project: Any, x: Any, *, generator: Any = None) -> Any:
+    """Upstream's ``FeaturesTransformer.add_embeddings``, drawn on the CPU.
+
+    Upstream draws on ``x``'s device in ``x``'s dtype. This draws float32
+    on ``generator``, a CPU generator, then casts to ``x``'s device and
+    dtype: the same draw on every device, and upstream's own on a CPU in
+    float32. It holds no state, so members of any seed and any thread share
+    it. It takes the network's projection rather than the network, so that
+    the network does not refer to itself and is freed as soon as it is
+    dropped.
+
+    Args:
+        project: The network's ``feature_positional_embedding`` layer.
+        x: Feature tokens, shape (batch, n_rows, n_groups, embed_dim); the
+            embedding is added to it in place.
+        generator: The member's CPU generator, from :func:`_generator`, or
+            None for torch's global one, as upstream allows.
+
+    Returns:
+        ``x``.
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    embeddings = torch.randn(
+        (x.shape[2], x.shape[3] // 4), dtype=torch.float32, generator=generator
+    )
+    embeddings = project(embeddings.to(x))
+    x += embeddings[None, None]
+    return x
 
 
 def _tensor(values: _typing.FloatArray, device: Any) -> Any:
