@@ -248,7 +248,7 @@ def test_a_refit_at_another_version_loads_that_versions_checkpoint(
         pinned, version="v-other", repo_id="google/tabfm-other"
     )
     monkeypatch.setitem(_hub.CHECKPOINTS, "tabfm:v-other", other)
-    monkeypatch.setattr(tabfm, "_RECIPE_VERSIONS", ("v1.0", "v-other"))
+    monkeypatch.setitem(tabfm._RECIPES, "v-other", tabfm._RECIPES["v1.0"])
     recorder = fakes.Recorder()
     cls = fakes.install("tabfm", monkeypatch, recorder)
     X, z, X_query = _problem(100)

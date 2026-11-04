@@ -45,7 +45,7 @@ see :data:`lazy.CHECKPOINTS`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 import dataclasses
 from importlib import util
 import pathlib
@@ -73,9 +73,15 @@ __all__ = ["LimiXBarDistribution"]
 # The largest share of free GPU memory the key/value caches may take.
 _CACHE_MEMORY_FRACTION = 0.6
 
-_RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
-"""The versions :data:`lazy.models._limix_preprocess.RECIPE` was read from
-upstream for. A new version joins once its recipe is checked against upstream's.
+_RECIPES: dict[str, dict[str, Any]] = {
+    "v2": {
+        field.name: getattr(_limix_preprocess.RECIPE, field.name)
+        for field in dataclasses.fields(_limix_preprocess.RECIPE)
+    },
+}
+""":data:`lazy.models._limix_preprocess.RECIPE`, by the versions it was read
+from upstream for. A new version joins once its recipe is checked against
+upstream's.
 """
 
 
@@ -195,6 +201,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     native_outlier_clipping = False
     recommended_max_context = 20_000
     exact_chunking = False  # Exact up to float rounding, not bit for bit.
+    recipes = _RECIPES
+    # LimiXPredictor's default, the value LimiX-2 was released with.
+    softmax_temperature_key = "softmax_temperature"
+    # No outlier_threshold_key: LimiX-2 clips nothing. LimiXPredictor stores
+    # outlier_remove_std and never reads it, and the checkpoint's encoder has
+    # remove_outliers off.
 
     # The key/value caches' memory budget and use of it, in bytes, and why
     # some member runs without one.
@@ -302,28 +314,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
                 return False
         print(f"LimiX-2: source at {source.root} ({source.origin}).")
         return True
-
-    def _auto_softmax_temperature(self) -> float:
-        # LimiXPredictor's default, the value LimiX-2 was released with.
-        return _limix_preprocess.RECIPE.softmax_temperature
-
-    def _auto_outlier_threshold(self) -> None:
-        # LimiX-2 clips nothing: LimiXPredictor stores outlier_remove_std
-        # and never reads it, and the checkpoint's encoder has
-        # remove_outliers off.
-        return None
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _RECIPE_VERSIONS:
-            return super()._pinned_recipe(version)
-        recipe = _limix_preprocess.RECIPE
-        return types.MappingProxyType(
-            {
-                field.name: getattr(recipe, field.name)
-                for field in dataclasses.fields(recipe)
-            }
-        )
 
     def _load_checkpoint(self) -> None:
         super()._load_checkpoint()

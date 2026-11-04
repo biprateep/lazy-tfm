@@ -63,13 +63,13 @@ def _without_softmax(recipe):
 
 
 def test_every_version_has_a_pinned_recipe():
-    assert set(tabpfn._AUTO_RECIPES) == set(VERSIONS)
+    assert set(tabpfn._RECIPES) == set(VERSIONS)
 
 
 @pytest.mark.parametrize("version", VERSIONS)
 def test_auto_hands_over_the_pinned_recipe(version):
     """Every field is lazy's, none left to the checkpoint or the package."""
-    recipe = tabpfn._AUTO_RECIPES[version]
+    recipe = tabpfn._RECIPES[version]
     settings = _settings(version, _group(), recipe["OUTLIER_REMOVAL_STD"])
     pinned = {k: v for k, v in settings.items() if k in recipe}
     assert pinned == _without_softmax(recipe)
@@ -127,7 +127,7 @@ def test_a_bagged_member_is_a_regressor_of_its_own_on_its_bag():
 @pytest.mark.parametrize("version", VERSIONS)
 def test_bagged_members_keep_the_recipes_mix(version):
     """Member i runs the preprocessor and target transform upstream gives i."""
-    recipe = tabpfn._AUTO_RECIPES[version]
+    recipe = tabpfn._RECIPES[version]
     groups = _members.plan(
         n_estimators=4,
         transforms=None,
@@ -199,7 +199,7 @@ def test_the_oldest_recipes_are_what_upstream_ships_for_them(version):
             "regression", constants.ModelVersion(version)
         )
     )
-    recipe = tabpfn._AUTO_RECIPES[version]
+    recipe = tabpfn._RECIPES[version]
     assert {k: shipped[k] for k in recipe} == recipe
 
 
@@ -212,7 +212,7 @@ def test_the_pinned_recipes_are_what_the_checkpoints_store(version):
     )
     regressor = upstream.TabPFNRegressor(model_path=path, device="cpu")
     stored = _upstream_fields(regressor.get_inference_config())
-    recipe = tabpfn._AUTO_RECIPES[version]
+    recipe = tabpfn._RECIPES[version]
     assert {k: stored[k] for k in recipe} == recipe
 
 
@@ -336,7 +336,7 @@ def test_the_fitted_regressor_ran_the_pinned_recipe(small):
     X, y, _ = small
     est = _fit(X, y, version="v3")
     config = est.regressor_.inference_config_
-    recipe = tabpfn._AUTO_RECIPES["v3"]
+    recipe = tabpfn._RECIPES["v3"]
     assert {k: _upstream_fields(config)[k] for k in recipe} == recipe
     assert est.regressor_.softmax_temperature_ == 0.9
     assert est.provenance_["softmax_temperature"] == 0.9

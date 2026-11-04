@@ -17,7 +17,7 @@ string upstream itself uses. Every estimator takes that version as an ordinary
 parameter, defaulting to the one in :data:`DEFAULT_VERSIONS`, and records what
 it actually loaded in its ``provenance_`` (:meth:`Checkpoint.provenance`).
 Adding a version is one entry here and the backend's recipe for it
-(``_pinned_recipe``); tests/lazy/test_backend_completeness.py reports a
+(``recipes``); tests/lazy/test_backend_completeness.py reports a
 version without one.
 
 :func:`download_checkpoint` pre-fetches on a machine with a network connection

@@ -59,13 +59,12 @@ bin cannot change a density tabulated on it.
 from __future__ import annotations
 
 import collections
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 import copy
 from importlib import util
 import inspect
 import math
 import pathlib
-import types
 from typing import Any
 
 import numpy as np
@@ -170,9 +169,17 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
 }
 """Every other TabFMClassifier argument, pinned to the recipe's value."""
 
-_RECIPE_VERSIONS: tuple[str, ...] = ("v1.0",)
-"""The versions the recipe above was read from upstream for. A new version joins
-once its recipe is checked against upstream's.
+_RECIPES: dict[str, dict[str, Any]] = {
+    "v1.0": {
+        "norm_methods": AUTO_NORM_METHODS,
+        "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+        "max_num_features": AUTO_MAX_NUM_FEATURES,
+        "softmax_temperature": AUTO_SOFTMAX_TEMPERATURE,
+        **_PINNED_CLASSIFIER_ARGS,
+    },
+}
+"""The recipe above, by the versions it was read from upstream for. A new
+version joins once its recipe is checked against upstream's.
 """
 
 
@@ -511,6 +518,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         "equal-mass bins of the target."
     )
     extra = "tabfm"
+    upstream_package = "tabfm"
     native_output = "histogram"
     # Only TabFM's norm methods that are lazy's transforms: its robust scales
     # to unit variance, its quantile subsamples 10,000 rows and its
@@ -525,6 +533,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # Float rounding in float32 on CUDA.
     kv_cache_rtol = 1e-4
     chunks_queries = False
+    recipes = _RECIPES
+    softmax_temperature_key = "softmax_temperature"
+    outlier_threshold_key = "outlier_threshold"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -577,11 +588,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     # -- the per-backend interface -------------------------------------------
 
-    def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "tabfm", needed_by=type(self).__name__, extra=self.extra
-        )
-
     @classmethod
     def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
         """Installs TabFM's repository build over the release, if need be.
@@ -614,26 +620,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             check=_CHECK_BUILD,
             missing="the KV-cache API",
             dry_run=dry_run,
-        )
-
-    def _auto_softmax_temperature(self) -> float:
-        return AUTO_SOFTMAX_TEMPERATURE
-
-    def _auto_outlier_threshold(self) -> float:
-        return AUTO_OUTLIER_THRESHOLD
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _RECIPE_VERSIONS:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(
-            {
-                "norm_methods": AUTO_NORM_METHODS,
-                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
-                "max_num_features": AUTO_MAX_NUM_FEATURES,
-                "softmax_temperature": AUTO_SOFTMAX_TEMPERATURE,
-                **_PINNED_CLASSIFIER_ARGS,
-            }
         )
 
     def _check_backend_params(self) -> None:
