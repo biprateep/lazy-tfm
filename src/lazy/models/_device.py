@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["resolve_device"]
+__all__ = ["is_auto", "resolve_device"]
 
 _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
 """The device strings accepted besides ``"auto"``, case-insensitively."""
@@ -39,9 +39,9 @@ def resolve_device(device: object = "auto") -> str:
         )
     # A torch.device prints as its string form ("cuda:0"); str() also lets
     # this module check it without importing torch.
-    name = str(device).strip().lower()
-    if name == "auto":
+    if is_auto(device):
         return _auto()
+    name = str(device).strip().lower()
     if not _DEVICE_PATTERN.fullmatch(name):
         raise ValueError(
             f"unknown device {device!r}: use 'auto', 'cpu', 'cuda', "
@@ -57,6 +57,18 @@ def resolve_device(device: object = "auto") -> str:
                 f"device={device!r} requested but MPS is unavailable"
             )
     return name
+
+
+def is_auto(device: object) -> bool:
+    """Whether a ``device`` parameter is ``"auto"``, in any case or spacing.
+
+    Args:
+        device: A ``device`` parameter, as :func:`resolve_device` takes it.
+
+    Returns:
+        True if :func:`resolve_device` picks the device for ``device``.
+    """
+    return str(device).strip().lower() == "auto"
 
 
 def _auto() -> str:

@@ -38,6 +38,7 @@ The two files total about 1 GB. They are downloaded once from Zenodo record
 ``$XDG_CACHE_HOME/lazy-tfm`` or ``~/.cache/lazy-tfm``, overridable with
 the ``LAZY_DATA_HOME`` environment variable or the ``data_home`` argument.
 Nothing is re-downloaded if the cached file is already there and intact.
+Each download is logged at level INFO to the ``lazy.datasets`` logger.
 
 DC1 is Buzzard v1.0 photometry: ``ugrizy`` magnitudes at LSST ten-year depth,
 ``i < 25.3``, ``0 < z < 2``, 43,486 training and 390,990 test galaxies. Each
@@ -75,6 +76,7 @@ import functools
 import hashlib
 import io
 import itertools
+import logging
 import os
 import pathlib
 import tempfile
@@ -88,7 +90,6 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
-from lazy import _home
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -112,6 +113,8 @@ __all__ = [
     "load_trainz",
     "make_selection_split",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200)
 """The LSST DESC PZ Data Challenge output format: 200 bins of width 0.01 over
@@ -168,9 +171,6 @@ _SIZES = {
     "trainz_test.npz": 694_374_957,
     _HSC_FILE: 13_823_712,
 }
-# The name of the old default cache directory, still read with a warning.
-_LEGACY_HOME = "lazy-photoz"
-_warned_legacy: set[pathlib.Path] = set()
 
 # Seconds a download may wait on the server before giving up, and the size of
 # the pieces it is read in.
@@ -446,34 +446,6 @@ def build_features(
     return pd.DataFrame(out, index=raw.index)
 
 
-def _legacy_copy(
-    filename: str, root: str | pathlib.Path | None, size: int
-) -> pathlib.Path | None:
-    """A complete copy of ``filename`` in the old default cache directory.
-
-    Looked for only when no cache directory was chosen, by argument or by
-    ``$LAZY_DATA_HOME``: the old directory is ``lazy-photoz``. The first use
-    of the old cache warns, once.
-
-    Returns:
-        The old copy, or None if there is none, or one was chosen.
-    """
-    if root or os.environ.get("LAZY_DATA_HOME"):
-        return None
-    legacy = _home.default_home(_LEGACY_HOME) / filename
-    if not _is_complete(legacy, size):
-        return None
-    if legacy.parent not in _warned_legacy:
-        _warned_legacy.add(legacy.parent)
-        _warnings.warn(
-            f"lazy.datasets is using {legacy} from its old cache directory, "
-            f"{legacy.parent}; the cache is now {data_home()}. Move the "
-            "files there to silence this.",
-            _warnings.LazyWarning,
-        )
-    return legacy
-
-
 @typing.overload
 def fetch_dc1(
     split: Literal[False] = ...,
@@ -727,17 +699,12 @@ def _cached_file(
     """Returns the cached copy of one remote file, fetched and checksummed.
 
     A cached copy whose size is not the published file's is fetched again,
-    or refused when ``download_if_missing`` is False. With no cache
-    directory chosen, a copy in the cache used before the package's rename
-    is used, with a warning, rather than fetched again.
+    with a warning, or refused when ``download_if_missing`` is False.
     """
     dest = data_home(root) / filename
     size = _SIZES[filename]
     if _is_complete(dest, size):
         return dest
-    legacy = _legacy_copy(filename, root, size)
-    if legacy is not None:
-        return legacy
     if dest.exists():
         message = (
             f"{dest} is {dest.stat().st_size} bytes, not the {size} "
@@ -745,7 +712,7 @@ def _cached_file(
         )
         if not download_if_missing:
             raise OSError(f"{message}. Delete it and run {hint} again.")
-        print(f"lazy.datasets: {message}; fetching it again", flush=True)
+        _warnings.warn(f"{message}; fetching it again", _warnings.LazyWarning)
     elif not download_if_missing:
         raise FileNotFoundError(
             f"{dest} is not cached and download_if_missing=False. "
@@ -820,7 +787,7 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
         OSError: If the download fails, stalls for longer than the timeout,
             or does not match its checksum.
     """
-    print(f"lazy.datasets: downloading {url}", flush=True)
+    _LOG.info("downloading %s", url)
     with tempfile.NamedTemporaryFile(
         dir=dest.parent, prefix=f".{dest.name}.", suffix=".part", delete=False
     ) as out:
@@ -852,10 +819,7 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
                     raise
     finally:
         tmp.unlink(missing_ok=True)
-    print(
-        f"lazy.datasets: cached {dest} ({dest.stat().st_size / 1e6:.0f} MB)",
-        flush=True,
-    )
+    _LOG.info("cached %s (%.0f MB)", dest, dest.stat().st_size / 1e6)
 
 
 def _umask() -> int:

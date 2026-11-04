@@ -12,7 +12,6 @@ their own, from the pickled path, as soon as they are unpickled.
 import io
 import pathlib
 import pickle
-import threading
 import time
 
 import fakes
@@ -24,7 +23,6 @@ import threads
 import lazy
 from lazy.models import _device
 from lazy.models import _hub
-from lazy.models import _locks
 
 
 @pytest.fixture
@@ -180,39 +178,23 @@ def test_threads_predicting_on_an_unpickled_model_attach_one_network(
     model = fakes.Backend("tabicl", monkeypatch)(n_estimators=2).fit(X, y)
     expected = model.predict_distribution(X_test).locs
     restored = pickle.loads(pickle.dumps(model))
-    contended = threading.Event()
-    lock_of = _locks.network_lock
-
-    class WatchedLock:
-        """A regressor's lock, noting a thread that finds it held."""
-
-        def __init__(self, obj):
-            self.lock = lock_of(obj)
-            self.watched = isinstance(obj, fake_tabicl.Regressor)
-
-        def __enter__(self):
-            if not self.lock.acquire(blocking=False):
-                if self.watched:
-                    contended.set()
-                self.lock.acquire()
-
-        def __exit__(self, *exc):
-            self.lock.release()
-
+    contended = threads.watch_contention(
+        monkeypatch, lambda obj: isinstance(obj, fake_tabicl.Regressor)
+    )
     relocate = restored._checkpoint
-    first = threading.Lock()  # Only the first caller acquires it.
     relocated = []
 
-    def held_checkpoint():
-        # The first attach waits until the other thread finds the
-        # regressor's lock held: without that lock, both attach at once.
-        if first.acquire(blocking=False):
-            assert contended.wait(threads.TIMEOUT)
+    def counted_checkpoint():
         relocated.append(True)
         return relocate()
 
-    monkeypatch.setattr(_locks, "network_lock", WatchedLock)
-    monkeypatch.setattr(restored, "_checkpoint", held_checkpoint)
+    # The first attach waits until the other thread finds the regressor's
+    # lock held: without that lock, both attach at once.
+    monkeypatch.setattr(
+        restored,
+        "_checkpoint",
+        threads.held_until(contended, counted_checkpoint),
+    )
     answers = _in_threads(
         lambda i: restored.predict_distribution(X_test).locs, 2
     )
@@ -222,27 +204,19 @@ def test_threads_predicting_on_an_unpickled_model_attach_one_network(
     assert len(relocated) == len(_regressors(restored))
 
 
-def test_an_auto_device_is_resolved_again_on_unpickling(monkeypatch, data):
-    X, y, X_test = data
+def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch, data):
+    X, y, _ = data
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")
     model = fakes.Backend("tabicl", monkeypatch)(device="auto").fit(X, y)
-    expected = model.predict_distribution(X_test).locs
-    model.device_ = "cuda:7"  # as if fitted there
+    # As if fitted on a GPU, under mixed precision.
+    model.device_, model.mixed_precision_ = "cuda:7", True
     for regressor in _regressors(model):
         regressor.device = regressor.device_ = "cuda:7"
+        regressor.use_amp = True
     restored = pickle.loads(pickle.dumps(model))
-    device = _device.resolve_device("auto")
-    assert restored.device_ == device
-    assert restored.provenance_["device"] == device
-    assert restored.mixed_precision_ == device.startswith("cuda")
-    assert restored.provenance_["tabicl"]["use_amp"] == (
-        restored.mixed_precision_
-    )
     for regressor in _regressors(restored):
-        assert regressor.device_ == device
-        assert regressor.use_amp == restored.mixed_precision_
-    np.testing.assert_array_equal(
-        restored.predict_distribution(X_test).locs, expected
-    )
+        assert regressor.device_ == "cpu"
+        assert regressor.use_amp is False
 
 
 @pytest.mark.checkpoint

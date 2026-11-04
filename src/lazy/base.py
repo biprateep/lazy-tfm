@@ -94,6 +94,11 @@ _Features: TypeAlias = Any
 # otherwise be one 15.6 GB array.
 _BLOCK_BYTES = 256 * 2**20
 
+_EMPTY_QUERY_MESSAGE = (
+    "Predicting on zero rows of X is deprecated: from lazy 0.7.0 it raises"
+    " ValueError, as scikit-learn does. Check for empty X before calling."
+)
+
 
 class BaseDensityRegressor(
     sklearn_base.RegressorMixin, sklearn_base.BaseEstimator, abc.ABC
@@ -102,6 +107,10 @@ class BaseDensityRegressor(
 
     Subclasses must accept a ``y_grid`` parameter and pass it through
     unchanged; see the module docstring.
+
+    The ``predict*`` methods return empty results for an ``X`` with no rows
+    and issue a ``FutureWarning``; from 0.7.0 they raise ``ValueError``.
+    :meth:`score` and :meth:`evaluate` raise it already.
 
     Attributes:
         backend: The registered backend name (a key of
@@ -284,10 +293,14 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
-        return self._densities(self._check_features(X), grid)
+        return self._densities(self._check_queries(X), grid)
 
     def predict_distribution(self, X: _Features) -> distributions.Distribution:  # noqa: GS030 - scikit-learn's X, y.
         """The model's native per-row distributions, on no grid at all.
@@ -316,9 +329,13 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
-        X = self._check_features(X)
+        X = self._check_queries(X)
         if X.empty:
             return self._empty_distribution()
         return self._predict_distribution(X)
@@ -343,12 +360,16 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
         return np.concatenate(
             [
                 dist.ppf(quantiles)
-                for dist in self._chunked(self._check_features(X))
+                for dist in self._chunked(self._check_queries(X))
             ]
         )
 
@@ -372,6 +393,10 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
         if not 0.0 < coverage < 1.0:
@@ -379,7 +404,7 @@ class BaseDensityRegressor(
         return np.concatenate(
             [
                 dist.interval(coverage)
-                for dist in self._chunked(self._check_features(X))
+                for dist in self._chunked(self._check_queries(X))
             ]
         )
 
@@ -405,9 +430,13 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
-        X = self._check_features(X)
+        X = self._check_queries(X)
         y = _check_target(y, len(X))
         pits, start = [], 0
         for dist in self._chunked(X):
@@ -430,6 +459,10 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         return self.predict_proba(X, y_grid)
 
@@ -457,13 +490,17 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
         centers = self._resolve_grid(y_grid).centers
         return np.concatenate(
             [
                 dist.cdf(centers)
-                for dist in self._chunked(self._check_features(X))
+                for dist in self._chunked(self._check_queries(X))
             ]
         )
 
@@ -499,11 +536,15 @@ class BaseDensityRegressor(
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+
+        Warns:
+            FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
+                ``ValueError``.
         """
         validation.check_is_fitted(self)
         method = _check_method(method)
         grid = self._resolve_grid(y_grid)
-        X = self._check_features(X)
+        X = self._check_queries(X)
         return np.concatenate(
             [
                 metrics.grid_point_estimate(grid, density, method)
@@ -793,6 +834,21 @@ class BaseDensityRegressor(
                 "features as input"
             )
         return self._align_to_fit(frame, named)
+
+    def _check_queries(self, X: _Features) -> pd.DataFrame:
+        """:meth:`_check_features`, warning that zero rows will be refused.
+
+        Args:
+            X: Features, shape (n_samples, n_features), in any form
+                :func:`lazy._inputs.as_feature_frame` accepts.
+
+        Returns:
+            The features, as :meth:`_check_features` returns them.
+        """
+        frame = self._check_features(X)
+        if frame.empty:
+            _warnings.warn(_EMPTY_QUERY_MESSAGE, FutureWarning)
+        return frame
 
     def _check_not_empty(self, X: pd.DataFrame) -> None:
         """Refuses a table with no rows, as scikit-learn does.

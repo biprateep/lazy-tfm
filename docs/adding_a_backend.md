@@ -88,6 +88,17 @@ and raises a clear error on a device its model does not support, before the
 checkpoint is loaded (Kumo Tabular refuses `"mps"`, which has no double
 precision). No current backend is tested on `"mps"`.
 
+An estimator unpickled under `device="auto"` resolves `device_` and
+`mixed_precision_` again on the machine at hand, so a model fitted on a GPU
+predicts on the CPU where there is none. A backend whose handles hold the
+device moves them to the new `device_` in its own `__setstate__` (TabICL and
+TabPFN move their upstream regressors). Handles must pickle without device
+tensors for the move from a GPU to work: TabICL's do, while TabPFN's still
+hold CUDA tensors (#197). A backend whose `_recipe` records a
+setting that follows the device returns it, recomputed, from
+`_relocated_provenance` (TabICL's `use_amp`, Kumo Tabular's autocast dtype and
+TabPFN's inference precision).
+
 ## Hooks for the rest of the package
 
 Code shared by every backend never names one. Where a backend needs more than

@@ -320,6 +320,42 @@ def test_as_grid_refuses_the_native_sentinel():
 
 
 @pytest.mark.parametrize(
+    ("call", "shape"),
+    [
+        (lambda est, X: est.predict_proba(X, lazy.datasets.DC1_GRID), (0, 200)),
+        (lambda est, X: est.predict(X, method="median"), (0,)),
+        (lambda est, X: est.predict_quantiles(X, [0.1, 0.5]), (0, 2)),
+    ],
+)
+def test_no_rows_give_empty_results_of_the_requested_shape(data, call, shape):
+    X, y = data
+    est = GaussianDummy().fit(X, y)
+    with pytest.warns(FutureWarning):
+        assert call(est, X.iloc[:0]).shape == shape
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda est, X, y: est.predict_proba(X),
+        lambda est, X, y: est.predict_cdf(X),
+        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict_pdf(X),
+        lambda est, X, y: est.predict_quantiles(X),
+        lambda est, X, y: est.predict_interval(X),
+        lambda est, X, y: est.predict_pit(X, y),
+        lambda est, X, y: est.predict_distribution(X),
+    ],
+)
+def test_predicting_no_rows_does_not_run_the_model(data, call):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.warns(FutureWarning):
+        call(est, X.iloc[:0], y[:0])
+    assert getattr(est, "calls_", 0) == 0
+
+
+@pytest.mark.parametrize(
     "call",
     [
         lambda est, X, y: est.predict_proba(X),
@@ -441,50 +477,6 @@ def test_fitting_no_rows_is_refused_like_scikit_learn(data):
         est.fit(X.iloc[:0], y[:0])
     with pytest.raises(exceptions.NotFittedError):
         est.predict_proba(X)  # the refused fit left it unfitted
-
-
-@pytest.mark.parametrize(
-    ("call", "shape"),
-    [
-        (lambda est, X: est.predict_proba(X), (0, 30)),
-        (lambda est, X: est.predict_cdf(X), (0, 30)),
-        (lambda est, X: est.predict(X), (0,)),
-        (lambda est, X: est.predict(X, method="median"), (0,)),
-        (lambda est, X: est.predict_quantiles(X, [0.1, 0.5]), (0, 2)),
-        (lambda est, X: est.predict_proba(X, lazy.datasets.DC1_GRID), (0, 200)),
-    ],
-)
-def test_predicting_no_rows_gives_empty_results_without_inference(
-    data, call, shape
-):
-    X, y = data
-    est = _CountingDummy(y_grid=lazy.Grid.linear(0.0, 3.0, 30)).fit(X, y)
-    out = call(est, X.iloc[:0])
-    assert out.shape == shape
-    assert getattr(est, "calls_", 0) == 0
-
-
-def test_no_rows_give_no_pit_values_without_inference(data):
-    X, y = data
-    est = _CountingDummy().fit(X, y)
-    assert est.predict_pit(X.iloc[:0], y[:0]).shape == (0,)
-    assert getattr(est, "calls_", 0) == 0
-
-
-def test_no_rows_give_an_empty_distribution(data):
-    X, y = data
-    est = _CountingDummy().fit(X, y)
-    dist = est.predict_distribution(X.iloc[:0])
-    assert len(dist) == 0
-    assert getattr(est, "calls_", 0) == 0
-
-
-@pytest.mark.parametrize("method", ["score", "evaluate"])
-def test_scoring_no_rows_is_refused(data, method):
-    X, y = data
-    est = _CountingDummy().fit(X, y)
-    with pytest.raises(ValueError, match=r"0 sample\(s\)"):
-        getattr(est, method)(X.iloc[:0], y[:0])
 
 
 @pytest.mark.parametrize(

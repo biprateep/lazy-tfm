@@ -736,12 +736,16 @@ class QuantileDistribution(_Base):
         Returns:
             Normalized densities, shape (n_rows, grid.n_bins).
         """
-        return self._on_grid_and_outside(grid)[0]
+        return grid.normalize(self._bin_densities(grid))
 
-    def _on_grid_and_outside(
+    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
+        """The mass in each bin of ``grid`` over its width, unnormalized."""
+        return self._bin_densities_and_outside(grid)[0]
+
+    def _bin_densities_and_outside(
         self, grid: grid_lib.Grid
     ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-        """:meth:`on_grid`, and each row's probability outside ``grid``.
+        """:meth:`_bin_densities`, and each row's probability outside ``grid``.
 
         The probability outside comes from the CDF that the tabulation
         evaluates at the grid's ends, so it costs no second interpolation,
@@ -751,7 +755,7 @@ class QuantileDistribution(_Base):
             grid: The grid to put the densities on.
 
         Returns:
-            A tuple ``(density, outside)``: the normalized densities, shape
+            A tuple ``(density, outside)``: the unnormalized densities, shape
             (n_rows, grid.n_bins), and the probability below ``grid.y_min``
             plus that above ``grid.y_max``, tails included, shape (n_rows,).
         """
@@ -1003,12 +1007,16 @@ class MixtureDistribution(_Base):
         Returns:
             Normalized densities, shape (n_rows, grid.n_bins).
         """
+        return grid.normalize(self._bin_densities(grid))
+
+    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
+        """The components' bin densities, weighted and unnormalized."""
         total = np.zeros((self.npdf, grid.n_bins))
         for weight, component in zip(
             self.weights, self.components, strict=True
         ):
             total += weight * component._bin_densities(grid)  # noqa: SLF001 - same module.
-        return grid.normalize(total)
+        return total
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values))."""

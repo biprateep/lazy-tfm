@@ -60,7 +60,6 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
@@ -622,16 +621,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         return (_unpickle, (type(self), fitted), self.__getstate__())
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle on this machine, not the one it was made on.
+        """Restores a pickle; the members' caches are recorded on next use.
 
-        ``device="auto"`` is resolved again, so a model fitted on a GPU
-        predicts on the CPU where there is none, and the checkpoint is found
-        again through the hub on next use rather than at the pickled path.
+        Args:
+            state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
-        if "device_" in state and self.device == "auto":
-            self.device_ = _device.resolve_device(self.device)
-            self.provenance_ = {**self.provenance_, "device": self.device_}
         if "handles_" in state:
             self._caches_pending = True
 
