@@ -9,9 +9,9 @@ caches), so two threads using one such network at once would answer from
 each other's context. Whatever hands such a network a context holds the
 network's lock until it has taken the network's answer and cleared it.
 
-An estimator that rebuilds state on first use, as LimiX rebuilds its caches
-after unpickling, is locked the same way, by the estimator itself, so that
-it does not hold up the other models on its network.
+An estimator that rebuilds state on first use, as an unpickled estimator
+rebuilds the caches its pickle left out, is locked the same way, by the
+estimator itself, so that it does not hold up the other models on its network.
 
 Typical usage example:
 

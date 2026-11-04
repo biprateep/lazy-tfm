@@ -498,7 +498,7 @@ class TabICLQuantile(
     def _attach_network(self, regressor: Any) -> None:
         """Hands an unpickled regressor the shared network, on first use.
 
-        A pickle leaves the network out (:meth:`__getstate__`), and the
+        A pickle leaves the network out (:meth:`_pickled_handle`), and the
         checkpoint is found again through the hub, where it is on this
         machine, rather than at the pickled path. A fitted regressor that
         holds its network already is left as it is.
@@ -572,31 +572,42 @@ class TabICLQuantile(
             },
         }
 
-    def __getstate__(self) -> dict[str, Any]:
-        """Pickles the regressors without their network.
+    def _pickled_handle(self, handle: _RegressorGroup) -> _RegressorGroup:
+        """A group whose regressors hold neither network nor cache.
 
         Upstream's own pickle of a regressor leaves the network out but
         reloads it as soon as it is unpickled, from the absolute checkpoint
         path and on the device it was fitted on, one network per regressor.
-        Each regressor is pickled as the state upstream's pickle holds (its
-        key/value cache, on the CPU, and its context included) and restored
-        by :meth:`__setstate__` without a network, which the first
-        prediction attaches, shared (:meth:`_attach_network`).
+        Each regressor is pickled as the state upstream's pickle holds, its
+        context included, but without its key/value cache, and restored by
+        :meth:`__setstate__` without a network, which the first prediction
+        attaches, shared (:meth:`_attach_network`).
         """
-        state = super().__getstate__()
-        if "handles_" in state:
-            state["handles_"] = [
-                dataclasses.replace(
-                    handle,
-                    regressors=tuple(
-                        _PickledRegressor.of(regressor)
-                        for regressor in handle.regressors
-                    ),
-                )
-                for handle in state["handles_"]
-            ]
-            state.pop("regressor_", None)
-        return state
+        return dataclasses.replace(
+            handle,
+            regressors=tuple(
+                _PickledRegressor.of(regressor)
+                for regressor in handle.regressors
+            ),
+        )
+
+    def _rebuild_caches(self) -> None:
+        """Records each cached regressor's missing key/value cache again.
+
+        On the shared network, as a fit records it, from the context the
+        regressor keeps. A regressor that has its cache, as one from an
+        older pickle does, or one a failed rebuild recorded, keeps it.
+        """
+        for handle in self.handles_:
+            for regressor in handle.regressors:
+                if (
+                    not regressor.kv_cache
+                    or regressor.model_kv_cache_ is not None
+                ):
+                    continue
+                self._attach_network(regressor)
+                with _lending(regressor):
+                    regressor._build_kv_cache()  # noqa: SLF001 - upstream's.
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restores a pickle, its regressors on this model's device.
@@ -616,6 +627,8 @@ class TabICLQuantile(
                 )
                 for handle in self.handles_
             ]
+            # As _after_fit: the TabICLRegressor itself, not the base's handle.
+            self.__dict__.pop("regressor_", None)
             if (
                 len(self.handles_) == 1
                 and len(self.handles_[0].regressors) == 1
@@ -634,8 +647,9 @@ class TabICLQuantile(
         """A pickled regressor, restored as upstream restores one, but lazily.
 
         Everything upstream's unpickling does but load the network: the
-        device is this model's, and the inference config and the key/value
-        cache follow it.
+        device is this model's, and the inference config and any key/value
+        cache follow it. Only an older pickle holds a cache; the others
+        record theirs before the first prediction (:meth:`_rebuild_caches`).
 
         Args:
             pickled: The regressor as :meth:`__getstate__` left it.
@@ -666,7 +680,8 @@ class _PickledRegressor:
     Attributes:
         cls: The regressor's class.
         state: What upstream's ``__getstate__`` returns: everything but the
-            network, the device and the checkpoint path.
+            network, the device, the checkpoint path and, here, the
+            key/value cache.
     """
 
     cls: type[Any]
@@ -674,8 +689,13 @@ class _PickledRegressor:
 
     @classmethod
     def of(cls, regressor: Any) -> _PickledRegressor:
-        """The pickled form of a fitted regressor."""
-        return cls(type(regressor), regressor.__getstate__())
+        """The pickled form of a fitted regressor, the regressor unchanged."""
+        # A shallow copy without the cache, made without upstream's
+        # __setstate__, which would load a network.
+        kind: Any = type(regressor)
+        bare = kind.__new__(kind)
+        bare.__dict__.update(regressor.__dict__, model_kv_cache_=None)
+        return cls(kind, bare.__getstate__())
 
 
 @dataclasses.dataclass(frozen=True)

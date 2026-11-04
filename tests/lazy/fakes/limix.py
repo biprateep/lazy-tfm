@@ -31,6 +31,7 @@ LAZY_SEAMS = (
     "lazy.models._limix_stream.decode",
     "lazy.models.limix._cache_dtype",
     "lazy.models.limix._free_device_memory",
+    "lazy.models.limix._release_device_memory",
     "lazy.models.limix.LimiXBarDistribution._import_backend",
 )
 """The private lazy names that :func:`install` replaces."""
@@ -140,6 +141,7 @@ def install(monkeypatch, recorder):
             "lazy.models._limix_stream.decode": _decode,
             "lazy.models.limix._cache_dtype": lambda net, **kw: None,
             "lazy.models.limix._free_device_memory": lambda net: None,
+            "lazy.models.limix._release_device_memory": lambda net: None,
             "lazy.models.limix.LimiXBarDistribution._import_backend": (
                 lambda est: _SOURCE.loading
             ),

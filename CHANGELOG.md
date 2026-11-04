@@ -42,6 +42,19 @@ change the API.
 
 ### Changed
 
+- A pickled TabICL model no longer holds its key/value caches; its first
+  prediction after unpickling records them again, with the same results to
+  the bit. Kumo Tabular and LimiX already left theirs out; all three now do
+  it the same way, and an unpickled LimiX model with one member group has
+  `regressor_` again. With 2 members and 3 features on a 4-core Xeon CPU
+  (2.8 GHz, 4 torch threads, torch 2.14.0, tabicl 2.2.0), a pickle of 300
+  context rows fell from 35.06 MB to 0.04 MB under `kv_cache=True` and from
+  6.78 MB to 0.04 MB under `"repr"`; of 1,200 rows, from 123.60 MB and
+  10.54 MB to 0.11 MB. Loading it in a fresh process and predicting 200 rows
+  took 3.92 s instead of 3.54 s at 300 rows, and 4.71 s instead of 3.73 s
+  at 1,200 rows, under `kv_cache=True` (medians of 3 interleaved runs).
+  A `copy.deepcopy` also leaves the caches out and rebuilds them on first
+  use. Pickles of earlier versions still load, with the caches they hold.
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.
