@@ -40,7 +40,7 @@ the network, which embeds them itself.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
 from importlib import util
@@ -149,8 +149,18 @@ same for every size).
 # Features in float64 and targets in float32, as upstream is handed them.
 _Array: TypeAlias = npt.NDArray[np.floating[Any]]
 
-_RECIPE_VERSIONS: tuple[str, ...] = tuple(SIZES)
-"""The versions the recipe above was read from upstream for."""
+_RECIPES: dict[str, dict[str, Any]] = {
+    version: {
+        "size": size,
+        "transforms": AUTO_TRANSFORMS,
+        "feat_shuffle_method": AUTO_FEAT_SHUFFLE_METHOD,
+        "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+        "trim_fraction": AUTO_TRIM_FRACTION,
+        **_PINNED_RECIPE,
+    }
+    for version, size in SIZES.items()
+}
+"""The recipe above, by the versions it was read from upstream for."""
 
 
 class KumoQuantile(
@@ -234,6 +244,7 @@ class KumoQuantile(
         "Quantiles of Kumo Tabular's regression head, trimmed across members."
     )
     extra = "kumo"
+    upstream_package = "sdm"
     native_output = "quantiles"
     # Kumo's power, robust and rank transforms are fitted on z-scored and
     # clipped columns and are not the uniform transforms of those names;
@@ -261,6 +272,8 @@ class KumoQuantile(
     # differ by up to 2.2e-4 of a density, and 1.2e-4 of the peak.
     kv_cache_rtol = 1e-3
     cpu_friendly_versions = ("v1-small",)
+    recipes = _RECIPES
+    outlier_threshold_key = "outlier_threshold"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -298,11 +311,9 @@ class KumoQuantile(
         self.verbose = verbose
 
     def _import_backend(self) -> types.ModuleType:
-        sdm = _ensemble.import_extra(
-            "sdm",
-            needed_by=type(self).__name__,
-            extra=self.extra,
-        )
+        # Another package installs as sdm too, so the import alone proves
+        # nothing.
+        sdm = super()._import_backend()
         if not hasattr(getattr(sdm, "models", None), "KumoTabular"):
             raise ImportError(
                 f"{type(self).__name__} needs NVIDIA's structured-data-models, "
@@ -360,24 +371,6 @@ class KumoQuantile(
             check="from sdm.models import KumoTabular",
             dry_run=dry_run,
         )
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _RECIPE_VERSIONS:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(
-            {
-                "size": SIZES[version],
-                "transforms": AUTO_TRANSFORMS,
-                "feat_shuffle_method": AUTO_FEAT_SHUFFLE_METHOD,
-                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
-                "trim_fraction": AUTO_TRIM_FRACTION,
-                **_PINNED_RECIPE,
-            }
-        )
-
-    def _auto_outlier_threshold(self) -> float:
-        return AUTO_OUTLIER_THRESHOLD
 
     def _check_backend_params(self) -> None:
         # The trim is part of Kumo's recipe, so it follows transforms as

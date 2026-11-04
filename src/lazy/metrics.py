@@ -59,12 +59,14 @@ Every function that takes ``y_grid`` accepts either the bin centres, shape
 convention then comes with it, so densities from a model's
 histogram-normalised native grid are scored exactly rather than by the
 trapezoid rule over their centres. With bare centres, the densities are
-trapezoid-normalised. Passing ``bin_edges``, shape (g + 1,), instead treats
-each density as constant across its bin (a ``"histogram"`` grid). A
-histogram-normalised Grid supplies its edges itself
-(:attr:`~lazy.grid.Grid.histogram_edges`). Edges passed with a Grid must be
-its own, or ``ValueError`` is raised, and they make even a trapezoid Grid's
-densities scored as histograms.
+trapezoid-normalised. To score densities that are constant across each bin on
+edges ``e``, pass ``lazy.Grid.from_edges(e, normalization="histogram")``.
+
+The ``bin_edges`` argument, shape (g + 1,), which marks bare centres as a
+histogram grid, is deprecated and is removed in lazy 0.7.0. Passing it warns
+with a ``FutureWarning``. It means the same as the histogram Grid above, with
+centres at the midpoints of the edges. Edges passed with a Grid must be its
+own, or ``ValueError`` is raised.
 
 Typical usage example::
 
@@ -83,6 +85,7 @@ import pandas as pd
 from scipy import stats
 
 from lazy import _typing
+from lazy import _warnings
 from lazy import grid as grid_lib
 
 Scale: TypeAlias = Literal["1+y", "none"]
@@ -301,8 +304,7 @@ def normalize_grid_pdfs(
         y_grid: Strictly increasing bin centres, shape (g,) with g >= 2, or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         A tuple (grid, density): the centres as a float array, shape (g,),
@@ -364,8 +366,7 @@ def normalization_error(
         y_grid: Bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The absolute normalisation error of each row, shape (n,).
@@ -392,8 +393,7 @@ def grid_cdf(
         y_grid: Bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The cumulative mass below each centre, shape (n, g). By trapezoid
@@ -448,8 +448,7 @@ def peak_mean(
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         density: Densities at those centres, shape (n, g).
         frac: Fraction of the peak density that bounds the main peak.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The main-peak weighted mean of each row, shape (n,). A peak one grid
@@ -507,8 +506,7 @@ def grid_point_estimates(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         A dict with keys ``"mode"``, ``"peak_mean"``, ``"mean"`` and
@@ -536,7 +534,7 @@ def grid_point_estimate(
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
         method: One of :data:`POINT_ESTIMATORS`.
-        bin_edges: The grid's bin edges, as in :func:`grid_point_estimates`.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The estimate of each row, shape (n,).
@@ -662,10 +660,9 @@ def evaluate_grid_at_truth(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring. With them, the density at the truth is its
-            bin's, zero outside the edges, and the PIT is the exact
-            piecewise-linear CDF.
+        bin_edges: Deprecated; see the module docstring. With them, the
+            density at the truth is its bin's, zero outside the edges, and
+            the PIT is the exact piecewise-linear CDF.
 
     Returns:
         A tuple (grid, density, pdf_at_truth, pit): the centres, shape (g,);
@@ -726,8 +723,7 @@ def cde_loss(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The loss, averaged over objects.
@@ -753,8 +749,7 @@ def per_object_scores(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         A tuple (cde_terms, pit): ``integral p_i^2 - 2 p_i(z_true_i)`` per
@@ -798,8 +793,7 @@ def crps(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The score, averaged over objects, in the target's units.
@@ -834,8 +828,7 @@ def per_object_crps(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         The score of each object, shape (n,), in the target's units.
@@ -870,8 +863,7 @@ def nll(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
 
@@ -909,8 +901,7 @@ def per_object_nll(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
 
@@ -951,7 +942,7 @@ def per_object_metrics(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, as in :func:`per_object_scores`.
+        bin_edges: Deprecated; see the module docstring.
         floor: The NLL's density floor, as in :func:`per_object_nll`.
 
     Returns:
@@ -1205,8 +1196,7 @@ def pdf_metrics(
         y_grid: Strictly increasing bin centres, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centres, shape (n, g); normalised here.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
 
     Returns:
         A tuple (metrics, pit): the metric bundle and the per-object PIT
@@ -1265,8 +1255,7 @@ def evaluate_grid_pdfs(
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"mode"``, ``"peak_mean"``,
             ``"mean"`` or ``"median"``).
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
         scale: How the point metrics scale residuals: ``"none"`` (the
             default) or ``"1+y"`` (DC1's); see :func:`point_metrics`.
 
@@ -1309,8 +1298,7 @@ def summarize(
             :func:`evaluate_grid_pdfs`.
         label: Model name for a leading ``model`` column; no such column
             when ``None``.
-        bin_edges: The grid's bin edges, shape (g + 1,), or ``None``; see
-            the module docstring.
+        bin_edges: Deprecated; see the module docstring.
         scale: How the point metrics scale residuals: ``"none"`` (the
             default) for plain residuals, or ``"1+y"`` for DC1's
             photometric-redshift convention; see :func:`point_metrics`.
@@ -1408,6 +1396,22 @@ def summarize_scores(
 # --------------------------------------------------------------------------
 
 
+class _Edges(np.ndarray):
+    """Bin edges that lazy resolved, not a caller's ``bin_edges``.
+
+    Passing them on to another metric is not a use of the deprecated
+    argument, so it does not warn. A forwarder passes them on unconverted,
+    since ``np.asarray`` drops the mark.
+    """
+
+
+_BIN_EDGES_DEPRECATED = (
+    "bin_edges is deprecated and is removed in lazy 0.7.0: pass "
+    "lazy.Grid.from_edges(bin_edges, normalization='histogram') as the grid "
+    "instead, whose centres are the midpoints of the edges."
+)
+
+
 def _split_grid(
     y_grid: grid_lib.Grid | npt.ArrayLike, bin_edges: npt.ArrayLike | None
 ) -> tuple[npt.ArrayLike, npt.ArrayLike | None]:
@@ -1415,19 +1419,32 @@ def _split_grid(
 
     A :class:`~lazy.grid.Grid` gives its centres and, when it is
     histogram-normalised, its edges, so its own convention scores it. Bare
-    centres pass through with ``bin_edges`` as given.
+    centres pass through with ``bin_edges`` as given. A user's ``bin_edges``
+    warns; the edges returned are marked as resolved, so the metric that
+    passes them to another does not warn again.
     """
+    if bin_edges is not None and not isinstance(bin_edges, _Edges):
+        _warnings.warn(_BIN_EDGES_DEPRECATED, FutureWarning)
     if not isinstance(y_grid, grid_lib.Grid):
-        return y_grid, bin_edges
+        return y_grid, _resolved(bin_edges)
     if bin_edges is None:
-        return y_grid.centers, y_grid.histogram_edges
+        return y_grid.centers, _resolved(y_grid.histogram_edges)
     edges = np.asarray(bin_edges, dtype=float)
     if not grid_lib._edges_agree(edges, y_grid.edges):  # noqa: SLF001 - the grid's rule.
         raise ValueError(
             "bin_edges differ from the edges of the Grid passed as y_grid; "
             "pass the Grid alone"
         )
-    return y_grid.centers, y_grid.edges
+    return y_grid.centers, _resolved(y_grid.edges)
+
+
+def _resolved(
+    bin_edges: npt.ArrayLike | None,
+) -> _typing.FloatArray | None:
+    """Marks ``bin_edges`` as lazy's own, without copying them."""
+    if bin_edges is None:
+        return None
+    return np.asarray(bin_edges, dtype=float).view(_Edges)
 
 
 def _bin_widths(bin_edges: npt.ArrayLike, n_bins: int) -> _typing.FloatArray:

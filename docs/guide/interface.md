@@ -193,9 +193,11 @@ The features can be given in the forms that scikit-learn users expect:
 a NumPy array, a structured or record array, a pandas DataFrame, an astropy
 `Table` or `QTable` (whose quantities give their values), or anything with a
 `to_pandas()` method. When the input has column names, they are recorded as
-`feature_names_in_` and checked at prediction time. The same columns in a
-different order are reordered, while an unnamed table meeting a named fit, or
-the reverse, is used by position with a warning.
+`feature_names_in_` and checked at prediction time. Every name must be a
+string. A mix of strings and other types is read as no names and warns with
+a `FutureWarning`; from 0.7.0 it raises `TypeError`, as in scikit-learn. The
+same columns in a different order are reordered, while an unnamed table
+meeting a named fit, or the reverse, is used by position with a warning.
 
 Missing values are marked with `NaN`; the masked entries of an astropy
 table or masked array also become `NaN`. Each model handles them in its own
@@ -203,9 +205,14 @@ way: TabPFN and LimiX add missing-value indicators, TabICL and TabFM impute
 them inside their preprocessing, and Kumo Tabular passes them to its network,
 which embeds them itself. Infinities, complex values, non-numeric columns
 and sparse matrices are rejected, so a categorical column has to be encoded
-as numbers before it is passed (see {doc}`limits`). The target is one
-finite, real value per row, validated as scikit-learn validates a
-regressor's target.
+as numbers before it is passed (see {doc}`limits`). An array or list of
+strings (`str` or `bytes` dtype) that hold numbers is still converted, with a
+`FutureWarning`; from 0.7.0 it raises `ValueError`, as in scikit-learn, which
+accepts a DataFrame column or an object array of such strings. The target is
+one finite, real value per row, validated as scikit-learn validates a regressor's target: a column
+vector of shape `(n_samples, 1)` is flattened with a
+`sklearn.exceptions.DataConversionWarning`, and a target with more columns
+raises `ValueError`.
 
 ## scikit-learn compatibility
 

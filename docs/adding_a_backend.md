@@ -7,7 +7,8 @@ the models have in common: it validates the parameters, fetches the pinned
 checkpoint, plans the ensemble members, draws their bags, applies the
 transforms a model lacks, chunks the queries, shows the progress bar and
 combines the members' answers. The subclass declares what its model does
-natively, as class attributes, and implements four methods. This page
+natively and the recipe it pins, as class attributes, and implements three
+methods. This page
 describes the contract those methods must meet, gives a skeleton module, and
 lists everything else a new backend needs, all of which the test suite
 checks. {doc}`adding_a_backend_kumo` follows one backend, NVIDIA's Kumo
@@ -19,12 +20,24 @@ A backend declares its model's capabilities as class attributes
 (`native_output`, `native_transforms`, `auto_tokens`,
 `supports_native_bagging`, `member_combination`, `kv_cache_modes`,
 `has_softmax`, `native_outlier_clipping` and the rest, documented on
-{class}`~lazy.models.ContextEnsembleEstimator`) and implements
-`_import_backend`, `_fit_group`, `_predict_group` and `_native_grid`. Its
-constructor takes every uniform parameter as a keyword with the shared
-default, stores each one verbatim, and takes nothing else positionally, so
-that `cls()` builds a working estimator; `register` refuses a class that falls
+{class}`~lazy.models.ContextEnsembleEstimator`) and implements `_fit_group`,
+`_predict_group` and `_native_grid`. Its constructor takes every uniform
+parameter as a keyword with the shared default, stores each one verbatim, and
+takes nothing else positionally, so that `cls()` builds a working estimator; `register` refuses a class that falls
 short of this.
+
+The backend also names its upstream package and pins its recipe as class
+attributes. `upstream_package` is the package that `_import_backend` imports,
+naming the pip extra when it is missing; a backend whose package needs more
+than an import overrides `_import_backend` (Kumo Tabular checks that the
+`sdm` it found is NVIDIA's, and LimiX loads its downloaded source). `recipes`
+maps each version to its recipe: every upstream setting that changes a
+prediction, read from upstream for that checkpoint, so that an upgrade of the
+package cannot change it. `_pinned_recipe(version)` returns it read-only. The
+recipe settings that `softmax_temperature="auto"` and
+`outlier_threshold="auto"` resolve to are named by `softmax_temperature_key`
+and `outlier_threshold_key`; None, the default, means no softmax temperature
+or no clip.
 
 The base class splits the ensemble into groups of members that one call of
 the model can serve together (a member with a transform the model does not
@@ -85,7 +98,9 @@ checkpoint and device file the network in the cache, and `_read_network`
 loads it from a checkpoint path onto `device_`. `_network` keeps the
 network on the estimator, which drops it on pickling and finds it again on
 first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
-Kumo Tabular do this). The base
+Kumo Tabular do this). TabPFN loads its network the same way and hands it to
+each upstream regressor as a model spec, but its regressors still pickle it.
+The base
 class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
@@ -141,8 +156,6 @@ API.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-import types
 from typing import Any
 
 from lazy import _typing
@@ -152,7 +165,7 @@ from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
 
-_AUTO_RECIPES: dict[str, dict[str, Any]] = {
+_RECIPES: dict[str, dict[str, Any]] = {
     "v1": {"softmax_temperature": 0.9, "n_buckets": 1000},
 }
 """Every upstream setting that changes a prediction, pinned per version so that
@@ -170,6 +183,9 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
     native_output = "histogram"
     native_transforms = {"none": "none"}
     auto_tokens = ("none",)
+    upstream_package = "mymodel"
+    recipes = _RECIPES
+    softmax_temperature_key = "softmax_temperature"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -205,21 +221,6 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
         self.outlier_threshold = outlier_threshold
         self.progress = progress
         self.verbose = verbose
-
-    def _import_backend(self) -> types.ModuleType:
-        # Names the extra when mymodel is missing.
-        return _ensemble.import_extra(
-            "mymodel", needed_by=type(self).__name__, extra=self.extra
-        )
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _AUTO_RECIPES:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(_AUTO_RECIPES[version])
-
-    def _auto_softmax_temperature(self) -> float:
-        return self._pinned_recipe(self.version)["softmax_temperature"]
 
     def _fit_group(
         self,
@@ -273,7 +274,7 @@ start.
 | What | Where | Checked by |
 | ---- | ----- | ---------- |
 | A pinned checkpoint, with a full commit hash, for every version | `CHECKPOINTS` and `DEFAULT_VERSIONS` in `src/lazy/models/_hub.py` | `register`, `test_backend_completeness.py`, `test_registry.py` |
-| A pinned recipe for every version | the backend's `_pinned_recipe` | `test_backend_completeness.py` |
+| A pinned recipe for every version | the backend's `recipes` | `test_backend_completeness.py` |
 | A pip extra, also named in the `all` extra | `[project.optional-dependencies]` in `pyproject.toml` | `test_backend_completeness.py`, `test_packaging.py` |
 | The upstream package among the optional modules mypy may miss | `[[tool.mypy.overrides]]` in `pyproject.toml` | mypy, without the extras installed |
 | A description of every checkpoint for the docs' tables | the fields above, in `CHECKPOINTS` in `src/lazy/models/_hub.py` | `test_backend_completeness.py` |

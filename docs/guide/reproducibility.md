@@ -2,7 +2,8 @@
 
 A prediction from LAZY is fixed by the checkpoint, the context, the seed and
 the shared parameters, up to the rounding of the machine it runs on, and for
-Kumo Tabular by the kind of device (see [Across devices](#across-devices)).
+Kumo Tabular and, to a lesser degree, LimiX-2 by the kind of device (see
+[Across devices](#across-devices)).
 This page describes how each is pinned and recorded, and which settings change a
 prediction.
 
@@ -167,3 +168,25 @@ of a row's 5% to 95% range between a CPU and a GPU, and by up to 19% between
 two seeds on the GPU; the CRPS moved by about 2% in both cases. With the
 random draws turned off, the two devices agreed to $2 \times 10^{-5}$ of that
 range. Kumo's golden densities are recorded on a CPU.
+
+The other backends were measured the same way, each fitted afresh on each
+device in float32 with `random_state=0`:
+
+| Backend | CPU against GPU | Seed 0 against seed 1, on the GPU |
+|---|---:|---:|
+| TabPFN | $2.5 \times 10^{-5}$ | 0.23 |
+| TabICL | $6.8 \times 10^{-6}$ | 0.19 |
+| TabFM | $3.9 \times 10^{-6}$ | 0.11 |
+| LimiX-2 | 0.023 | 0.28 |
+| Kumo Tabular | 0.28 | 0.19 |
+
+The figures are the largest change of the 5%, 50% and 95% quantiles over the
+same 50 rows, as a fraction of a row's 5% to 95% range, on an NVIDIA GB10 and
+its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL and
+TabFM agree across devices to float32 rounding. LimiX-2 differs by more than
+rounding, but by about a tenth of a change of seed; its cause is not yet
+known.
+
+So, to repeat a result exactly, run it on the same kind of device, which
+`provenance_` records. Compare results from a CPU and a GPU with scores over
+many rows, as across machines.

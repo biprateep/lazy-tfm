@@ -39,12 +39,11 @@ than by the data.
 from __future__ import annotations
 
 import collections
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
 import functools
 import math
-import types
 from typing import Any
 
 import numpy as np
@@ -125,9 +124,16 @@ _PINNED_REGRESSOR_ARGS: dict[str, Any] = {
 beyond float rounding, but none is left to upstream either.
 """
 
-_RECIPE_VERSIONS: tuple[str, ...] = ("v2",)
-"""The versions the recipe above was read from upstream for. A new version joins
-once its recipe is checked against upstream's.
+_RECIPES: dict[str, dict[str, Any]] = {
+    "v2": {
+        "norm_methods": AUTO_NORM_METHODS,
+        "feat_shuffle_method": AUTO_FEAT_SHUFFLE_METHOD,
+        "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+        **_PINNED_REGRESSOR_ARGS,
+    },
+}
+"""The recipe above, by the versions it was read from upstream for. A new
+version joins once its recipe is checked against upstream's.
 """
 
 
@@ -227,6 +233,7 @@ class TabICLQuantile(
     display_name = "TabICL"
     method_note = "Quantiles of TabICLv2's regression head."
     extra = "tabicl"
+    upstream_package = "tabicl"
     native_output = "quantiles"
     # TabICL's other norm methods are not the uniform transforms of the same
     # names: it fits them on z-scored columns (power, robust), with sklearn's
@@ -251,6 +258,8 @@ class TabICLQuantile(
     kv_cache_rtol = 1e-4
     exact_chunking = False
     cpu_friendly = True
+    recipes = _RECIPES
+    outlier_threshold_key = "outlier_threshold"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -286,27 +295,6 @@ class TabICLQuantile(
         self.outlier_threshold = outlier_threshold
         self.progress = progress
         self.verbose = verbose
-
-    def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "tabicl", needed_by=type(self).__name__, extra=self.extra
-        )
-
-    def _auto_outlier_threshold(self) -> float | None:
-        return AUTO_OUTLIER_THRESHOLD
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _RECIPE_VERSIONS:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(
-            {
-                "norm_methods": AUTO_NORM_METHODS,
-                "feat_shuffle_method": AUTO_FEAT_SHUFFLE_METHOD,
-                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
-                **_PINNED_REGRESSOR_ARGS,
-            }
-        )
 
     def _after_fit(self) -> None:
         # The base class keeps the one group's handle; regressor_ is the

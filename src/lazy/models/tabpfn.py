@@ -26,7 +26,7 @@ a CPU),
 onto its soft clip, ``OUTLIER_REMOVAL_STD``,
 ``softmax_temperature`` onto its own and ``mixed_precision`` onto its
 ``inference_precision``. No setting is left to TabPFN: each version's own
-recipe is written out below (:data:`_AUTO_RECIPES`) and handed over in full,
+recipe is written out below (:data:`_RECIPES`) and handed over in full,
 so neither the checkpoint's stored config nor the installed tabpfn package
 decides what runs, and every column is numeric (upstream would take a column
 with fewer than four distinct values for a category).
@@ -41,16 +41,13 @@ it on the bag, as every other model does, and only the bag meets the limits.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
-import contextlib
+from collections.abc import Callable, Mapping
 import copy
-import dataclasses
-import functools
+import inspect
 import itertools
 import os
 import pathlib
 import sys
-import threading
 import types
 from typing import Any
 
@@ -63,7 +60,6 @@ from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
-from lazy.models import _weights
 
 __all__ = [
     "TabPFNBarDistribution",
@@ -121,7 +117,7 @@ _SHARED_RECIPE: dict[str, Any] = {
 }
 """Settings every version's own recipe shares."""
 
-_AUTO_RECIPES: dict[str, dict[str, Any]] = {
+_RECIPES: dict[str, dict[str, Any]] = {
     "v2": {
         **_SHARED_RECIPE,
         "PREPROCESS_TRANSFORMS": (
@@ -226,7 +222,7 @@ a regressor), and ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both
 are what ``"auto"`` resolves to, and are handed over as such.
 """
 # The fast variant is the same recipe on a smaller checkpoint.
-_AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
+_RECIPES["v3.5-fast"] = _RECIPES["v3.5"]
 
 
 def _upstream_settings(
@@ -257,7 +253,7 @@ def _upstream_settings(
     """
     settings = {
         field: value
-        for field, value in _AUTO_RECIPES[version].items()
+        for field, value in _RECIPES[version].items()
         # Handed over as the estimator's own argument instead.
         if field != "SOFTMAX_TEMPERATURE"
     }
@@ -366,7 +362,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         n_estimators: Ensemble members, each a forward pass over a
             differently preprocessed view of the data.
         transforms: Per-member feature transforms. ``"auto"`` is the
-            version's own recipe, pinned in :data:`_AUTO_RECIPES`: its
+            version's own recipe, pinned in :data:`_RECIPES`: its
             preprocessors, including any SVD components and original columns
             they append, the fingerprint feature, polynomial features on
             v2.6, the target transforms, and on v3.5 a 12-sigma soft clip.
@@ -440,6 +436,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     display_name = "TabPFN"
     method_note = "Bucket masses of TabPFN's bar distribution."
     extra = "tabpfn"
+    upstream_package = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()
     # A regressor per bag: upstream's own subsampling standardises the
@@ -458,6 +455,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # Not bit for bit on every CPU: on a 4-core x86 machine, 7-row chunks
     # and one pass differ in the last bits of most densities.
     exact_chunking = False
+    recipes = _RECIPES
+    softmax_temperature_key = "SOFTMAX_TEMPERATURE"
+    outlier_threshold_key = "OUTLIER_REMOVAL_STD"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -495,11 +495,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.ignore_pretraining_limits = ignore_pretraining_limits
         self.progress = progress
         self.verbose = verbose
-
-    def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "tabpfn", needed_by=type(self).__name__, extra=self.extra
-        )
 
     @classmethod
     def clear_upstream_caches(cls) -> None:
@@ -542,7 +537,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         y: _typing.FloatArray,
         group: _members.MemberGroup,
     ) -> Any:
-        # The pinned checkpoint is handed over by path, never left to
+        # The pinned checkpoint is handed over loaded, never left to
         # TabPFN's own default (the newest version it knows, which moves with
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
@@ -553,7 +548,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
-            model_path=path_for_tabpfn(self.checkpoint_),
+            model_path=self._model_specs(tabpfn),
             device=self.device_,
             random_state=group.seed,
             categorical_features_indices=None,
@@ -572,99 +567,94 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             **_cache_options(self.kv_cache),
         )
         try:
-            with self._shared_network(tabpfn):
-                regressor.fit(X, y)
+            regressor.fit(X, y)
         except (ValueError, RuntimeError) as error:
             remedied = _with_bagging_remedy(error, regressor, len(X), self)
             if remedied is error:
                 raise
             raise remedied from error
+        # Upstream reads model_path only at fit, so a saved regressor names
+        # the checkpoint, as one given the path does, not the spec's copies.
+        regressor.model_path = path_for_tabpfn(self.checkpoint_)
         if group.index == 0:
             self.borders_ = _bucket_borders(regressor)
             self.n_buckets_ = int(self.borders_.size - 1)
         return regressor
 
-    def _fit(self, X: Any, y: _typing.FloatArray) -> None:
-        # The loaded networks of this fit, shared by its regressors. An
-        # override rather than _before_fit and _after_fit, because they must
-        # be let go of when the fit fails too.
-        self._networks: dict[tuple[Any, ...], Any] = {}
-        try:
-            super()._fit(X, y)
-        finally:
-            self.__dict__.pop("_networks", None)
+    def _model_specs(self, tabpfn: types.ModuleType) -> Any:
+        """The shared network, as the model spec of one upstream regressor.
 
-    @contextlib.contextmanager
-    def _shared_network(self, tabpfn: types.ModuleType) -> Iterator[None]:
-        """Loads the network once, for every group's regressor and every fit.
-
-        Each ``TabPFNRegressor`` loads its own copy of the network at fit,
-        so the regressors of a bagged ensemble (one per member) would hold
-        ``n_estimators`` copies on the device, and every refit would read
-        the checkpoint again. Upstream's networks hold no state between
-        calls (the key/value cache lives in the inference engine, and the
-        architectures ignore ``cache_trainset_representation``), so the
-        regressors share one: while the fit runs, upstream's loader hands
-        this thread the network loaded first for the same arguments, in
-        this fit or, through :mod:`lazy.models._weights`, an earlier one
-        (see :func:`_redirected_loader`). Upstream moves the network to the
-        device, and casts it to a forced precision, in place, so both are
-        part of the key. The bar distribution and the configs, which a fit
-        may move and rescale, are copied.
+        A ``TabPFNRegressor`` given a checkpoint path loads its own copy of
+        the network, so the regressors of a bagged ensemble (one per member)
+        would hold ``n_estimators`` copies on the device, and every refit
+        would read the checkpoint again. Given a model spec as
+        ``model_path``, it runs on the spec's network by reference, so every
+        regressor runs on the one :meth:`_network` loads. Upstream's
+        networks hold no state between calls (the key/value cache lives in
+        the inference engine), so they can share one. A fit moves and
+        rescales the bar distribution, and may change the configs, so each
+        regressor gets its own copies of them.
 
         Args:
             tabpfn: The imported ``tabpfn`` package.
 
-        Yields:
-            Nothing; the loader is restored once no fit needs it.
+        Returns:
+            A ``tabpfn.base`` model spec.
         """
-        networks = self.__dict__.setdefault("_networks", {})
-        precision = self._inference_precision()
-        load: Callable[..., Any]
+        models, architectures, bardist, config = self._network()
+        (model,) = models
+        # tabpfn 9.2 replaced RegressorModelSpecs with one ModelSpecs class.
+        specs = getattr(tabpfn.base, "RegressorModelSpecs", None)
+        if specs is None:
+            specs = tabpfn.base.ModelSpecs
+        return specs(model, *copy.deepcopy((architectures[0], config, bardist)))
 
-        def shared(**kwargs: Any) -> Any:
-            local = tuple(sorted((k, str(v)) for k, v in kwargs.items()))
-            if local not in networks:
-                networks[local] = self._load_network(load, precision, kwargs)
-            models, configs, bardist, config = networks[local]
-            return list(models), *copy.deepcopy((configs, bardist, config))
+    def _network_loader(self) -> tuple[Any, Callable[..., Any]]:
+        """The regressors' precision and upstream's loader.
 
-        with _redirected_loader(tabpfn.base, shared) as load:
-            yield
+        A regressor moves the network to the device, and casts it to a
+        forced precision, in place, so both are part of the network's key.
+        """
+        tabpfn = self._import_backend()
+        return self._inference_precision(), tabpfn.base.initialize_tabpfn_model
 
-    def _load_network(
-        self,
-        load: Callable[..., Any],
-        precision: Any,
-        arguments: dict[str, Any],
+    def _read_network(
+        self, load: Callable[..., Any], checkpoint: pathlib.Path
     ) -> Any:
-        """Upstream's loader, through the process-wide cache when it can be.
+        """Loads the checkpoint onto ``device_``, as its own network.
 
-        Args:
-            load: Upstream's ``initialize_tabpfn_model``.
-            precision: The ``inference_precision`` the regressors run at.
-            arguments: What upstream called the loader with.
+        Upstream's built-model cache (``$TABPFN_MODEL_CACHE_SIZE``) shares a
+        network by reference, and a regressor moves and casts it in place,
+        so each of lazy's keys must get a network of its own. From tabpfn
+        9.2 the cache is keyed by the devices and forced dtype, passed here
+        as the regressor computes them; before, by the checkpoint alone,
+        and it is skipped under ``fit_mode="fit_with_cache"``, which every
+        architecture otherwise ignores.
 
         Returns:
-            What ``load`` returns.
+            Upstream's models, architecture configs, bar distribution and
+            inference config.
         """
-        path = arguments.get("model_path")
-        if not isinstance(path, (str, os.PathLike)):
-            # Not one checkpoint file: nothing to key it by.
-            return load(**arguments)
-        # The overrides only reconcile several checkpoints' configs, so one
-        # file loads the same network whatever they are.
-        cache_key = _weights.key(
-            self.backend,
-            self.version,
-            path,
-            self.device_,
-            precision,
-            arguments.get("which"),
-            arguments.get("fit_mode"),
-            load,
+        tabpfn = self._import_backend()
+        accepted = inspect.signature(load).parameters
+        options: dict[str, Any] = {}
+        if "fit_mode" in accepted:
+            options["fit_mode"] = "fit_with_cache"
+        if "devices" in accepted:
+            precision = self._inference_precision()
+            options |= {
+                "devices": tabpfn.utils.infer_devices(self.device_),
+                # As upstream's determine_precision: autocast forces none.
+                "force_inference_dtype": (
+                    None if precision == "autocast" else precision
+                ),
+            }
+        loaded = load(
+            model_path=path_for_tabpfn(checkpoint), which="regressor", **options
         )
-        return _weights.network(cache_key, functools.partial(load, **arguments))
+        for model in loaded[0]:
+            model.to(self.device_)
+        return loaded
 
     def _inference_precision(self) -> Any:
         """Upstream's ``inference_precision``: autocast, or float32.
@@ -676,18 +666,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
         return "autocast" if self.mixed_precision_ else torch.float32
-
-    def _auto_softmax_temperature(self) -> float:
-        return float(_AUTO_RECIPES[self.version]["SOFTMAX_TEMPERATURE"])
-
-    def _auto_outlier_threshold(self) -> float | None:
-        return _AUTO_RECIPES[self.version]["OUTLIER_REMOVAL_STD"]
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _AUTO_RECIPES:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(_AUTO_RECIPES[version])
 
     def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
         """The ``inference_config`` a group hands TabPFN, ready to pass."""
@@ -768,107 +746,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
-
-
-@dataclasses.dataclass
-class _Redirection:
-    """Upstream's loader, and the stand-in installed over it.
-
-    Attributes:
-        upstream: What ``initialize_tabpfn_model`` was before any fit.
-        dispatch: The stand-in, which routes each call to its thread's fit.
-        fits: How many fits, in any thread, are using the stand-in.
-    """
-
-    upstream: Callable[..., Any]
-    dispatch: Callable[..., Any]
-    fits: int = 0
-
-
-# Upstream's loader is module state, shared by every thread, so it is
-# replaced once, by a stand-in that routes each call to the fit running in
-# the calling thread (or to upstream's loader outside one), and put back
-# when the last fit is done. _REDIRECTIONS is keyed by id() of the module
-# holding the loader; _ROUTES holds each thread's fits, per module, innermost
-# last. Every access to _REDIRECTIONS holds _REDIRECTION_LOCK.
-_REDIRECTIONS: dict[int, _Redirection] = {}
-_REDIRECTION_LOCK = threading.Lock()
-_ROUTES = threading.local()
-
-
-@contextlib.contextmanager
-def _redirected_loader(
-    base: Any, shared: Callable[..., Any]
-) -> Iterator[Callable[..., Any]]:
-    """Sends this thread's calls to upstream's loader to ``shared``.
-
-    Fits in other threads keep their own routes, and code outside any fit
-    reaches upstream's loader, so overlapping fits in several threads
-    neither see each other's networks nor leave the stand-in installed.
-    Upstream's loader is taken once, by the first of a run of overlapping
-    fits, and restored by the last; a loader someone else installed in
-    between is left alone.
-
-    Args:
-        base: The module holding ``initialize_tabpfn_model``
-            (``tabpfn.base``).
-        shared: What this thread's calls are answered by.
-
-    Yields:
-        Upstream's own loader, for ``shared`` to load with.
-    """
-    with _REDIRECTION_LOCK:
-        redirection = _REDIRECTIONS.get(id(base))
-        if redirection is None:
-            upstream = base.initialize_tabpfn_model
-            redirection = _Redirection(
-                upstream, _dispatcher(id(base), upstream)
-            )
-            _REDIRECTIONS[id(base)] = redirection
-            base.initialize_tabpfn_model = redirection.dispatch
-        redirection.fits += 1
-    routes = _thread_routes().setdefault(id(base), [])
-    routes.append(shared)
-    try:
-        yield redirection.upstream
-    finally:
-        routes.pop()
-        with _REDIRECTION_LOCK:
-            redirection.fits -= 1
-            if redirection.fits == 0:
-                del _REDIRECTIONS[id(base)]
-                if base.initialize_tabpfn_model is redirection.dispatch:
-                    base.initialize_tabpfn_model = redirection.upstream
-
-
-def _thread_routes() -> dict[int, list[Callable[..., Any]]]:
-    """The calling thread's running fits, per loader module."""
-    routes = getattr(_ROUTES, "fits", None)
-    if routes is None:
-        routes = _ROUTES.fits = {}
-    return routes
-
-
-def _dispatcher(
-    module_id: int, upstream: Callable[..., Any]
-) -> Callable[..., Any]:
-    """The stand-in for upstream's loader; see :func:`_redirected_loader`.
-
-    Args:
-        module_id: ``id()`` of the module the stand-in is installed in.
-        upstream: Upstream's loader, for calls from outside a fit.
-
-    Returns:
-        A loader taking upstream's keyword arguments.
-    """
-
-    def dispatch(**kwargs: Any) -> Any:
-        routes = _thread_routes().get(module_id)
-        if routes:
-            return routes[-1](**kwargs)
-        return upstream(**kwargs)
-
-    return dispatch
 
 
 def _with_bagging_remedy(

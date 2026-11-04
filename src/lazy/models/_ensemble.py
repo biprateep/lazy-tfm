@@ -159,8 +159,8 @@ class PerformanceWarning(_warnings.LazyWarning):
 class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     """A pretrained in-context model behind the uniform feature layer.
 
-    Subclasses declare their model's capabilities as class attributes and
-    implement :meth:`_import_backend`, :meth:`_fit_group`,
+    Subclasses declare their model's capabilities and pinned recipes as
+    class attributes and implement :meth:`_fit_group`,
     :meth:`_predict_group` and :meth:`_native_grid`; everything else --
     validation, checkpoints, bagging, scaffolded transforms, member
     combination, chunking, progress and the native grid -- lives here.
@@ -197,7 +197,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     which loads it from a checkpoint path onto ``device_``. A fitted
     estimator pickles and predicts the same after unpickling; that network
     is kept on the instance, which ``__getstate__`` drops, so it is fetched
-    again on first use rather than pickled. The device is resolved
+    again on first use rather than pickled; a fit drops it too, before it
+    starts and when it fails. The device is resolved
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
@@ -269,6 +270,15 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             clause starting with a space; empty for nothing.
         method_note: How the model gives a distribution, in one sentence,
             for the documentation's table of the backends.
+        upstream_package: The package :meth:`_import_backend` imports, such
+            as ``"tabicl"``.
+        recipes: Each version's own recipe, every upstream setting the
+            backend pins for it, by name (:meth:`_pinned_recipe`).
+        softmax_temperature_key: The recipe setting that
+            ``softmax_temperature="auto"`` resolves to, or None for none.
+        outlier_threshold_key: The recipe setting that
+            ``outlier_threshold="auto"`` resolves to under
+            ``transforms="auto"``, or None for no clip.
     """
 
     display_name: ClassVar[str] = ""
@@ -293,6 +303,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
     cpu_note: ClassVar[str] = ""
     method_note: ClassVar[str] = ""
+    upstream_package: ClassVar[str] = ""
+    recipes: ClassVar[Mapping[str, Mapping[str, Any]]] = {}
+    softmax_temperature_key: ClassVar[str | None] = None
+    outlier_threshold_key: ClassVar[str | None] = None
 
     # Set by each backend's __init__; declared for the type checker only.
     version: str
@@ -314,12 +328,30 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     # -- the per-backend interface -----------------------------------------
 
-    @abc.abstractmethod
     def _import_backend(self) -> types.ModuleType:
         """Imports the model's package, naming the extra if it is missing.
 
-        :func:`import_extra` does this for a package that imports by name.
+        The default imports ``upstream_package`` (:func:`import_extra`); a
+        backend whose package needs more than an import overrides it.
+
+        Returns:
+            The imported package.
+
+        Raises:
+            ImportError: Naming the extra when the package is not installed.
+            NotImplementedError: If the backend names no package and does
+                not override this method.
         """
+        if not self.upstream_package:
+            raise NotImplementedError(
+                f"{type(self).__name__} must set upstream_package or "
+                "override _import_backend"
+            )
+        return import_extra(
+            self.upstream_package,
+            needed_by=type(self).__name__,
+            extra=self.extra,
+        )
 
     def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         """Prepares a fit; runs once the backend's package is imported.
@@ -464,12 +496,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return {}
 
     def _auto_softmax_temperature(self) -> float | None:
-        """The checkpoint's calibrated temperature, or None without a softmax.
+        """The recipe's ``softmax_temperature_key`` setting, or None for none.
 
-        Called after the checkpoint is loaded, so a backend can read the
-        value from it.
+        Called after the checkpoint is loaded, so a backend whose calibrated
+        temperature is stored in the checkpoint can override it to read it
+        from there.
         """
-        return None
+        if self.softmax_temperature_key is None:
+            return None
+        recipe = self._pinned_recipe(self.version)
+        return float(recipe[self.softmax_temperature_key])
 
     def _temperature(self) -> float:
         """The resolved ``softmax_temperature`` of a model with a softmax."""
@@ -481,17 +517,20 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return self.softmax_temperature_
 
     def _auto_outlier_threshold(self) -> float | None:
-        """The clip threshold of the model's own recipe, or None for none.
+        """The recipe's ``outlier_threshold_key`` setting, or None for no clip.
 
         What ``outlier_threshold="auto"`` resolves to under
         ``transforms="auto"``; under any explicit ``transforms`` it resolves
         to None, so an explicit recipe is all the model sees.
         """
-        return None
+        if self.outlier_threshold_key is None:
+            return None
+        value = self._pinned_recipe(self.version)[self.outlier_threshold_key]
+        return None if value is None else float(value)
 
     @classmethod
     def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        """The model's own recipe at ``version``, as the backend pins it.
+        """The model's own recipe at ``version``, read-only from ``recipes``.
 
         Every upstream setting the backend fixes for that version rather than
         leaving to the installed package: what ``transforms="auto"`` runs,
@@ -509,7 +548,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         Raises:
             KeyError: If the backend pins no recipe for ``version``.
         """
-        raise KeyError(f"{cls.__name__} pins no recipe for {version!r}")
+        if version not in cls.recipes:
+            raise KeyError(f"{cls.__name__} pins no recipe for {version!r}")
+        return types.MappingProxyType(cls.recipes[version])
 
     # -- hooks the rest of the package calls on every registered backend ----
 
@@ -1093,6 +1134,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """
         del load, checkpoint  # Unused: see the error.
         raise NotImplementedError(_NETWORK_HOOKS.format(type(self).__name__))
+
+    def _clear_fitted(self) -> None:
+        """Drops the fitted attributes and the memoized network.
+
+        A fit that fails lets go of the network it loaded, which otherwise
+        stays on the device while the estimator lives, even with the cache
+        off.
+        """
+        super()._clear_fitted()
+        self.__dict__.pop("_network_cache", None)
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the memoized network, which reloads on first use."""
