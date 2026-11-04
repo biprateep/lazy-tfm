@@ -383,7 +383,7 @@ class Checkpoint:
             A JSON-serialisable record with the keys ``backend``, ``version``,
             ``repo_id``, ``filename``, ``revision``, ``package`` (the
             backend's distribution and installed version), ``lazy`` (this
-            package's) and ``device``: :data:`PROVENANCE_KEYS`.
+            package's) and ``device``: ``PROVENANCE_KEYS``.
 
         Examples:
             >>> record = get_checkpoint("tabpfn", "v2.5").provenance(
@@ -690,8 +690,10 @@ CHECKPOINTS: dict[str, Checkpoint] = {
         ),
     )
 }
-"""Every pinned checkpoint, keyed ``"<backend>:<version>"``. Built from the
-records themselves so a key can never disagree with what it points at.
+"""Every pinned checkpoint, keyed ``"<backend>:<version>"``.
+
+Built from the records themselves so a key can never disagree with what it
+points at.
 """
 
 DEFAULT_VERSIONS: dict[str, str] = {
@@ -701,8 +703,10 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "tabicl": "v2",
     "tabpfn": "v3.5",
 }
-"""The version each backend loads when none is asked for. Changing one of these
-changes what every unversioned call returns, so they move only deliberately.
+"""The version each backend loads when none is asked for.
+
+Changing one of these changes what every unversioned call returns, so they
+move only deliberately.
 """
 
 

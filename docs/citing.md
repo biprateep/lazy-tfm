@@ -10,16 +10,17 @@ preprint is posted. The software is archived on Zenodo, where the concept DOI
 every version of lazy-tfm and resolves to the latest release, while each
 release also has its own DOI on its Zenodo record for when you need to cite
 the exact version you used. The BibTeX entry below is the one Zenodo provides
-for the concept DOI, and the "Cite this repository" button on GitHub gives
+for the concept DOI, with a plain key and braces that keep the title's
+capitals, and the "Cite this repository" button on GitHub gives
 the same metadata from the repository's `CITATION.cff`.
 
 ```bibtex
-@misc{https://doi.org/10.5281/zenodo.23751881,
+@misc{dey_lazy_2026,
   doi = {10.5281/ZENODO.23751881},
   url = {https://zenodo.org/doi/10.5281/zenodo.23751881},
   author = {Dey, Biprateep and Speagle, Joshua Shen},
   keywords = {photometric redshift, astronomy, foundation model, tabular, LSST},
-  title = {LAZY: Lazy but Accurate z for Yinz},
+  title = {{LAZY}: {Lazy} but {Accurate} z for {Yinz}},
   publisher = {Zenodo},
   year = {2026},
   copyright = {MIT License}

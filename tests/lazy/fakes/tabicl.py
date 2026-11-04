@@ -122,11 +122,15 @@ class Regressor:
         ).fit(X, y)
         self.model_kv_cache_ = None
         if self.kv_cache:
-            # Upstream records the cache on the network, then takes it.
-            self.model_._cache = self.context_
-            self.model_kv_cache_ = self.model_.cached_context()
-            self.model_.clear_cache()
+            self._build_kv_cache()
         return self
+
+    def _build_kv_cache(self):
+        """Records the cache from the context, as upstream's fit does."""
+        # Upstream records the cache on the network, then takes it.
+        self.model_._cache = self.context_
+        self.model_kv_cache_ = self.model_.cached_context()
+        self.model_.clear_cache()
 
     def predict(self, X, output_type):
         del output_type  # Unused: always the raw quantiles.

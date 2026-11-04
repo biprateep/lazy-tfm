@@ -266,9 +266,7 @@ def test_no_regressor_argument_is_left_to_upstream(monkeypatch, kv_cache):
         n_estimators=1, kv_cache=kv_cache, device="cpu", progress=False
     ).fit(X, X[:, 0])
     accepted = inspect.signature(fake_tabpfn.Regressor.upstream).parameters
-    # Deprecated: one acts only on n_estimators="auto", one does nothing.
-    unused = {"auto_scale_n_estimators", "n_jobs"}
-    assert set(est.regressor_.kwargs) == set(accepted) - unused
+    assert set(est.regressor_.kwargs) == set(accepted)
 
 
 def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch):
@@ -290,6 +288,68 @@ def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch):
         assert regressor.inference_precision is torch.float32
         # Read by to(), so set before it.
         assert regressor.use_autocast_ is False
+
+
+def test_a_model_fitted_on_a_gpu_unpickles_without_one(monkeypatch):
+    """Torch loads a CUDA tensor without CUDA only when mapped elsewhere."""
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2, bag_size=20, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    expected = est.predict_proba(X)
+    # torch tags every tensor as on a GPU, as on the machine that fitted it,
+    # and this machine has none.
+    gpu = (0, lambda storage: "cuda:0", lambda storage, location: None)
+    registry = [gpu, *torch.serialization._package_registry]
+    monkeypatch.setattr(torch.serialization, "_package_registry", registry)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    restored = pickle.loads(pickle.dumps(est))
+    np.testing.assert_array_equal(restored.predict_proba(X), expected)
+
+
+def test_a_pickle_leaves_the_network_and_the_live_model_alone(monkeypatch):
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    recorder = fakes.Recorder()
+    est = fakes.install("tabpfn", monkeypatch, recorder)(
+        n_estimators=2, bag_size=20, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    expected = est.predict_proba(X)
+    network = est.handles_[0].models_[0]
+    for regressor in est.handles_:
+        regressor.device = "cuda:7"  # As the fake's to() records a GPU.
+    restored = pickle.loads(pickle.dumps(est))
+    for regressor in est.handles_:
+        assert regressor.device == "cuda:7"
+        assert regressor.models_ == [network]
+        assert regressor.executor_.models == [network]
+    np.testing.assert_array_equal(est.predict_proba(X), expected)
+    # Not a copy from the pickle: the network the fit shared.
+    for regressor in restored.handles_:
+        assert regressor.models_ == [network]
+        assert regressor.executor_.models == [network]
+    assert len(recorder.loads) == 1
+
+
+def test_a_pickle_of_whole_regressors_loads_with_their_networks(monkeypatch):
+    """The format of earlier versions: handles_ a list of regressors."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=1, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    expected = est.predict_proba(X)
+    state = {**est.__getstate__(), "handles_": est.handles_}
+    state["regressor_"] = est.handles_[0]
+    restored = object.__new__(type(est))
+    restored.__setstate__(pickle.loads(pickle.dumps(state)))
+    (regressor,) = restored.handles_
+    assert restored.regressor_ is regressor
+    # The pickled copy, not the network this process shares.
+    assert regressor.models_[0] is not est.handles_[0].models_[0]
+    np.testing.assert_array_equal(restored.predict_proba(X), expected)
 
 
 def test_bucket_masses_returns_float64_borders():

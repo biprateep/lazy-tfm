@@ -50,6 +50,7 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
 from lazy.models import _hub
+from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _transforms
@@ -166,8 +167,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     combination, chunking, progress and the native grid -- lives here.
 
     The contract a subclass meets is the following. Its constructor takes every
-    name in :data:`UNIFORM_PARAMS` as a keyword, with the default in
-    :data:`UNIFORM_DEFAULTS`, stores each verbatim and takes no ``**kwargs``, so
+    name in ``UNIFORM_PARAMS`` as a keyword, with the default in
+    ``UNIFORM_DEFAULTS``, stores each verbatim and takes no ``**kwargs``, so
     that ``cls()`` builds a working estimator (``register`` checks this).
     ``_fit`` splits the ensemble into groups of members that one call of the
     model serves together, and :meth:`_fit_group` returns, for each, a *handle*:
@@ -186,7 +187,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     (``member_combination="quantile_trimmed_average"``) also implements
     :meth:`_predict_members`, which answers for each member of a group
     separately, so that the trim spans the whole ensemble. After ``_fit``,
-    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`:
+    ``provenance_`` holds every key in ``REQUIRED_PROVENANCE``:
     :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
     ensemble's.
 
@@ -198,7 +199,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     estimator pickles and predicts the same after unpickling; that network
     is kept on the instance, which ``__getstate__`` drops, so it is fetched
     again on first use rather than pickled; a fit drops it too, before it
-    starts and when it fails. The device is resolved
+    starts and when it fails. A pickle holds each handle as
+    :meth:`_pickled_handle` returns it: a backend that implements it leaves
+    out its key/value caches and keeps its context, and its
+    :meth:`_rebuild_caches` records them again before the first prediction
+    (the defaults pickle a handle whole). ``copy.deepcopy`` goes through the
+    pickle methods, so a deep copy rebuilds its caches too. The device is
+    resolved
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
@@ -919,6 +926,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self, features: _typing.FloatArray
     ) -> distributions.Distribution:
         """Every group's prediction for some query features, combined."""
+        self._restore_caches()
         if self.member_combination == "quantile_trimmed_average":
             return self._predict_trimmed(features)
         parts = [
@@ -1144,21 +1152,72 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """
         super()._clear_fitted()
         self.__dict__.pop("_network_cache", None)
+        self.__dict__.pop("_caches_pending", None)
 
     def __getstate__(self) -> dict[str, Any]:
-        """Pickles without the memoized network, which reloads on first use."""
+        """Pickles without the network, and each handle as pickling wants it.
+
+        Each handle is pickled as :meth:`_pickled_handle` returns it.
+        ``regressor_`` is left out; :meth:`__setstate__` sets it again.
+        """
         state = dict(super().__getstate__())
         state.pop("_network_cache", None)
+        state.pop("_caches_pending", None)
+        state.pop("regressor_", None)
+        if "handles_" in state:
+            state["handles_"] = [self._pickled_handle(h) for h in self.handles_]
         return state
+
+    def _pickled_handle(self, handle: Any) -> Any:
+        """A handle as a pickle holds it, by default the handle itself.
+
+        A backend whose handles hold key/value caches returns a copy
+        without them, which keeps whatever :meth:`_rebuild_caches` needs to
+        record them again, such as the context. The live handle is left as
+        it is.
+
+        Args:
+            handle: What :meth:`_fit_group` returned.
+
+        Returns:
+            The handle to pickle in its place.
+        """
+        return handle
+
+    def _rebuild_caches(self) -> None:
+        """Records again the caches :meth:`_pickled_handle` left out.
+
+        Called on an unpickled estimator before its first prediction, on
+        ``device_``, under the estimator's lock, so that threads predicting
+        at once rebuild once. A call that raises is retried by the next
+        prediction, so it must be safe to run again after a partial
+        rebuild. The default does nothing.
+        """
+
+    def _restore_caches(self) -> None:
+        """Rebuilds an unpickled estimator's caches, once, before it predicts.
+
+        Safe from several threads: the first rebuilds under the estimator's
+        lock and clears the flag last, so a thread that waited for the lock,
+        or that sees the flag cleared, finds every cache rebuilt. A rebuild
+        that fails leaves the flag set, so the next prediction tries again.
+        """
+        if self.__dict__.get("_caches_pending", False):
+            with _locks.network_lock(self):
+                if self.__dict__.get("_caches_pending", False):
+                    self._rebuild_caches()
+                    self._caches_pending = False
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restores a pickle on this machine, not the one that made it.
 
-        The pickled ``checkpoint_`` names a file on the machine that made the
-        pickle. :meth:`_checkpoint` looks the pinned checkpoint up again
-        through the hub, which downloads it only if this machine lacks it.
-        Only a backend that reads its checkpoint after fitting calls it; for
-        the others the flag stays unread.
+        A fitted model gets ``regressor_`` again and rebuilds its caches
+        before its first prediction (:meth:`_rebuild_caches`). The pickled
+        ``checkpoint_`` names a file on the machine that made the pickle.
+        :meth:`_checkpoint` looks the pinned checkpoint up again through the
+        hub, which downloads it only if this machine lacks it. Only a backend
+        that reads its checkpoint after fitting calls it; for the others the
+        flag stays unread.
 
         Under ``device="auto"``, a fitted model resolves ``device_`` and
         ``mixed_precision_`` again, so a model fitted on a GPU predicts on
@@ -1170,6 +1229,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
+        if "handles_" in state:
+            self._caches_pending = True
+            if len(self.handles_) == 1:  # As _fit sets it.
+                self.regressor_ = self.handles_[0]
         if "checkpoint_" in state:
             self._relocate_checkpoint = True
         if "device_" in state and _device.is_auto(self.device):

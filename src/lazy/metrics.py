@@ -89,7 +89,7 @@ from lazy import _warnings
 from lazy import grid as grid_lib
 
 Scale: TypeAlias = Literal["1+y", "none"]
-"""How the point metrics scale a residual: ``"none"`` leaves ``y_pred - y_true``
+"""How the point metrics scale a residual. ``"none"`` leaves ``y_pred - y_true``
 as it is; ``"1+y"`` divides it by ``1 + y_true`` (the photometric-redshift
 convention, needed for DC1's numbers).
 """
@@ -97,7 +97,7 @@ SCALES: tuple[str, ...] = ("1+y", "none")
 """The accepted values of ``scale``."""
 
 OUTLIER_FLOOR = 0.06
-"""The smallest outlier threshold of :func:`point_metrics`: a residual is an
+"""The smallest outlier threshold of :func:`point_metrics`. A residual is an
 outlier when its size exceeds ``max(OUTLIER_FLOOR, 3 * sigma_IQR)``.
 """
 DC1_OUTLIER_THRESHOLD = 0.15
@@ -105,7 +105,7 @@ DC1_OUTLIER_THRESHOLD = 0.15
 PIT_EXTREME = 1e-4
 """How close to 0 or 1 a PIT value is to count in ``pit_outlier_rate``."""
 NLL_DENSITY_FLOOR = 1e-12
-"""The density below which :func:`nll` clips, in the target's inverse units: a
+"""The density below which :func:`nll` clips, in the target's inverse units. A
 zero density at the truth (a truth off the grid, an empty bin) then scores
 ``-log(1e-12) ~ 27.6`` rather than infinity.
 """
@@ -307,7 +307,7 @@ def normalize_grid_pdfs(
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        A tuple (grid, density): the centres as a float array, shape (g,),
+        A tuple (grid, density) -- the centres as a float array, shape (g,),
         and the normalised densities, shape (n, g).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
@@ -665,7 +665,7 @@ def evaluate_grid_at_truth(
             the PIT is the exact piecewise-linear CDF.
 
     Returns:
-        A tuple (grid, density, pdf_at_truth, pit): the centres, shape (g,);
+        A tuple (grid, density, pdf_at_truth, pit) -- the centres, shape (g,);
         the normalised densities, shape (n, g); the density at the truth,
         shape (n,), zero for a truth more than half a bin outside the grid;
         and the PIT values, shape (n,), in [0, 1].
@@ -752,7 +752,7 @@ def per_object_scores(
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        A tuple (cde_terms, pit): ``integral p_i^2 - 2 p_i(z_true_i)`` per
+        A tuple (cde_terms, pit) -- ``integral p_i^2 - 2 p_i(z_true_i)`` per
         object, shape (n,), and the PIT values, shape (n,).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
@@ -1199,7 +1199,7 @@ def pdf_metrics(
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        A tuple (metrics, pit): the metric bundle and the per-object PIT
+        A tuple (metrics, pit) -- the metric bundle and the per-object PIT
         values, shape (n,).
     """
     terms, pit, crps_terms, nll_terms = per_object_metrics(
@@ -1260,7 +1260,7 @@ def evaluate_grid_pdfs(
             default) or ``"1+y"`` (DC1's); see :func:`point_metrics`.
 
     Returns:
-        A tuple (point_metrics, pdf_metrics, pit): the point statistics of
+        A tuple (point_metrics, pdf_metrics, pit) -- the point statistics of
         the chosen reduction, the PDF metric bundle and the per-object PIT
         values, shape (n,).
     """
@@ -1304,7 +1304,7 @@ def summarize(
             photometric-redshift convention; see :func:`point_metrics`.
 
     Returns:
-        A one-row table: ``model`` (if labelled), ``point_estimate``,
+        A one-row table -- ``model`` (if labelled), ``point_estimate``,
         ``scale``, the other :class:`PointMetrics` fields and the
         :class:`PDFMetrics` fields other than ``n`` (``crps`` and ``nll``
         last).

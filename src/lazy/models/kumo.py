@@ -464,18 +464,14 @@ class KumoQuantile(
         self, handle: _KumoGroup, X: _typing.FloatArray
     ) -> list[distributions.QuantileDistribution]:
         if self.kv_cache and handle.cache is None:
-            # Unpickled: the cache was left out, and the same context and
-            # seed record the same one again, once. The lock is the
-            # estimator's, since a group compares by value and so is not
-            # hashable.
+            # The lock is the estimator's, since a group compares by value
+            # and so is not hashable.
             with _locks.network_lock(self):
-                if handle.cache is None:
-                    handle.cache = self._record(handle)
-        cache = handle.cache
+                self._record_missing(handle)
         network = self._network()
         (queries,) = self._tensors(X)
         with self._autocast():
-            if cache is None:
+            if handle.cache is None:
                 assert handle.context is not None  # Set by _fit_group.
                 x, target = self._tensors(*handle.context)
                 out = network(
@@ -488,7 +484,7 @@ class KumoQuantile(
                     generator=self._generator(handle.seed),
                 )
             else:
-                with _lending(network, cache):
+                with _lending(network, handle.cache):
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
         quantiles = out.numerical.double().cpu().numpy()
@@ -590,22 +586,27 @@ class KumoQuantile(
             },
         }
 
-    def __getstate__(self) -> dict[str, Any]:
-        """Pickles without the members' keys and values, which re-record.
+    def _pickled_handle(self, handle: _KumoGroup) -> _KumoGroup:
+        """A group without its cache, which can run to gigabytes."""
+        return dataclasses.replace(handle, cache=None)
 
-        The cache can run to gigabytes and lives on the device it was fitted
-        on, so a pickle keeps each group's context instead, and the first
-        prediction records the cache again, on the device then in use.
+    def _rebuild_caches(self) -> None:
+        """Records each group's missing cache again; see _record_missing."""
+        for handle in self.handles_:
+            self._record_missing(handle)
+
+    def _record_missing(self, handle: _KumoGroup) -> None:
+        """Records a group's cache if ``kv_cache`` is on and it has none.
+
+        The same context and seed record the same cache as the fit. A group
+        lacks it after unpickling, or after ``kv_cache`` was switched on
+        since the fit. The caller holds the estimator's lock.
+
+        Args:
+            handle: The group, with its context.
         """
-        state = super().__getstate__()
-        if "handles_" in state:
-            state["handles_"] = [
-                dataclasses.replace(handle, cache=None)
-                for handle in state["handles_"]
-            ]
-            if "regressor_" in state:
-                state["regressor_"] = state["handles_"][0]
-        return state
+        if self.kv_cache and handle.cache is None:
+            handle.cache = self._record(handle)
 
     def _relocated_provenance(self) -> dict[str, Any]:
         return {

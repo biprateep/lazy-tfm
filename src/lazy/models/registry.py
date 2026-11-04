@@ -35,9 +35,11 @@ from lazy.models import tabpfn
 __all__ = ["ESTIMATORS", "get_estimator", "list_estimators", "register"]
 
 ESTIMATORS: dict[str, type[base.BaseDensityRegressor]] = {}
-"""Short name -> estimator class. These names are what :class:`LazyModel` and
-:func:`get_estimator` accept, and what the benchmark tables record. Filled only
-through :func:`register`.
+"""Short name -> estimator class.
+
+These names are what :class:`~lazy.models.LazyModel` and :func:`get_estimator`
+accept, and what the benchmark tables record. Filled only through
+:func:`register`.
 """
 
 
@@ -45,7 +47,7 @@ def register(name: str, cls: type[base.BaseDensityRegressor]) -> None:
     """Adds a backend to the registry, once it meets the backend contract.
 
     Args:
-        name: The short name :class:`LazyModel` will know it by.
+        name: The short name :class:`~lazy.models.LazyModel` will know it by.
         cls: The backend class.
 
     Raises:

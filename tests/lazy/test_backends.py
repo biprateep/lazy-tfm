@@ -1178,7 +1178,10 @@ class TestTabPFN:
         blob = blobs / "0123456789abcdef0123"
         blob.write_bytes(b"weights")
         link = snapshot / "model.safetensors"
-        link.symlink_to(blob)
+        try:
+            link.symlink_to(blob)
+        except (OSError, NotImplementedError) as error:
+            pytest.skip(f"cannot create a symlink here: {error}")
 
         readable = tabpfn.path_for_tabpfn(link)
         assert readable.resolve().suffix == ".safetensors"

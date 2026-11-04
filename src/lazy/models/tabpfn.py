@@ -14,9 +14,10 @@ That is already a conditional density estimate, so
 :class:`TabPFNBarDistribution` does no post-processing: its predictions are
 :class:`~lazy.distributions.HistogramDistribution` objects over those buckets,
 mapped onto any grid by exact, mass-conserving integration
-(:meth:`lazy.grid.Grid.rebin`), and its native grid is the buckets
-themselves, in full. The bucket masses rather than quantiles, because upstream
-computes its quantiles by inverting this same piecewise-uniform CDF.
+(:meth:`~lazy.distributions.HistogramDistribution.on_grid`), and its native
+grid is the buckets themselves, in full. The bucket masses rather than
+quantiles, because upstream computes its quantiles by inverting this same
+piecewise-uniform CDF.
 
 The uniform parameters map onto TabPFN's own machinery: ``kv_cache`` onto its
 fit-time key/value cache (at full precision, so exact to float rounding on
@@ -43,9 +44,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 import copy
 import inspect
+import io
 import itertools
 import os
 import pathlib
+import pickle
 import sys
 import types
 from typing import Any
@@ -56,6 +59,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -541,9 +545,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
         # Every other argument is passed too, at the value upstream defaults
-        # to today, so that a later default cannot change a prediction. Two
-        # deprecated ones are left out: auto_scale_n_estimators acts only on
-        # n_estimators="auto", and n_jobs does nothing.
+        # to today, so that a later default cannot change a prediction.
+        # auto_scale_n_estimators acts only on n_estimators="auto", and
+        # n_jobs does nothing; both are deprecated upstream.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
@@ -561,6 +565,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             memory_saving_mode="auto",
             keep_cache_on_device=True,
             n_preprocessing_jobs=1,
+            n_jobs=None,
+            auto_scale_n_estimators=True,
             differentiable_input=False,
             eval_metric=None,
             **_cache_options(self.kv_cache),
@@ -701,24 +707,65 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             )
         }
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickles the regressors without the network, loadable anywhere.
+
+        The regressors share one network (:meth:`_model_specs`), which is
+        left out and attached again on unpickling. The rest of each
+        regressor, its key/value cache included, goes through
+        ``torch.save``, so that :meth:`__setstate__` can load its tensors
+        on the CPU, which a plain pickle of CUDA tensors cannot. The live
+        model is only read.
+
+        Returns:
+            The state to pickle, with ``handles_`` as bytes.
+        """
+        state = super().__getstate__()
+        if "handles_" in state:
+            state["handles_"] = _without_networks(state["handles_"])
+            state.pop("regressor_", None)
+        return state
+
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restores a pickle, its regressors on this model's device.
 
-        Upstream's ``to`` moves each regressor's network and key/value cache
-        and sets its precision again, from ``inference_precision``, which is
-        therefore set first. A regressor pickled with CUDA tensors still
-        needs CUDA to unpickle (#197). Estimators pickled together share one
-        network, which ``to`` moves in place, so they should share a device.
+        Regressors written by :meth:`__getstate__` load on the CPU and get
+        the network from :meth:`_network`, as a fit's do, which needs the
+        pinned checkpoint on this machine and downloads it if it is missing.
+        A ``handles_`` of whole regressors, each with its network, loads as
+        it is; regressors pickled together share that network, which
+        ``to`` moves in place, so they should share a device. Upstream's
+        ``to`` then moves each regressor's network and key/value cache and
+        sets its precision again, from ``inference_precision``, which is
+        therefore set first.
 
         Args:
             state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
-        if "handles_" in state:
-            precision = self._inference_precision()
+        if "handles_" not in state:
+            return
+        if isinstance(self.handles_, bytes):
+            import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+            self.handles_ = torch.load(
+                io.BytesIO(self.handles_),
+                map_location="cpu",
+                weights_only=False,
+            )
+            (network,), *_ = self._network()
             for regressor in self.handles_:
-                regressor.inference_precision = precision
-                regressor.to(self.device_)
+                regressor.models_ = [network]
+                # A constant target runs no network, so has no engine.
+                engine = getattr(regressor, "executor_", None)
+                if engine is not None:
+                    engine._set_models([network])  # noqa: SLF001 - upstream's.
+            if len(self.handles_) == 1:
+                self.regressor_ = self.handles_[0]
+        precision = self._inference_precision()
+        for regressor in self.handles_:
+            regressor.inference_precision = precision
+            regressor.to(self.device_)
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
@@ -729,16 +776,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        # Every member group's buckets: under bagging each member places
-        # its own, from its bag's targets.
-        edges = np.unique(
-            np.concatenate([_bucket_borders(h) for h in self.handles_])
-        )
-        if edges.size < 3:
-            # A constant target has one bucket; a grid needs two, and
-            # halving it changes no density.
-            edges = np.r_[edges[0], edges.mean(), edges[-1]]
-        return grid_lib.Grid.from_edges(edges, normalization="histogram")
+        return _bucket_head.native_grid(map(_bucket_borders, self.handles_))
 
     def _progress_postfix(
         self, dist: distributions.Distribution
@@ -823,6 +861,57 @@ def _shortest_period(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
     return tokens
 
 
+def _without_networks(regressors: list[Any]) -> bytes:
+    """Fitted regressors as ``torch.save`` writes them, without the networks.
+
+    Each network unpickles as ``None``, wherever a regressor refers to it.
+
+    Args:
+        regressors: Fitted ``tabpfn.TabPFNRegressor`` instances.
+
+    Returns:
+        What ``torch.load`` reads back.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    networks: set[int] = set()
+    for regressor in regressors:
+        networks.update(id(network) for network in regressor.models_)
+
+    class Pickler(pickle.Pickler):
+        """Pickles each of ``networks`` as ``None``."""
+
+        def reducer_override(self, obj: Any) -> Any:
+            """Writes ``obj`` as ``None`` if it is one of ``networks``.
+
+            Args:
+                obj: An object being pickled.
+
+            Returns:
+                A reduction to ``None`` for a network, or
+                ``NotImplemented``, which pickles ``obj`` as usual.
+            """
+            if id(obj) in networks:
+                return type(None), ()
+            return NotImplemented
+
+    buffer = io.BytesIO()
+    torch.save(
+        regressors,
+        buffer,
+        # torch.save reads only these two of a pickle module.
+        pickle_module=types.SimpleNamespace(__name__="pickle", Pickler=Pickler),
+        pickle_protocol=pickle.HIGHEST_PROTOCOL,
+    )
+    return buffer.getvalue()
+
+
+_IDENTITY = (-0.0, 1.0)
+"""The ``(mean, std)`` for borders already in the target's units: adding
+-0.0, unlike 0.0, keeps every float exactly, a border of -0.0 included.
+"""
+
+
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """The fitted regressor's bucket borders in the target's units.
 
@@ -845,11 +934,11 @@ def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """
     znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
     borders = np.asarray(znorm, dtype=np.float64)
-    if not getattr(regressor, "is_constant_target_", False):
-        borders = borders * float(regressor.y_train_std_) + float(
-            regressor.y_train_mean_
-        )
-    return np.maximum.accumulate(borders)
+    if getattr(regressor, "is_constant_target_", False):
+        return _bucket_head.bucket_edges(borders, *_IDENTITY)
+    return _bucket_head.bucket_edges(
+        borders, float(regressor.y_train_mean_), float(regressor.y_train_std_)
+    )
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:
@@ -944,10 +1033,11 @@ def bucket_masses(
     if regressor is not None:
         borders = _bucket_borders(regressor)
     else:
-        borders = np.maximum.accumulate(
+        borders = _bucket_head.bucket_edges(
             np.asarray(
                 criterion.borders.detach().cpu().numpy(), dtype=np.float64
-            )
+            ),
+            *_IDENTITY,
         )
         if borders.size > 1 and np.any(np.diff(borders) == 0):
             _warnings.warn(

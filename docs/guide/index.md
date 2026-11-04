@@ -11,13 +11,17 @@ the tutorials, which point to this guide as the reference.
 tfm
 distributions
 interface
+scikit_learn
 choosing
 ensembles
 scaling
 hardware
 limits
+warnings
 reproducibility
+saving
 clusters
 datasets
 faq
+glossary
 ```

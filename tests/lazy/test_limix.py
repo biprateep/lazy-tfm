@@ -413,6 +413,41 @@ def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
     np.testing.assert_allclose(after, before, rtol=1e-4, atol=1e-7)
 
 
+def test_a_failed_cache_rebuild_measures_memory_without_its_caches(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    fakes.install("limix", monkeypatch)
+    model = _model(n_estimators=4).fit(X, z)
+    expected = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    members = restored.handles_[0]["members"]
+
+    def free(network):
+        # A GPU of 7 units, less the caches still held; each takes 1.
+        del network  # Unused.
+        return 7 - sum(entry["cache"] is not None for entry in members)
+
+    prefill = _limix_stream.prefill
+    calls = []
+
+    def fails_third(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 3:
+            raise RuntimeError("out of memory")
+        return prefill(*args, **kwargs)
+
+    monkeypatch.setattr(limix, "_free_device_memory", free)
+    monkeypatch.setattr(_limix_stream, "cache_bytes", lambda *args: 1)
+    monkeypatch.setattr(_limix_stream, "prefill", fails_third)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        restored.predict_proba(X_test)
+    # Without the first run's two caches, the budget holds all four.
+    np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
+    assert all(entry["use_cache"] for entry in members)
+    assert restored.kv_cache_ is True
+
+
 def test_threads_predicting_on_an_unpickled_model_wait_for_its_caches(
     monkeypatch, data
 ):

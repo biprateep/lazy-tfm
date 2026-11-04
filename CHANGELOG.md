@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `Checkpoint`, the record that `lazy.get_checkpoint` returns, is now
+  exported from `lazy` and `lazy.models` and documented in the API
+  reference. The page of each package with an `__all__` (`lazy`,
+  `lazy.models` and `lazy.plotting`) lists the names it exports, and the
+  reference builds with no unresolved cross-reference.
 - `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
   warning classes, and `lazy.GridCoverageWarning`, issued when densities are
   renormalised because the native grid misses part of their probability.
@@ -39,6 +44,12 @@ change the API.
   and NLL of each row from one normalization, where `per_object_scores`,
   `per_object_crps` and `per_object_nll` normalize once each. `evaluate`
   uses it, with the same results to the bit.
+- The user guide has four new pages: a glossary, how the models work with
+  scikit-learn's tools, saving and loading a fitted model, and every warning
+  that lazy issues. The scaling page states how `n_jobs` uses the model cache
+  and the GPU, and how `chunk_size` multiplies the cost of the context when
+  `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
+  the title's capitals.
 
 ### Changed
 
@@ -47,6 +58,19 @@ change the API.
   with a GPU generator, which gives another stream for the same seed, so the
   same `random_state` gave different densities on the two devices. Densities
   on a GPU change; on a CPU they are unchanged.
+- A pickled TabICL model no longer holds its key/value caches; its first
+  prediction after unpickling records them again, with the same results to
+  the bit. Kumo Tabular and LimiX already left theirs out; all three now do
+  it the same way, and an unpickled LimiX model with one member group has
+  `regressor_` again. With 2 members and 3 features on a 4-core Xeon CPU
+  (2.8 GHz, 4 torch threads, torch 2.14.0, tabicl 2.2.0), a pickle of 300
+  context rows fell from 35.06 MB to 0.04 MB under `kv_cache=True` and from
+  6.78 MB to 0.04 MB under `"repr"`; of 1,200 rows, from 123.60 MB and
+  10.54 MB to 0.11 MB. Loading it in a fresh process and predicting 200 rows
+  took 3.92 s instead of 3.54 s at 300 rows, and 4.71 s instead of 3.73 s
+  at 1,200 rows, under `kv_cache=True` (medians of 3 interleaved runs).
+  A `copy.deepcopy` also leaves the caches out and rebuilds them on first
+  use. Pickles of earlier versions still load, with the caches they hold.
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.
@@ -153,6 +177,23 @@ change the API.
   evaluates at the grid's ends, instead of interpolating every row's
   quantiles a second time. Densities, scores and the warning about that
   probability are unchanged to the bit.
+- Densities of a histogram or a mixture of histograms on a grid other than
+  their own buckets now come from differencing the distribution's CDF at the
+  grid's edges, as quantile distributions' already did. They move by float
+  rounding only. On the test fakes of every backend, the test stand-ins,
+  the `LazyEnsembleModel` pools and the stand-ins of `benchmarks/cpu.py`,
+  densities moved by at most 3.3e-13 of a row's peak (8.7e-12 absolute),
+  and medians and scores by at most 5.2e-13 and 4.3e-13, both on the bagged
+  benchmark stand-in. Densities on a model's own buckets, and those of
+  TabICL and Kumo Tabular, are unchanged to the bit. The native grid of a
+  bagged TabPFN or LimiX model, or of TabFM with more than one dither, joins
+  the members' edges, so its densities move by rounding too. Where a bucket
+  spans several bins of equal density, rounding can now pick another of
+  those tied bins as the mode. With `benchmarks/cpu.py --repeats 5` (500
+  query rows, a 4-CPU Linux machine, four threads, NumPy 2.5.3), the median
+  time of `predict_proba` fell from 0.33 s to 0.27 s and its peak memory
+  from 229 MiB to 172 MiB for four bagged members of 5,000 buckets, and from
+  0.0132 s to 0.0117 s for 999 quantiles.
 
 ### Deprecated
 
@@ -178,6 +219,13 @@ change the API.
   backends' `setup` hook, which only this path uses, goes with it.
   `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
   install, also warns and will be removed in 0.7.0.
+- `Grid.rebin` and `Grid.from_quantiles` warn with a `FutureWarning` and
+  will be removed in 0.7.0, since nothing in LAZY uses them now.
+  `HistogramDistribution(edges, probs).on_grid(grid)` and
+  `QuantileDistribution(levels, values).on_grid(grid)` replace them, but
+  they normalize the densities by the grid's convention, and the second adds
+  tails beyond the outermost levels. `Grid.rebin` now computes its densities
+  as `HistogramDistribution` does, so it gets the point-mass fix below.
 - The `bin_edges` argument of the `lazy.metrics` functions warns with a
   `FutureWarning` and will be removed in 0.7.0. Results are unchanged. Pass
   `lazy.Grid.from_edges(bin_edges, normalization="histogram")` as the grid
@@ -199,6 +247,32 @@ change the API.
 
 ### Fixed
 
+- `on_grid`, and so `predict_proba`, keeps the mass of a zero-width bucket of
+  a histogram, which `cdf`, `ppf` and `mean` already counted as a point mass.
+  It dropped that mass before: masses `[0.5, 0.5]` in buckets with edges
+  `[0, 1, 1]` gave bin masses `[0.5, 0.5, 0, 0]` on the edges
+  `[0, 0.5, 1, 1.5, 2]`; they are now `[0.25, 0.25, 0.5, 0]`. Such buckets
+  arise from TabPFN's float32 borders, which `bucket_masses` returns without
+  the regressor.
+- A point mass on a bin edge, from a zero-width bucket or from tied
+  quantiles, now falls in the bin above the edge, and one on the grid's top
+  edge in the last bin, as `Grid.bin_index` assigns a true value there for
+  the scores. `histogramize` counted it in the bin below, and dropped one on
+  the grid's bottom edge, as did the probability outside the grid that the
+  native-grid warning counts. Distributions without point masses are
+  unchanged to the bit.
+- A TabPFN model fitted on a GPU can now be unpickled on a machine without
+  one. Its pickle held the regressors' CUDA tensors, which torch refuses to
+  load there. A TabPFN pickle also no longer holds the network. Unpickling
+  reattaches the network, so it needs the pinned checkpoint on that machine:
+  it is downloaded through the hub if missing, and `lazy download` fetches
+  it in advance. A pickle made by this version does not load in earlier
+  versions of lazy; pickles made by earlier versions still load. A v3.5
+  model with 8 members and 500 context rows, fitted on a CPU, pickled to
+  935.6 MB before and 59.4 MB now. Loading it in a fresh process took a
+  median of 2.77 s before and 3.59 s now, since the network is read from
+  the checkpoint (5 interleaved runs, 4 torch threads, 4-core Xeon at
+  2.8 GHz, torch 2.14.0, tabpfn 9.0.0).
 - A LimiX or TabFM model fitted on a GPU with `device="auto"` and unpickled
   on a machine without one now runs on the CPU with mixed precision off, and
   its `provenance_` says so. LimiX already moved to the CPU but kept mixed

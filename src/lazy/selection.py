@@ -472,7 +472,7 @@ def selection_summary(
         redshift_bins: Increasing redshift bin edges.
 
     Returns:
-        One row per bin, magnitude bins first: ``bin`` (its label),
+        One row per bin, magnitude bins first -- ``bin`` (its label),
         ``n_all``, ``n_selected`` and ``fraction``.
 
     Examples:

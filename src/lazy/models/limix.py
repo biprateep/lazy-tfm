@@ -59,11 +59,11 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
-from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _transforms
@@ -422,14 +422,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        # Every group's buckets: a bagged member standardises its target on
-        # its own bag, so places its buckets there.
-        edges = [
-            _bucket_edges(self.borders_, handle["mean"], handle["std"])
+        # Fit has checked that no group's buckets merge.
+        return _bucket_head.native_grid(
+            _bucket_head.bucket_edges(
+                self.borders_, handle["mean"], handle["std"]
+            )
             for handle in self.handles_
-        ]
-        return grid_lib.Grid.from_edges(
-            np.unique(np.concatenate(edges)), normalization="histogram"
         )
 
     def _progress_postfix(
@@ -512,20 +510,33 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         entry["use_cache"] = True
         self._cache_bytes += needed
 
-    def _restore_caches(self) -> None:
-        """Rebuilds the caches pickling dropped, within the memory budget.
+    def _pickled_handle(self, handle: dict[str, Any]) -> dict[str, Any]:
+        """A group without its members' caches."""
+        members = [{**entry, "cache": None} for entry in handle["members"]]
+        return {**handle, "members": members}
 
-        The pending flag is cleared last, so a thread that sees it cleared
-        finds every cache rebuilt; the caller holds the estimator's lock.
+    def _rebuild_caches(self) -> None:
+        """Records the members' caches again, within a fresh memory budget.
+
+        Safe to run again after a failure: the caches a failed run recorded
+        are dropped first, so that the budget is measured without them.
         """
+        if not self.kv_cache_:
+            return
+        partial = False
+        for handle in self.handles_:
+            for entry in handle["members"]:
+                partial = partial or entry["cache"] is not None
+                entry["cache"] = None
         network = self._network()
+        if partial:
+            _release_device_memory(network)
         self._reset_cache_budget()
         for handle in self.handles_:
             for entry in handle["members"]:
                 if entry["use_cache"]:
                     self._cache_member(network, entry)
         self._warn_if_uncached()
-        self._caches_pending = False
 
     def _warn_if_uncached(self) -> None:
         """Says, once, how many members run without their cache, and why."""
@@ -556,12 +567,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         network = self._network()
         member = entry["member"]
         queries = entry["pipeline"].transform(X)
-        if self.kv_cache_ and self.__dict__.get("_caches_pending", False):
-            # Keyed by the estimator, not the shared network, so restoring
-            # one model does not hold up another's predictions.
-            with _locks.network_lock(self):
-                if self.__dict__.get("_caches_pending", False):
-                    self._restore_caches()
         if self.kv_cache_ and entry["use_cache"]:
             logits = _limix_stream.decode(
                 network,
@@ -574,10 +579,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             logits = _limix_stream.forward(
                 network, member, queries, mixed_precision=self.mixed_precision_
             )
-        scaled = logits.astype(np.float64) / self._temperature()
-        scaled -= scaled.max(axis=1, keepdims=True)
-        probabilities = np.exp(scaled)
-        return probabilities / probabilities.sum(axis=1, keepdims=True)
+        return _bucket_head.softmax(
+            logits.astype(np.float64), self._temperature()
+        )
 
     def __reduce__(self) -> tuple[Any, ...]:
         """Pickles through :func:`_unpickle`, which loads LimiX's code first.
@@ -588,32 +592,6 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         """
         fitted = "handles_" in self.__dict__
         return (_unpickle, (type(self), fitted), self.__getstate__())
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle; the members' caches are recorded on next use.
-
-        Args:
-            state: The pickled ``__dict__``.
-        """
-        super().__setstate__(state)
-        if "handles_" in state:
-            self._caches_pending = True
-
-    def __getstate__(self) -> dict[str, Any]:
-        """Pickles without the network or the caches, which reload."""
-        state = super().__getstate__()
-        if "handles_" in state:
-            state["handles_"] = [
-                {
-                    **handle,
-                    "members": [
-                        {**entry, "cache": None} for entry in handle["members"]
-                    ],
-                }
-                for handle in state["handles_"]
-            ]
-            state.pop("regressor_", None)
-        return state
 
 
 def _unpickle(
@@ -645,7 +623,11 @@ def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
 def _bucket_edges(
     borders: _typing.FloatArray, mean: float, std: float
 ) -> _typing.FloatArray:
-    """The buckets' borders in the target's units.
+    """The buckets' borders in the target's units, checked not to merge.
+
+    The checkpoint's borders are increasing, as a bar distribution's must
+    be, so the shared non-decreasing rule changes none of them, and a merge
+    shows as fewer distinct edges than borders.
 
     Args:
         borders: The borders in standardised units, shape (n_buckets + 1,).
@@ -653,13 +635,13 @@ def _bucket_edges(
         std: Their standard deviation.
 
     Returns:
-        ``borders * std + mean``, the same shape.
+        ``borders * std + mean``, made non-decreasing, the same shape.
 
     Raises:
         ValueError: If the spread is so small against the mean that float64
             cannot tell neighbouring borders apart.
     """
-    edges = borders * std + mean
+    edges = _bucket_head.bucket_edges(borders, mean, std)
     if np.unique(edges).size < np.unique(borders).size:
         raise ValueError(
             f"the target's spread (standard deviation {std:.3g}) is too "
@@ -679,6 +661,14 @@ def _cache_dtype(network: Any, *, mixed_precision: bool) -> Any:
     if mixed_precision and device.type == "cuda":
         return torch.get_autocast_dtype("cuda")
     return torch.float32
+
+
+def _release_device_memory(network: Any) -> None:
+    """Returns the memory PyTorch holds unused on the network's GPU."""
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    if next(network.parameters()).device.type == "cuda":
+        torch.cuda.empty_cache()
 
 
 def _free_device_memory(network: Any) -> int | None:

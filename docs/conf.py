@@ -25,6 +25,8 @@ from typing import Any
 
 import jupytext
 from sphinx import application
+from sphinx.ext import intersphinx
+from sphinx.util import nodes
 
 import lazy
 
@@ -51,6 +53,7 @@ exclude_patterns = [
     "_build",
     "build",
     "**.ipynb_checkpoints",
+    "_templates",
     "tutorials/_gallery.md",
     "models/_overview.md",
     "guide/_backends.md",
@@ -446,10 +449,8 @@ autoapi_options = [
     "show-module-summary",
     "imported-members",
 ]
+autoapi_template_dir = "_templates/autoapi"
 add_module_names = False
-# Attributes: sections render as fields, not as a second copy of the
-# attributes autoapi already documents (dataclass fields would appear twice).
-napoleon_use_ivar = True
 # Else napoleon's escaping of a trailing underscore shows through, and the
 # fitted attributes (grid_, provenance_, ...) render without it.
 strip_signature_backslash = True
@@ -459,7 +460,24 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable", None),
     "pandas": ("https://pandas.pydata.org/docs", None),
     "sklearn": ("https://scikit-learn.org/stable", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy", None),
+    "matplotlib": ("https://matplotlib.org/stable", None),
 }
+
+# Every reference must resolve, or the build says which one does not. The
+# exceptions are names the reference leaves out on purpose, or that no
+# inventory documents.
+nitpicky = True
+nitpick_ignore_regex = [
+    # The reference documents public names only, so a reference to a private
+    # name (one with a part that starts with "_") renders as code.
+    ("py:.*", r"(.*\.)?_[A-Za-z]\w*(\..*)?"),
+    # Type aliases that their modules leave out of __all__, so that autoapi
+    # does not document them; a signature spells their names.
+    ("py:class", r"Ancil|FeatureMode|Member|Normalization|Pooling"),
+    # Not in matplotlib's inventory.
+    ("py:class", r"matplotlib\.typing\.RcKeyType"),
+]
 
 # -- Copy button: strip console prompts from copied commands -----------------
 copybutton_prompt_text = r"\$ |>>> |\.\.\. "
@@ -492,6 +510,73 @@ html_context = {
 }
 
 
+def _first_private(path: str) -> int | None:
+    """Returns the index of the first part of ``path`` that starts with ``_``.
+
+    Args:
+        path: A dotted name.
+
+    Returns:
+        The index into ``path.split(".")``, or ``None`` when the path is
+        public.
+    """
+    parts = path.split(".")
+    return next((i for i, p in enumerate(parts) if p.startswith("_")), None)
+
+
+def _resolve_alias(
+    app: application.Sphinx,
+    env: Any,  # The build environment.
+    node: Any,  # The unresolved pending_xref.
+    contnode: Any,  # Its text.
+) -> Any:
+    """Resolves a reference to a re-exported name or to numpy typing.
+
+    ``:func:`lazy.is_cached``` gives the path a user imports, and a ``Bases:``
+    line gives the path of the private module that defines the name. Neither
+    is documented (see ``_skip_public_reexports``), so the reference follows
+    autoapi's record of each import to where the name is documented. A
+    private path is first read without its private module, and a
+    bare name (from a summary on a package page) as one in that package. numpy
+    lists ``numpy.typing.ArrayLike`` as data, and a signature references it
+    as a class.
+
+    Returns:
+        A reference node, or ``None`` when the target is neither.
+    """
+    if node.get("refdomain") != "py":
+        return None
+    target = node["reftarget"]
+    if target.startswith("npt."):  # numpy.typing, as the module imports it.
+        target = "numpy.typing." + target.removeprefix("npt.")
+    if target.startswith("numpy.typing."):
+        data = node.deepcopy()
+        data["reftype"] = "data"
+        data["reftarget"] = target
+        return intersphinx.missing_reference(app, env, data, contnode)
+    if "." not in target and node.get("py:module"):
+        target = f"{node['py:module']}.{target}"  # A name in the same module.
+    if not target.startswith("lazy."):
+        return None
+    parts = target.split(".")
+    private = _first_private(target)
+    # A name inside a private module, not the private module itself.
+    if private is not None and private + 1 < len(parts):
+        target = ".".join([*parts[:private], *parts[private + 1 :]])
+    documented = env.get_domain("py").objects
+    seen: set[str] = set()
+    while target not in documented:
+        seen.add(target)
+        imported = env.autoapi_all_objects.get(target)
+        target = imported and imported.obj.get("original_path")
+        if not target or target in seen:
+            return None
+    entry = documented[target]
+    return nodes.make_refnode(
+        app.builder, node["refdoc"], entry.docname, entry.node_id, contnode
+    )
+
+
 def _skip_public_reexports(  # Sphinx's event signature.
     app: application.Sphinx,  # noqa: ARG001
     what: str,
@@ -516,8 +601,7 @@ def _skip_public_reexports(  # Sphinx's event signature.
         return True
     original = getattr(obj, "obj", {}).get("original_path") or ""
     if getattr(obj, "imported", False) and original:
-        module = original.rpartition(".")[0]
-        if not any(part.startswith("_") for part in module.split(".")):
+        if _first_private(original.rpartition(".")[0]) is None:
             return True
     return skip
 
@@ -546,4 +630,5 @@ def _edit_tutorial_source(  # Sphinx's event signature.
 
 def setup(app: application.Sphinx) -> None:  # noqa: D103 - Sphinx's extension hook.
     app.connect("autoapi-skip-member", _skip_public_reexports)
+    app.connect("missing-reference", _resolve_alias)
     app.connect("html-page-context", _edit_tutorial_source)

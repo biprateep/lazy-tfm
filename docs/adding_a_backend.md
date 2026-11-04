@@ -77,8 +77,11 @@ cuts the queries into chunks and yields each chunk's distributions from
 `_distribution_chunks`, from which every prediction method works: the
 densities, the native distributions, quantiles, intervals and PIT values. A
 backend overrides none of these, since the others would bypass an override of
-one. A model that must see every query in one call sets `chunks_queries =
-False`, as TabFM does.
+one. In particular `_predict_distribution` is derived from
+`_distribution_chunks`, so a backend that overrode only the former would be
+bypassed by `predict_quantiles`, `predict_interval` and `predict_pit`. A
+model that must see every query in one call sets `chunks_queries = False`, as
+TabFM does.
 
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
@@ -99,9 +102,39 @@ loads it from a checkpoint path onto `device_`. `_network` keeps the
 network on the estimator, which drops it on pickling and finds it again on
 first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
 Kumo Tabular do this). TabPFN loads its network the same way and hands it to
-each upstream regressor as a model spec, but its regressors still pickle it.
-The base
-class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
+each upstream regressor as a model spec; its pickle leaves the network out
+and hands it to the regressors again on unpickling.
+
+A pickle also leaves out each handle's key/value cache. A cache holds the
+network's work on the context rows. It can be many times the size of the
+context, and the context rebuilds it. A backend with a cache implements two
+hooks:
+
+- `_pickled_handle(handle)` returns a copy of a handle without its cache. It
+  keeps what rebuilds the cache, such as the context.
+- `_rebuild_caches()` records the caches again. The base class calls it
+  before the first prediction of an unpickled model, under the estimator's
+  lock, so threads that predict at once rebuild once. If it raises, the next
+  prediction calls it again, so it must be safe to run twice.
+
+Kumo Tabular's hooks show the pattern:
+
+```python
+def _pickled_handle(self, handle):
+    return dataclasses.replace(handle, cache=None)
+
+def _rebuild_caches(self):
+    for handle in self.handles_:
+        self._record_missing(handle)
+```
+
+TabICL, Kumo Tabular and LimiX-2 implement both hooks. A backend whose
+handles hold no cache keeps the defaults, which pickle a handle whole and
+rebuild nothing. TabPFN's regressors still pickle their caches.
+`copy.deepcopy` goes through the same hooks, so a deep copy also rebuilds
+its caches.
+
+The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
 and raises a clear error on a device its model does not support, before the
@@ -112,10 +145,12 @@ An estimator unpickled under `device="auto"` resolves `device_` and
 `mixed_precision_` again on the machine at hand, so a model fitted on a GPU
 predicts on the CPU where there is none. A backend whose handles hold the
 device moves them to the new `device_` in its own `__setstate__` (TabICL and
-TabPFN move their upstream regressors). Handles must pickle without device
-tensors for the move from a GPU to work: TabICL's do, while TabPFN's still
-hold CUDA tensors (#197). A backend whose `_recipe` records a
-setting that follows the device returns it, recomputed, from
+TabPFN move their upstream regressors). For the move from a GPU to work,
+handles that hold device tensors must pickle them so that they load on a
+CPU. TabICL's handles hold no cache when pickled; TabPFN writes its
+regressors with `torch.save` and reads them with
+`torch.load(..., map_location="cpu")`. A backend whose `_recipe` records
+a setting that follows the device returns it, recomputed, from
 `_relocated_provenance` (TabICL's `use_amp`, Kumo Tabular's autocast dtype and
 TabPFN's inference precision).
 
@@ -149,7 +184,12 @@ its repository build, and LimiX downloads its source). The hook is told by
 The module below is a starting point for a model called MyModel, whose
 package `mymodel` is assumed to offer a regressor that predicts bucket
 probabilities. Every name from `mymodel` is a stand-in for the real upstream
-API.
+API. Here the regressor returns its bucket edges already in the target's
+units, with probabilities. The skeleton's `_native_grid` joins every member
+group's edges with `native_grid` from `lazy.models._bucket_head`. That module
+also holds `bucket_edges`, which maps standardised borders to the target's
+units, and `softmax`, which turns logits into probabilities, for a model that
+returns those instead.
 
 ```python
 """Target distributions from MyModel's bucket probabilities."""
@@ -161,6 +201,7 @@ from typing import Any
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -246,8 +287,8 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, probabilities)
 
     def _native_grid(self) -> grid_lib.Grid:
-        return grid_lib.Grid.from_edges(
-            self.handles_[0].bucket_edges, normalization="histogram"
+        return _bucket_head.native_grid(
+            handle.edges for handle in self.handles_
         )
 ```
 
