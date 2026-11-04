@@ -216,15 +216,10 @@ def test_the_pinned_recipes_are_what_the_checkpoints_store(version):
     assert {k: stored[k] for k in recipe} == recipe
 
 
-def test_concurrent_fits_share_the_network_and_restore_the_loader(
-    monkeypatch,
-):
+def test_concurrent_fits_share_one_network(monkeypatch):
     """Four fits in four threads, all inside upstream's fit at once."""
-    from tabpfn import base  # noqa: PLC0415 - optional extra.
-
     recorder = fakes.Recorder()
     cls = fakes.install("tabpfn", monkeypatch, recorder)
-    upstream = base.initialize_tabpfn_model
     together = threading.Barrier(4, timeout=threads.TIMEOUT)
     fit = fake_tabpfn.Regressor.fit
 
@@ -246,7 +241,20 @@ def test_concurrent_fits_share_the_network_and_restore_the_loader(
     assert threads.run(*[run] * 4), "deadlock"
     assert len(fitted) == 4
     assert len(recorder.loads) == 1
-    assert base.initialize_tabpfn_model is upstream
+    (network,) = fitted[0].regressor_.models_
+    assert all(est.regressor_.models_[0] is network for est in fitted)
+
+
+def test_a_fitted_regressor_names_the_checkpoint_not_the_spec(monkeypatch):
+    """A pickle holds a path, as before; a spec class is not stable."""
+    recorder = fakes.Recorder()
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch, recorder)(
+        n_estimators=1, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    assert len(recorder.loads) == 1  # the fit ran on the shared network
+    assert est.regressor_.model_path == tabpfn.path_for_tabpfn(est.checkpoint_)
 
 
 @pytest.mark.parametrize("kv_cache", [True, False])

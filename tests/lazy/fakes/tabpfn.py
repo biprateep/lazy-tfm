@@ -4,15 +4,19 @@
 
 It accepts only the arguments upstream's constructor accepts. Its bucket
 borders are fixed in standardized units and stretched by the
-targets it is given, as upstream's are. It loads its "network" through
-upstream's loader, as the real regressor does, and the loader counts the
-networks it builds in ``recorder.loads``. Needs the tabpfn package.
+targets it is given, as upstream's are. It gets its "network" through
+upstream's loader, as the real regressor does. The fake loader builds one
+for a checkpoint path, counting them in ``recorder.loads``, and hands a model
+spec to upstream's own loader, which answers with the spec's network. Needs
+the tabpfn package.
 
 It replaces no private lazy name; ``tabpfn.base.initialize_tabpfn_model`` and
 ``tabpfn.TabPFNRegressor`` are upstream's.
 """
 
+import functools
 import inspect
+import os
 import types
 
 import numpy as np
@@ -43,18 +47,23 @@ class Regressor:
     def __init__(self, **kwargs):
         inspect.signature(self.upstream).bind(**kwargs)
         self.kwargs = kwargs
+        self.model_path = kwargs["model_path"]  # upstream's attribute
 
     def fit(self, X, y):
         from tabpfn import base  # noqa: PLC0415 - optional extra.
         from tabpfn import validation  # noqa: PLC0415 - optional extra.
         import torch  # noqa: PLC0415 - optional extra.
 
-        self.models_, *_ = base.initialize_tabpfn_model(
-            model_path=self.kwargs["model_path"],
+        # Upstream passes the fit mode where its loader takes one (before
+        # tabpfn 9.2).
+        options = {"fit_mode": self.kwargs["fit_mode"]}
+        accepted = inspect.signature(base.initialize_tabpfn_model).parameters
+        self.models_, self.configs_, *_ = base.initialize_tabpfn_model(
+            model_path=self.model_path,
             which="regressor",
-            fit_mode=self.kwargs["fit_mode"],
             softmax_temperature_override=None,
             n_estimators_override=self.kwargs["n_estimators"],
+            **{k: v for k, v in options.items() if k in accepted},
         )
         limit = self.limit or 10**9
         self.inference_config_ = types.SimpleNamespace(
@@ -118,11 +127,21 @@ def install(monkeypatch, recorder, *, limit=None):
     """
     upstream = pytest.importorskip("tabpfn")
     from tabpfn import base  # noqa: PLC0415 - optional extra.
+    from tabpfn import inference_config  # noqa: PLC0415 - optional extra.
     import torch  # noqa: PLC0415 - optional extra.
 
+    real = base.initialize_tabpfn_model
+
+    @functools.wraps(real)
     def load(**kwargs):
+        inspect.signature(real).bind(**kwargs)
+        if not isinstance(kwargs["model_path"], (str, os.PathLike)):
+            return real(**kwargs)
         recorder.loads.append(kwargs)
-        return [object()], None, torch.nn.Module(), None
+        config = inference_config.InferenceConfig.get_default(
+            task_type="regression", model_version="v2"
+        )
+        return [torch.nn.Module()], [{}], torch.nn.Module(), config
 
     monkeypatch.setattr(base, "initialize_tabpfn_model", load)
     monkeypatch.setattr(Regressor, "recorder", recorder)

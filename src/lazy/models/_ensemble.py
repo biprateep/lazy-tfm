@@ -197,7 +197,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     which loads it from a checkpoint path onto ``device_``. A fitted
     estimator pickles and predicts the same after unpickling; that network
     is kept on the instance, which ``__getstate__`` drops, so it is fetched
-    again on first use rather than pickled. The device is resolved
+    again on first use rather than pickled; a fit drops it too, before it
+    starts and when it fails. The device is resolved
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
@@ -1093,6 +1094,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """
         del load, checkpoint  # Unused: see the error.
         raise NotImplementedError(_NETWORK_HOOKS.format(type(self).__name__))
+
+    def _clear_fitted(self) -> None:
+        """Drops the fitted attributes and the memoized network.
+
+        A fit that fails lets go of the network it loaded, which otherwise
+        stays on the device while the estimator lives, even with the cache
+        off.
+        """
+        super()._clear_fitted()
+        self.__dict__.pop("_network_cache", None)
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the memoized network, which reloads on first use."""
