@@ -9,6 +9,10 @@ caches), so two threads using one such network at once would answer from
 each other's context. Whatever hands such a network a context holds the
 network's lock until it has taken the network's answer and cleared it.
 
+An estimator that rebuilds state on first use, as LimiX rebuilds its caches
+after unpickling, is locked the same way, by the estimator itself, so that
+it does not hold up the other models on its network.
+
 Typical usage example:
 
   with _locks.network_lock(network):
@@ -25,7 +29,7 @@ import weakref
 
 __all__ = ["network_lock"]
 
-# Mutable global state by design: the locks belong to the shared networks,
+# Mutable global state by design: the locks belong to the objects they guard,
 # and go with them. Every access holds _GUARD.
 _LOCKS: weakref.WeakKeyDictionary[Any, threading.Lock] = (
     weakref.WeakKeyDictionary()
@@ -36,13 +40,17 @@ _GUARD = threading.Lock()
 def network_lock(network: Any) -> threading.Lock:
     """Returns the lock of a loaded network, the same one for every caller.
 
+    Any other object whose state threads share can be locked the same way,
+    such as an estimator that rebuilds its caches on first use.
+
     Args:
-        network: The loaded network; it must be hashable by identity and
-            accept weak references, as a ``torch.nn.Module`` does.
+        network: The loaded network, or another such object; it must be
+            hashable by identity and accept weak references, as a
+            ``torch.nn.Module`` or an estimator does.
 
     Returns:
-        The network's lock, created on first use and dropped with the
-        network. It is not reentrant.
+        The object's lock, created on first use and dropped with the
+        object. It is not reentrant.
     """
     with _GUARD:
         return _LOCKS.setdefault(network, threading.Lock())
