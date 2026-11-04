@@ -7,6 +7,9 @@ pass is faked, on both inference paths (the streamed one and
 ``predict_proba``). Records, for every classifier run, the rows of its view
 and the scaling each of its standardizations was refitted with. Needs the
 tabfm package.
+
+It replaces the private lazy names in ``LAZY_SEAMS`` and, upstream,
+``tabfm.TabFMClassifier._predict_proba_internal``.
 """
 
 import types
@@ -16,8 +19,14 @@ import pytest
 
 import fakes
 from lazy.models import _hub
-from lazy.models import _icl_stream
 from lazy.models import tabfm
+
+LAZY_SEAMS = (
+    "lazy.models._icl_stream.streaming_available",
+    "lazy.models._icl_stream.classification_logits",
+    "lazy.models.tabfm.TabFMHistogram._shared_backbone",
+)
+"""The private lazy names that :func:`install` replaces."""
 
 SETTINGS = {
     "n_estimators": 2,
@@ -80,9 +89,15 @@ def install(monkeypatch, recorder):
         frame = {"query": X}
         return logits(classifier, None, frame)["query"]["mean_logits"][None]
 
-    monkeypatch.setattr(_icl_stream, "streaming_available", lambda: True)
-    monkeypatch.setattr(tabfm.TabFMHistogram, "_shared_backbone", backbone)
-    monkeypatch.setattr(_icl_stream, "classification_logits", logits)
+    fakes.patch(
+        monkeypatch,
+        LAZY_SEAMS,
+        {
+            "lazy.models._icl_stream.streaming_available": lambda: True,
+            "lazy.models._icl_stream.classification_logits": logits,
+            "lazy.models.tabfm.TabFMHistogram._shared_backbone": backbone,
+        },
+    )
     monkeypatch.setattr(
         upstream.TabFMClassifier, "_predict_proba_internal", internal
     )

@@ -6,6 +6,9 @@ The backend's own code runs, its key/value caches and pickling included;
 what is faked is LimiX's source (not on PyPI), its preprocessing pipelines
 (which come from that source), and the network's forward pass, prefill and
 decode. Needs nothing beyond the package, so it runs everywhere.
+
+It replaces the private lazy names in ``LAZY_SEAMS``; it provides no upstream
+names, since LimiX's source is faked whole.
 """
 
 import types
@@ -13,10 +16,24 @@ import types
 import numpy as np
 
 import fakes
-from lazy.models import _limix_preprocess
-from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import limix
+
+LAZY_SEAMS = (
+    "lazy.models._limix_preprocess.MemberPipeline",
+    "lazy.models._limix_source.load",
+    "lazy.models._limix_stream.Member",
+    "lazy.models._limix_stream.load_network",
+    "lazy.models._limix_stream.cache_supported",
+    "lazy.models._limix_stream.cache_bytes",
+    "lazy.models._limix_stream.prefill",
+    "lazy.models._limix_stream.forward",
+    "lazy.models._limix_stream.decode",
+    "lazy.models.limix._cache_dtype",
+    "lazy.models.limix._free_device_memory",
+    "lazy.models.limix.LimiXBarDistribution._import_backend",
+)
+"""The private lazy names that :func:`install` replaces."""
 
 SETTINGS = {"n_estimators": 2}
 """Small enough for the behavioral suite."""
@@ -104,24 +121,28 @@ def install(monkeypatch, recorder):
         :class:`lazy.models.limix.LimiXBarDistribution`.
     """
     monkeypatch.setattr(Member, "recorder", recorder)
-    monkeypatch.setattr(_limix_preprocess, "MemberPipeline", Pipeline)
-    monkeypatch.setattr(_limix_stream, "Member", Member)
-    monkeypatch.setattr(_limix_source, "load", lambda: _SOURCE)
-    monkeypatch.setattr(
-        _limix_stream, "load_network", lambda path, device: Network()
-    )
-    monkeypatch.setattr(_limix_stream, "cache_supported", lambda net: True)
-    monkeypatch.setattr(_limix_stream, "cache_bytes", lambda *args: 0)
-    monkeypatch.setattr(
-        _limix_stream, "prefill", lambda net, member, **kw: "cache"
-    )
-    monkeypatch.setattr(_limix_stream, "forward", _logits)
-    monkeypatch.setattr(_limix_stream, "decode", _decode)
-    monkeypatch.setattr(limix, "_cache_dtype", lambda net, **kw: None)
-    monkeypatch.setattr(limix, "_free_device_memory", lambda net: None)
-    monkeypatch.setattr(
-        limix.LimiXBarDistribution,
-        "_import_backend",
-        lambda est: _SOURCE.loading,
+    fakes.patch(
+        monkeypatch,
+        LAZY_SEAMS,
+        {
+            "lazy.models._limix_preprocess.MemberPipeline": Pipeline,
+            "lazy.models._limix_source.load": lambda: _SOURCE,
+            "lazy.models._limix_stream.Member": Member,
+            "lazy.models._limix_stream.load_network": (
+                lambda path, device: Network()
+            ),
+            "lazy.models._limix_stream.cache_supported": lambda net: True,
+            "lazy.models._limix_stream.cache_bytes": lambda *args: 0,
+            "lazy.models._limix_stream.prefill": (
+                lambda net, member, **kw: "cache"
+            ),
+            "lazy.models._limix_stream.forward": _logits,
+            "lazy.models._limix_stream.decode": _decode,
+            "lazy.models.limix._cache_dtype": lambda net, **kw: None,
+            "lazy.models.limix._free_device_memory": lambda net: None,
+            "lazy.models.limix.LimiXBarDistribution._import_backend": (
+                lambda est: _SOURCE.loading
+            ),
+        },
     )
     return limix.LimiXBarDistribution

@@ -9,6 +9,8 @@ depends on it: the regressor loads its network from ``model_path`` in
 ``_load_model``, the network keeps the cache of its last call on itself, and
 a pickle leaves the network out and reloads it eagerly on unpickling, from
 the pickled path and on the pickled device.
+
+It replaces no private lazy name; ``tabicl.TabICLRegressor`` is upstream's.
 """
 
 import pathlib
@@ -19,6 +21,9 @@ import pytest
 import fakes
 from lazy.models import _hub
 from lazy.models import tabicl
+
+LAZY_SEAMS = ()
+"""The private lazy names that :func:`install` replaces: none."""
 
 SETTINGS = {"n_estimators": 2}
 """Small enough for the behavioral suite."""
