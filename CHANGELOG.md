@@ -147,6 +147,10 @@ change the API.
   backends' `setup` hook, which only this path uses, goes with it.
   `lazy.models.kumo.REPOSITORY_BUILD`, the git requirement it used to
   install, also warns and will be removed in 0.7.0.
+- `lazy.plotting.style.better_step`, `stacked_hist`, `running_median`,
+  `side_colorbar` and `grid_figsize` (also `lazy.plotting.grid_figsize`) warn
+  with a `FutureWarning` and will be removed in 0.7.0. Nothing in lazy uses
+  them, and they still work.
 
 ### Removed
 
