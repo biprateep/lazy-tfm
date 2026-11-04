@@ -12,6 +12,7 @@ so it only runs when ``LAZY_RUN_CHECKPOINT_TESTS=1`` is set.
 
 import builtins
 import collections
+import importlib
 import inspect
 import os
 import pathlib
@@ -84,6 +85,41 @@ class TestTabFM:
         )
         monkeypatch.setattr(_icl_stream, "streaming_available", lambda: False)
 
+        est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2)
+        with pytest.warns(tabfm.TabFMPerformanceWarning, match="KV-cache"):
+            est.fit(X, z)
+        assert est.inference_ == "predict_proba"
+
+    @pytest.fixture
+    def full_build(self, monkeypatch):
+        """The installed tabfm, given any of the streaming API it lacks."""
+        pytest.importorskip("torch")
+        owners = {}
+        for module, name in _icl_stream.STREAMING_API:
+            owner = importlib.import_module(f"tabfm.src.{module}")
+            *parents, attribute = name.split(".")
+            for parent in parents:
+                owner = getattr(owner, parent)
+            if not hasattr(owner, attribute):
+                monkeypatch.setattr(owner, attribute, object(), raising=False)
+            owners[name] = (owner, attribute)
+        return owners
+
+    def test_a_build_with_all_the_streaming_api_streams(self, full_build):
+        del full_build  # Used for its patches.
+        assert _icl_stream.streaming_available()
+
+    @pytest.mark.parametrize(
+        "missing", [name for _, name in _icl_stream.STREAMING_API]
+    )
+    def test_a_build_missing_any_streaming_api_falls_back(
+        self, tiny, monkeypatch, full_build, missing
+    ):
+        """The PyPI release lacks transform_context_only, not just decode."""
+        monkeypatch.delattr(*full_build[missing])
+        assert not _icl_stream.streaming_available()
+
+        X, z = tiny
         est = lazy.get_estimator("tabfm", n_coarse_bins=2, n_fine_bins=2)
         with pytest.warns(tabfm.TabFMPerformanceWarning, match="KV-cache"):
             est.fit(X, z)
