@@ -94,6 +94,7 @@ class KumoQuantile(
     backend = "kumo"
     display_name = "Kumo Tabular"
     extra = "kumo"
+    upstream_package = "sdm"
     native_output = "quantiles"
     native_transforms = {"none": "identity"}
     auto_tokens = AUTO_TRANSFORMS
@@ -111,6 +112,8 @@ class KumoQuantile(
     exact_chunking = False
     kv_cache_rtol = 1e-3
     cpu_friendly_versions = ("v1-small",)
+    recipes = _RECIPES
+    outlier_threshold_key = "outlier_threshold"
 ```
 
 The context limit is the size of the tables NVIDIA pretrained on, and since
@@ -127,8 +130,10 @@ stores them verbatim, as in the skeleton on {doc}`adding_a_backend`, with
 Upstream's recipe is written out in the module rather than taken from the
 installed package (`AUTO_TRANSFORMS`, `AUTO_OUTLIER_THRESHOLD`,
 `AUTO_TRIM_FRACTION` and `_PINNED_RECIPE`, assembled by `_recipe`), so that an
-upgrade of `sdm` cannot change what `transforms="auto"` runs, and
-`_pinned_recipe` returns these settings for every version. The recipe maps
+upgrade of `sdm` cannot change what `transforms="auto"` runs. `_RECIPES`, the
+class's `recipes`, holds these settings for every version, and
+`outlier_threshold_key` names the one that `outlier_threshold="auto"` resolves
+to. The recipe maps
 onto the uniform parameters: the members' transforms follow `transforms`, the
 Latin-square shuffle is present only when `feature_shuffle=True`, and the
 two-pass clip only when `outlier_threshold` resolves to a number. Its output
@@ -258,10 +263,10 @@ as NVIDIA runs the model.
 The `kumo` extra in `pyproject.toml` requires `structured-data-models>=0.2.1`,
 and joins the `all` extra. The `setup` hook does nothing unless the backend
 is named, which is deprecated; then it installs the package if
-`sdm.models.KumoTabular` does not import. `_import_backend` tells a user
-without `sdm` to install the extra, and refuses a package called `sdm` that
-has no `KumoTabular`. Since `sdm` ships no type information and is
-absent from CI, it also joins the modules mypy may miss.
+`sdm.models.KumoTabular` does not import. `_import_backend` imports
+`upstream_package`, which tells a user without `sdm` to install the extra, and
+then refuses a package called `sdm` that has no `KumoTabular`. Since `sdm`
+ships no type information and is absent from CI, it also joins the modules mypy may miss.
 
 ## Registering and pinning
 

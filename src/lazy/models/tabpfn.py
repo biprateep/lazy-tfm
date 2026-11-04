@@ -25,7 +25,7 @@ a CPU),
 onto its soft clip, ``OUTLIER_REMOVAL_STD``,
 ``softmax_temperature`` onto its own and ``mixed_precision`` onto its
 ``inference_precision``. No setting is left to TabPFN: each version's own
-recipe is written out below (:data:`_AUTO_RECIPES`) and handed over in full,
+recipe is written out below (:data:`_RECIPES`) and handed over in full,
 so neither the checkpoint's stored config nor the installed tabpfn package
 decides what runs, and every column is numeric (upstream would take a column
 with fewer than four distinct values for a category).
@@ -116,7 +116,7 @@ _SHARED_RECIPE: dict[str, Any] = {
 }
 """Settings every version's own recipe shares."""
 
-_AUTO_RECIPES: dict[str, dict[str, Any]] = {
+_RECIPES: dict[str, dict[str, Any]] = {
     "v2": {
         **_SHARED_RECIPE,
         "PREPROCESS_TRANSFORMS": (
@@ -221,7 +221,7 @@ a regressor), and ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both
 are what ``"auto"`` resolves to, and are handed over as such.
 """
 # The fast variant is the same recipe on a smaller checkpoint.
-_AUTO_RECIPES["v3.5-fast"] = _AUTO_RECIPES["v3.5"]
+_RECIPES["v3.5-fast"] = _RECIPES["v3.5"]
 
 
 def _upstream_settings(
@@ -252,7 +252,7 @@ def _upstream_settings(
     """
     settings = {
         field: value
-        for field, value in _AUTO_RECIPES[version].items()
+        for field, value in _RECIPES[version].items()
         # Handed over as the estimator's own argument instead.
         if field != "SOFTMAX_TEMPERATURE"
     }
@@ -361,7 +361,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         n_estimators: Ensemble members, each a forward pass over a
             differently preprocessed view of the data.
         transforms: Per-member feature transforms. ``"auto"`` is the
-            version's own recipe, pinned in :data:`_AUTO_RECIPES`: its
+            version's own recipe, pinned in :data:`_RECIPES`: its
             preprocessors, including any SVD components and original columns
             they append, the fingerprint feature, polynomial features on
             v2.6, the target transforms, and on v3.5 a 12-sigma soft clip.
@@ -435,6 +435,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     display_name = "TabPFN"
     method_note = "Bucket masses of TabPFN's bar distribution."
     extra = "tabpfn"
+    upstream_package = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()
     # A regressor per bag: upstream's own subsampling standardises the
@@ -453,6 +454,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # Not bit for bit on every CPU: on a 4-core x86 machine, 7-row chunks
     # and one pass differ in the last bits of most densities.
     exact_chunking = False
+    recipes = _RECIPES
+    softmax_temperature_key = "SOFTMAX_TEMPERATURE"
+    outlier_threshold_key = "OUTLIER_REMOVAL_STD"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -490,11 +494,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.ignore_pretraining_limits = ignore_pretraining_limits
         self.progress = progress
         self.verbose = verbose
-
-    def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "tabpfn", needed_by=type(self).__name__, extra=self.extra
-        )
 
     @classmethod
     def clear_upstream_caches(cls) -> None:
@@ -666,18 +665,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
         return "autocast" if self.mixed_precision_ else torch.float32
-
-    def _auto_softmax_temperature(self) -> float:
-        return float(_AUTO_RECIPES[self.version]["SOFTMAX_TEMPERATURE"])
-
-    def _auto_outlier_threshold(self) -> float | None:
-        return _AUTO_RECIPES[self.version]["OUTLIER_REMOVAL_STD"]
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _AUTO_RECIPES:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(_AUTO_RECIPES[version])
 
     def _inference_config(self, group: _members.MemberGroup) -> dict[str, Any]:
         """The ``inference_config`` a group hands TabPFN, ready to pass."""
