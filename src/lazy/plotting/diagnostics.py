@@ -740,9 +740,7 @@ def diagnostic_panel(
     y_true = np.asarray(y_true, dtype=float)
     centers, edges = _geometry(y_grid, bin_edges)
     y_pred = metrics.grid_point_estimates(centers, pdfs, bin_edges=edges)[point]
-    _, _, pit = metrics.evaluate_grid_pdfs(
-        y_true, centers, pdfs, point=point, bin_edges=edges
-    )
+    _, pit = metrics.pdf_metrics(y_true, centers, pdfs, bin_edges=edges)
 
     fig, axes = plt.subplots(
         2, 2, figsize=style.figsize(width="text", aspect=0.85)

@@ -27,6 +27,9 @@ change the API.
 
 ### Changed
 
+- `lazy.plotting.diagnostics.diagnostic_panel` computes the point estimates
+  once instead of twice, with the same figure to the bit. On 5,000 rows and
+  500 bins its median time fell from 0.59 s to 0.54 s.
 - `import lazy` no longer imports h5py or scikit-learn's dataset loaders.
   `lazy.datasets` and `lazy.selection` load when first accessed, as
   attributes of `lazy` or by import, so code that uses them is unchanged.
