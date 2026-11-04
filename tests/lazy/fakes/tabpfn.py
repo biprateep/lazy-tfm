@@ -161,5 +161,12 @@ def install(monkeypatch, recorder, *, limit=None):
     monkeypatch.setattr(Regressor, "recorder", recorder)
     monkeypatch.setattr(Regressor, "limit", limit)
     monkeypatch.setattr(Regressor, "upstream", upstream.TabPFNRegressor)
+    # So that lazy reads upstream's arguments from the fake, as from the real.
+    monkeypatch.setattr(
+        Regressor,
+        "__signature__",
+        inspect.signature(upstream.TabPFNRegressor),
+        raising=False,
+    )
     monkeypatch.setattr(upstream, "TabPFNRegressor", Regressor)
     return tabpfn.TabPFNBarDistribution

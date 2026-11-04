@@ -242,6 +242,9 @@ change the API.
 
 ### Fixed
 
+- With `tabpfn` 9.2 or later installed, TabPFN passes
+  `enable_torch_compile=False` instead of leaving it to upstream's default,
+  so a later default cannot change its densities. Outputs do not change.
 - `on_grid`, and so `predict_proba`, keeps the mass of a zero-width bucket of
   a histogram, which `cdf`, `ppf` and `mean` already counted as a point mass.
   It dropped that mass before: masses `[0.5, 0.5]` in buckets with edges
