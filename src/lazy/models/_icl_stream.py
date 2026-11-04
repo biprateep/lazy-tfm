@@ -387,28 +387,6 @@ def classification_logits(
     }
 
 
-def softmax(
-    logits: _typing.FloatArray, temperature: float
-) -> _typing.FloatArray:
-    """Temperature-scaled softmax over the last axis.
-
-    Args:
-        logits: Logits, any shape; classes on the last axis.
-        temperature: Divides the logits before the softmax.
-
-    Returns:
-        Probabilities of the same shape, summing to one over the last axis.
-
-    Examples:
-        >>> softmax(np.zeros((1, 4)), temperature=0.9).round(3).tolist()
-        [[0.25, 0.25, 0.25, 0.25]]
-    """
-    scaled = logits / temperature
-    scaled = scaled - scaled.max(axis=-1, keepdims=True)
-    weights = np.exp(scaled)
-    return weights / weights.sum(axis=-1, keepdims=True)
-
-
 STREAMING_API = (
     ("pytorch.model", "move_cache_to_device"),
     ("pytorch.model", "TabFM.prefill"),
