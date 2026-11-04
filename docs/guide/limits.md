@@ -55,6 +55,17 @@ that covers them, or use the native grid, which reaches far into both tails
 grid with no context rows gets zero probability, and a true value in it has
 zero density. Such a grid should therefore have context rows in every bin.
 
+```{figure} ../figures/figs/grid_cutoff.svg
+:alt: One skewed density on a grid that covers it and on a grid that ends at 1.5; the short grid's density is higher, and a true value at 2.2 lies beyond it.
+:width: 100%
+
+**Figure 1.** One distribution on a grid that covers it (blue) and on a grid
+that ends inside it (orange), from
+{meth}`~lazy.distributions.HistogramDistribution.on_grid`. The short grid
+drops the probability beyond 1.5 and renormalizes the rest, so its density is
+higher, and it gives the true value at 2.2 no density.
+```
+
 ## Discrete targets and the PIT
 
 The PIT statistics assume a continuous target. When the target takes only a

@@ -49,6 +49,18 @@ n_coarse_bins)` in-context classifications (11 by default), which is why it is
 the slowest, and it needs its repository build to be even this fast (see
 {doc}`../installation`).
 
+```{figure} ../figures/figs/chunks_bags.svg
+:alt: Two grids of query rows by context rows, split into three chunks of query rows; in the second grid only half the context columns are filled.
+:width: 100%
+
+**Figure 1.** The queries' work in one member, in which each filled cell is a
+query row attending to a context row. The queries run in chunks of
+`chunk_size` rows, which bound the memory of each pass, and a bagged member
+(right) attends only to the context rows in its bag. Not drawn: the context's
+own work, which without the key/value cache each chunk repeats (see
+[Chunking](#chunking)).
+```
+
 ## Chunking
 
 Peak memory is bounded by `chunk_size` on every backend (8,192 query rows by

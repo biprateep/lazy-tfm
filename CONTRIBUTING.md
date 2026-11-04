@@ -160,9 +160,10 @@ untouched.
 
 ### The figures
 
-`docs/figures/make_figures.py` draws the figures of the docs that show a
-model's output, with TabPFN-3.5-fast on a CPU, and writes them as SVG into
-`docs/figures/figs/`. It needs the `tabpfn` extra and the TabPFN checkpoint.
+`docs/figures/make_figures.py` draws every figure of the landing page and the
+user guide, and writes them as SVG into `docs/figures/figs/`. The figures of a
+model's output run TabPFN-3.5-fast on a CPU, so the script needs the `tabpfn`
+extra and the TabPFN checkpoint, even to redraw only a concept figure.
 Rerun it after a change to a model's output or to the landing snippet
 `docs/snippets/quickstart.py`:
 
