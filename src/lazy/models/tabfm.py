@@ -500,8 +500,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         provenance_: Which weights, code and ensemble answered, as a dict.
         checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
             loads its backbone on the first prediction, so this appears then.
-        bin_prior_: The context's bin fractions from the last prediction,
-            shape (n_bins,).
+        bin_prior_: The bin fractions of the last member group's context
+            targets, at the last dither, shape (n_bins,). With bagging
+            done natively, the one group's targets are the whole context.
         bins_: How the bins were chosen, for example
             ``"auto equal-mass 7x7"`` or ``"grid 50 bins in 5 groups"``.
         n_coarse_bins_: The resolved coarse classes, or a matched grid's
@@ -836,7 +837,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     ) -> distributions.Distribution:
         model = self._backbone()
         query = _frame(X)
-        shifts = [d / self.n_dither for d in range(self.n_dither)]
+        shifts = self._shifts()
         parts = []
         with _progress.bar(
             self.progress,
@@ -860,7 +861,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 if self.prior_shift == "em":
                     probs, _ = prior_shift_em(probs, prior)
                 parts.append(distributions.HistogramDistribution(edges, probs))
-        self.bin_prior_ = prior
         if len(parts) == 1:
             return parts[0]
         return distributions.MixtureDistribution.equal(parts)
@@ -868,7 +868,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _native_grid(self) -> grid_lib.Grid:
         if self.bin_grid_ is not None:
             return self.bin_grid_
-        shifts = [d / self.n_dither for d in range(self.n_dither)]
+        shifts = self._shifts()
         edges = np.unique(
             np.concatenate(
                 [self._edges(self.y_context_, shift)[0] for shift in shifts]
@@ -952,9 +952,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             the context's bin fractions, shape ``(n_bins,)``.
         """
         y, X_context, group = handle["y"], handle["X"], handle["group"]
-        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        edges, coarse_edges, fine_edges, coarse, fines, prior = self._labels(
+            y, shift
+        )
         n_coarse = coarse_edges.size - 1
-        coarse = _bin_labels(coarse_edges, y)
         # Each member's rows of this group's context, for natively bagged
         # members; None when every member sees all of them.
         member_rows = getattr(group, "member_rows", None)
@@ -970,12 +971,11 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             member_rows,
         )
         _done(progress)
-        prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
         for j in range(n_coarse):
             rows = coarse == j
             n_fine = fine_edges[j].size - 1
-            fine = _bin_labels(fine_edges[j], y[rows])
+            fine = fines[j]
             level_rows = (
                 None
                 if member_rows is None
@@ -998,13 +998,73 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 level_rows,
             )
             _done(progress)
-            prior.append(np.bincount(fine, minlength=n_fine) / max(y.size, 1))
             blocks.append(p_fine * p_coarse[:, [j]])
             self._log(
                 f"  coarse bin {j + 1}/{n_coarse}"
                 f" ({int(rows.sum())} context rows)"
             )
-        return np.concatenate(blocks, axis=1), edges, np.concatenate(prior)
+        return np.concatenate(blocks, axis=1), edges, prior
+
+    def _shifts(self) -> list[float]:
+        """Each dither's edge shift in quantile space, in bins."""
+        return [d / self.n_dither for d in range(self.n_dither)]
+
+    def _labels(
+        self, y: _typing.FloatArray, shift: float
+    ) -> tuple[
+        _typing.FloatArray,
+        _typing.FloatArray,
+        list[_typing.FloatArray],
+        _typing.IntArray,
+        list[_typing.IntArray],
+        _typing.FloatArray,
+    ]:
+        """A group's context targets in the bins of one dither.
+
+        Args:
+            y: The group's clipped context targets, shape (n,).
+            shift: Edge shift in quantile space, in bins.
+
+        Returns:
+            A tuple ``(edges, coarse_edges, fine_edges, coarse, fines,
+            prior)``: the bin edges, as :meth:`_edges` gives them; each
+            target's coarse class, shape (n,); the fine classes of each
+            coarse class's targets, one array per coarse class; and the
+            targets' bin fractions, shape (n_bins,).
+        """
+        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        coarse = _bin_labels(coarse_edges, y)
+        fines = [
+            _bin_labels(fine_edges[j], y[coarse == j])
+            for j in range(coarse_edges.size - 1)
+        ]
+        prior = np.concatenate(
+            [
+                np.bincount(fine, minlength=fine_edges[j].size - 1)
+                / max(y.size, 1)
+                for j, fine in enumerate(fines)
+            ]
+        )
+        return edges, coarse_edges, fine_edges, coarse, fines, prior
+
+    def _after_fit(self) -> None:
+        """Sets ``bin_prior_``, which no prediction changes."""
+        self._set_bin_prior()
+
+    def _set_bin_prior(self) -> None:
+        """The last member group's bin fractions, at the last dither."""
+        shift = self._shifts()[-1]
+        self.bin_prior_ = self._labels(self.handles_[-1]["y"], shift)[-1]
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle; one made before ``fit`` set the bin prior gets it.
+
+        Args:
+            state: The pickled ``__dict__``.
+        """
+        super().__setstate__(state)
+        if "handles_" in state and "bin_prior_" not in state:
+            self._set_bin_prior()
 
     def _class_probabilities(
         self,

@@ -7,6 +7,7 @@ and the probability bookkeeping are checked without a checkpoint. The last
 loads TabFM on the CPU, and runs only with ``LAZY_RUN_CHECKPOINT_TESTS=1``.
 """
 
+import pickle
 import warnings
 
 import fakes
@@ -208,6 +209,43 @@ def test_a_matched_grid_s_empty_bins_get_zero(monkeypatch):
     prior = est.bin_prior_
     assert prior[11] == pytest.approx(5 / z_used.size)
     np.testing.assert_allclose(prior.sum(), 1.0)
+
+
+def test_the_bin_prior_is_set_by_fitting_and_left_alone_by_predicting(
+    monkeypatch,
+):
+    X, z, X_query = _problem(200)
+    # A transform TabFM does not run natively puts each bagged member in a
+    # group of its own, with its own bag, so the groups' priors differ.
+    est = fakes.Backend("tabfm", monkeypatch)(
+        n_estimators=3, bag_size=120, n_dither=2, transforms=["quantile"]
+    ).fit(X, z)
+    assert len(est.handles_) == 3
+    prior = est.bin_prior_
+    hierarchy = est._hierarchy
+    seen = []
+
+    def recorded(*args, **kwargs):
+        out = hierarchy(*args, **kwargs)
+        seen.append(out[2])
+        return out
+
+    monkeypatch.setattr(est, "_hierarchy", recorded)
+    est.predict_distribution(X_query)
+    assert est.bin_prior_ is prior
+    # The prior the last group used at the last dither, as predictions see it.
+    np.testing.assert_array_equal(prior, seen[-1])
+    assert any(not np.array_equal(seen[0], other) for other in seen[1:])
+
+
+def test_a_pickle_without_the_bin_prior_gets_it(monkeypatch):
+    X, z, _ = _problem(200)
+    est = fakes.Backend("tabfm", monkeypatch)(n_dither=2).fit(X, z)
+    prior = est.bin_prior_
+    del est.bin_prior_  # As a model fitted before fit set it.
+    np.testing.assert_array_equal(
+        pickle.loads(pickle.dumps(est)).bin_prior_, prior
+    )
 
 
 def test_a_grid_of_ten_bins_or_fewer_is_one_classifier(monkeypatch):
