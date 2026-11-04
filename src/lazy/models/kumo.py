@@ -158,69 +158,54 @@ class KumoQuantile(
 ):
     """Target distributions from the quantiles Kumo Tabular predicts.
 
+    The parameters every backend shares mean what :doc:`/guide/interface`
+    states; each entry below adds only what differs on Kumo Tabular.
+
     Args:
         version: Which size to load: ``"v1-large"`` (216 million
             parameters), ``"v1-medium"`` (62 million) or ``"v1-small"`` (28
-            million); see :func:`lazy.list_versions`. Recorded in
-            ``provenance_``.
-        n_estimators: Ensemble members, exactly; costs scale linearly.
-            NVIDIA's benchmarks run 8 with the small and medium sizes and 16
-            with the large one; 8 is the package-wide default.
-        transforms: Per-member feature transforms: ``"auto"`` (Kumo's own
+            million).
+        n_estimators: Ensemble members. NVIDIA's benchmarks run 8 with the
+            small and medium sizes and 16 with the large one.
+        transforms: Per-member feature transforms. ``"auto"`` is Kumo's own
             recipe, cycling none, a power transform, a robust scaling and a
-            Gaussian rank transform, with the 4-sigma clip), a recipe name,
-            a transform name or a sequence of them; see
-            :mod:`lazy.models._transforms`. Only ``none`` is Kumo's own; lazy
-            applies every other name, and Kumo then runs with no transform of
-            its own. An explicit ``transforms`` also drops the recipe's 20%
-            trim, so the members' quantiles are a plain mean; the random sign
-            flips of the columns and of the target stay under any
-            ``transforms``.
-        feature_shuffle: Whether members see the columns in different orders
-            (upstream's Latin-square shuffle). A bagged member, which runs on
-            its own, has its columns permuted by lazy instead.
-        bag_size: Context rows per member: an int is a row count (1 means
-            one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Scaffolded: each bag runs as an ensemble of one,
-            with its preprocessing and target standardization fitted on the
-            bag.
-        kv_cache: Fit upstream's context cache (``fit`` then ``predict``),
-            so each chunk of queries skips the context's forward pass; False
-            runs the whole forward pass, recipe included, for every chunk.
-            On a CPU the two agree to float rounding; on a GPU with
-            ``mixed_precision=True`` they agree to float16 rounding.
-        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an array of
-            bin centres, ``"native"``, or None for the native grid (1,000
-            equal bins across the training targets' range, extended by a
-            quarter of that range on each side). Tabulating a row that puts
-            more than 1% of its probability outside the native grid warns.
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"cpu"``, or a ``torch.device``. Apple's MPS is not supported,
-            since the recipe works in float64, which MPS lacks: a fit on it
-            raises ValueError before the checkpoint loads.
-        random_state: Seed for the ensemble. A group of members runs on a
+            Gaussian rank transform, with the 4-sigma clip. Only ``none`` is
+            Kumo's own; lazy applies every other name, and Kumo then runs
+            with no transform of its own. An explicit ``transforms`` also
+            drops the recipe's 20% trim, so the members' quantiles are a
+            plain mean; the random sign flips of the columns and of the
+            target stay under any ``transforms``.
+        feature_shuffle: Upstream's Latin-square shuffle. A bagged member,
+            which runs on its own, has its columns permuted by lazy instead.
+        bag_size: Context rows per member. Scaffolded: each bag runs as an
+            ensemble of one, with its preprocessing and target
+            standardization fitted on the bag.
+        kv_cache: Fit upstream's context cache (``fit`` then ``predict``);
+            False runs the whole forward pass, recipe included, for every
+            chunk. On a CPU the two agree to float rounding.
+        y_grid: Default output grid; the native grid has 1,000 equal bins
+            across the training targets' range, extended by a quarter of
+            that range on each side. Tabulating a row that puts more than 1%
+            of its probability outside the native grid warns.
+        device: Where to run. Apple's MPS is not supported, since the
+            recipe works in float64, which MPS lacks: a fit on it raises
+            ValueError before the checkpoint loads.
+        random_state: The ensemble's seed. A group of members runs on a
             ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
-            column shuffles and sign flips. None draws a fresh seed at fit,
-            recorded as ``random_state_`` and in ``provenance_``.
-        chunk_size: Query rows predicted at a time, to bound peak memory;
-            ``0`` does them in one pass. Every query attends to the context
-            rows alone, so a row's answer never depends on the other rows in
-            its chunk beyond float rounding: the batch shape can change the
-            kernels (on a CPU, a one-row chunk differs by a few parts in a
-            million of the quantiles' spread).
+            column shuffles and sign flips.
+        chunk_size: Query rows per forward pass. The batch shape can change
+            the kernels: on a CPU, a one-row chunk differs by a few parts in
+            a million of the quantiles' spread.
         softmax_temperature: Only ``"auto"``: the quantile head has no
             softmax, so any other value raises ValueError. Recorded in
             ``provenance_`` as None.
-        mixed_precision: On CUDA, run upstream under float16 autocast, as
-            NVIDIA does. False, or any device other than CUDA, runs in
-            float32.
+        mixed_precision: On CUDA, upstream under float16 autocast, as NVIDIA
+            does.
         outlier_threshold: Upstream's two-pass soft clip of each member's
-            transformed columns, at this many standard deviations of the
-            context. ``"auto"`` is 4.0 under ``transforms="auto"`` and off
-            under an explicit ``transforms``; None is off.
-        progress: A progress bar over the query rows: ``"auto"`` shows it
-            on a terminal or in a notebook, ``True`` always, ``False`` never.
+            transformed columns. ``"auto"`` is 4.0 under
+            ``transforms="auto"``.
+        progress: A progress bar over the query rows.
         verbose: Print log messages to stdout.
 
     Attributes:

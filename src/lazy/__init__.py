@@ -68,6 +68,8 @@ import types
 import typing
 
 from lazy import _namespace
+from lazy._namespace import ImportNameWarning
+from lazy._warnings import LazyWarning
 from lazy.base import BaseDensityRegressor
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
@@ -81,18 +83,21 @@ from lazy.models import EnsembleSizeWarning
 from lazy.models import ESTIMATORS
 from lazy.models import get_checkpoint
 from lazy.models import get_estimator
+from lazy.models import GridCoverageWarning
 from lazy.models import is_cached
 from lazy.models import KumoQuantile
 from lazy.models import LazyEnsembleModel
 from lazy.models import LazyModel
 from lazy.models import LicenseWarning
 from lazy.models import LimiXBarDistribution
+from lazy.models import LimiXSourceWarning
 from lazy.models import list_estimators
 from lazy.models import list_versions
 from lazy.models import model_cache_enabled
 from lazy.models import PerformanceWarning
 from lazy.models import set_model_cache
 from lazy.models import TabFMHistogram
+from lazy.models import TabFMPerformanceWarning
 from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
 
@@ -111,14 +116,19 @@ __all__ = [
     "ESTIMATORS",
     "EnsembleSizeWarning",
     "Grid",
+    "GridCoverageWarning",
+    "ImportNameWarning",
     "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
+    "LazyWarning",
     "LicenseWarning",
     "LimiXBarDistribution",
+    "LimiXSourceWarning",
     "POINT_ESTIMATORS",
     "PerformanceWarning",
     "TabFMHistogram",
+    "TabFMPerformanceWarning",
     "TabICLQuantile",
     "TabPFNBarDistribution",
     "__version__",

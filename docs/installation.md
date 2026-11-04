@@ -73,6 +73,19 @@ lazy setup
 - **Kumo Tabular.** The extra installs NVIDIA's `structured-data-models`
   package from PyPI; see {doc}`models/kumo`.
 
+## Listing and downloading checkpoints
+
+`lazy models` lists every pinned checkpoint, marks each backend's default
+version, and says whether the weights are in the local cache. It uses no
+network. `lazy download` fetches the weights of the checkpoints named, as
+{func}`lazy.download_checkpoint` does, and prints any licence notice. It exits
+with status 2, and downloads nothing, when a name or version is unknown:
+
+```console
+lazy models
+lazy download tabpfn:v2.5 tabicl
+```
+
 ## Installation from source
 
 ```console

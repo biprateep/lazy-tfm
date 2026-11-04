@@ -60,7 +60,7 @@ PROVENANCE_KEYS: tuple[str, ...] = (
 """The keys of every :meth:`Checkpoint.provenance` record, in its order."""
 
 
-class LicenseWarning(UserWarning):
+class LicenseWarning(_warnings.LazyWarning):
     """The licence of weights that lazy is about to download.
 
     Issued before a download that finds nothing cached, for each checkpoint

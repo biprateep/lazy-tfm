@@ -97,7 +97,7 @@ __all__ = [
 
 
 class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
-    """The prediction will be correct but far slower than it needs to be.
+    """TabFM's prediction will be correct but far slower than it needs to be.
 
     Its own category so that it can be silenced on purpose --
     ``warnings.filterwarnings("ignore", category=TabFMPerformanceWarning)`` --
@@ -358,40 +358,38 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     members, the 4-sigma soft clip and, above 500 columns, a random
     500-column subset per member.
 
+    The parameters every backend shares mean what :doc:`/guide/interface`
+    states; each entry below adds only what differs on TabFM.
+
     Args:
-        version: Which pinned TabFM checkpoint to load; see
-            :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: Ensemble members per classifier, exactly; each sees
-            its own column order and class shift. More members cost
-            linearly more time and reduce member noise.
-        transforms: Per-member feature transforms: ``"auto"`` (TabFM's own
-            recipe, pinned in lazy: members alternate ``none`` and ``power``),
-            a recipe name, a transform name or a sequence of them; see
-            :mod:`lazy.models._transforms`. ``none`` and ``power`` are
-            TabFM's own ``norm_methods``, which equal lazy's (TabFM applies
-            them after its standardisation); the rest are scaffolded, each as
-            a hierarchy of its own, because TabFM's namesakes differ (its
-            ``robust`` scales to unit variance, its ``quantile`` subsamples
-            10,000 rows, its ``quantile_rtdl`` draws other noise). Under an
-            explicit value no column subsampling and, unless
-            ``outlier_threshold`` is a number, no soft clip.
-        feature_shuffle: Whether members see the columns in different orders
-            (TabFM's ``feat_shuffle_method="random"``, else ``"none"``).
-            Without it every member sees every column in the original order,
-            however wide the table.
-        bag_size: Context rows per member: an int is a row count (1 means
-            one row), a float a fraction in (0, 1] (1.0 means all rows), and
-            None all of them. Member ``i`` sees lazy's bag ``i``, as on every
-            model: its coarse-level member that bag, its member of fine
-            level ``j`` the rows of the bag in coarse bin ``j`` (a coarse
-            bin no bag reaches splits its probability over its fine bins as
-            the context's rows fall in them). A member of TabFM's own
-            transforms keeps its place in the classifier (its column order,
-            class shift and the logit average), with its standardisation,
-            norm method and clip fitted on those rows; a member with a
-            scaffolded transform is a hierarchy of its own on its bag.
-            Members are run one at a time, whatever ``member_batch_size``
-            says, because their contexts differ in length.
+        version: Which pinned TabFM checkpoint to load.
+        n_estimators: Ensemble members per classifier; each sees its own
+            column order and class shift, and more of them reduce member
+            noise.
+        transforms: Per-member feature transforms. ``"auto"`` is TabFM's own
+            recipe, pinned in lazy: members alternate ``none`` and ``power``.
+            ``none`` and ``power`` are TabFM's own ``norm_methods``, which
+            equal lazy's (TabFM applies them after its standardisation); the
+            rest are scaffolded, each as a hierarchy of its own, because
+            TabFM's namesakes differ (its ``robust`` scales to unit variance,
+            its ``quantile`` subsamples 10,000 rows, its ``quantile_rtdl``
+            draws other noise). An explicit value also turns off the column
+            subsampling.
+        feature_shuffle: TabFM's ``feat_shuffle_method="random"``, else
+            ``"none"``. Without it every member sees every column in the
+            original order, however wide the table.
+        bag_size: Context rows per member. Member ``i`` sees lazy's bag
+            ``i``, as on every model: its coarse-level member that bag, its
+            member of fine level ``j`` the rows of the bag in coarse bin
+            ``j`` (a coarse bin no bag reaches splits its probability over
+            its fine bins as the context's rows fall in them). A member of
+            TabFM's own transforms keeps its place in the classifier (its
+            column order, class shift and the logit average), with its
+            standardisation, norm method and clip fitted on those rows; a
+            member with a scaffolded transform is a hierarchy of its own on
+            its bag. Members are run one at a time, whatever
+            ``member_batch_size`` says, because their contexts differ in
+            length.
         kv_cache: Prefill each member's context once and decode the queries
             against the cache, chunk by chunk (``True``; needs TabFM's
             repository build, and falls back with a
@@ -405,42 +403,32 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             far from a float32 run: a row's density by a few percent of its
             peak, and single bins by more. ``mixed_precision=False``
             removes the difference at a higher cost in time.
-        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
-            array of bin centres, ``"native"``, or None for the native grid
-            (the union of every dither's bin edges). A constructor grid also
-            sets the range the bins span; without one they span the training
-            values. With ``"grid"`` bins, a constructor grid of at most 100
-            bins is matched: its bins become the classes, see
-            ``n_coarse_bins``. A grid passed to a prediction only rebins
-            the answer.
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"mps"``, ``"cpu"``, or a ``torch.device``.
-        random_state: Seed of the ensemble: a group's classifiers are seeded
+        y_grid: Default output grid; the native grid is the union of every
+            dither's bin edges. A constructor grid also sets the range the
+            bins span; without one they span the training values. With
+            ``"grid"`` bins, a constructor grid of at most 100 bins is
+            matched: its bins become the classes, see ``n_coarse_bins``. A
+            grid passed to a prediction only rebins the answer.
+        device: Where to run.
+        random_state: The ensemble's seed: a group's classifiers are seeded
             from its first member ``i``, ``SeedSequence([random_state, i])``
-            (see the seeds above). None draws a fresh seed at fit, recorded
-            as ``random_state_`` and in ``provenance_``.
+            (see the seeds above).
         chunk_size: Query rows per forward pass, on both paths: decoded
             against the cache at a time, or handed to the upstream
-            ``predict_proba`` at a time when ``kv_cache=False``; ``0`` does
-            them in one pass. The in-context stage builds its keys and values
-            from the context rows only, so a row's answer never depends on
-            the other rows in its chunk, but the kernels batch differently:
-            on the CPU in float32 it changes by float rounding, and
-            in bfloat16 on CUDA by the rounding ``kv_cache`` describes.
+            ``predict_proba`` at a time when ``kv_cache=False``. The kernels
+            batch differently, so on the CPU in float32 a row's answer
+            changes by float rounding, and in bfloat16 on CUDA by the
+            rounding ``kv_cache`` describes.
         softmax_temperature: Divides the member-averaged logits before the
             softmax. ``"auto"`` is TabFM v1.0's calibrated 0.9, deliberately
-            not 1.0; a positive number overrides it. Recorded in
-            ``provenance_``.
-        mixed_precision: On CUDA, run TabFM in bfloat16, the precision it
-            was designed for (its float32 weights cast at load); False keeps
-            float32. A CPU always runs float32, whatever this says.
-            Recorded, resolved, in ``provenance_``.
+            not 1.0.
+        mixed_precision: On CUDA, TabFM in bfloat16, the precision it was
+            designed for (its float32 weights cast at load).
         outlier_threshold: TabFM's own two-pass soft clip of each
-            standardised column, at this many standard deviations
+            standardised column
             (:class:`lazy.models._transforms.SoftClip`). ``"auto"`` is 4.0
-            under ``transforms="auto"`` and off under an explicit
-            ``transforms``; None is off (TabFM is passed an infinite
-            threshold, which makes its clip the identity).
+            under ``transforms="auto"``; None passes TabFM an infinite
+            threshold, which makes its clip the identity.
         n_coarse_bins: Classes at the first hierarchy level: an int from 2
             to 10, ``"auto"`` or ``"grid"``. An int gives equal-mass bins,
             and so does ``"auto"``, with :func:`auto_bin_count` of the
@@ -466,8 +454,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
             the training prior, which is worth having when the context is a
-            biased spectroscopic sample. ``None`` (default) leaves the
-            posteriors alone.
+            biased spectroscopic sample. The correction uses every query row
+            of the call, so a row's answer then depends on the others.
+            ``None`` (default) leaves the posteriors alone.
         member_batch_size: Ensemble members processed together (prefilled
             together on the cached path; TabFM's own ``batch_size``), an int
             of at least 1. This and the next two are memory/throughput knobs
@@ -479,10 +468,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             one), so it never changes the rows per forward pass.
         keep_cache_on_device: Whether the prefilled cache stays on the device
             rather than round-tripping through host memory.
-        progress: A progress bar over the in-context stages: ``"auto"`` shows
-            it on a terminal or in a notebook, ``True`` always, ``False``
-            never. It counts stages, ``n_dither * (1 + n_coarse_bins)`` of
-            them per member group, because each runs over every query row.
+        progress: A progress bar over the in-context stages. It counts
+            stages, ``n_dither * (1 + n_coarse_bins)`` of them per member
+            group, because each runs over every query row.
         verbose: Print per-level log messages to stdout.
 
     Attributes:
@@ -1447,7 +1435,7 @@ def _clip_to_support(
             f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
             "ends, so their probability piles into the end bins. Pass a "
             "y_grid that covers the targets.",
-            UserWarning,
+            _warnings.LazyWarning,
         )
     return np.clip(y, low, high)
 

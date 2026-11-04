@@ -70,10 +70,10 @@ False`, as TabFM does.
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
 `Checkpoint.provenance` (in `lazy.models._hub`), the base class adds the
-resolved uniform settings, and a fit that ends without every key in
-`lazy.models._ensemble.REQUIRED_PROVENANCE` raises. A backend that overrides
-`_load_checkpoint`, for instance to load its weights lazily, must still
-record the checkpoint's keys.
+resolved uniform settings, and a fit must end with every key in
+`lazy.models._ensemble.REQUIRED_PROVENANCE`, which the backend tests check.
+A backend that overrides `_load_checkpoint`, for instance to load its weights
+lazily, must still record the checkpoint's keys.
 
 A fitted estimator must survive pickling and give the same predictions
 afterwards. A network shared between estimators through `lazy.models._weights`
@@ -302,7 +302,7 @@ The golden file is recorded once, on a CPU at four torch threads
 that is meant to move the densities and that the maintainers have approved (as
 when the tails of the quantile models were spread over one quantile spacing),
 since it is the guard on the published numbers. Where a backend's densities
-differ between processors, as TabPFN's and TabFM's do, record it on a GitHub
+differ between processors, as TabPFN's do, record it on a GitHub
 runner with the checkpoint workflow's `record` input (see the contributing
 guide), so that CI can check it. The tests that load a checkpoint run
 only with `LAZY_RUN_CHECKPOINT_TESTS=1`, so a new backend is finished when

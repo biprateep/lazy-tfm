@@ -400,6 +400,23 @@ def test_quantiles_invert_the_distribution(cls, data):
         )
 
 
+def test_predict_cdf_at_a_quantile_returns_its_level(cls, data):
+    X, z, X_test = data
+    model = cls().fit(X, z)
+    levels = np.array([0.2, 0.5, 0.8])
+    quantiles = model.predict_quantiles(X_test[:4], levels)
+    for row, values in enumerate(quantiles):
+        for level, value in zip(levels, values, strict=True):
+            # The middle bin's centre is the quantile, up to one ulp.
+            edges = value + np.array([-3e-6, -1e-6, 1e-6, 3e-6])
+            cdf = model.predict_cdf(
+                X_test[row : row + 1], lazy.Grid.from_edges(edges)
+            )
+            # ppf and cdf invert each other up to float rounding, as in
+            # test_quantiles_invert_the_distribution.
+            np.testing.assert_allclose(cdf[0, 1], level, atol=1e-9)
+
+
 @pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
 @pytest.mark.parametrize(
     "y_grid",
@@ -720,14 +737,6 @@ class _DropsARow(standins.HistogramStandIn):
         return super()._predict_group(handle, X)[1:]
 
 
-class _ForgetsTheRevision(standins.HistogramStandIn):
-    """Records a provenance without the checkpoint's revision."""
-
-    def _load_checkpoint(self):
-        super()._load_checkpoint()
-        del self.provenance_["revision"]
-
-
 # One group serves the whole ensemble, or a scaffolded transform splits it.
 GROUPINGS = [
     pytest.param({}, 1, id="one-group"),
@@ -751,12 +760,6 @@ def test_a_group_answering_the_wrong_rows_is_refused(params, n_groups, data):
     assert len(model.member_groups_) == n_groups
     with pytest.raises(RuntimeError, match="19 rows for 20 query rows"):
         model.predict_distribution(X_test)
-
-
-def test_a_provenance_without_a_required_key_is_refused(data):
-    X, z, _ = data
-    with pytest.raises(RuntimeError, match=r"lacks \['revision'\]"):
-        _ForgetsTheRevision().fit(X, z)
 
 
 def test_a_fitted_provenance_holds_every_required_key(cls, data):
@@ -806,7 +809,7 @@ def test_the_fit_hooks_bracket_the_fit(data):
 
 def test_a_memoized_network_is_kept_until_its_key_changes(monkeypatch, data):
     # Off, so that only the instance's memo keeps a network.
-    monkeypatch.setattr(_weights, "_SWITCH", {"enabled": False})
+    monkeypatch.setattr(_weights, "_switch", False)
     X, z, _ = data
     model = _Hooked().fit(X, z)
     first = model._network()
@@ -819,7 +822,7 @@ def test_a_memoized_network_is_kept_until_its_key_changes(monkeypatch, data):
 
 def test_a_memoized_network_is_not_pickled(monkeypatch, data):
     # Off, so that only the instance's memo keeps a network.
-    monkeypatch.setattr(_weights, "_SWITCH", {"enabled": False})
+    monkeypatch.setattr(_weights, "_switch", False)
     X, z, X_test = data
     model = _Hooked().fit(X, z)
     model._network()
@@ -1042,18 +1045,6 @@ def test_soft_clip_is_kumos_clip():
     assert not np.allclose(theirs[:, 3], queries[:, 3])
 
 
-def test_no_query_rows_give_an_empty_answer(cls, data):
-    X, z, X_test = data
-    model = cls(n_estimators=3, bag_size=40).fit(X, z)
-    empty = pd.DataFrame(X_test[:0])
-    pdfs = model._predict_pdf(empty, model.grid_)
-    assert pdfs.shape == (0, model.grid_.n_bins)
-    dist = model._predict_distribution(empty)
-    full = model._predict_distribution(pd.DataFrame(X_test))
-    assert type(dist) is type(full)
-    assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
-
-
 @pytest.mark.parametrize(
     "name",
     [
@@ -1269,15 +1260,51 @@ def test_only_uniform_layer_backends_can_register():
         registry.register("plain", Plain)
 
 
-def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
+@pytest.mark.parametrize(
+    ("call", "shape"),
+    [
+        (lambda m, X, z: m.predict(X), (0,)),
+        (lambda m, X, z: m.predict_proba(X), "bins"),
+        (lambda m, X, z: m.predict_pdf(X), "bins"),
+        (lambda m, X, z: m.predict_cdf(X), "bins"),
+        (lambda m, X, z: m.predict_quantiles(X), (0, 3)),
+        (lambda m, X, z: m.predict_interval(X), (0, 2)),
+        (lambda m, X, z: m.predict_pit(X, z), (0,)),
+        (lambda m, X, z: m.predict_distribution(X), "distribution"),
+    ],
+    ids=[
+        "predict",
+        "predict_proba",
+        "predict_pdf",
+        "predict_cdf",
+        "predict_quantiles",
+        "predict_interval",
+        "predict_pit",
+        "predict_distribution",
+    ],
+)
+def test_predicting_no_query_rows_warns_and_returns_an_empty_result(
+    cls, data, call, shape
+):
     X, z, X_test = data
     model = cls(n_estimators=2, progress=False).fit(X, z)
-    empty = X_test[:0]
-    assert model.predict_proba(empty).shape == (0, model.grid_.n_bins)
-    assert model.predict_cdf(empty).shape == (0, model.grid_.n_bins)
-    assert model.predict(empty).shape == (0,)
-    assert model.predict_quantiles(empty).shape == (0, 3)
-    assert len(model.predict_distribution(empty)) == 0
+    with pytest.warns(FutureWarning, match="zero rows of X") as record:
+        out = call(model, X_test[:0], z[:0])
+    assert len(record) == 1
+    if shape == "distribution":
+        assert len(out) == 0
+    elif shape == "bins":
+        assert out.shape == (0, model.grid_.n_bins)
+    else:
+        assert out.shape == shape
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_no_query_rows_is_refused(cls, data, method):
+    X, z, X_test = data
+    model = cls(n_estimators=2, progress=False).fit(X, z)
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        getattr(model, method)(X_test[:0], z[:0])
 
 
 def test_fitting_no_rows_is_refused(cls, data):

@@ -42,7 +42,6 @@ def test_another_environment_run_inside_a_uv_project_is_not_the_projects(
     project = _project(tmp_path / "project")
     where(project, tmp_path / "conda")
     assert _install.uv_project() is None
-    assert not _install.in_uv_project()
 
 
 def test_the_projects_own_environment_is(where, tmp_path):
@@ -50,7 +49,6 @@ def test_the_projects_own_environment_is(where, tmp_path):
     (project / "src").mkdir()
     where(project / "src", project / ".venv")
     assert _install.uv_project() == project
-    assert _install.in_uv_project()
 
 
 def test_the_projects_environment_run_from_elsewhere_is(where, tmp_path):

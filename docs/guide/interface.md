@@ -15,11 +15,13 @@ registry: see the "Tables of the models" section there. -->
 {class}`~lazy.models.limix.LimiXBarDistribution`,
 {class}`~lazy.models.tabicl.TabICLQuantile`,
 {class}`~lazy.models.tabfm.TabFMHistogram`,
-{class}`~lazy.models.kumo.KumoQuantile`) are the same models, and the class
-pages document every parameter. We recommend `LazyModel` when the backend is a
-configuration value, as in a benchmark loop. All backends write onto
-any requested {class}`~lazy.grid.Grid`, and each has a native grid on which it
-answers by default (see {doc}`distributions`).
+{class}`~lazy.models.kumo.KumoQuantile`) are the same models. The table
+below gives what each shared parameter means, and each class page gives what
+it does on that model and the model's own parameters. We recommend
+`LazyModel` when the backend is a configuration value, as in a benchmark
+loop. All backends write onto any requested {class}`~lazy.grid.Grid`, and
+each has a native grid on which it answers by default (see
+{doc}`distributions`).
 
 ## Shared parameters and defaults
 
@@ -31,23 +33,23 @@ parameters or pinned by LAZY, so neither a model's own default nor an upgrade
 of its package can change an answer without the user knowing. Only `version`
 differs between backends, because the checkpoints do.
 
-| Parameter             | Meaning                                                                     | Default   |
-| --------------------- | --------------------------------------------------------------------------- | --------- |
-| `n_estimators`        | Ensemble members; exactly this many run.                                    | `8`       |
-| `transforms`          | Per-member feature transforms (below).                                      | `"auto"`  |
-| `feature_shuffle`     | Each member sees the feature columns in a different order.                  | `True`    |
-| `bag_size`            | Context rows per member: a count, a fraction, or `None` for all.            | `None`    |
-| `kv_cache`            | Process the context once and reuse it for every query chunk.                | `True`    |
-| `y_grid`              | Default output grid; `None` is the native grid.                             | `None`    |
-| `random_state`        | The ensemble's seed; `None` draws one and records it.                       | `0`       |
-| `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass.             | `8192`    |
-| `softmax_temperature` | Divides the output logits; `"auto"` is the checkpoint's calibrated value.   | `"auto"`  |
-| `mixed_precision`     | The model's reduced-precision path on a GPU; float32 otherwise.             | `True`    |
-| `outlier_threshold`   | Soft-clip each feature at this many standard deviations (below).            | `"auto"`  |
-| `device`              | `"auto"`, `"cuda"`, `"cuda:1"`, `"cpu"`.                                    | `"auto"`  |
-| `progress`            | A progress bar: `"auto"`, `True` or `False`.                                | `"auto"`  |
-| `verbose`             | Log messages to stdout.                                                     | `False`   |
-| `version`             | Which pinned checkpoint.                                                    | per model |
+| Parameter             | Meaning                                                                                                                              | Default   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `n_estimators`        | Ensemble members; exactly this many are planned, and the cost scales linearly with them (TabICL runs identical members once).        | `8`       |
+| `transforms`          | Per-member feature transforms: `"auto"`, a recipe name, a transform name or a sequence of them (below). `"auto"` is the model's own recipe, written out by LAZY for each version rather than read from the installed package. An explicit value turns the recipe's extras off, and features are clipped only if `outlier_threshold` is a number; each class page lists what its model still does whatever the recipe. | `"auto"`  |
+| `feature_shuffle`     | Each member sees the feature columns in a different order.                                                                           | `True`    |
+| `bag_size`            | Context rows per member: an int is a count (`1` is one row), a float a fraction in (0, 1] (`1.0` is all rows), `None` all rows.      | `None`    |
+| `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
+| `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centres, `"native"`, or `None` for the native grid.                 | `None`    |
+| `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
+| `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding, except under TabFM's `prior_shift="em"`, which uses every row of the call. | `8192`    |
+| `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
+| `mixed_precision`     | The model's reduced-precision path on CUDA, where chunked and cached answers then agree to that precision's rounding; float32 otherwise. | `True`    |
+| `outlier_threshold`   | Soft-clip each feature at this many standard deviations of the context (below). `"auto"` is the model's own clip under `transforms="auto"` and no clip under an explicit value; `None` is no clip. | `"auto"`  |
+| `device`              | `"auto"` (CUDA if available), `"cuda"`, `"cuda:1"`, `"mps"` (not Kumo Tabular), `"cpu"`, or a `torch.device`.                        | `"auto"`  |
+| `progress`            | A progress bar, over the query rows (TabFM: over its in-context stages): `"auto"` shows it on a terminal or in a notebook, `True` always, `False` never. | `"auto"`  |
+| `verbose`             | Print log messages to stdout.                                                                                                        | `False`   |
+| `version`             | Which pinned checkpoint (see {func}`lazy.list_versions`); `provenance_` records which one answered.                                  | per model |
 
 The `softmax_temperature`, `mixed_precision` and `outlier_threshold` actually
 used are recorded in `provenance_`, together with the rest of the recipe (see

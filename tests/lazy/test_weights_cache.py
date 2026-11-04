@@ -33,7 +33,7 @@ from lazy.models import tabpfn
 def fresh_cache(monkeypatch):
     """Every test starts with an empty cache and the switch at its default."""
     monkeypatch.delenv(_weights.ENV_VAR, raising=False)
-    monkeypatch.setitem(_weights._SWITCH, "enabled", None)
+    monkeypatch.setattr(_weights, "_switch", None)
     _weights.clear_model_cache()
     yield
     _weights.clear_model_cache()
@@ -108,7 +108,7 @@ def test_clearing_frees_the_networks():
     assert alive() is not None
     assert _weights.clear_model_cache() == 1
     assert alive() is None
-    assert not _weights.cached_keys()
+    assert not _weights._NETWORKS
     assert _weights.clear_model_cache() == 0
 
 
@@ -117,7 +117,7 @@ def test_turned_off_every_call_loads(monkeypatch):
     _weights.network(key, _Loader())
     _weights.set_model_cache(False)
     assert not _weights.model_cache_enabled()
-    assert not _weights.cached_keys()  # turning it off lets go
+    assert not _weights._NETWORKS  # turning it off lets go
     load = _Loader()
     assert _weights.network(key, load) is not _weights.network(key, load)
     assert len(load.calls) == 2
@@ -171,7 +171,7 @@ def test_a_slow_load_holds_up_no_other_network():
     def others():
         assert loading.wait(threads.TIMEOUT)
         seen["fast"] = _weights.network(fast_key, _Loader())
-        seen["keys"] = _weights.cached_keys()
+        seen["keys"] = list(_weights._NETWORKS)
         seen["dropped"] = _weights.clear_model_cache()
         release.set()
 
@@ -179,7 +179,7 @@ def test_a_slow_load_holds_up_no_other_network():
     assert seen["keys"] == [fast_key]
     assert seen["dropped"] == 1
     # The clear overtook the slow load, so it was handed back, not filed.
-    assert not _weights.cached_keys()
+    assert not _weights._NETWORKS
 
 
 def _broken():
@@ -334,7 +334,7 @@ def test_outside_a_fit_upstreams_loader_answers():
             lambda: upstream.base.initialize_tabpfn_model(model_path="/w")
         )
     assert calls == [{"model_path": "/w"}]
-    assert not _weights.cached_keys()
+    assert not _weights._NETWORKS
 
 
 class _TabICLRegressor:
@@ -507,15 +507,15 @@ def test_a_shared_network_answers_bit_for_bit(cls, params, data):
     first = model().fit(X, z)
     # TabFM loads its backbone at the first prediction, not at fit.
     np.testing.assert_array_equal(first.predict_proba(X_test), fresh)
-    assert len(_weights.cached_keys()) == 1
+    assert len(_weights._NETWORKS) == 1
     # Another context in between must leave no trace on the network.
     model().fit(X[:120], np.sin(z[:120])).predict_proba(X_test)
     second = model().fit(X, z)
-    assert len(_weights.cached_keys()) == 1
+    assert len(_weights._NETWORKS) == 1
     np.testing.assert_array_equal(first.predict_proba(X_test), fresh)
     np.testing.assert_array_equal(second.predict_proba(X_test), fresh)
     restored = pickle.loads(pickle.dumps(second))
     np.testing.assert_array_equal(restored.predict_proba(X_test), fresh)
     refit = sklearn_base.clone(second).fit(X, z)
     np.testing.assert_array_equal(refit.predict_proba(X_test), fresh)
-    assert len(_weights.cached_keys()) == 1
+    assert len(_weights._NETWORKS) == 1

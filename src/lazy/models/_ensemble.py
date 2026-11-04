@@ -4,25 +4,9 @@
 
 Every backend takes the same parameters (:data:`UNIFORM_PARAMS`), with the
 same defaults (:data:`UNIFORM_DEFAULTS`; only ``version`` differs), and means
-the same thing by them:
-
-=======================  ===================================================
-``n_estimators``         exactly this many ensemble members
-``transforms``           per-member feature transforms (:mod:`._transforms`);
-                         ``"auto"`` is the model's own recipe, written out by
-                         the backend rather than inherited from the installed
-                         upstream package
-``feature_shuffle``      each member sees the feature columns permuted
-``bag_size``             each member sees a random subset of context rows
-``kv_cache``             cache the context's keys and values
-``y_grid``               the default output grid; None is the native grid
-``random_state``         the ensemble's seed
-``chunk_size``           query rows per forward pass
-``softmax_temperature``  divides the output logits; ``"auto"`` is the
-                         checkpoint's calibrated value
-``mixed_precision``      the model's reduced-precision path on a GPU
-``outlier_threshold``    the soft clip at that many standard deviations
-=======================  ===================================================
+the same thing by them. The "One interface for every model" page of the
+documentation (``docs/guide/interface.md``) states that meaning once, and each
+backend's class docstring adds only what differs on its model.
 
 A backend translates each parameter to its model's own machinery where the
 model has it, and the missing pieces are scaffolded here: rows, transforms,
@@ -164,11 +148,11 @@ _NETWORK_HOOKS = (
 """The error of a backend that calls ``_network`` without its hooks."""
 
 
-class ContextSizeWarning(UserWarning):
+class ContextSizeWarning(_warnings.LazyWarning):
     """The context is larger than the model was pretrained for."""
 
 
-class PerformanceWarning(UserWarning):
+class PerformanceWarning(_warnings.LazyWarning):
     """The prediction will be correct but slower than it needs to be."""
 
 
@@ -202,9 +186,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     (``member_combination="quantile_trimmed_average"``) also implements
     :meth:`_predict_members`, which answers for each member of a group
     separately, so that the trim spans the whole ensemble. After ``_fit``,
-    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`, which is
-    checked: :meth:`_load_checkpoint` records the checkpoint's and
-    :meth:`_recipe` the ensemble's.
+    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`:
+    :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
+    ensemble's.
 
     A backend that loads its network itself, rather than handing the
     checkpoint to upstream, gets it from :meth:`_network` and implements
@@ -479,10 +463,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         del dist  # Unused.
         return {}
 
-    def _recommended_max_context(self) -> int | None:
-        """The context size above which the model wants bagging."""
-        return self.recommended_max_context
-
     def _auto_softmax_temperature(self) -> float | None:
         """The checkpoint's calibrated temperature, or None without a softmax.
 
@@ -621,7 +601,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             if self.softmax_temperature == AUTO
             else float(self.softmax_temperature)
         )
-        self.outlier_threshold_ = self._resolve_outlier_threshold()
+        specs = _transforms.parse(self.transforms)
+        self.outlier_threshold_ = self._resolve_outlier_threshold(specs)
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
         self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
@@ -631,7 +612,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.kv_cache_: bool | str = self.kv_cache
         self.member_groups_ = _members.plan(
             n_estimators=self._n_members(),
-            transforms=_transforms.parse(self.transforms),
+            transforms=specs,
             native_transforms=self.native_transforms,
             feature_shuffle=self.feature_shuffle,
             bag_rows=self.bag_rows_,
@@ -682,20 +663,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             **getattr(self, "provenance_", {}),
             **self._recipe(),
         }
-        self._check_provenance()
         self._after_fit()
-
-    def _check_provenance(self) -> None:
-        """Raises unless ``provenance_`` holds :data:`REQUIRED_PROVENANCE`."""
-        missing = [
-            key for key in REQUIRED_PROVENANCE if key not in self.provenance_
-        ]
-        if missing:
-            raise RuntimeError(
-                f"{type(self).__name__}.provenance_ lacks {missing}: "
-                "_load_checkpoint records the checkpoint's keys "
-                "(Checkpoint.provenance) and _recipe the ensemble's"
-            )
 
     def _check_uniform_params(self) -> None:
         """Validates the uniform parameters, before anything is loaded."""
@@ -754,12 +722,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"of standard deviations: {self.outlier_threshold=}"
             )
 
-    def _resolve_outlier_threshold(self) -> float | None:
-        """The clip threshold in force: ``"auto"`` follows ``transforms``."""
+    def _resolve_outlier_threshold(
+        self, specs: tuple[_transforms.TransformSpec, ...] | None
+    ) -> float | None:
+        """The clip threshold in force: ``"auto"`` follows ``transforms``.
+
+        Args:
+            specs: The parsed ``transforms``; None for the model's own recipe.
+
+        Returns:
+            The threshold in standard deviations, or None for no clip.
+        """
         if self.outlier_threshold is None:
             return None
         if self.outlier_threshold == AUTO:
-            if _transforms.parse(self.transforms) is None:
+            if specs is None:
                 return self._auto_outlier_threshold()
             return None
         return float(self.outlier_threshold)
@@ -816,12 +793,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             f"{self.bag_rows_} context row(s). An int bag_size is a row "
             "count and a float one a fraction of the context: bag_size=1 is "
             "one row, bag_size=1.0 all of them.",
-            UserWarning,
+            _warnings.LazyWarning,
         )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:
         """Warns when a member's context exceeds what the model handles."""
-        limit = self._recommended_max_context()
+        limit = self.recommended_max_context
         if limit is None or self.bag_rows_ <= limit:
             return
         needed = -(-n_rows // limit)
@@ -893,11 +870,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self, features: _typing.FloatArray
     ) -> distributions.Distribution:
         """Every group's prediction for some query features, combined."""
-        clippers = getattr(self, "clippers_", None) or [None] * len(
-            self.handles_
-        )
         if self.member_combination == "quantile_trimmed_average":
-            return self._predict_trimmed(features, clippers)
+            return self._predict_trimmed(features)
         parts = [
             self._check_group_output(
                 self._predict_group(
@@ -909,16 +883,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 self.handles_,
                 self.member_groups_,
                 self.transformers_,
-                clippers,
+                self.clippers_,
                 strict=True,
             )
         ]
         return self._combine(parts)
 
     def _predict_trimmed(
-        self,
-        features: _typing.FloatArray,
-        clippers: list[_transforms.SoftClip | None],
+        self, features: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
         """Every member's prediction, combined by a trimmed average."""
         members: list[distributions.QuantileDistribution] = []
@@ -926,7 +898,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             self.handles_,
             self.member_groups_,
             self.transformers_,
-            clippers,
+            self.clippers_,
             strict=True,
         ):
             answers = self._predict_members(
@@ -1002,7 +974,15 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _distribution_chunks(
         self, X: pd.DataFrame
     ) -> Iterator[distributions.Distribution]:
-        """The predicted distributions, chunk by chunk, with a progress bar."""
+        """The predicted distributions, chunk by chunk, with a progress bar.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features), with
+                n_samples >= 1.
+
+        Yields:
+            One distribution per chunk of rows, in order.
+        """
         features = X.to_numpy(dtype=np.float64)
         if not self.chunks_queries:
             yield self._predict_chunk(features)
@@ -1016,7 +996,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             unit="row",
         ) as progress:
             progress.set_postfix(context=self.n_context_)
-            for start in range(0, len(features), max(size, 1)):
+            for start in range(0, len(features), size):
                 stop = min(start + size, len(features))
                 self._log(f"rows {start}:{stop} of {len(features)}")
                 dist = self._predict_chunk(features[start:stop])
@@ -1031,19 +1011,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
-        if X.shape[0] == 0:
-            # The empty answer still carries the model's buckets or levels,
-            # which only a prediction reveals: predict one placeholder row
-            # and keep none of it.
-            placeholder = np.zeros((1, X.shape[1]))
-            return self._predict_chunk(placeholder)[:0]
         return distributions.concatenate(list(self._distribution_chunks(X)))
 
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        if X.shape[0] == 0:
-            return np.empty((0, grid.n_bins))
         # Chunk by chunk, so the full native container never exists at once.
         blocks = [dist.on_grid(grid) for dist in self._distribution_chunks(X)]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)

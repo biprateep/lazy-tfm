@@ -9,6 +9,15 @@ change the API.
 
 ### Added
 
+- `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
+  warning classes, and `lazy.GridCoverageWarning`, issued when densities are
+  renormalised because the native grid misses part of their probability.
+  `lazy.ImportNameWarning`, `lazy.LimiXSourceWarning` and
+  `lazy.TabFMPerformanceWarning` are now exported from `lazy`.
+- `lazy models` lists every pinned checkpoint, its default version and
+  whether it is cached, and `lazy download NAME[:VERSION]` downloads the
+  weights of the checkpoints named, with the licence notice, so the cache
+  can be warmed from the command line.
 - The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
   issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
   own downloader asks for the licence to be accepted, but LAZY downloads the
@@ -27,6 +36,24 @@ change the API.
 
 ### Changed
 
+- `lazy.datasets` reports each download at level INFO to the
+  `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
+  do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
+  the wrong size now warns, with a `lazy.LazyWarning`, before it is fetched
+  again.
+- The warning for rows with probability outside the native grid is now a
+  `lazy.GridCoverageWarning`. Its text starts with "Densities are
+  renormalised on the native grid" and gives the row count and the grid at
+  the end. Every `UserWarning` class of lazy, and the warnings that were
+  plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
+  `filterwarnings("ignore", category=UserWarning)` still catches them.
+- `predict_cdf` returns each row's native CDF at the bin centres, exactly,
+  as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
+  densities on the grid, which drops the probability outside the grid and
+  adds a discretisation error. On the test fakes and stand-ins, on 50 and
+  500 bins over a range partly outside the support, values moved by up to
+  0.32, mostly from the probability outside the grid; the median move was
+  at most 0.006.
 - `lazy.plotting.diagnostics.diagnostic_panel` computes the point estimates
   once instead of twice, with the same figure to the bit. On 5,000 rows and
   500 bins its median time fell from 0.59 s to 0.54 s.
@@ -91,9 +118,20 @@ change the API.
   on. Without a name, `lazy setup` does nothing for Kumo Tabular. A source
   checkout gets every backend with `uv sync --extra all`; the `backends`
   dependency group is gone.
+- On its native grid, TabICL and Kumo Tabular take each row's probability
+  outside the grid from the CDF that tabulating the density already
+  evaluates at the grid's ends, instead of interpolating every row's
+  quantiles a second time. Densities, scores and the warning about that
+  probability are unchanged to the bit.
 
 ### Deprecated
 
+- Predicting on an `X` with no rows warns with a `FutureWarning` in
+  `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
+  `predict_quantiles`, `predict_interval`, `predict_pit` and
+  `predict_distribution`, which still return empty results. From 0.7.0 they
+  raise `ValueError`, as scikit-learn does and as `fit`, `score` and
+  `evaluate` already do.
 - `lazy setup kumo` warns with a `FutureWarning` and will be removed in
   0.7.0. It still installs `structured-data-models` when
   `sdm.models.KumoTabular` does not import. The `requested` argument of the
@@ -103,6 +141,9 @@ change the API.
 
 ### Removed
 
+- `lazy.datasets` no longer reads files cached in `~/.cache/lazy-photoz`,
+  the directory used before the package's rename in 0.1.0, which has warned
+  since then. Files left there are downloaded again into `data_home()`.
 - The backend class attribute `setup_needs_name`, and the `then` argument
   of `lazy.models._ensemble.import_extra`, are removed, since no backend
   needs them now. `lazy setup --help` no longer lists backends that
@@ -121,6 +162,9 @@ change the API.
 - An unpickled `LazyEnsembleModel` now reports its members' devices as they
   are after unpickling in `provenance_["members"]`, not as they were when
   pickled.
+- An unpickled TabICL model predicting from two threads at once could load
+  a second copy of its network from the checkpoint and then raise an
+  `AttributeError`. The network is now attached once, under a lock.
 - An unpickled Kumo, LimiX or TabICL model predicting from two threads at
   once could read the checkpoint path of the machine that made the pickle,
   which on another machine does not exist. The path is now found again

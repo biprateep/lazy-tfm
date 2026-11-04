@@ -8,6 +8,10 @@ pass is faked, on both inference paths (the streamed one and
 and the scaling each of its standardizations was refitted with, and in
 ``loads`` the checkpoint each backbone load was handed. Needs the tabfm
 package.
+
+It replaces the private lazy names in ``LAZY_SEAMS`` and, upstream,
+``tabfm.TabFMClassifier._predict_proba_internal`` and
+``tabfm.tabfm_v1_0_0_pytorch.load``.
 """
 
 import types
@@ -16,8 +20,13 @@ import numpy as np
 import pytest
 
 import fakes
-from lazy.models import _icl_stream
 from lazy.models import tabfm
+
+LAZY_SEAMS = (
+    "lazy.models._icl_stream.streaming_available",
+    "lazy.models._icl_stream.classification_logits",
+)
+"""The private lazy names that :func:`install` replaces."""
 
 SETTINGS = {
     "n_estimators": 2,
@@ -90,9 +99,15 @@ def install(monkeypatch, recorder):
         frame = {"query": X}
         return logits(classifier, None, frame)["query"]["mean_logits"][None]
 
-    monkeypatch.setattr(_icl_stream, "streaming_available", lambda: True)
     monkeypatch.setattr(upstream.tabfm_v1_0_0_pytorch, "load", load)
-    monkeypatch.setattr(_icl_stream, "classification_logits", logits)
+    fakes.patch(
+        monkeypatch,
+        LAZY_SEAMS,
+        {
+            "lazy.models._icl_stream.streaming_available": lambda: True,
+            "lazy.models._icl_stream.classification_logits": logits,
+        },
+    )
     monkeypatch.setattr(
         upstream.TabFMClassifier, "_predict_proba_internal", internal
     )
