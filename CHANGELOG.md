@@ -104,6 +104,9 @@ change the API.
 
 ### Fixed
 
+- LimiX-2 predicting from two threads at once could leave `sys.stdout` on
+  a discarded buffer, so that later prints vanished. The threads now take
+  turns to silence upstream's prints.
 - An unpickled Kumo model predicting from two threads at once recorded each
   key/value cache twice, one recording after the other, and briefly held
   two caches on the device. It now records each cache once, under a lock.
