@@ -152,7 +152,7 @@ def member_seed(random_state: int, index: int) -> int:
     """The seed of member ``index`` of an ensemble seeded ``random_state``.
 
     Drawn from ``SeedSequence([random_state, index])``, which hashes the pair,
-    so seeds of neighbouring ensembles do not overlap: an offset scheme such
+    so seeds of neighboring ensembles do not overlap: an offset scheme such
     as ``random_state + index`` would give member ``i`` at ``random_state=r``
     the seed of member ``i - 1`` at ``r + 1``. Kept below 2**31, so that it is
     a valid seed for every upstream model.

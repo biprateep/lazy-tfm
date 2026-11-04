@@ -3,7 +3,7 @@
 """Densities from TabFM's in-context classifier, as a bin hierarchy.
 
 TabFM (Google, 2026) is an in-context tabular foundation model: it is never
-trained on your data, it reads labelled rows as context and answers queries
+trained on your data, it reads labeled rows as context and answers queries
 against them. Its classifier handles at most ten classes, which is far short
 of the resolution a conditional density needs, so :class:`TabFMHistogram`
 builds the density as a two-level hierarchy of *equal-mass* bins of the target:
@@ -45,7 +45,7 @@ so in the busy part of the distribution they are routinely *narrower* than
 the output bin.
 Mapping them onto the output grid is therefore done by exact, mass-conserving
 integration (:meth:`~lazy.distributions.HistogramDistribution.on_grid`),
-not by sampling the density at the output bin centres, which would drop whole
+not by sampling the density at the output bin centers, which would drop whole
 bins and lose probability.
 
 The ten-class limit constrains the hierarchy, never the output: ``y_grid`` can
@@ -364,7 +364,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     Every ``TabFMClassifier`` argument is set by lazy, none left to the
     installed tabfm. What TabFM still does to the features under any
     ``transforms``: mean-impute missing values (dropping an all-missing
-    column), drop constant columns, and standardise each column (clipped
+    column), drop constant columns, and standardize each column (clipped
     to +-100); under ``transforms="auto"`` the recipe adds the Yeo-Johnson
     members, the 4-sigma soft clip and, above 500 columns, a random
     500-column subset per member.
@@ -380,7 +380,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         transforms: Per-member feature transforms. ``"auto"`` is TabFM's own
             recipe, pinned in lazy: members alternate ``none`` and ``power``.
             ``none`` and ``power`` are TabFM's own ``norm_methods``, which
-            equal lazy's (TabFM applies them after its standardisation); the
+            equal lazy's (TabFM applies them after its standardization); the
             rest are scaffolded, each as a hierarchy of its own, because
             TabFM's namesakes differ (its ``robust`` scales to unit variance,
             its ``quantile`` subsamples 10,000 rows, its ``quantile_rtdl``
@@ -396,7 +396,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             its fine bins as the context's rows fall in them). A member of
             TabFM's own transforms keeps its place in the classifier (its
             column order, class shift and the logit average), with its
-            standardisation, norm method and clip fitted on those rows; a
+            standardization, norm method and clip fitted on those rows; a
             member with a scaffolded transform is a hierarchy of its own on
             its bag. Members are run one at a time, whatever
             ``member_batch_size`` says, because their contexts differ in
@@ -436,7 +436,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         mixed_precision: On CUDA, TabFM in bfloat16, the precision it was
             designed for (its float32 weights cast at load).
         outlier_threshold: TabFM's own two-pass soft clip of each
-            standardised column
+            standardized column
             (:class:`lazy.models._transforms.SoftClip`). ``"auto"`` is 4.0
             under ``transforms="auto"``; None passes TabFM an infinite
             threshold, which makes its clip the identity.
@@ -487,7 +487,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     Attributes:
         grid_: The resolved default output grid.
         native_grid_: The union of every dither's equal-mass bin edges, a
-            histogram-normalised grid set at fit; under a matched grid, that
+            histogram-normalized grid set at fit; under a matched grid, that
             grid.
         inference_: The path actually used: ``"stream"`` or
             ``"predict_proba"``.
@@ -857,7 +857,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         A matched grid's own edges, grouped by :func:`grid_groups`, or the
         equal-mass edges for one dither, spanning ``support_``; the top
         edge is nudged up so the largest value falls inside. Tied targets
-        (discrete, zero-inflated or constant ones) collapse neighbouring
+        (discrete, zero-inflated or constant ones) collapse neighboring
         quantiles, which leaves zero-width, empty bins: an empty coarse bin
         gets evenly spaced fine edges across itself, and every empty bin
         gets zero probability.
@@ -1277,7 +1277,7 @@ def _member_views(
     Member ``i`` of the classifier keeps what TabFM drew for it -- its norm
     method, column order and class shift, in the place TabFM's shuffle of its
     configurations put them -- and sees only ``member_rows[i]``, on which its
-    standardisation, norm method and soft clip are refitted, exactly as
+    standardization, norm method and soft clip are refitted, exactly as
     ``EnsembleGenerator.fit`` fits them on a whole context. The labels keep
     the classifier's encoding, so every member answers over the same classes.
 

@@ -3,7 +3,7 @@
 """Target distributions from LimiX-2's bucket probabilities.
 
 LimiX-2 (Stable AI) is an in-context tabular foundation model whose regressor
-is, underneath, a classifier over 5,000 buckets of the standardised target:
+is, underneath, a classifier over 5,000 buckets of the standardized target:
 buckets fixed in the checkpoint, stretched and shifted by the context
 targets' mean and standard deviation. Upstream's ``predict`` averages its
 ensemble members' bucket probabilities and returns their mean; the density is
@@ -32,7 +32,7 @@ where it is the vocabulary's transform (``none``, ``none+original``,
 ``quantile_uniform``) and are scaffolded otherwise, ``feature_shuffle`` onto
 its column shuffler, and ``bag_size`` is scaffolded as the paper's bagged
 LimiX-2 was -- one member per bag, running one of upstream's pipelines with
-its seeds and column shuffle and standardising the target on its own bag,
+its seeds and column shuffle and standardizing the target on its own bag,
 members mixed as densities. LimiX-2 was pretrained on contexts of up to
 about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
 when a member's context is larger: the whole context unbagged, or each bag
@@ -98,12 +98,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     all-missing context columns dropped, then either a uniform quantile
     transform with the original columns and SVD components appended, or
     upstream's Yeo-Johnson (missing values imputed to the mean,
-    standardised), then the column shuffle. Under an explicit
+    standardized), then the column shuffle. Under an explicit
     ``transforms`` a member sees that transform and what LimiX cannot do
     without: the constant and all-missing columns dropped, and inside the
     network missing values replaced by the context mean (with an indicator),
-    each column standardised on the context and clipped at 100 standard
-    deviations. Either way the context targets are standardised (mean and
+    each column standardized on the context and clipped at 100 standard
+    deviations. Either way the context targets are standardized (mean and
     sample standard deviation), as the buckets are in those units.
 
     The parameters every backend shares mean what :doc:`/guide/interface`
@@ -133,7 +133,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             cover the context (a larger bag warns, as a larger context
             does). Each bagged member is one of upstream's pipelines run
             alone on its bag, its transforms, clip and target
-            standardisation fitted there.
+            standardization fitted there.
         kv_cache: Run the context through the network once, at fit, and let
             each chunk of queries attend to the result. Exact to the
             rounding of the precision in use; costs about 2 GB of GPU memory
@@ -172,7 +172,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         provenance_: Which weights, code and ensemble answered, as a dict;
             ``limix_pipelines`` lists each member's pipeline token.
         handles_: Every fitted member group.
-        borders_: The buckets' borders in standardised units, shape
+        borders_: The buckets' borders in standardized units, shape
             (``n_buckets_`` + 1,).
         n_buckets_: How many buckets the network predicts.
         n_context_: Context rows ``fit`` was given.
@@ -605,7 +605,7 @@ def _unpickle(
             refers to LimiX's code, which is then loaded first.
 
     Returns:
-        An uninitialised instance of ``cls``; pickle sets its state.
+        An uninitialized instance of ``cls``; pickle sets its state.
     """
     if fitted:
         _limix_source.load()
@@ -630,7 +630,7 @@ def _bucket_edges(
     shows as fewer distinct edges than borders.
 
     Args:
-        borders: The borders in standardised units, shape (n_buckets + 1,).
+        borders: The borders in standardized units, shape (n_buckets + 1,).
         mean: The context targets' mean.
         std: Their standard deviation.
 

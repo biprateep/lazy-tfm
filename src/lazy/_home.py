@@ -7,7 +7,7 @@ import pathlib
 
 
 def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
-    """Returns the directory cached catalogues live in, creating it if needed.
+    """Returns the directory cached catalogs live in, creating it if needed.
 
     Resolution order: the ``data_home`` argument, then ``$LAZY_DATA_HOME``,
     then ``$XDG_CACHE_HOME/lazy-tfm``, then ``~/.cache/lazy-tfm``.

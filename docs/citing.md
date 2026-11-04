@@ -4,8 +4,7 @@ If LAZY is useful in your work, we ask that you cite the paper that describes
 it and the software itself. The paper is Dey & Speagle, "Tabular Foundation
 Models Dramatically Outperform Bespoke Photometric Redshift Estimators",
 presented at the 9th Workshop on Machine Learning and the Physical Sciences
-(ML4PS 2026); we will add its arXiv link and BibTeX entry here once the
-preprint is posted. The software is archived on Zenodo, where the concept DOI
+(ML4PS 2026). The software is archived on Zenodo, where the concept DOI
 [10.5281/zenodo.23751881](https://doi.org/10.5281/zenodo.23751881) refers to
 every version of lazy-tfm and resolves to the latest release, while each
 release also has its own DOI on its Zenodo record for when you need to cite
