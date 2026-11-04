@@ -53,6 +53,9 @@ change the API.
 
 ### Changed
 
+- The package metadata lists both authors, as `CITATION.cff` does. Its
+  summary and keywords describe conditional density estimation in general,
+  with photometric redshifts and astronomy as one use.
 - A pickled TabICL model no longer holds its key/value caches; its first
   prediction after unpickling records them again, with the same results to
   the bit. Kumo Tabular and LimiX already left theirs out; all three now do
