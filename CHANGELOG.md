@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
+  warning classes, and `lazy.GridCoverageWarning`, issued when densities are
+  renormalised because the native grid misses part of their probability.
+  `lazy.ImportNameWarning`, `lazy.LimiXSourceWarning` and
+  `lazy.TabFMPerformanceWarning` are now exported from `lazy`.
 - `lazy models` lists every pinned checkpoint, its default version and
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
   weights of the checkpoints named, with the licence notice, so the cache
@@ -40,6 +45,12 @@ change the API.
   of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
   0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
   `predict` from 0.075 s to 0.048 s.
+- The warning for rows with probability outside the native grid is now a
+  `lazy.GridCoverageWarning`. Its text starts with "Densities are
+  renormalised on the native grid" and gives the row count and the grid at
+  the end. Every `UserWarning` class of lazy, and the warnings that were
+  plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
+  `filterwarnings("ignore", category=UserWarning)` still catches them.
 - `predict_cdf` returns each row's native CDF at the bin centres, exactly,
   as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
   densities on the grid, which drops the probability outside the grid and
@@ -135,6 +146,13 @@ change the API.
 
 ### Fixed
 
+- An unpickled TabICL model predicting from two threads at once could load
+  a second copy of its network from the checkpoint and then raise an
+  `AttributeError`. The network is now attached once, under a lock.
+- An unpickled Kumo, LimiX or TabICL model predicting from two threads at
+  once could read the checkpoint path of the machine that made the pickle,
+  which on another machine does not exist. The path is now found again
+  before the model marks it found.
 - LimiX-2 predicting from two threads at once could leave `sys.stdout` on
   a discarded buffer, so that later prints vanished. The threads now take
   turns to silence upstream's prints.

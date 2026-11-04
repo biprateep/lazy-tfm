@@ -141,8 +141,8 @@ recipe keeps.
 
 So compare results from different machines with scores over many rows (the
 CDE loss, CRPS or NLL), not density by density. The golden tests, which
-compare densities, run on GitHub's Linux runners, which agree with one another
-to the bit.
+compare densities, hold within float32 rounding on any processor, except
+TabPFN's, which holds on the AVX2 GitHub runners that recorded it.
 
 LimiX-2 needed three changes to make a row's answer independent of which
 other rows share its chunk. The first is that each member's preprocessing is

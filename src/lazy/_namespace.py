@@ -24,13 +24,15 @@ Typical usage example:
 from importlib import metadata
 import warnings
 
+from lazy import _warnings
+
 __all__ = ["OTHER_DISTRIBUTION", "ImportNameWarning", "warn_if_shared"]
 
 OTHER_DISTRIBUTION = "lazy"
 """The unrelated PyPI distribution that also installs a ``lazy`` package."""
 
 
-class ImportNameWarning(UserWarning):
+class ImportNameWarning(_warnings.LazyWarning):
     """Another installed distribution also provides the ``lazy`` package."""
 
 

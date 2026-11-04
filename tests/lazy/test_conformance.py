@@ -16,6 +16,7 @@ import inspect
 import pickle
 import re
 import sys
+import threading
 import warnings
 
 import fakes
@@ -25,6 +26,7 @@ import pytest
 from sklearn import base as sklearn_base
 from sklearn import exceptions
 import standins
+import threads
 
 import lazy
 from lazy.models import _conformance
@@ -1318,3 +1320,34 @@ def test_quantiles_intervals_and_pits_reduce_one_chunk_at_a_time(
     step = 4 if chunk_size and model.chunks_queries else n
     chunks = [min(step, n - start) for start in range(0, n, step)]
     assert seen == chunks * 3
+
+
+def test_threads_relocating_a_pickles_checkpoint_never_see_the_old_path(
+    monkeypatch, data
+):
+    X, z = data[0], data[1]
+    model = standins.HistogramStandIn(n_estimators=1, progress=False)
+    model.fit(X, z)
+    model.checkpoint_ = "/the/machine/that/pickled/it.ckpt"
+    restored = pickle.loads(pickle.dumps(model))
+    start = threading.Barrier(2, timeout=threads.TIMEOUT)
+    # Each download waits for the other thread's. If the flag were cleared
+    # before the path is assigned, the second thread would not download, and
+    # this barrier would break.
+    downloading = threading.Barrier(2, timeout=threads.TIMEOUT)
+
+    class Spec:
+        def download(self):
+            downloading.wait()
+            return "/here/it.ckpt"
+
+    monkeypatch.setattr(type(restored), "_checkpoint_spec", lambda self: Spec())
+    seen = []
+
+    def relocate():
+        start.wait()
+        seen.append(restored._checkpoint())
+
+    assert threads.run(relocate, relocate)
+    assert seen == ["/here/it.ckpt", "/here/it.ckpt"]
+    assert "_relocate_checkpoint" not in vars(restored)

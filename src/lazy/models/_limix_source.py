@@ -106,7 +106,7 @@ _INSTALL_HINT = (
 _DEPENDENCIES = frozenset({"torch", "einops", "kditransform", "nvtx", "triton"})
 
 
-class LimiXSourceWarning(UserWarning):
+class LimiXSourceWarning(_warnings.LazyWarning):
     """The LimiX source is not the commit the backend was validated on."""
 
 

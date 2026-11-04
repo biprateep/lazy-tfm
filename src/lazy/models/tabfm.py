@@ -98,7 +98,7 @@ __all__ = [
 
 
 class TabFMPerformanceWarning(_ensemble.PerformanceWarning):
-    """The prediction will be correct but far slower than it needs to be.
+    """TabFM's prediction will be correct but far slower than it needs to be.
 
     Its own category so that it can be silenced on purpose --
     ``warnings.filterwarnings("ignore", category=TabFMPerformanceWarning)`` --
@@ -1457,7 +1457,7 @@ def _clip_to_support(
             f"range [{low:g}, {high:g}]; TabFMHistogram clips them to its "
             "ends, so their probability piles into the end bins. Pass a "
             "y_grid that covers the targets.",
-            UserWarning,
+            _warnings.LazyWarning,
         )
     return np.clip(y, low, high)
 

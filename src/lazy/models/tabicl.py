@@ -54,7 +54,6 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
 from lazy.models import _ensemble
-from lazy.models import _hub
 from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
@@ -517,6 +516,9 @@ class TabICLQuantile(
         machine, rather than at the pickled path. A fitted regressor that
         holds its network already is left as it is.
 
+        Safe from several threads: the attach runs under the regressor's
+        lock, and a thread that waited for it finds the network attached.
+
         Args:
             regressor: A fitted ``TabICLRegressor``.
         """
@@ -524,14 +526,16 @@ class TabICLQuantile(
             type(regressor), "_load_model"
         ):
             return
-        if self.__dict__.pop("_relocate_checkpoint", False):
-            spec = _hub.get_checkpoint(self.backend, self.version)
-            self.checkpoint_ = spec.download()
-        regressor.model_path = str(self.checkpoint_)
-        with self._shared_network(regressor):
-            regressor._load_model()  # noqa: SLF001 - the shared loader.
-            # As upstream's fit does: a network just loaded is on the CPU.
-            regressor.model_.to(regressor.device_)
+        # The regressor's lock, not the network's, which _shared_network
+        # takes inside it.
+        with _locks.network_lock(regressor):
+            if hasattr(regressor, "model_"):
+                return
+            regressor.model_path = str(self._checkpoint())
+            with self._shared_network(regressor):
+                regressor._load_model()  # noqa: SLF001 - the shared loader.
+                # As upstream's fit does: a network just loaded is on the CPU.
+                regressor.model_.to(regressor.device_)
 
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray
@@ -628,8 +632,6 @@ class TabICLQuantile(
             if isinstance(recipe, dict):
                 moved["tabicl"] = {**recipe, "use_amp": self.mixed_precision_}
             self.provenance_ = {**self.provenance_, **moved}
-        if "checkpoint_" in state:
-            self._relocate_checkpoint = True
         if "handles_" in state:
             self.handles_ = [
                 dataclasses.replace(

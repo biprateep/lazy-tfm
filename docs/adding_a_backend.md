@@ -286,7 +286,7 @@ The golden file is recorded once, on a CPU at four torch threads
 that is meant to move the densities and that the maintainers have approved (as
 when the tails of the quantile models were spread over one quantile spacing),
 since it is the guard on the published numbers. Where a backend's densities
-differ between processors, as TabPFN's and TabFM's do, record it on a GitHub
+differ between processors, as TabPFN's do, record it on a GitHub
 runner with the checkpoint workflow's `record` input (see the contributing
 guide), so that CI can check it. The tests that load a checkpoint run
 only with `LAZY_RUN_CHECKPOINT_TESTS=1`, so a new backend is finished when
