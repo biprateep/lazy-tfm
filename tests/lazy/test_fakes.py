@@ -21,6 +21,7 @@ import lazy
 
 STAND_INS = {
     "tabpfn.TabPFNRegressor": fake_tabpfn.Regressor,
+    "tabpfn.inference.InferenceEngine": fake_tabpfn.Executor,
     "tabicl.TabICLRegressor": fake_tabicl.Regressor,
     "tabicl._model.tabicl.TabICL": fake_tabicl.Network,
 }

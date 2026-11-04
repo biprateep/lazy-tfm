@@ -34,6 +34,17 @@ SETTINGS = {"n_estimators": 2}
 N_BUCKETS = 10
 
 
+class Executor:
+    """Stands in for upstream's inference engine, which holds the network."""
+
+    def __init__(self, models):
+        self.models = models
+
+    def _set_models(self, models):
+        """Hands the engine its networks, as upstream's unpickling does."""
+        self.models = models
+
+
 class Regressor:
     """Stands in for ``tabpfn.TabPFNRegressor``."""
 
@@ -65,6 +76,7 @@ class Regressor:
             n_estimators_override=self.kwargs["n_estimators"],
             **{k: v for k, v in options.items() if k in accepted},
         )
+        self.executor_ = Executor(list(self.models_))
         limit = self.limit or 10**9
         self.inference_config_ = types.SimpleNamespace(
             MAX_NUMBER_OF_SAMPLES=limit, MAX_CPU_SAMPLES=10**9
@@ -106,6 +118,8 @@ class Regressor:
         import torch  # noqa: PLC0415 - optional extra.
 
         del output_type  # Unused: always the full output.
+        if None in (*self.models_, *self.executor_.models):
+            raise RuntimeError("the regressor has no network")
         signal = fakes.response(X, self.context_)
         return {
             "criterion": self.znorm_space_bardist_,
