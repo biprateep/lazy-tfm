@@ -45,6 +45,17 @@ the table defines each pool and when we would use it:
 | `"linear"`    | $\frac{1}{K} \sum_k p_k$, the mixture of the members.              | Members that each miss part of the distribution; keeps every mode, but is wider.  |
 | `"quantile"`  | $\frac{1}{K} \sum_k Q_k$, the average quantile function (Vincentization). | Members that agree on the shape and differ in location or width.                 |
 
+```{figure} ../figures/figs/pooling.svg
+:alt: Three panels showing the linear, geometric and quantile pools of two member densities, one with two peaks and one with a single peak.
+:width: 100%
+
+**Figure 1.** The three pools of two members, only the first of which predicts
+a second mode, drawn from the definitions in the table above. The linear pool
+keeps both modes and is the widest, the
+geometric pool drops the second mode and is the sharpest, and the quantile
+pool keeps the second mode but moves it toward the second member.
+```
+
 The members are first evaluated exactly, each on its own native distribution.
 For the geometric and the linear pool, we then compute the probability that
 each member places in every bin of one fine grid of equal bins (the

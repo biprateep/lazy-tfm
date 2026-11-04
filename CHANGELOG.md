@@ -58,6 +58,10 @@ change the API.
   the tutorials without outputs instead of failing.
 - The user guide has a page that compares LAZY with each model's own
   package, TabTune and AutoGluon-Tabular, and says when to use each instead.
+- The user guide has four concept figures, drawn by
+  `docs/figures/make_figures.py` without a model: the point estimates of a
+  bimodal density, the three pools of an ensemble, chunks and bags of the
+  context, and a grid that ends inside a distribution.
 
 ### Changed
 
