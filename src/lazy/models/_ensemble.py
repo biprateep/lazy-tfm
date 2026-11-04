@@ -4,25 +4,9 @@
 
 Every backend takes the same parameters (:data:`UNIFORM_PARAMS`), with the
 same defaults (:data:`UNIFORM_DEFAULTS`; only ``version`` differs), and means
-the same thing by them:
-
-=======================  ===================================================
-``n_estimators``         exactly this many ensemble members
-``transforms``           per-member feature transforms (:mod:`._transforms`);
-                         ``"auto"`` is the model's own recipe, written out by
-                         the backend rather than inherited from the installed
-                         upstream package
-``feature_shuffle``      each member sees the feature columns permuted
-``bag_size``             each member sees a random subset of context rows
-``kv_cache``             cache the context's keys and values
-``y_grid``               the default output grid; None is the native grid
-``random_state``         the ensemble's seed
-``chunk_size``           query rows per forward pass
-``softmax_temperature``  divides the output logits; ``"auto"`` is the
-                         checkpoint's calibrated value
-``mixed_precision``      the model's reduced-precision path on a GPU
-``outlier_threshold``    the soft clip at that many standard deviations
-=======================  ===================================================
+the same thing by them. The "One interface for every model" page of the
+documentation (``docs/guide/interface.md``) states that meaning once, and each
+backend's class docstring adds only what differs on its model.
 
 A backend translates each parameter to its model's own machinery where the
 model has it, and the missing pieces are scaffolded here: rows, transforms,

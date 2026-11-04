@@ -104,31 +104,29 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     deviations. Either way the context targets are standardised (mean and
     sample standard deviation), as the buckets are in those units.
 
+    The parameters every backend shares mean what :doc:`/guide/interface`
+    states; each entry below adds only what differs on LimiX-2.
+
     Args:
-        version: Which pinned LimiX checkpoint to load; see
-            :func:`lazy.list_versions`. Recorded in ``provenance_``.
-        n_estimators: Ensemble members, exactly this many. Under
-            ``transforms="auto"`` they run whole blocks of upstream's eight
-            pipelines, then any remainder split between its quantile and
-            power pipelines (quantile first, and the odd one), so that any
-            size keeps the recipe's mix: 3 members are two quantile and one
-            power, and 8, 16, 32 are upstream's recipe repeated.
-        transforms: Per-member feature transforms: ``"auto"`` (upstream's
+        version: Which pinned LimiX checkpoint to load.
+        n_estimators: Ensemble members. Under ``transforms="auto"`` they run
+            whole blocks of upstream's eight pipelines, then any remainder
+            split between its quantile and power pipelines (quantile first,
+            and the odd one), so that any size keeps the recipe's mix: 3
+            members are two quantile and one power, and 8, 16, 32 are
+            upstream's recipe repeated.
+        transforms: Per-member feature transforms. ``"auto"`` is upstream's
             recipe: four quantile members with the original columns and SVD
-            components, four power members), a recipe name, a transform name
-            or a sequence of them; see :mod:`lazy.models._transforms`.
-            ``none``, ``none+original`` and ``quantile_uniform`` run as
-            LimiX's own steps, which are exactly those transforms; every
-            other name is scaffolded. ``"limix"`` is not ``"auto"``: it has
-            no SVD components, and its two transforms are the vocabulary's.
-        feature_shuffle: Whether members see the columns in different orders:
-            upstream's column shuffler, seeded per member as upstream seeds
-            it, permuting every column a member's pipeline outputs (the
-            original columns and SVD components among the rest) -- bagged
-            members too.
-        bag_size: Context rows per member: an int is a row count (``1``
-            means one row), a float a fraction in (0, 1] (``1.0`` means all
-            rows), and None all of them. Above about 20,000 context rows
+            components, four power members. ``none``, ``none+original`` and
+            ``quantile_uniform`` run as LimiX's own steps, which are exactly
+            those transforms; every other name is scaffolded. ``"limix"`` is
+            not ``"auto"``: it has no SVD components, and its two transforms
+            are the vocabulary's.
+        feature_shuffle: Upstream's column shuffler, seeded per member as
+            upstream seeds it, permuting every column a member's pipeline
+            outputs (the original columns and SVD components among the rest)
+            -- bagged members too.
+        bag_size: Context rows per member. Above about 20,000 context rows
             LimiX-2 needs it: pass ``bag_size=20_000`` with enough members to
             cover the context (a larger bag warns, as a larger context
             does). Each bagged member is one of upstream's pipelines run
@@ -140,37 +138,26 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             per member at 20,000 context rows. The caches may take 0.6 of
             the GPU memory free at fit; members whose caches do not fit run
             uncached, with a warning.
-        y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
-            array of bin centres, ``"native"``, or None for the native grid
-            (the 5,000 buckets, in full).
-        device: ``"auto"`` (CUDA if available), ``"cuda"``, ``"cuda:1"``,
-            ``"mps"``, ``"cpu"``, or a :class:`torch.device`.
-        random_state: Seed for the ensemble. A group of members is run
-            with the seed of its first member, ``i``, drawn from
+        y_grid: Default output grid; the native grid is the 5,000 buckets,
+            in full.
+        device: Where to run.
+        random_state: The ensemble's seed. A group of members is run with
+            the seed of its first member, ``i``, drawn from
             ``SeedSequence([random_state, i])``, which seeds each member's
             rebalancing and shuffle as upstream's ``seed`` does, and its
-            feature positional embedding. None draws a fresh seed at fit,
-            recorded as ``random_state_`` and in ``provenance_``.
-        chunk_size: Query rows predicted at a time (default 8,192), to bound
-            peak memory; ``0`` does them in one pass. A query's answer does
-            not depend on the others in its chunk, up to float rounding.
+            feature positional embedding.
+        chunk_size: Query rows per forward pass; exact up to float rounding.
         softmax_temperature: Divides the bucket logits before the softmax.
             ``"auto"`` is 0.9, upstream's default and the value LimiX-2 was
-            released with; a positive float overrides it. The resolved value
-            is in ``provenance_``.
-        mixed_precision: On CUDA, run the network under ``torch.autocast``
-            (float16), as upstream does, and hold the key/value cache in
-            that precision; False runs float32. On CPU and MPS it is always
-            float32. The resolved value is in ``provenance_``.
-        outlier_threshold: The soft outlier clip at this many standard
-            deviations of the context
-            (:class:`~lazy.models._transforms.SoftClip`), scaffolded ahead of
-            each member's pipeline: LimiX-2 has no clip of its own
-            (upstream's ``outlier_remove_std`` is never used). ``"auto"``
-            and None are off; a float clips. The resolved value is in
-            ``provenance_``.
-        progress: A progress bar over the query rows: ``"auto"`` shows it
-            on a terminal or in a notebook, ``True`` always, ``False`` never.
+            released with.
+        mixed_precision: On CUDA, the network under ``torch.autocast``
+            (float16), as upstream does, with the key/value cache held in
+            that precision.
+        outlier_threshold: Scaffolded ahead of each member's pipeline
+            (:class:`~lazy.models._transforms.SoftClip`): LimiX-2 has no clip
+            of its own (upstream's ``outlier_remove_std`` is never used).
+            ``"auto"`` is off under any ``transforms``, as None is.
+        progress: A progress bar over the query rows.
         verbose: Print log messages to stdout.
 
     Attributes:
