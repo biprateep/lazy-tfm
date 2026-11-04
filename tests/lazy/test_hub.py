@@ -230,3 +230,9 @@ def test_the_licence_is_shown_for_tabpfn_from_v2_5_on():
         "tabpfn:v3.5",
         "tabpfn:v3.5-fast",
     }
+
+
+@pytest.mark.parametrize("key", list(_hub.CHECKPOINTS))
+def test_commercial_use_agrees_with_the_license_name(key):
+    spec = _hub.CHECKPOINTS[key]
+    assert spec.commercial_use == ("non-commercial" not in spec.license_name)

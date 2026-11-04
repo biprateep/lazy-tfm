@@ -14,8 +14,10 @@ The house sheet is ``paper.mplstyle``, shipped alongside this module: Nimbus
 Roman serif with Computer Modern math at 9/10/12 pt, inward ticks on all four
 sides, frameless legends, tight 300 dpi output, and matplotlib's own tab10
 property cycle and viridis colormap, pinned so a personal matplotlibrc cannot
-change them. Widths come from measured journal geometry rather than guesses
--- see :func:`register_journal` for adding your own.
+change them. :data:`RC_PARAMS` and :data:`DEFAULT_PALETTE` hold the same
+settings as the sheet, and a test keeps them equal. Widths come from measured
+journal geometry rather than guesses -- see :func:`register_journal` for adding
+your own.
 
 :func:`set_palette` replaces the pinned cycle and colormap.
 
@@ -24,11 +26,12 @@ Depends only on numpy and matplotlib.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import dataclasses
+import functools
 import os
 import pathlib
-from typing import Any
+from typing import Any, cast, TypeVar
 
 import cycler
 import matplotlib as mpl
@@ -76,6 +79,37 @@ __all__ = [
     "side_colorbar",
     "save",
 ]
+
+# --------------------------------------------------------------------------
+# Deprecation
+# --------------------------------------------------------------------------
+_FuncT = TypeVar("_FuncT", bound=Callable[..., Any])
+_REMOVAL = "0.7.0"
+"""The lazy release that removes the deprecated helpers of this module."""
+
+
+def _deprecated(func: _FuncT) -> _FuncT:
+    """Makes ``func`` issue a FutureWarning naming its removal release.
+
+    Args:
+        func: The function to deprecate.
+
+    Returns:
+        A function with the same signature, docstring and behaviour that
+        warns on every call.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        _warnings.warn(
+            f"lazy.plotting.style.{func.__name__} is deprecated and will be "
+            f"removed in lazy {_REMOVAL}.",
+            FutureWarning,
+        )
+        return func(*args, **kwargs)
+
+    return cast(_FuncT, wrapper)
+
 
 # --------------------------------------------------------------------------
 # Journal geometry
@@ -140,8 +174,8 @@ JOURNALS: dict[str, Journal] = {
 """Measured journal geometry, by name; :func:`register_journal` adds one."""
 DEFAULT_JOURNAL = "aastex"
 """The journal that :func:`use_style` selects unless told otherwise."""
-# Mutable on purpose: use_style() selects the journal that figsize() and
-# grid_figsize() follow afterwards, the way rcParams follow plt.style.use().
+# Mutable on purpose: use_style() selects the journal that figsize() follows
+# afterwards, the way rcParams follow plt.style.use().
 _active_journal: Journal = JOURNALS[DEFAULT_JOURNAL]
 
 
@@ -188,8 +222,7 @@ def journal(name: str | Journal | None = None) -> Journal:
 
 # Module constants for the DEFAULT journal (AASTeX), for the inline
 # ``figsize=(COLUMN_WIDTH, 0.62 * COLUMN_WIDTH)`` form. For any other journal
-# use figsize() / grid_figsize(), which follow the journal passed to
-# use_style().
+# use figsize(), which follows the journal passed to use_style().
 COLUMN_WIDTH = JOURNALS[DEFAULT_JOURNAL].column_width
 """Column width of the default journal, in inches (3.352 for AASTeX)."""
 TEXT_WIDTH = JOURNALS[DEFAULT_JOURNAL].text_width
@@ -340,9 +373,8 @@ def use_style(
     Args:
         style_file: A matplotlib style sheet to use instead of the shipped
             ``paper.mplstyle``.
-        journal: The journal whose geometry :func:`figsize` and
-            :func:`grid_figsize` use from now on: a key of :data:`JOURNALS`
-            or a :class:`Journal`.
+        journal: The journal whose geometry :func:`figsize` uses from now
+            on: a key of :data:`JOURNALS` or a :class:`Journal`.
         palette: Property cycle, as for ``colors`` in :func:`set_palette`;
             None leaves the style sheet's cycle in place.
         cmap: Default colormap, as in :func:`set_palette`; None leaves the
@@ -447,9 +479,7 @@ ASPECTS = {
     "tall": 0.75,  # 4:3 — scatter with a running median or a legend inside
     "square": 1.0,  # one-to-one comparisons, sky maps, anything aspect="equal"
 }
-"""Named height-to-width ratios, which :func:`figsize` accepts as ``aspect``
-and :func:`grid_figsize` as ``panel_aspect``.
-"""
+"""Named height-to-width ratios, which :func:`figsize` accepts as ``aspect``."""
 
 
 def _resolve_width(
@@ -494,6 +524,7 @@ def figsize(
     return (w, _resolve_aspect(aspect) * w)
 
 
+@_deprecated
 def grid_figsize(
     nrows: int = 1,
     ncols: int = 1,
@@ -508,6 +539,9 @@ def grid_figsize(
     ``nrows * panel_aspect * width / ncols`` tall. Two golden panels across
     the text width give ``0.31 * TEXT_WIDTH``; two-panel rows of 0.35–0.4
     of the width need a ``panel_aspect`` of roughly 0.7–0.8.
+
+    .. deprecated:: 0.6.0
+        Removed in lazy 0.7.0; nothing in lazy uses it.
 
     Args:
         nrows: Number of panel rows.
@@ -529,6 +563,7 @@ def grid_figsize(
 # --------------------------------------------------------------------------
 # Figure idioms
 # --------------------------------------------------------------------------
+@_deprecated
 def better_step(
     bin_edges: npt.ArrayLike,
     heights: npt.ArrayLike,
@@ -542,6 +577,9 @@ def better_step(
     bin, with the vertical jumps between bins.
     With ``yerr``, also shades the band between the two limits per bin.
 
+    .. deprecated:: 0.6.0
+        Removed in lazy 0.7.0; nothing in lazy uses it.
+
     Args:
         bin_edges: The bin edges, shape (n_bins + 1,). This should be one
             element longer than the bin heights array ``heights``.
@@ -551,6 +589,28 @@ def better_step(
         ax: The axis where this should be plotted; the current axes if
             None.
         **kwargs: Passed straight through to matplotlib's ``plot``.
+
+    Returns:
+        The axes drawn into.
+    """
+    return _better_step(bin_edges, heights, yerr, ax, **kwargs)
+
+
+def _better_step(
+    bin_edges: npt.ArrayLike,
+    heights: npt.ArrayLike,
+    yerr: tuple[npt.ArrayLike, npt.ArrayLike] | None = None,
+    ax: mpl_axes.Axes | None = None,
+    **kwargs: Any,
+) -> mpl_axes.Axes:
+    """Implements :func:`better_step`, which is deprecated.
+
+    Args:
+        bin_edges: The bin edges, shape (n_bins + 1,).
+        heights: The bin heights, shape (n_bins,).
+        yerr: The ``(lower, upper)`` band limits, each of shape (n_bins,).
+        ax: The axes to draw into; the current axes if None.
+        **kwargs: Passed to matplotlib's ``plot``.
 
     Returns:
         The axes drawn into.
@@ -576,6 +636,7 @@ def better_step(
     return ax
 
 
+@_deprecated
 def stacked_hist(
     ax: mpl_axes.Axes,
     datasets: Sequence[npt.ArrayLike],
@@ -592,6 +653,9 @@ def stacked_hist(
     that traces the full-width stacked envelope, then the semi-transparent
     ``rwidth``-narrowed bars on top. The gap plus the underlay keeps the
     individual bars legible where translucent stacks would otherwise merge.
+
+    .. deprecated:: 0.6.0
+        Removed in lazy 0.7.0; nothing in lazy uses it.
 
     Args:
         ax: The axes to draw into.
@@ -701,6 +765,7 @@ def binned_quantiles(
     return edges, values
 
 
+@_deprecated
 def running_median(
     ax: mpl_axes.Axes,
     x_values: npt.ArrayLike,
@@ -721,6 +786,9 @@ def running_median(
 
     Draws the median as a :func:`better_step` staircase with a shaded IQR,
     and (by default) the global median as a dashed line in the same colour.
+
+    .. deprecated:: 0.6.0
+        Removed in lazy 0.7.0; nothing in lazy uses it.
 
     Args:
         ax: The axes to draw into.
@@ -746,7 +814,7 @@ def running_median(
         bins=bins,
         percentiles=(25, 50, 75),
     )
-    better_step(edges, med, (p25, p75), ax=ax, c=color, **kwargs)
+    _better_step(edges, med, (p25, p75), ax=ax, c=color, **kwargs)
     if global_median:
         overall = float(np.nanmedian(np.asarray(y_values, dtype=float)))
         ax.axhline(overall, color=color, ls="--", lw=1)
@@ -785,6 +853,7 @@ def one_to_one(
     return ax
 
 
+@_deprecated
 def side_colorbar(
     fig: mpl_figure.Figure,
     mappable: cm.ScalarMappable,
@@ -795,6 +864,9 @@ def side_colorbar(
     """Adds a slim colorbar on its own axes to the right of the whole figure.
 
     The label is rotated -90 deg so it reads top-to-bottom.
+
+    .. deprecated:: 0.6.0
+        Removed in lazy 0.7.0; nothing in lazy uses it.
 
     Args:
         fig: The figure to add the colorbar to.

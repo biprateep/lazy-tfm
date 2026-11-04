@@ -245,7 +245,6 @@ def test_tabpfns_bagged_members_share_one_network(monkeypatch, data):
     an unbagged one on four times the rows.
     """
     pytest.importorskip("tabpfn")
-    from tabpfn import base  # noqa: PLC0415 - optional extra.
 
     X, y = data
     est, recorder = _fit("tabpfn", monkeypatch, X, y)
@@ -253,9 +252,9 @@ def test_tabpfns_bagged_members_share_one_network(monkeypatch, data):
     assert len(recorder.loads) == 1
     (network,) = est.handles_[0].models_
     assert all(handle.models_[0] is network for handle in est.handles_)
-    # The loader is upstream's own again once the fit is done.
-    assert base.initialize_tabpfn_model.__name__ == "load"
-    assert "_networks" not in vars(est)
+    # A fit may change the rest of a spec, so each regressor has its own.
+    first, second = (h.configs_[0] for h in est.handles_[:2])
+    assert first is not second
     est.fit(X, y)
     assert len(recorder.loads) == 1  # a refit reuses it (lazy._weights)
     assert est.handles_[0].models_[0] is network

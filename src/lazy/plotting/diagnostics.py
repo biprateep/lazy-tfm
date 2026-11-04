@@ -109,7 +109,7 @@ def _geometry(
                 "pass either a Grid or bin_edges, not both: the Grid "
                 "carries its own edges"
             )
-        return y_grid.centers, y_grid.histogram_edges
+        return y_grid.centers, _own(y_grid.histogram_edges)
     centers = np.asarray(y_grid, dtype=float)
     if bin_edges is not None:
         edges = np.asarray(bin_edges, dtype=float)
@@ -118,7 +118,7 @@ def _geometry(
                 f"bin_edges must have one more value than y_grid: "
                 f"{edges.shape=}, {centers.shape=}"
             )
-        return centers, edges
+        return centers, _own(edges)
     spacing = np.diff(centers)
     if spacing.size and not np.allclose(spacing, spacing[0], rtol=1e-6):
         raise ValueError(
@@ -127,6 +127,18 @@ def _geometry(
             "on (e.g. est.grid_) or bin_edges="
         )
     return centers, None
+
+
+def _own(
+    edges: npt.NDArray[np.float64] | None,
+) -> npt.NDArray[np.float64] | None:
+    """Marks edges as lazy's own, so the metrics score the caller's centres.
+
+    The plots' ``bin_edges`` is not deprecated, and a Grid cannot hold
+    centres that are not the midpoints of its edges, so the metrics get the
+    centres and the edges rather than a Grid.
+    """
+    return metrics._resolved(edges)  # noqa: SLF001 - see the docstring.
 
 
 def _stairs_or_line(
@@ -531,7 +543,7 @@ def plot_stacked_pdfs(
         label: Legend label of the stacked PDFs.
         truth_label: Legend label of the true histogram.
         bin_edges: With bare centres, the bin edges of histogram densities,
-            shape (n_grid + 1,); see :func:`lazy.metrics.normalize_grid_pdfs`.
+            shape (n_grid + 1,), as the module docstring describes.
         truth_bins: The true histogram's bins, as :func:`numpy.histogram`
             takes them, over the finite true values.
         **kwargs: Passed to ``ax.plot`` for the stacked PDFs, or to

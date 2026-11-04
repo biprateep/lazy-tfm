@@ -25,6 +25,7 @@ import test_golden
 import test_weights_cache
 
 import lazy
+from lazy.models import _ensemble
 
 ROOT = pathlib.Path(__file__).parents[2]
 MODELS_DOCS = ROOT / "docs" / "models"
@@ -68,11 +69,21 @@ def _checkpoint_gaps(name, cls):
         except KeyError:
             found.append(
                 f"no recipe pinned for version {version!r} "
-                f"({cls.__name__}._pinned_recipe)"
+                f"({cls.__name__}.recipes)"
             )
         else:
             if not recipe:
                 found.append(f"the recipe pinned for {version!r} is empty")
+            for attribute in (
+                "softmax_temperature_key",
+                "outlier_threshold_key",
+            ):
+                key = getattr(cls, attribute)
+                if key is not None and key not in recipe:
+                    found.append(
+                        f"{cls.__name__}.{attribute} = {key!r} is not a key "
+                        f"of the recipe pinned for {version!r}"
+                    )
     return found
 
 
@@ -163,6 +174,20 @@ def _missing(name):
     """Everything the backend registered as ``name`` lacks, one line each."""
     cls = lazy.ESTIMATORS[name]
     found = _checkpoint_gaps(name, cls)
+    imports = (
+        cls._import_backend
+        is not _ensemble.ContextEnsembleEstimator._import_backend
+    )
+    if not (cls.upstream_package or imports):
+        found.append(
+            f"no package to import: set {cls.__name__}.upstream_package or "
+            "override _import_backend"
+        )
+    if cls.has_softmax and cls.softmax_temperature_key is None:
+        found.append(
+            f"a softmax but no temperature: set "
+            f"{cls.__name__}.softmax_temperature_key"
+        )
     if cls.extra not in _extras():
         found.append(f"no pip extra {cls.extra!r} in pyproject.toml")
     found.extend(_docs_gaps(name, cls))
@@ -198,6 +223,22 @@ def test_a_new_backend_is_told_everything_it_lacks(monkeypatch):
         assert gap in missing
 
 
+@pytest.mark.parametrize(
+    ("attribute", "value", "gap"),
+    [
+        ("upstream_package", "", "no package to import"),
+        ("softmax_temperature_key", None, "a softmax but no temperature"),
+        ("outlier_threshold_key", "nope", "'nope' is not a key"),
+    ],
+)
+def test_a_backend_attribute_the_base_cannot_use_is_reported(
+    monkeypatch, attribute, value, gap
+):
+    cls = lazy.ESTIMATORS["tabfm"]
+    monkeypatch.setattr(cls, attribute, value)
+    assert any(gap in line for line in _missing("tabfm"))
+
+
 def test_a_version_without_a_recipe_is_reported(monkeypatch):
     cls = lazy.ESTIMATORS["tabicl"]
     checkpoint = lazy.get_checkpoint("tabicl")
@@ -207,7 +248,7 @@ def test_a_version_without_a_recipe_is_reported(monkeypatch):
         type(checkpoint)(**{**vars(checkpoint), "version": "v9"}),
     )
     assert _checkpoint_gaps("tabicl", cls) == [
-        "no recipe pinned for version 'v9' (TabICLQuantile._pinned_recipe)"
+        "no recipe pinned for version 'v9' (TabICLQuantile.recipes)"
     ]
 
 

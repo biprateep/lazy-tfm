@@ -59,13 +59,12 @@ bin cannot change a density tabulated on it.
 from __future__ import annotations
 
 import collections
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 import copy
 from importlib import util
 import inspect
 import math
 import pathlib
-import types
 from typing import Any
 
 import numpy as np
@@ -170,9 +169,17 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
 }
 """Every other TabFMClassifier argument, pinned to the recipe's value."""
 
-_RECIPE_VERSIONS: tuple[str, ...] = ("v1.0",)
-"""The versions the recipe above was read from upstream for. A new version joins
-once its recipe is checked against upstream's.
+_RECIPES: dict[str, dict[str, Any]] = {
+    "v1.0": {
+        "norm_methods": AUTO_NORM_METHODS,
+        "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
+        "max_num_features": AUTO_MAX_NUM_FEATURES,
+        "softmax_temperature": AUTO_SOFTMAX_TEMPERATURE,
+        **_PINNED_CLASSIFIER_ARGS,
+    },
+}
+"""The recipe above, by the versions it was read from upstream for. A new
+version joins once its recipe is checked against upstream's.
 """
 
 
@@ -193,8 +200,10 @@ _CHECK_BUILD = (
 )
 
 _SLOW_PATH_WARNING = (
-    "the installed tabfm has no KV-cache API (TabFM.prefill and "
-    "TabFM.decode; the PyPI releases 1.0.0 and 1.0.1 lack it), so "
+    "the installed tabfm lacks part of the KV-cache API that lazy streams "
+    "through (TabFM.prefill, TabFM.decode and the helpers listed in "
+    "lazy.models._icl_stream.STREAMING_API; the PyPI releases 1.0.0 and "
+    "1.0.1 lack it), so "
     "TabFMHistogram is falling back to upstream predict_proba, which "
     "re-encodes the training context for every chunk of query rows -- "
     "measured at roughly 26x the compute per query row (13.7 ms vs 0.53 ms "
@@ -511,6 +520,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         "equal-mass bins of the target."
     )
     extra = "tabfm"
+    upstream_package = "tabfm"
     native_output = "histogram"
     # Only TabFM's norm methods that are lazy's transforms: its robust scales
     # to unit variance, its quantile subsamples 10,000 rows and its
@@ -525,6 +535,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # Float rounding in float32 on CUDA.
     kv_cache_rtol = 1e-4
     chunks_queries = False
+    recipes = _RECIPES
+    softmax_temperature_key = "softmax_temperature"
+    outlier_threshold_key = "outlier_threshold"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -577,11 +590,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     # -- the per-backend interface -------------------------------------------
 
-    def _import_backend(self) -> types.ModuleType:
-        return _ensemble.import_extra(
-            "tabfm", needed_by=type(self).__name__, extra=self.extra
-        )
-
     @classmethod
     def setup(cls, *, dry_run: bool, requested: bool = False) -> bool:
         """Installs TabFM's repository build over the release, if need be.
@@ -612,28 +620,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             REPOSITORY_BUILD,
             what="the repository build",
             check=_CHECK_BUILD,
-            missing="the KV-cache API",
+            missing="the KV-cache API (TabFM.prefill, TabFM.decode and "
+            "their helpers)",
             dry_run=dry_run,
-        )
-
-    def _auto_softmax_temperature(self) -> float:
-        return AUTO_SOFTMAX_TEMPERATURE
-
-    def _auto_outlier_threshold(self) -> float:
-        return AUTO_OUTLIER_THRESHOLD
-
-    @classmethod
-    def _pinned_recipe(cls, version: str) -> Mapping[str, Any]:
-        if version not in _RECIPE_VERSIONS:
-            return super()._pinned_recipe(version)
-        return types.MappingProxyType(
-            {
-                "norm_methods": AUTO_NORM_METHODS,
-                "outlier_threshold": AUTO_OUTLIER_THRESHOLD,
-                "max_num_features": AUTO_MAX_NUM_FEATURES,
-                "softmax_temperature": AUTO_SOFTMAX_TEMPERATURE,
-                **_PINNED_CLASSIFIER_ARGS,
-            }
         )
 
     def _check_backend_params(self) -> None:
@@ -1122,7 +1111,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 logits["query"]["mean_logits"], self._temperature()
             )
         else:
-            probs = self._predict_proba_chunked(classifier, X_query)
+            probs = _in_chunks(
+                classifier.predict_proba, X_query, self.chunk_size
+            )
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
@@ -1154,43 +1145,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 keep_cache_on_device=self.keep_cache_on_device,
             )
             return logits["query"]["mean_logits"]
-        size = self.chunk_size if self.chunk_size > 0 else len(X_query)
-        frame = X_query.reset_index(drop=True)
-        blocks = [
-            np.asarray(
-                view._predict_proba_internal(  # noqa: SLF001 - the raw logits.
-                    frame.iloc[start : start + size]
-                )[0],
-                dtype=float,
-            )
-            for start in range(0, len(frame), size)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
-
-    def _predict_proba_chunked(
-        self, classifier: Any, X_query: pd.DataFrame
-    ) -> _typing.FloatArray:
-        """Upstream ``predict_proba``, a bounded number of query rows at a time.
-
-        ``predict_proba`` materialises ``n_members x n_query x n_features`` in
-        one go, which a survey-sized query set cannot afford. Feeding it chunks
-        caps that at ``n_members x chunk_size x n_features``. The in-context
-        stage builds its keys and values from the context rows alone, so
-        query rows never influence one another; the result differs from a
-        single pass only by float rounding, the kernels batching
-        differently. The context forward pass is repeated per chunk, which
-        is the price.
-        """
-        size = self.chunk_size if self.chunk_size > 0 else len(X_query)
-        frame = X_query.reset_index(drop=True)
-        blocks = [
-            np.asarray(
-                classifier.predict_proba(frame.iloc[start : start + size]),
-                dtype=float,
-            )
-            for start in range(0, len(frame), size)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+        internal = view._predict_proba_internal  # noqa: SLF001 - the raw logits.
+        return _in_chunks(
+            lambda rows: internal(rows)[0], X_query, self.chunk_size
+        )
 
     def _classifier(
         self,
@@ -1247,13 +1205,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             **_PINNED_CLASSIFIER_ARGS,
         }
         accepted = inspect.signature(tabfm.TabFMClassifier.__init__).parameters
-        for name, value in (
-            ("cache_context", False),
-            ("maybe_quantize_kv_cache", False),
-            ("keep_cache_on_device", self.keep_cache_on_device),
-        ):
-            if name in accepted:
-                kwargs[name] = value
+        cache_args = {
+            "cache_context": False,
+            "maybe_quantize_kv_cache": False,
+            "keep_cache_on_device": self.keep_cache_on_device,
+        }
+        kwargs.update({k: v for k, v in cache_args.items() if k in accepted})
         return tabfm.TabFMClassifier(**kwargs)
 
     # -- backbone -----------------------------------------------------------
@@ -1283,22 +1240,18 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """Reads the backbone from the checkpoint.
 
         Upstream keeps a process-wide cache of its own, which
-        :func:`lazy.clear_model_cache` could not empty; it is bypassed where
-        the installed TabFM has the switch.
+        :func:`lazy.clear_model_cache` could not empty, so it is bypassed.
         """
         self._log(f"loading TabFM classification checkpoint from {checkpoint}")
         import torch  # noqa: PLC0415 - optional backend, imported at use.
 
-        options: dict[str, Any] = {}
-        if "use_cache" in inspect.signature(load).parameters:
-            options["use_cache"] = False
         return load(
             model_type="classification",
             device=self.device_,
             checkpoint_path=str(checkpoint),
             # None keeps the stored float32 weights.
             dtype=torch.bfloat16 if self.mixed_precision_ else None,
-            **options,
+            use_cache=False,
         )
 
 
@@ -1388,6 +1341,38 @@ def _member_views(
         view.n_estimators = 1
         views.append(view)
     return views
+
+
+def _in_chunks(
+    predict: Callable[[pd.DataFrame], Any],
+    X_query: pd.DataFrame,
+    chunk_size: int,
+) -> _typing.FloatArray:
+    """``predict`` on a bounded number of query rows at a time, stacked.
+
+    Upstream's predictions materialise ``n_members x n_query x n_features``
+    in one go, which a survey-sized query set cannot afford. Feeding them
+    chunks caps that at ``n_members x chunk_size x n_features``. The
+    in-context stage builds its keys and values from the context rows alone,
+    so query rows never influence one another; the result differs from a
+    single pass only by float rounding, the kernels batching differently.
+    The context forward pass is repeated per chunk, which is the price.
+
+    Args:
+        predict: Maps query rows to an array with one row per query row.
+        X_query: The query rows.
+        chunk_size: Rows per call; ``0`` passes every row at once.
+
+    Returns:
+        The stacked results, float64, ``(n_query, ...)``.
+    """
+    size = chunk_size if chunk_size > 0 else len(X_query)
+    frame = X_query.reset_index(drop=True)
+    blocks = [
+        np.asarray(predict(frame.iloc[start : start + size]), dtype=float)
+        for start in range(0, len(frame), size)
+    ]
+    return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
 
 def _is_auto(value: object) -> bool:

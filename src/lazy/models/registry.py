@@ -8,7 +8,7 @@ look a backend up without :mod:`lazy.models` having to import it first.
 Adding a backend means writing a
 :class:`lazy.models.ContextEnsembleEstimator` subclass, pinning its
 checkpoint in :mod:`lazy.models._hub` and its recipe for every version
-(``_pinned_recipe``), and calling :func:`register`, which refuses a class
+(``recipes``), and calling :func:`register`, which refuses a class
 that does not support the uniform features
 (:mod:`lazy.models._conformance`). Registering is what puts it in
 :class:`~lazy.models.lazy_model.LazyModel`,

@@ -66,20 +66,16 @@ def test_histogram_cde_loss_and_pit_match_the_native_scores(bar):
     grid = lazy.Grid.from_edges(edges, normalization="histogram")
     density = masses / grid.widths
     expected_cde, expected_pit = _native_scores(edges, masses, truth)
-    loss = metrics.cde_loss(truth, grid.centers, density, bin_edges=grid.edges)
+    loss = metrics.cde_loss(truth, grid, density)
     np.testing.assert_allclose(loss, expected_cde.mean(), rtol=1e-12)
-    *_, pit = metrics.evaluate_grid_at_truth(
-        truth, grid.centers, density, bin_edges=grid.edges
-    )
+    *_, pit = metrics.evaluate_grid_at_truth(truth, grid, density)
     np.testing.assert_allclose(pit, expected_pit, atol=1e-12)
 
 
 def test_histogram_point_estimates_agree_with_the_distribution(bar):
     edges, masses, _ = bar
     grid = lazy.Grid.from_edges(edges, normalization="histogram")
-    estimates = metrics.grid_point_estimates(
-        grid.centers, masses / grid.widths, bin_edges=grid.edges
-    )
+    estimates = metrics.grid_point_estimates(grid, masses / grid.widths)
     dist = distributions.HistogramDistribution(edges, masses)
     np.testing.assert_allclose(estimates["mean"], dist.mean(), rtol=1e-12)
     np.testing.assert_allclose(estimates["median"], dist.median(), atol=1e-12)
@@ -95,12 +91,10 @@ def test_histogram_cdf_at_centres_is_exact(bar):
     )
 
 
-def test_summarize_takes_bin_edges(bar):
+def test_summarize_scores_a_histogram_grid_exactly(bar):
     edges, masses, truth = bar
     grid = lazy.Grid.from_edges(edges, normalization="histogram")
-    row = metrics.summarize(
-        truth, grid.centers, masses / grid.widths, bin_edges=grid.edges
-    )
+    row = metrics.summarize(truth, grid, masses / grid.widths)
     expected, _ = _native_scores(edges, masses, truth)
     np.testing.assert_allclose(row["cde_loss"].iloc[0], expected.mean())
 
@@ -120,7 +114,10 @@ def test_an_unknown_normalization_is_rejected():
 
 
 def test_bin_edges_must_match_the_grid():
-    with pytest.raises(ValueError, match="one more entry"):
+    with (
+        pytest.warns(FutureWarning, match="bin_edges is deprecated"),
+        pytest.raises(ValueError, match="one more entry"),
+    ):
         metrics.normalize_grid_pdfs(
             np.array([0.5, 1.5]), np.ones((1, 2)), bin_edges=[0.0, 1.0]
         )

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import gc
+import importlib
 import time
 from typing import Any, TypeAlias, TypedDict
 
@@ -408,23 +409,35 @@ def softmax(
     return weights / weights.sum(axis=-1, keepdims=True)
 
 
-def streaming_available() -> bool:
-    """Whether the installed ``tabfm`` exposes the KV-cache API needed here.
+STREAMING_API = (
+    ("pytorch.model", "move_cache_to_device"),
+    ("pytorch.model", "TabFM.prefill"),
+    ("pytorch.model", "TabFM.decode"),
+    ("classifier_and_regressor", "EnsembleGenerator.transform_context_only"),
+    ("classifier_and_regressor", "EnsembleGenerator.prepare_ensemble_tensors"),
+    ("classifier_and_regressor", "_append_cross_features"),
+    ("classifier_and_regressor", "_append_svd_features"),
+    ("classifier_and_regressor", "_apply_categorical_permutation"),
+)
+"""What the streaming path calls in ``tabfm.src``, as (module, attribute)."""
 
-    The PyPI release of ``tabfm`` 1.0.0/1.0.1 has no ``prefill`` / ``decode``
-    and no cache helpers; only the repository build has them. Everything
-    here therefore has to be optional, with the upstream ``predict_proba`` as
-    the fallback (see :class:`lazy.models.tabfm.TabFMHistogram`).
+
+def streaming_available() -> bool:
+    """Whether the installed ``tabfm`` has all of :data:`STREAMING_API`.
+
+    The PyPI releases of ``tabfm`` (1.0.0, 1.0.1) have no ``prefill`` /
+    ``decode``, no cache helpers and no ``transform_context_only``; only the
+    repository build has them. Everything here therefore has to be optional,
+    with the upstream ``predict_proba`` as the fallback (see
+    :class:`lazy.models.tabfm.TabFMHistogram`).
     """
-    try:
-        from tabfm.src.pytorch import (  # noqa: PLC0415 - optional backend, imported at use.
-            model as tabfm_model,
-        )
-    except Exception:  # noqa: BLE001 - any failure to import means no streaming.
-        return False
-    return (
-        hasattr(tabfm_model, "move_cache_to_device")
-        and hasattr(tabfm_model, "TabFM")
-        and hasattr(tabfm_model.TabFM, "prefill")
-        and hasattr(tabfm_model.TabFM, "decode")
-    )
+    for module, name in STREAMING_API:
+        try:
+            owner = importlib.import_module(f"tabfm.src.{module}")
+        except Exception:  # noqa: BLE001 - any failure to import means no streaming.
+            return False
+        for part in name.split("."):
+            if not hasattr(owner, part):
+                return False
+            owner = getattr(owner, part)
+    return True
