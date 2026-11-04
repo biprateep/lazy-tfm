@@ -24,7 +24,7 @@ Point estimates (DC1 Appendix B1), with ``e`` the residual::
     sigma_MAD = 1.4826 * median(|e - median(e)|)
     outlier   = fraction(|e| > max(0.06, 3 * sigma_IQR))
 
-PDF metrics on a grid of bin centres (:class:`lazy.grid.Grid`)::
+PDF metrics on a grid of bin centers (:class:`lazy.grid.Grid`)::
 
     CDE loss  = mean_i [ trapz(p_i^2, y) - 2 p_i(y nearest to y_true_i) ]
     PIT_i     = integral of the gridded (linearly interpolated) p_i up to
@@ -54,18 +54,18 @@ The nearest-grid-point likelihood (rather than linear interpolation) is also
 what the Cal-PIT reference implementation uses, and is exact for the
 piecewise-constant densities this package produces.
 
-Every function that takes ``y_grid`` accepts either the bin centres, shape
-(g,), or the :class:`lazy.grid.Grid` itself. Pass the grid: its normalisation
+Every function that takes ``y_grid`` accepts either the bin centers, shape
+(g,), or the :class:`lazy.grid.Grid` itself. Pass the grid: its normalization
 convention then comes with it, so densities from a model's
-histogram-normalised native grid are scored exactly rather than by the
-trapezoid rule over their centres. With bare centres, the densities are
-trapezoid-normalised. To score densities that are constant across each bin on
+histogram-normalized native grid are scored exactly rather than by the
+trapezoid rule over their centers. With bare centers, the densities are
+trapezoid-normalized. To score densities that are constant across each bin on
 edges ``e``, pass ``lazy.Grid.from_edges(e, normalization="histogram")``.
 
-The ``bin_edges`` argument, shape (g + 1,), which marks bare centres as a
+The ``bin_edges`` argument, shape (g + 1,), which marks bare centers as a
 histogram grid, is deprecated and is removed in lazy 0.7.0. Passing it warns
 with a ``FutureWarning``. It means the same as the histogram Grid above, with
-centres at the midpoints of the edges. Edges passed with a Grid must be its
+centers at the midpoints of the edges. Edges passed with a Grid must be its
 own, or ``ValueError`` is raised.
 
 Typical usage example::
@@ -301,14 +301,14 @@ def normalize_grid_pdfs(
     and a row with no mass left becomes a uniform density.
 
     Args:
-        y_grid: Strictly increasing bin centres, shape (g,) with g >= 2, or the
+        y_grid: Strictly increasing bin centers, shape (g,) with g >= 2, or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g).
+        pdfs: Densities at those centers, shape (n, g).
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        A tuple (grid, density) -- the centres as a float array, shape (g,),
-        and the normalised densities, shape (n, g).
+        A tuple (grid, density) -- the centers as a float array, shape (g,),
+        and the normalized densities, shape (n, g).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     grid = np.asarray(y_grid, dtype=float)
@@ -363,13 +363,13 @@ def normalization_error(
     """``|trapz(p, y) - 1|`` per row: the check callers assert on.
 
     Args:
-        y_grid: Bin centres, shape (g,), or the
+        y_grid: Bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g).
+        pdfs: Densities at those centers, shape (n, g).
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        The absolute normalisation error of each row, shape (n,).
+        The absolute normalization error of each row, shape (n,).
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     grid = np.asarray(y_grid, dtype=float)
@@ -390,13 +390,13 @@ def grid_cdf(
     """Cumulative mass at each grid point, by the trapezoid rule of the norm.
 
     Args:
-        y_grid: Bin centres, shape (g,), or the
+        y_grid: Bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        density: Densities at those centres, shape (n, g).
+        density: Densities at those centers, shape (n, g).
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
-        The cumulative mass below each centre, shape (n, g). By trapezoid
+        The cumulative mass below each center, shape (n, g). By trapezoid
         column 0 is zero; for a histogram grid each entry is the mass below
         the bin's left edge plus half its own.
     """
@@ -418,12 +418,12 @@ def mode(
     """DC1 ``z_PEAK``: the mode of the PDF.
 
     Args:
-        y_grid: Bin centres, shape (g,), or the
+        y_grid: Bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        density: Densities at those centres, shape (n, g).
+        density: Densities at those centers, shape (n, g).
 
     Returns:
-        The centre of each row's highest bin, shape (n,).
+        The center of each row's highest bin, shape (n,).
     """
     y_grid, _ = _split_grid(y_grid, None)
     grid = np.asarray(y_grid, dtype=float)
@@ -444,9 +444,9 @@ def peak_mean(
     probability-weighted mean of ``y`` over that run.
 
     Args:
-        y_grid: Bin centres, shape (g,), or the
+        y_grid: Bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        density: Densities at those centres, shape (n, g).
+        density: Densities at those centers, shape (n, g).
         frac: Fraction of the peak density that bounds the main peak.
         bin_edges: Deprecated; see the module docstring.
 
@@ -499,13 +499,13 @@ def grid_point_estimates(
 ) -> dict[str, _typing.FloatArray]:
     """Every point estimate of each row: mode, peak mean, mean and median.
 
-    The densities are normalised first (see :func:`normalize_grid_pdfs`).
+    The densities are normalized first (see :func:`normalize_grid_pdfs`).
     For one estimate, :func:`grid_point_estimate` is cheaper.
 
     Args:
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g).
+        pdfs: Densities at those centers, shape (n, g).
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -530,9 +530,9 @@ def grid_point_estimate(
     """One point estimate of each row, as :func:`grid_point_estimates` gives it.
 
     Args:
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g).
+        pdfs: Densities at those centers, shape (n, g).
         method: One of :data:`POINT_ESTIMATORS`.
         bin_edges: Deprecated; see the module docstring.
 
@@ -572,9 +572,9 @@ def _point_estimate(
     method: str,
     bin_edges: npt.ArrayLike | None,
 ) -> _typing.FloatArray:
-    """One point estimate of normalised densities.
+    """One point estimate of normalized densities.
 
-    On a histogram grid (``bin_edges`` given), ``mode`` is the centre of the
+    On a histogram grid (``bin_edges`` given), ``mode`` is the center of the
     densest bin, ``mean`` the exact mean of the piecewise-constant density,
     ``median`` the exact inverse of its CDF at one half, and ``peak_mean``
     the main-peak mean with bin masses as weights.
@@ -657,16 +657,16 @@ def evaluate_grid_at_truth(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g).
+        pdfs: Densities at those centers, shape (n, g).
         bin_edges: Deprecated; see the module docstring. With them, the
             density at the truth is its bin's, zero outside the edges, and
             the PIT is the exact piecewise-linear CDF.
 
     Returns:
-        A tuple (grid, density, pdf_at_truth, pit) -- the centres, shape (g,);
-        the normalised densities, shape (n, g); the density at the truth,
+        A tuple (grid, density, pdf_at_truth, pit) -- the centers, shape (g,);
+        the normalized densities, shape (n, g); the density at the truth,
         shape (n,), zero for a truth more than half a bin outside the grid;
         and the PIT values, shape (n,), in [0, 1].
     """
@@ -716,13 +716,13 @@ def cde_loss(
     ``E[integral p^2] - 2 E[p(y_true)]`` is the L2 distance between the
     estimated and true conditional densities, up to a constant that does not
     depend on the estimator -- so it ranks methods without knowing the
-    truth's density. It is the single number this project optimises.
+    truth's density. It is the single number this project optimizes.
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -742,13 +742,13 @@ def per_object_scores(
     """Each object's contribution to the CDE loss, and its PIT.
 
     :func:`cde_loss` is the mean of the first. For the CRPS and NLL as
-    well, from one normalisation, use :func:`per_object_metrics`.
+    well, from one normalization, use :func:`per_object_metrics`.
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -768,7 +768,7 @@ def _cde_terms(
     pdf_at_truth: _typing.FloatArray,
     bin_edges: npt.ArrayLike | None,
 ) -> _typing.FloatArray:
-    """``integral p_i^2 - 2 p_i(y_true_i)`` of each normalised row."""
+    """``integral p_i^2 - 2 p_i(y_true_i)`` of each normalized row."""
     return _integral_of_square(grid, density, bin_edges) - 2.0 * pdf_at_truth
 
 
@@ -790,9 +790,9 @@ def crps(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -812,10 +812,10 @@ def per_object_crps(
 ) -> _typing.FloatArray:
     """Each object's continuous ranked probability score.
 
-    The densities are normalised on the grid first (see
+    The densities are normalized on the grid first (see
     :func:`normalize_grid_pdfs`), so no mass lies outside it: the CDF is 0
     below the first node and 1 above the last. Between nodes it is linear:
-    on a trapezoid grid the nodes are the centres and the CDF takes the
+    on a trapezoid grid the nodes are the centers and the CDF takes the
     values of :func:`grid_cdf` there (the CDF the PIT interpolates); on a
     histogram grid the nodes are the bin edges, where the CDF of the
     piecewise-constant density is exactly linear. The squared difference
@@ -825,9 +825,9 @@ def per_object_crps(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -860,9 +860,9 @@ def nll(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
@@ -898,9 +898,9 @@ def per_object_nll(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
         floor: Positive density, in the target's inverse units, below which
             the density at the truth is clipped.
@@ -928,20 +928,20 @@ def per_object_metrics(
     _typing.FloatArray,
     _typing.FloatArray,
 ]:
-    """Every per-object score of each row, from one normalisation.
+    """Every per-object score of each row, from one normalization.
 
     Each array equals what its own function returns:
     :func:`per_object_scores` (the CDE terms and PIT values),
-    :func:`per_object_crps` and :func:`per_object_nll`. One normalisation
+    :func:`per_object_crps` and :func:`per_object_nll`. One normalization
     makes this cheaper than calling the three. :func:`summarize_scores`
     turns the arrays of blocks of rows, joined, into the :func:`summarize`
     table.
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
         floor: The NLL's density floor, as in :func:`per_object_nll`.
 
@@ -981,7 +981,7 @@ def _crps_terms(
     density: _typing.FloatArray,
     bin_edges: npt.ArrayLike | None,
 ) -> _typing.FloatArray:
-    """The CRPS of each normalised row, by its grid's convention."""
+    """The CRPS of each normalized row, by its grid's convention."""
     if bin_edges is None:
         return _crps_piecewise_linear(truth, grid, grid_cdf(grid, density))
     edges = np.asarray(bin_edges, dtype=float)
@@ -1193,9 +1193,9 @@ def pdf_metrics(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         bin_edges: Deprecated; see the module docstring.
 
     Returns:
@@ -1249,9 +1249,9 @@ def evaluate_grid_pdfs(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"mode"``, ``"peak_mean"``,
             ``"mean"`` or ``"median"``).
@@ -1291,9 +1291,9 @@ def summarize(
 
     Args:
         y_true: Finite true values, one per PDF, shape (n,).
-        y_grid: Strictly increasing bin centres, shape (g,), or the
+        y_grid: Strictly increasing bin centers, shape (g,), or the
             :class:`~lazy.grid.Grid` itself (see the module docstring).
-        pdfs: Densities at those centres, shape (n, g); normalised here.
+        pdfs: Densities at those centers, shape (n, g); normalized here.
         point: The point-estimate reduction, as in
             :func:`evaluate_grid_pdfs`.
         label: Model name for a leading ``model`` column; no such column
@@ -1304,7 +1304,7 @@ def summarize(
             photometric-redshift convention; see :func:`point_metrics`.
 
     Returns:
-        A one-row table -- ``model`` (if labelled), ``point_estimate``,
+        A one-row table -- ``model`` (if labeled), ``point_estimate``,
         ``scale``, the other :class:`PointMetrics` fields and the
         :class:`PDFMetrics` fields other than ``n`` (``crps`` and ``nll``
         last).
@@ -1415,11 +1415,11 @@ _BIN_EDGES_DEPRECATED = (
 def _split_grid(
     y_grid: grid_lib.Grid | npt.ArrayLike, bin_edges: npt.ArrayLike | None
 ) -> tuple[npt.ArrayLike, npt.ArrayLike | None]:
-    """Returns a tuple (centres, bin_edges) from a Grid or bare centres.
+    """Returns a tuple (centers, bin_edges) from a Grid or bare centers.
 
-    A :class:`~lazy.grid.Grid` gives its centres and, when it is
-    histogram-normalised, its edges, so its own convention scores it. Bare
-    centres pass through with ``bin_edges`` as given. A user's ``bin_edges``
+    A :class:`~lazy.grid.Grid` gives its centers and, when it is
+    histogram-normalized, its edges, so its own convention scores it. Bare
+    centers pass through with ``bin_edges`` as given. A user's ``bin_edges``
     warns; the edges returned are marked as resolved, so the metric that
     passes them to another does not warn again.
     """

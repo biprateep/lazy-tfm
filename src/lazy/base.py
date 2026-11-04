@@ -8,11 +8,11 @@ models is a conditional density of the target, not a number, so
 :meth:`BaseDensityRegressor.predict` is a documented reduction of it::
 
     model = LazyModel("tabfm", n_estimators=4)
-    model.fit(X_train, z_train)
+    model.fit(X_train, y_train)
 
     pdfs = model.predict_proba(X_test, y_grid)  # (n_test, n_bins) densities
-    z = model.predict(X_test, method="mode")  # (n_test,)
-    model.score(X_test, z_test)  # negative CDE loss
+    y_pred = model.predict(X_test, method="mode")  # (n_test,)
+    model.score(X_test, y_test)  # negative CDE loss
 
 ``y_grid`` is an argument to the *prediction*, not to the constructor.
 Nothing about fitting depends on the output binning -- these models place
@@ -34,10 +34,10 @@ A subclass implements :meth:`_fit` and :meth:`_predict_pdf` and nothing else.
 Both receive a :class:`pandas.DataFrame` with the columns ``fit`` was given,
 and ``_predict_pdf`` is handed the :class:`~lazy.grid.Grid` to answer
 on; the base class takes care of validation, grid resolution and
-normalisation.
+normalization.
 
 Note on "fitting" an in-context model: none of the backends updates any
-weights. ``fit`` stores the labelled rows that become the model's *context*,
+weights. ``fit`` stores the labeled rows that become the model's *context*,
 and the cost of a prediction scales with how many there are. That is an
 implementation detail of the backends, not of this interface -- a classical
 estimator can implement the same protocol.
@@ -119,7 +119,7 @@ class BaseDensityRegressor(
             :data:`lazy.ESTIMATORS`), set as a class attribute by each
             backend; ``None`` on a subclass that is not one.
         y_grid: The default output grid as passed to the constructor: a
-            :class:`~lazy.grid.Grid`, bin centres, or ``None``.
+            :class:`~lazy.grid.Grid`, bin centers, or ``None``.
         grid_: The resolved default output grid, set by :meth:`fit`.
         is_fitted_: ``True`` once :meth:`fit` has run.
         n_features_in_: Number of feature columns seen by :meth:`fit`.
@@ -158,7 +158,7 @@ class BaseDensityRegressor(
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        """Returns un-normalised densities on ``grid``, one row per row of X.
+        """Returns un-normalized densities on ``grid``, one row per row of X.
 
         Args:
             X: Validated features, with the columns ``fit`` saw, shape
@@ -166,7 +166,7 @@ class BaseDensityRegressor(
             grid: The grid to answer on.
 
         Returns:
-            Non-negative densities at the bin centres, shape
+            Non-negative densities at the bin centers, shape
             (n_samples, grid.n_bins).
         """
 
@@ -230,7 +230,7 @@ class BaseDensityRegressor(
     # -- the public API ----------------------------------------------------
 
     def fit(self, X: _Features, y: npt.ArrayLike) -> BaseDensityRegressor:  # noqa: GS030 - scikit-learn's X, y.
-        """Fits on labelled rows.
+        """Fits on labeled rows.
 
         A fit either succeeds or leaves the estimator unfitted: every fitted
         attribute of an earlier fit is dropped before this one starts, the
@@ -280,13 +280,13 @@ class BaseDensityRegressor(
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
             y_grid: A :class:`~lazy.grid.Grid`, an array of at least two
-                evenly spaced, increasing bin centres, ``"native"`` for the
+                evenly spaced, increasing bin centers, ``"native"`` for the
                 model's own grid, or ``None`` for this model's default.
 
         Returns:
             Densities, shape (n_samples, n_bins). These are **densities**,
-            normalised by the grid's convention (the trapezoid rule over the
-            bin centres, or ``sum(p * widths) == 1`` on a histogram grid),
+            normalized by the grid's convention (the trapezoid rule over the
+            bin centers, or ``sum(p * widths) == 1`` on a histogram grid),
             which is how every metric in :mod:`lazy.metrics` integrates
             them. Multiply by ``grid.widths`` for per-bin probability masses.
             Probability outside the grid is dropped before normalizing. For
@@ -457,7 +457,7 @@ class BaseDensityRegressor(
                 default.
 
         Returns:
-            Normalised densities, shape (n_samples, n_bins).
+            Normalized densities, shape (n_samples, n_bins).
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
@@ -471,7 +471,7 @@ class BaseDensityRegressor(
     def predict_cdf(  # noqa: GS030 - scikit-learn's X, y.
         self, X: _Features, y_grid: grid_lib.GridLike = None
     ) -> _typing.FloatArray:
-        """Each row's cumulative distribution at the centres of ``y_grid``.
+        """Each row's cumulative distribution at the centers of ``y_grid``.
 
         Computed on the native distribution (:meth:`predict_distribution`),
         never on a grid, as in :meth:`predict_quantiles`: column ``j`` of
@@ -483,11 +483,11 @@ class BaseDensityRegressor(
 
         Args:
             X: Features, shape (n_samples, n_features).
-            y_grid: The grid whose bin centres to evaluate at; ``None`` for
+            y_grid: The grid whose bin centers to evaluate at; ``None`` for
                 this model's default.
 
         Returns:
-            The probability below each bin centre, within [0, 1], shape
+            The probability below each bin center, within [0, 1], shape
             (n_samples, n_bins).
 
         Raises:
@@ -618,7 +618,7 @@ class BaseDensityRegressor(
                 See :func:`lazy.metrics.point_metrics`.
 
         Returns:
-            A one-row table labelled with :attr:`name_`; its ``scale``
+            A one-row table labeled with :attr:`name_`; its ``scale``
             column records the choice.
 
         Raises:
@@ -692,7 +692,7 @@ class BaseDensityRegressor(
     def _density_blocks(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> Iterator[tuple[slice, _typing.FloatArray]]:
-        """Normalised densities of validated features, a block at a time.
+        """Normalized densities of validated features, a block at a time.
 
         Blocks hold about ``_BLOCK_BYTES`` of densities. When the model
         chunks its own queries (a ``chunk_size`` parameter), a block is a
@@ -720,7 +720,7 @@ class BaseDensityRegressor(
     def _densities(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        """Normalised densities of validated features on ``grid``.
+        """Normalized densities of validated features on ``grid``.
 
         Args:
             X: Validated features, shape (n_samples, n_features).
@@ -824,7 +824,7 @@ class BaseDensityRegressor(
 
         Returns:
             The features as a float64 DataFrame with a fresh index, columns
-            labelled and ordered as at fit time.
+            labeled and ordered as at fit time.
         """
         frame, named = _inputs.as_feature_frame(X)
         if frame.shape[1] != self.n_features_in_:

@@ -9,7 +9,7 @@ piecewise-linear cumulative distribution function (CDF), so one small algebra
 serves them all without approximation:
 
 * :class:`HistogramDistribution` -- masses in buckets shared by every row,
-  uniform within each bucket (qp's ``hist`` parameterisation);
+  uniform within each bucket (qp's ``hist`` parameterization);
 * :class:`QuantileDistribution` -- values at fixed cumulative levels,
   linear in between, each tail beyond the outermost levels spread evenly
   over one quantile spacing (qp's ``quant``);
@@ -30,7 +30,7 @@ Typical usage example:
   dist = model.predict_distribution(X_test)
   low, median, high = dist.ppf([0.16, 0.5, 0.84]).T
   samples = dist.rvs(100, random_state=0)
-  pit = dist.pit(z_test)
+  pit = dist.pit(y_test)
 """
 
 from __future__ import annotations
@@ -285,7 +285,7 @@ class _Base:
         Each bucket holds ``bins[i] <= y < bins[i + 1]``, and the last also
         its upper edge, as :meth:`lazy.grid.Grid.bin_index` assigns values;
         a point mass on an edge goes to the bucket above it. Probability
-        outside ``bins`` is dropped and each row renormalised.
+        outside ``bins`` is dropped and each row renormalized.
 
         Args:
             bins: The bucket edges, shape (n_buckets + 1,), non-decreasing.
@@ -362,9 +362,9 @@ class HistogramDistribution(_Base):
         bins: Bucket edges, shape (n_buckets + 1,), non-decreasing, finite.
         masses: Non-negative weight in each bucket, shape (n_rows,
             n_buckets), stored as given; every method treats each row as
-            renormalised to sum to one (an empty row as uniform over the
+            renormalized to sum to one (an empty row as uniform over the
             buckets of positive width). :attr:`probabilities` gives the
-            renormalised masses.
+            renormalized masses.
         ancil: Optional per-row metadata, each value of length n_rows.
     """
 
@@ -403,7 +403,7 @@ class HistogramDistribution(_Base):
 
     @property
     def probabilities(self) -> _typing.FloatArray:
-        """The masses renormalised to sum to one per row, (n_rows, n_buckets).
+        """The masses renormalized to sum to one per row, (n_rows, n_buckets).
 
         An empty row is uniform in probability over the buckets of positive
         width, so that a zero-width bucket carries none; over every bucket
@@ -573,7 +573,7 @@ class HistogramDistribution(_Base):
         """The variance of each row, shape (n_rows,); buckets are uniform.
 
         About each row's mean, not as E[x^2] - mean^2, which cancels when
-        the values sit far from zero: a bucket centred ``d`` from the mean
+        the values sit far from zero: a bucket centered ``d`` from the mean
         and ``w`` wide contributes ``d^2 + w^2 / 12``.
         """
         probabilities = self.probabilities
@@ -584,7 +584,7 @@ class HistogramDistribution(_Base):
         return np.einsum("ij,ij->i", probabilities, offset) + spread
 
     def mode(self) -> _typing.FloatArray:
-        """The centre of each row's densest bucket, shape (n_rows,)."""
+        """The center of each row's densest bucket, shape (n_rows,)."""
         widths = self.widths
         with np.errstate(divide="ignore", invalid="ignore"):
             density = np.where(widths > 0, self.probabilities / widths, -np.inf)
@@ -692,7 +692,7 @@ class QuantileDistribution(_Base):
             parts: One distribution per member, at the same levels and with
                 the same rows.
             weights: One finite, non-negative weight per part with a positive
-                sum, normalised here; ``None`` for equal weights.
+                sum, normalized here; ``None`` for equal weights.
 
         Returns:
             The weighted average, with the first part's ``ancil``.
@@ -892,7 +892,7 @@ class QuantileDistribution(_Base):
         return (step * (low**2 + low * high + high**2) / 3.0).sum(axis=1)
 
     def mode(self) -> _typing.FloatArray:
-        """The centre of each row's densest segment, shape (n_rows,).
+        """The center of each row's densest segment, shape (n_rows,).
 
         A tail is the mode only where it is denser than every segment
         between the quantiles by more than rounding. With evenly spaced
@@ -1124,7 +1124,7 @@ class MixtureDistribution(_Base):
         )
 
     def mode(self) -> _typing.FloatArray:
-        """The centre of each row's densest union bucket, shape (n_rows,)."""
+        """The center of each row's densest union bucket, shape (n_rows,)."""
         return np.concatenate(
             [block.mode() for _, block in self._histogram_blocks()]
         )
@@ -1223,7 +1223,7 @@ def from_qp(ensemble: Any) -> HistogramDistribution | QuantileDistribution:
     """Converts a ``qp.Ensemble`` of ``hist`` or ``quant`` PDFs; needs qp.
 
     Args:
-        ensemble: A qp ensemble whose parameterisation is ``hist`` or
+        ensemble: A qp ensemble whose parameterization is ``hist`` or
             ``quant``; convert others first with ``ensemble.convert_to``.
 
     Returns:

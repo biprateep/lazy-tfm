@@ -5,7 +5,7 @@
 :func:`lazy.models.registry.register` runs :func:`check_static` on every
 backend, so none can join the registry without the uniform features: the
 parameters (keyword-only, with the shared defaults), a coherent declaration of
-what its model does natively, and a pinned checkpoint. The behavioural half of
+what its model does natively, and a pinned checkpoint. The behavioral half of
 the contract -- that the features also *work* -- is the conformance test
 suite, which runs over everything registered.
 

@@ -193,7 +193,7 @@ def cache_dir() -> pathlib.Path:
     """Where :func:`fetch` unpacks LimiX's source.
 
     ``limix/<commit>`` under :func:`lazy.datasets.data_home`, so
-    ``$LAZY_DATA_HOME`` moves it with the catalogues.
+    ``$LAZY_DATA_HOME`` moves it with the catalogs.
 
     Returns:
         The directory, which holds the source once :func:`fetch` has run.

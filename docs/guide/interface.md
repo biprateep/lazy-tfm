@@ -40,7 +40,7 @@ differs between backends, because the checkpoints do.
 | `feature_shuffle`     | Each member sees the feature columns in a different order.                                                                           | `True`    |
 | `bag_size`            | Context rows per member: an int is a count (`1` is one row), a float a fraction in (0, 1] (`1.0` is all rows), `None` all rows.      | `None`    |
 | `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
-| `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centres, `"native"`, or `None` for the native grid.                 | `None`    |
+| `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centers, `"native"`, or `None` for the native grid.                 | `None`    |
 | `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
 | `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding, except under TabFM's `prior_shift="em"`, which uses every row of the call. | `8192`    |
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |

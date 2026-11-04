@@ -187,7 +187,7 @@ probabilities. Every name from `mymodel` is a stand-in for the real upstream
 API. Here the regressor returns its bucket edges already in the target's
 units, with probabilities. The skeleton's `_native_grid` joins every member
 group's edges with `native_grid` from `lazy.models._bucket_head`. That module
-also holds `bucket_edges`, which maps standardised borders to the target's
+also holds `bucket_edges`, which maps standardized borders to the target's
 units, and `softmax`, which turns logits into probabilities, for a model that
 returns those instead.
 
