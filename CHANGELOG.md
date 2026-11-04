@@ -27,6 +27,13 @@ change the API.
 
 ### Changed
 
+- `predict_cdf` returns each row's native CDF at the bin centres, exactly,
+  as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
+  densities on the grid, which drops the probability outside the grid and
+  adds a discretisation error. On the test fakes and stand-ins, on 50 and
+  500 bins over a range partly outside the support, values moved by up to
+  0.32, mostly from the probability outside the grid; the median move was
+  at most 0.006.
 - `lazy.plotting.diagnostics.diagnostic_panel` computes the point estimates
   once instead of twice, with the same figure to the bit. On 5,000 rows and
   500 bins its median time fell from 0.59 s to 0.54 s.

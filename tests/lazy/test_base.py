@@ -147,11 +147,12 @@ def test_the_constructor_grid_is_the_default(data):
     )
 
 
-def test_predict_cdf_is_monotone_and_reaches_one(data):
+def test_predict_cdf_is_zero_below_and_one_above_the_distribution(data):
     X, y = data
-    cdf = GaussianDummy().fit(X, y).predict_cdf(X)
-    assert (np.diff(cdf, axis=1) >= -1e-12).all()
-    assert np.allclose(cdf[:, -1], 1.0, atol=1e-9)
+    wide = lazy.Grid.linear(-5.0, 7.0, 60)  # beyond the default grid's ends
+    cdf = GaussianDummy().fit(X, y).predict_cdf(X, wide)
+    assert (np.diff(cdf, axis=1) >= 0.0).all()
+    np.testing.assert_array_equal(cdf[:, [0, -1]], [[0.0, 1.0]] * len(X))
 
 
 # -- input validation --------------------------------------------------------

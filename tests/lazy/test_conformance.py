@@ -394,6 +394,23 @@ def test_quantiles_invert_the_distribution(cls, data):
         )
 
 
+def test_predict_cdf_at_a_quantile_returns_its_level(cls, data):
+    X, z, X_test = data
+    model = cls().fit(X, z)
+    levels = np.array([0.2, 0.5, 0.8])
+    quantiles = model.predict_quantiles(X_test[:4], levels)
+    for row, values in enumerate(quantiles):
+        for level, value in zip(levels, values, strict=True):
+            # The middle bin's centre is the quantile, up to one ulp.
+            edges = value + np.array([-3e-6, -1e-6, 1e-6, 3e-6])
+            cdf = model.predict_cdf(
+                X_test[row : row + 1], lazy.Grid.from_edges(edges)
+            )
+            # ppf and cdf invert each other up to float rounding, as in
+            # test_quantiles_invert_the_distribution.
+            np.testing.assert_allclose(cdf[0, 1], level, atol=1e-9)
+
+
 @pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
 @pytest.mark.parametrize(
     "y_grid",
