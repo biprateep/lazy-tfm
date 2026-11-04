@@ -60,6 +60,7 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _ensemble
 from lazy.models import _install
+from lazy.models import _kumo_draws
 from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import _progress
@@ -712,8 +713,6 @@ def _recipe(
         An ``sdm.processing.Recipe`` whose output keeps every member.
     """
     import torch  # noqa: PLC0415 - torch comes with the extra.
-
-    from lazy.models import _kumo_draws  # noqa: PLC0415 - imports sdm.
 
     pinned = _PINNED_RECIPE
     features = [
