@@ -166,8 +166,7 @@ _SIZES = {
     "trainz_test.npz": 694_374_957,
     _HSC_FILE: 13_823_712,
 }
-# The default cache directory's name before the package became lazy-tfm, and
-# the old caches already warned of.
+# The name of the old default cache directory, still read with a warning.
 _LEGACY_HOME = "lazy-photoz"
 _warned_legacy: set[pathlib.Path] = set()
 
@@ -481,11 +480,11 @@ def _default_home(name: str) -> pathlib.Path:
 def _legacy_copy(
     filename: str, root: str | pathlib.Path | None, size: int
 ) -> pathlib.Path | None:
-    """A complete copy of ``filename`` in the cache used before the rename.
+    """A complete copy of ``filename`` in the old default cache directory.
 
     Looked for only when no cache directory was chosen, by argument or by
-    ``$LAZY_DATA_HOME``: the package cached in ``lazy-photoz`` before it
-    became ``lazy-tfm``. The first use of the old cache warns, once.
+    ``$LAZY_DATA_HOME``: the old directory is ``lazy-photoz``. The first use
+    of the old cache warns, once.
 
     Returns:
         The old copy, or None if there is none, or one was chosen.

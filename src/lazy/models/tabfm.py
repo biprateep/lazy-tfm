@@ -50,10 +50,10 @@ at the output bin centres, which would drop whole bins and lose probability.
 The ten-class limit constrains the hierarchy, never the output: ``y_grid`` can
 have any number of bins, at any spacing, over any range.
 
-There is deliberately no post-processing stage. Probability sharpening and
-Gaussian smoothing were both tried and neither is used: TabFM's class
-probabilities are already well calibrated in sharpness, and a Gaussian narrower
-than the output bin cannot change a density tabulated on it.
+There is deliberately no post-processing stage. There is no probability
+sharpening, since TabFM's class probabilities are already well calibrated in
+sharpness, and no Gaussian smoothing, since a Gaussian narrower than the output
+bin cannot change a density tabulated on it.
 """
 
 from __future__ import annotations
@@ -348,8 +348,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     density mixtures, weighted by members and equally respectively. Every
     dither runs its classifiers with the same seeds -- the coarse level the
     group's seed, fine level ``j`` that seed plus ``1 + j`` -- so dithers
-    differ only by their bin edges, as in the paper's runs. The bin edges
-    are the whole context's, for every group and every bag.
+    differ only by their bin edges. The bin edges are the whole context's,
+    for every group and every bag.
 
     Every ``TabFMClassifier`` argument is set by lazy, none left to the
     installed tabfm. What TabFM still does to the features under any
@@ -403,11 +403,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             calls. In float32 the two paths agree to float rounding. In
             bfloat16 on CUDA, whose kernels round differently for different
             batch shapes, they differ as any two bfloat16 runs do, each as
-            far from a float32 run: a typical row's density by about 3% of
-            its peak (at most 4.5% in our tests), single bins by up to a
-            quarter of the peak. In our tests the CRPS and NLL moved about
-            as much as with a change of seed, and ``mixed_precision=False``
-            removes the difference at two to three times the time.
+            far from a float32 run: a row's density by a few percent of its
+            peak, and single bins by more. ``mixed_precision=False``
+            removes the difference at a higher cost in time.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
@@ -428,8 +426,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             them in one pass. The in-context stage builds its keys and values
             from the context rows only, so a row's answer never depends on
             the other rows in its chunk, but the kernels batch differently:
-            on the CPU in float32 it changes by float rounding (measured up
-            to 2e-6 of the peak density; bit-identical in some cases), and
+            on the CPU in float32 it changes by float rounding, and
             in bfloat16 on CUDA by the rounding ``kv_cache`` describes.
         softmax_temperature: Divides the member-averaged logits before the
             softmax. ``"auto"`` is TabFM v1.0's calibrated 0.9, deliberately
@@ -464,8 +461,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_dither: Repeats of the whole hierarchy with bin edges shifted by
             ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
             dithering; 3 gives a better likelihood almost everywhere, at
-            about three times the compute, and is what we recommend when
-            accuracy matters. ``"grid"`` bins take only 1, since shifted
+            about three times the compute, and suits runs where accuracy
+            matters. ``"grid"`` bins take only 1, since shifted
             copies of the grid's edges would no longer be its edges.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
@@ -537,8 +534,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # Chunking changes the float rounding even on a CPU, and in bfloat16 on
     # CUDA it and the cache change it far more (see kv_cache above).
     exact_chunking = False
-    # Float rounding in float32, measured at up to 4e-5 of the peak density
-    # on CUDA.
+    # Float rounding in float32 on CUDA.
     kv_cache_rtol = 1e-4
     chunks_queries = False
 
@@ -697,13 +693,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             return "predict_proba"  # asked for explicitly; say nothing
         if _icl_stream.streaming_available():
             return "stream"
-        # Warn, and do not be shy about it. The fallback is correct but it
-        # re-runs the context forward pass for every chunk of query rows,
-        # which measures ~13.7 ms per member-row against ~0.53 ms on the
-        # cached path -- around twenty-six times the work. On a large query
-        # set that is the difference between one hour and a day, and because
-        # both paths produce the same answer the only symptom is a run that
-        # never seems to end. Nothing else reports it, so this does.
+        # The fallback is correct but re-runs the context forward pass for
+        # every chunk of query rows, far slower than the cached path. Both
+        # paths give the same answer, so the only symptom is a long run;
+        # nothing else reports it, so this warns.
         _warnings.warn(
             _SLOW_PATH_WARNING,
             TabFMPerformanceWarning,
@@ -1482,7 +1475,7 @@ def _clip_to_support(
 
 
 def _frame(features: _typing.FloatArray) -> pd.DataFrame:
-    """Features as the DataFrame TabFM's preprocessing has always been given."""
+    """Features as the DataFrame TabFM's preprocessing takes."""
     return pd.DataFrame(
         features, columns=[f"x{i}" for i in range(features.shape[1])]
     )

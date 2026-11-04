@@ -50,9 +50,8 @@ lazy = "lazy._cli:main"
 # requirement is the release. The release lacks the KV-cache API
 # (`TabFM.prefill` / `TabFM.decode`) that `lazy.models._icl_stream` needs, and
 # without it TabFMHistogram re-encodes the training context for every chunk of
-# query rows -- ~13.7 ms per member-row against ~0.53 ms, about 26x the compute,
-# for identical answers. TabFMHistogram raises TabFMPerformanceWarning when it
-# falls back, and the installation page of the documentation says how to
+# query rows, far slower for identical answers. TabFMHistogram raises
+# TabFMPerformanceWarning when it falls back, and the installation page of the documentation says how to
 # install the repository build. A uv checkout gets that build automatically,
 # from [tool.uv.sources] below.
 tabfm = [
@@ -274,6 +273,6 @@ ignore_missing_imports = true
 source = ["src/lazy"]
 
 [tool.coverage.report]
-# About 2 points under the 79.6% measured without the backend packages; the
-# backends CI job sets its own floor.
+# A floor for the run without the backend packages; the backends CI job sets
+# its own.
 fail_under = 78

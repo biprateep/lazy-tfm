@@ -441,9 +441,7 @@ def verify_style(
 GOLDEN = 2 / (1 + 5**0.5)
 """Height over width of a golden rectangle, about 0.618."""
 
-# Named height:width ratios. The bracket is what the source manuscripts used:
-# single-column panels 0.56–0.75 (0.7 most often), full-width two-panel rows
-# 0.35–0.4, full-width single panels 0.5–0.65, comparisons square.
+# Named height:width ratios.
 ASPECTS = {
     "golden": GOLDEN,  # default single panel
     "wide": 0.5625,  # 16:9 — histograms, trends with little vertical range
@@ -509,8 +507,8 @@ def grid_figsize(
     The figure spans ``width``; each panel is nominally ``width / ncols``
     wide and ``panel_aspect`` times that tall, so the figure is
     ``nrows * panel_aspect * width / ncols`` tall. Two golden panels across
-    the text width give ``0.31 * TEXT_WIDTH``; the manuscripts used 0.35–0.4
-    for two-panel rows, i.e. ``panel_aspect`` of roughly 0.7–0.8.
+    the text width give ``0.31 * TEXT_WIDTH``; two-panel rows of 0.35–0.4
+    of the width need a ``panel_aspect`` of roughly 0.7–0.8.
 
     Args:
         nrows: Number of panel rows.
