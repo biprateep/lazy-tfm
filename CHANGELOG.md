@@ -36,6 +36,11 @@ change the API.
 
 ### Changed
 
+- `lazy.datasets` reports each download at level INFO to the
+  `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
+  do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
+  the wrong size now warns, with a `lazy.LazyWarning`, before it is fetched
+  again.
 - The warning for rows with probability outside the native grid is now a
   `lazy.GridCoverageWarning`. Its text starts with "Densities are
   renormalised on the native grid" and gives the row count and the grid at
@@ -130,6 +135,9 @@ change the API.
 
 ### Removed
 
+- `lazy.datasets` no longer reads files cached in `~/.cache/lazy-photoz`,
+  the directory used before the package's rename in 0.1.0, which has warned
+  since then. Files left there are downloaded again into `data_home()`.
 - The backend class attribute `setup_needs_name`, and the `then` argument
   of `lazy.models._ensemble.import_extra`, are removed, since no backend
   needs them now. `lazy setup --help` no longer lists backends that
