@@ -43,8 +43,9 @@ ATOL = {
 """Absolute tolerance per backend, as a fraction of the peak density. Two
 runners agreed to the bit on TabPFN, so its 1e-5 (and its 1e-4 relative) are a
 margin chosen, not measured, for a change of runner image on the same
-processor. TabFM, in float32, moved by up to 5.5e-6 of the peak with MKL's
-code path changed, so 2.5e-5 leaves a margin of four. Kumo's and TabICL's
+processor. TabFM's file, in float32, differed by up to 6.1e-6 of the peak
+between the runner (AVX2) that recorded it and a 4-core AVX-512 machine, so
+2.5e-5 leaves a margin of four. Kumo's and TabICL's
 far-tail bins move by more than their relative tolerance on another CPU: by up
 to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine (TabICL's at one
 thread and at four), so 3e-6 leaves a margin of four.
