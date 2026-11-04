@@ -76,6 +76,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _icl_stream
@@ -840,17 +841,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _native_grid(self) -> grid_lib.Grid:
         if self.bin_grid_ is not None:
             return self.bin_grid_
-        shifts = self._shifts()
-        edges = np.unique(
-            np.concatenate(
-                [self._edges(self.y_context_, shift)[0] for shift in shifts]
-            )
+        return _bucket_head.native_grid(
+            self._edges(self.y_context_, shift)[0] for shift in self._shifts()
         )
-        if edges.size < 3:
-            # A constant target has one bin; a grid needs two, and halving
-            # it changes no density.
-            edges = np.r_[edges[0], edges.mean(), edges[-1]]
-        return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
     # -- the hierarchy ------------------------------------------------------
 
@@ -1095,7 +1088,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 self._member_logits(model, view, X_query)
                 for view in _member_views(classifier, member_rows)
             ]
-            probs = _icl_stream.softmax(
+            probs = _bucket_head.softmax(
                 np.mean(members, axis=0), self._temperature()
             )
         elif self.inference_ == "stream":
@@ -1108,7 +1101,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 chunk_size=self.chunk_size,
                 keep_cache_on_device=self.keep_cache_on_device,
             )
-            probs = _icl_stream.softmax(
+            probs = _bucket_head.softmax(
                 logits["query"]["mean_logits"], self._temperature()
             )
         else:
