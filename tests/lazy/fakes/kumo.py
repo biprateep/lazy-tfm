@@ -6,6 +6,8 @@ The network is replaced by a subclass of upstream's ``ICLModel`` whose
 forward pass answers from the processed features alone, so the backend's own
 code and upstream's preprocessing, ensembling and context cache all run as
 they do on the real model. It needs the sdm package, so it skips without it.
+
+It replaces the private lazy names in ``LAZY_SEAMS``.
 """
 
 import pathlib
@@ -16,6 +18,12 @@ import pytest
 import fakes
 from lazy.models import _hub
 from lazy.models import kumo
+
+LAZY_SEAMS = (
+    "lazy.models.kumo._load_network",
+    "lazy.models.kumo._N_QUANTILES",
+)
+"""The private lazy names that :func:`install` replaces."""
 
 SETTINGS = {"version": "v1-small", "n_estimators": 2}
 """Small enough for the behavioral suite; v1-small, the CPU-friendly size."""
@@ -134,6 +142,12 @@ def install(monkeypatch, recorder):
         recorder.loads.append(device)
         return network().to(device).eval()
 
-    monkeypatch.setattr(kumo, "_load_network", load)
-    monkeypatch.setattr(kumo, "_N_QUANTILES", SPREAD.size)
+    fakes.patch(
+        monkeypatch,
+        LAZY_SEAMS,
+        {
+            "lazy.models.kumo._load_network": load,
+            "lazy.models.kumo._N_QUANTILES": SPREAD.size,
+        },
+    )
     return kumo.KumoQuantile
