@@ -237,6 +237,9 @@ class BaseDensityRegressor(
 
         Returns:
             The fitted estimator itself.
+
+        Raises:
+            ImportError: If the backend's package is not installed.
         """
         self._clear_fitted()
         X, named = _inputs.as_feature_frame(X)
@@ -265,9 +268,9 @@ class BaseDensityRegressor(
         Args:
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
-            y_grid: A :class:`~lazy.grid.Grid`, an array of bin
-                centres, ``"native"`` for the model's own grid, or ``None``
-                for this model's default.
+            y_grid: A :class:`~lazy.grid.Grid`, an array of at least two
+                evenly spaced, increasing bin centres, ``"native"`` for the
+                model's own grid, or ``None`` for this model's default.
 
         Returns:
             Densities, shape (n_samples, n_bins). These are **densities**,
@@ -280,8 +283,7 @@ class BaseDensityRegressor(
             this is ``predict_distribution(X).on_grid(grid)``.
 
         Raises:
-            RuntimeError: If the backend returns densities of the wrong
-                shape.
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
@@ -311,6 +313,9 @@ class BaseDensityRegressor(
             One distribution per row of ``X``. For no rows at all, an empty
             :class:`~lazy.distributions.HistogramDistribution` on the
             default grid, without running the model.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         X = self._check_features(X)
@@ -335,6 +340,9 @@ class BaseDensityRegressor(
 
         Returns:
             The value at each level, shape (n_samples, k).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         return np.concatenate(
@@ -363,7 +371,7 @@ class BaseDensityRegressor(
             The lower and upper bounds, shape (n_samples, 2).
 
         Raises:
-            ValueError: If ``coverage`` is not in (0, 1).
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         if not 0.0 < coverage < 1.0:
@@ -394,6 +402,9 @@ class BaseDensityRegressor(
 
         Returns:
             The PIT values, within [0, 1], shape (n_samples,).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         X = self._check_features(X)
@@ -416,6 +427,9 @@ class BaseDensityRegressor(
 
         Returns:
             Normalised densities, shape (n_samples, n_bins).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         return self.predict_proba(X, y_grid)
 
@@ -434,6 +448,9 @@ class BaseDensityRegressor(
             the grid's convention (:meth:`lazy.grid.Grid.cdf`): column 0 is
             zero on a trapezoid grid, and half the first bin's mass on a
             histogram grid.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
@@ -468,6 +485,9 @@ class BaseDensityRegressor(
 
         Returns:
             Point estimates, shape (n_samples,).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         method = _check_method(method)
@@ -498,6 +518,9 @@ class BaseDensityRegressor(
 
         Returns:
             Minus :func:`lazy.metrics.cde_loss`.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)
@@ -543,6 +566,9 @@ class BaseDensityRegressor(
         Returns:
             A one-row table labelled with :attr:`name_`; its ``scale``
             column records the choice.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         method = _check_method(method)
@@ -695,6 +721,9 @@ class BaseDensityRegressor(
         Returns:
             A dict mapping each name in :data:`POINT_ESTIMATORS` to point
             values, shape (n_samples,).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
         """
         validation.check_is_fitted(self)
         grid = self._resolve_grid(y_grid)

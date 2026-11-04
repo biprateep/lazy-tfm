@@ -50,10 +50,10 @@ at the output bin centres, which would drop whole bins and lose probability.
 The ten-class limit constrains the hierarchy, never the output: ``y_grid`` can
 have any number of bins, at any spacing, over any range.
 
-There is deliberately no post-processing stage. Probability sharpening and
-Gaussian smoothing were both tried and neither is used: TabFM's class
-probabilities are already well calibrated in sharpness, and a Gaussian narrower
-than the output bin cannot change a density tabulated on it.
+There is deliberately no post-processing stage. There is no probability
+sharpening, since TabFM's class probabilities are already well calibrated in
+sharpness, and no Gaussian smoothing, since a Gaussian narrower than the output
+bin cannot change a density tabulated on it.
 """
 
 from __future__ import annotations
@@ -348,8 +348,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     density mixtures, weighted by members and equally respectively. Every
     dither runs its classifiers with the same seeds -- the coarse level the
     group's seed, fine level ``j`` that seed plus ``1 + j`` -- so dithers
-    differ only by their bin edges, as in the paper's runs. The bin edges
-    are the whole context's, for every group and every bag.
+    differ only by their bin edges. The bin edges are the whole context's,
+    for every group and every bag.
 
     Every ``TabFMClassifier`` argument is set by lazy, none left to the
     installed tabfm. What TabFM still does to the features under any
@@ -403,11 +403,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             calls. In float32 the two paths agree to float rounding. In
             bfloat16 on CUDA, whose kernels round differently for different
             batch shapes, they differ as any two bfloat16 runs do, each as
-            far from a float32 run: a typical row's density by about 3% of
-            its peak (at most 4.5% in our tests), single bins by up to a
-            quarter of the peak. In our tests the CRPS and NLL moved about
-            as much as with a change of seed, and ``mixed_precision=False``
-            removes the difference at two to three times the time.
+            far from a float32 run: a row's density by a few percent of its
+            peak, and single bins by more. ``mixed_precision=False``
+            removes the difference at a higher cost in time.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an
             array of bin centres, ``"native"``, or None for the native grid
             (the union of every dither's bin edges). A constructor grid also
@@ -428,8 +426,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             them in one pass. The in-context stage builds its keys and values
             from the context rows only, so a row's answer never depends on
             the other rows in its chunk, but the kernels batch differently:
-            on the CPU in float32 it changes by float rounding (measured up
-            to 2e-6 of the peak density; bit-identical in some cases), and
+            on the CPU in float32 it changes by float rounding, and
             in bfloat16 on CUDA by the rounding ``kv_cache`` describes.
         softmax_temperature: Divides the member-averaged logits before the
             softmax. ``"auto"`` is TabFM v1.0's calibrated 0.9, deliberately
@@ -464,8 +461,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_dither: Repeats of the whole hierarchy with bin edges shifted by
             ``d/n_dither`` of a bin, mixed with equal weights. 1 disables
             dithering; 3 gives a better likelihood almost everywhere, at
-            about three times the compute, and is what we recommend when
-            accuracy matters. ``"grid"`` bins take only 1, since shifted
+            about three times the compute, and suits runs where accuracy
+            matters. ``"grid"`` bins take only 1, since shifted
             copies of the grid's edges would no longer be its edges.
         prior_shift: ``"em"`` applies the label-shift correction of
             :func:`prior_shift_em` using the context's own bin fractions as
@@ -500,8 +497,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         provenance_: Which weights, code and ensemble answered, as a dict.
         checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
             loads its backbone on the first prediction, so this appears then.
-        bin_prior_: The context's bin fractions from the last prediction,
-            shape (n_bins,).
+        bin_prior_: The bin fractions of the last member group's context
+            targets, at the last dither, shape (n_bins,). With bagging
+            done natively, the one group's targets are the whole context.
         bins_: How the bins were chosen, for example
             ``"auto equal-mass 7x7"`` or ``"grid 50 bins in 5 groups"``.
         n_coarse_bins_: The resolved coarse classes, or a matched grid's
@@ -536,8 +534,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     # Chunking changes the float rounding even on a CPU, and in bfloat16 on
     # CUDA it and the cache change it far more (see kv_cache above).
     exact_chunking = False
-    # Float rounding in float32, measured at up to 4e-5 of the peak density
-    # on CUDA.
+    # Float rounding in float32 on CUDA.
     kv_cache_rtol = 1e-4
     chunks_queries = False
 
@@ -696,13 +693,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             return "predict_proba"  # asked for explicitly; say nothing
         if _icl_stream.streaming_available():
             return "stream"
-        # Warn, and do not be shy about it. The fallback is correct but it
-        # re-runs the context forward pass for every chunk of query rows,
-        # which measures ~13.7 ms per member-row against ~0.53 ms on the
-        # cached path -- around twenty-six times the work. On a large query
-        # set that is the difference between one hour and a day, and because
-        # both paths produce the same answer the only symptom is a run that
-        # never seems to end. Nothing else reports it, so this does.
+        # The fallback is correct but re-runs the context forward pass for
+        # every chunk of query rows, far slower than the cached path. Both
+        # paths give the same answer, so the only symptom is a long run;
+        # nothing else reports it, so this warns.
         _warnings.warn(
             _SLOW_PATH_WARNING,
             TabFMPerformanceWarning,
@@ -836,7 +830,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     ) -> distributions.Distribution:
         model = self._backbone()
         query = _frame(X)
-        shifts = [d / self.n_dither for d in range(self.n_dither)]
+        shifts = self._shifts()
         parts = []
         with _progress.bar(
             self.progress,
@@ -860,7 +854,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 if self.prior_shift == "em":
                     probs, _ = prior_shift_em(probs, prior)
                 parts.append(distributions.HistogramDistribution(edges, probs))
-        self.bin_prior_ = prior
         if len(parts) == 1:
             return parts[0]
         return distributions.MixtureDistribution.equal(parts)
@@ -868,7 +861,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _native_grid(self) -> grid_lib.Grid:
         if self.bin_grid_ is not None:
             return self.bin_grid_
-        shifts = [d / self.n_dither for d in range(self.n_dither)]
+        shifts = self._shifts()
         edges = np.unique(
             np.concatenate(
                 [self._edges(self.y_context_, shift)[0] for shift in shifts]
@@ -952,9 +945,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             the context's bin fractions, shape ``(n_bins,)``.
         """
         y, X_context, group = handle["y"], handle["X"], handle["group"]
-        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        edges, coarse_edges, fine_edges, coarse, fines, prior = self._labels(
+            y, shift
+        )
         n_coarse = coarse_edges.size - 1
-        coarse = _bin_labels(coarse_edges, y)
         # Each member's rows of this group's context, for natively bagged
         # members; None when every member sees all of them.
         member_rows = getattr(group, "member_rows", None)
@@ -970,12 +964,11 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             member_rows,
         )
         _done(progress)
-        prior: list[_typing.FloatArray] = []
         blocks: list[_typing.FloatArray] = []
         for j in range(n_coarse):
             rows = coarse == j
             n_fine = fine_edges[j].size - 1
-            fine = _bin_labels(fine_edges[j], y[rows])
+            fine = fines[j]
             level_rows = (
                 None
                 if member_rows is None
@@ -998,13 +991,73 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 level_rows,
             )
             _done(progress)
-            prior.append(np.bincount(fine, minlength=n_fine) / max(y.size, 1))
             blocks.append(p_fine * p_coarse[:, [j]])
             self._log(
                 f"  coarse bin {j + 1}/{n_coarse}"
                 f" ({int(rows.sum())} context rows)"
             )
-        return np.concatenate(blocks, axis=1), edges, np.concatenate(prior)
+        return np.concatenate(blocks, axis=1), edges, prior
+
+    def _shifts(self) -> list[float]:
+        """Each dither's edge shift in quantile space, in bins."""
+        return [d / self.n_dither for d in range(self.n_dither)]
+
+    def _labels(
+        self, y: _typing.FloatArray, shift: float
+    ) -> tuple[
+        _typing.FloatArray,
+        _typing.FloatArray,
+        list[_typing.FloatArray],
+        _typing.IntArray,
+        list[_typing.IntArray],
+        _typing.FloatArray,
+    ]:
+        """A group's context targets in the bins of one dither.
+
+        Args:
+            y: The group's clipped context targets, shape (n,).
+            shift: Edge shift in quantile space, in bins.
+
+        Returns:
+            A tuple ``(edges, coarse_edges, fine_edges, coarse, fines,
+            prior)``: the bin edges, as :meth:`_edges` gives them; each
+            target's coarse class, shape (n,); the fine classes of each
+            coarse class's targets, one array per coarse class; and the
+            targets' bin fractions, shape (n_bins,).
+        """
+        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        coarse = _bin_labels(coarse_edges, y)
+        fines = [
+            _bin_labels(fine_edges[j], y[coarse == j])
+            for j in range(coarse_edges.size - 1)
+        ]
+        prior = np.concatenate(
+            [
+                np.bincount(fine, minlength=fine_edges[j].size - 1)
+                / max(y.size, 1)
+                for j, fine in enumerate(fines)
+            ]
+        )
+        return edges, coarse_edges, fine_edges, coarse, fines, prior
+
+    def _after_fit(self) -> None:
+        """Sets ``bin_prior_``, which no prediction changes."""
+        self._set_bin_prior()
+
+    def _set_bin_prior(self) -> None:
+        """The last member group's bin fractions, at the last dither."""
+        shift = self._shifts()[-1]
+        self.bin_prior_ = self._labels(self.handles_[-1]["y"], shift)[-1]
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle; one made before ``fit`` set the bin prior gets it.
+
+        Args:
+            state: The pickled ``__dict__``.
+        """
+        super().__setstate__(state)
+        if "handles_" in state and "bin_prior_" not in state:
+            self._set_bin_prior()
 
     def _class_probabilities(
         self,
@@ -1422,7 +1475,7 @@ def _clip_to_support(
 
 
 def _frame(features: _typing.FloatArray) -> pd.DataFrame:
-    """Features as the DataFrame TabFM's preprocessing has always been given."""
+    """Features as the DataFrame TabFM's preprocessing takes."""
     return pd.DataFrame(
         features, columns=[f"x{i}" for i in range(features.shape[1])]
     )

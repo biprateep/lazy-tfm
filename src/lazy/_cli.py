@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-import sys
 
 from lazy.models import _ensemble
 from lazy.models import registry
@@ -77,7 +76,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.backends or name in args.backends
     ]
     return 0 if all(complete) else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

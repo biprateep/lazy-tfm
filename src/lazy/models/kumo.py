@@ -190,8 +190,7 @@ class KumoQuantile(
         kv_cache: Fit upstream's context cache (``fit`` then ``predict``),
             so each chunk of queries skips the context's forward pass; False
             runs the whole forward pass, recipe included, for every chunk.
-            On a CPU the two agree to float rounding, within 2e-5 of the
-            quantiles' spread where measured; on a GPU with
+            On a CPU the two agree to float rounding; on a GPU with
             ``mixed_precision=True`` they agree to float16 rounding.
         y_grid: Default output grid: a :class:`lazy.grid.Grid`, an array of
             bin centres, ``"native"``, or None for the native grid (1,000
@@ -491,12 +490,17 @@ class KumoQuantile(
     ) -> list[distributions.QuantileDistribution]:
         if self.kv_cache and handle.cache is None:
             # Unpickled: the cache was left out, and the same context and
-            # seed record the same one again.
-            handle.cache = self._record(handle)
+            # seed record the same one again, once. The lock is the
+            # estimator's, since a group compares by value and so is not
+            # hashable.
+            with _locks.network_lock(self):
+                if handle.cache is None:
+                    handle.cache = self._record(handle)
+        cache = handle.cache
         network = self._network()
         (queries,) = self._tensors(X)
         with self._autocast():
-            if handle.cache is None:
+            if cache is None:
                 assert handle.context is not None  # Set by _fit_group.
                 x, target = self._tensors(*handle.context)
                 out = network(
@@ -509,7 +513,7 @@ class KumoQuantile(
                     generator=self._generator(handle.seed),
                 )
             else:
-                with _lending(network, handle.cache):
+                with _lending(network, cache):
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
         quantiles = out.numerical.double().cpu().numpy()
@@ -834,33 +838,11 @@ def _group_tokens(group: _members.MemberGroup) -> tuple[str, ...]:
     """The distinct transforms a group's members cycle through, in order."""
     if group.native_transforms is None:
         return AUTO_TRANSFORMS
-    return _cycle(group.native_transforms)
-
-
-def _cycle(tokens: tuple[str, ...]) -> tuple[str, ...]:
-    """The distinct transforms a group's members cycle through, in order.
-
-    Upstream assigns member ``k`` transform ``k % len(options)``, so the
-    distinct tokens in order run the plan only when it cycles through them.
-
-    Args:
-        tokens: The transform of each member, in member order.
-
-    Returns:
-        The distinct tokens, in order.
-
-    Raises:
-        ValueError: If the plan does not cycle, as ``("power", "power",
-            "identity")`` would. No plan the uniform parameters make does.
-    """
-    distinct = tuple(dict.fromkeys(tokens))
-    cycled = tuple(distinct[i % len(distinct)] for i in range(len(tokens)))
-    if cycled != tuple(tokens):
-        raise ValueError(
-            f"Kumo Tabular cycles its transforms over the members, so it "
-            f"cannot run {tuple(tokens)}"
-        )
-    return distinct
+    return _members.cycle_tokens(
+        group.native_transforms,
+        "Kumo Tabular cycles its transforms over the members, so it "
+        "cannot run {tokens}",
+    )
 
 
 # Hidden from the type checker, which would otherwise type every misspelt

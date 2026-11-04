@@ -62,7 +62,10 @@ thereafter; :func:`download_checkpoint` warms that cache ahead of time.
 # This file's imports re-export the public API by name; that is its purpose.
 # ruff: noqa: GS001
 
+import importlib
 from importlib import metadata
+import types
+import typing
 
 from lazy import _namespace
 from lazy.base import BaseDensityRegressor
@@ -130,3 +133,27 @@ __all__ = [
     "model_cache_enabled",
     "set_model_cache",
 ]
+
+if typing.TYPE_CHECKING:
+    from lazy import datasets as datasets
+    from lazy import selection as selection
+
+
+def __getattr__(name: str) -> types.ModuleType:
+    """Imports :mod:`lazy.datasets` or :mod:`lazy.selection` on first access.
+
+    They import h5py and scikit-learn's dataset loaders, which most programs
+    never use, so ``import lazy`` leaves them out.
+
+    Args:
+        name: The attribute asked for.
+
+    Returns:
+        The submodule.
+
+    Raises:
+        AttributeError: If ``name`` is not one of those submodules.
+    """
+    if name in ("datasets", "selection"):
+        return importlib.import_module(f"lazy.{name}")
+    raise AttributeError(f"module 'lazy' has no attribute {name!r}")

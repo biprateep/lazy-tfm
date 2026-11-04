@@ -84,12 +84,13 @@ def test_an_explicit_recipe_drops_the_clip_and_the_shuffle():
 
 
 def test_members_cycle_through_their_transforms():
-    assert kumo._cycle(("identity", "power", "identity")) == (
-        "identity",
-        "power",
+    group = types.SimpleNamespace(
+        native_transforms=("identity", "power", "identity")
     )
+    assert kumo._group_tokens(group) == ("identity", "power")
+    group.native_transforms = ("power", "power", "identity")
     with pytest.raises(ValueError, match="cycles its transforms"):
-        kumo._cycle(("power", "power", "identity"))
+        kumo._group_tokens(group)
     with pytest.raises(ValueError, match="no transform 'yeo'"):
         kumo._transform(None, "yeo")
 
@@ -278,6 +279,41 @@ def test_a_pickle_finds_the_checkpoint_where_it_is_now(monkeypatch, data):
     assert restored.checkpoint_.parent.parent == elsewhere
     # One network for every group of the bagged model.
     assert len(recorder.loads) == loads + 1
+
+
+def test_threads_predicting_on_an_unpickled_model_record_its_cache_once(
+    monkeypatch, data
+):
+    X, y, X_test = data
+    cls = fakes.install("kumo", monkeypatch, fakes.Recorder())
+    settings = {**fakes.settings("kumo"), "device": "cpu", "progress": False}
+    model = cls(**settings).fit(X, y)
+    expected = model.predict_distribution(X_test).locs
+    restored = pickle.loads(pickle.dumps(model))
+    contended = threads.watch_contention(
+        monkeypatch, lambda obj: obj is restored
+    )
+    recorded = []
+    record = restored._record
+
+    def counted_record(handle):
+        recorded.append(handle)
+        return record(handle)
+
+    # The first recording waits until the other thread finds the model's
+    # lock held: without that lock, both threads record.
+    monkeypatch.setattr(
+        restored, "_record", threads.held_until(contended, counted_record)
+    )
+    answers = []
+
+    def predict():
+        answers.append(restored.predict_distribution(X_test).locs)
+
+    assert threads.run(predict, predict)
+    for answer in answers:
+        np.testing.assert_array_equal(answer, expected)
+    assert len(recorded) == len(restored.handles_)
 
 
 def test_the_trim_spans_every_bagged_member(monkeypatch, data):

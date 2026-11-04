@@ -1008,7 +1008,8 @@ def test_no_query_rows_give_an_empty_answer(cls, data):
             name,
             marks=pytest.mark.xfail(
                 strict=True,
-                reason="TabFM keeps the last prediction's bin_prior_",
+                reason="TabFM loads its backbone, setting checkpoint_, on "
+                "the first prediction",
             ),
         )
         if name == "tabfm"

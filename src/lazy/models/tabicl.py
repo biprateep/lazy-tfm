@@ -384,10 +384,17 @@ class TabICLQuantile(
             RuntimeError: If upstream ran members other than the planned
                 ones, which would make the weights wrong.
         """
-        methods = _norm_methods(
+        methods = list(
             AUTO_NORM_METHODS
             if group.native_transforms is None
-            else group.native_transforms
+            # A norm method listed twice would give two members the same
+            # feature shuffle too, so they would be one member counted twice.
+            else _members.cycle_tokens(
+                group.native_transforms,
+                "TabICL runs each of its transforms once per cycle over "
+                "the members, so it cannot weight them as {tokens}; list "
+                "each transform once in transforms",
+            )
         )
         shuffle = AUTO_FEAT_SHUFFLE_METHOD if group.feature_shuffle else "none"
         n_members = group.n_members
@@ -853,34 +860,3 @@ def _extra_seed(seed: int, index: int) -> int:
     """
     sequence = np.random.SeedSequence([seed % 2**32, index])
     return int(sequence.generate_state(1)[0] % 2**31)
-
-
-def _norm_methods(tokens: tuple[str, ...]) -> list[str]:
-    """TabICL's ``norm_methods`` for the members' planned transforms.
-
-    Upstream pairs member ``k`` with norm method ``k % len(norm_methods)``,
-    and a norm method listed twice gives two members the same feature
-    shuffle as well, so they are one member counted twice. The distinct
-    tokens in order therefore run the plan only when it cycles through them.
-
-    Args:
-        tokens: TabICL's token for each member's transform, in member order.
-
-    Returns:
-        The distinct tokens, in order.
-
-    Raises:
-        ValueError: If the plan repeats a token within a cycle, as
-            ``("power", "power", "none")`` would. No plan the uniform
-            parameters make does: only ``none`` is native, and the auto
-            recipe alternates.
-    """
-    methods = list(dict.fromkeys(tokens))
-    cycled = tuple(methods[i % len(methods)] for i in range(len(tokens)))
-    if cycled != tuple(tokens):
-        raise ValueError(
-            "TabICL runs each of its transforms once per cycle over the "
-            f"members, so it cannot weight them as {tuple(tokens)}; list "
-            "each transform once in transforms"
-        )
-    return methods

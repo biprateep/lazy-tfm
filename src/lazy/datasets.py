@@ -88,10 +88,12 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
+from lazy import _home
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
 from lazy import selection
+from lazy._home import data_home  # noqa: GS001 - re-exports the public name.
 
 __all__ = [
     "BANDS",
@@ -166,8 +168,7 @@ _SIZES = {
     "trainz_test.npz": 694_374_957,
     _HSC_FILE: 13_823_712,
 }
-# The default cache directory's name before the package became lazy-tfm, and
-# the old caches already warned of.
+# The name of the old default cache directory, still read with a warning.
 _LEGACY_HOME = "lazy-photoz"
 _warned_legacy: set[pathlib.Path] = set()
 
@@ -389,10 +390,6 @@ def build_features(
         names chosen to be
         readable in feature-importance output (``"G-R"``, ``"G-RERR"``, ...).
 
-    Raises:
-        KeyError: If ``raw`` lacks a magnitude or error column for one of
-            ``bands``.
-
     Examples:
         >>> raw = pd.DataFrame(
         ...     {b: np.full(3, 20.0) for b in BANDS}
@@ -449,50 +446,21 @@ def build_features(
     return pd.DataFrame(out, index=raw.index)
 
 
-def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
-    """Returns the directory cached catalogues live in, creating it if needed.
-
-    Resolution order: the ``data_home`` argument, then ``$LAZY_DATA_HOME``,
-    then ``$XDG_CACHE_HOME/lazy-tfm``, then ``~/.cache/lazy-tfm``.
-
-    Nothing about the location is baked in, so a shared scratch filesystem or
-    a node-local disk is one environment variable away and the same code runs
-    unchanged on a laptop and on a cluster.
-
-    Args:
-        data_home: An explicit cache directory, overriding the environment.
-
-    Returns:
-        The cache directory, with ``~`` expanded.
-    """
-    explicit = data_home or os.environ.get("LAZY_DATA_HOME")
-    root = pathlib.Path(explicit) if explicit else _default_home("lazy-tfm")
-    root = root.expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _default_home(name: str) -> pathlib.Path:
-    """The default cache directory ``name``, under the user's cache."""
-    cache = os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
-    return pathlib.Path(cache).expanduser() / name
-
-
 def _legacy_copy(
     filename: str, root: str | pathlib.Path | None, size: int
 ) -> pathlib.Path | None:
-    """A complete copy of ``filename`` in the cache used before the rename.
+    """A complete copy of ``filename`` in the old default cache directory.
 
     Looked for only when no cache directory was chosen, by argument or by
-    ``$LAZY_DATA_HOME``: the package cached in ``lazy-photoz`` before it
-    became ``lazy-tfm``. The first use of the old cache warns, once.
+    ``$LAZY_DATA_HOME``: the old directory is ``lazy-photoz``. The first use
+    of the old cache warns, once.
 
     Returns:
         The old copy, or None if there is none, or one was chosen.
     """
     if root or os.environ.get("LAZY_DATA_HOME"):
         return None
-    legacy = _default_home(_LEGACY_HOME) / filename
+    legacy = _home.default_home(_LEGACY_HOME) / filename
     if not _is_complete(legacy, size):
         return None
     if legacy.parent not in _warned_legacy:
@@ -1474,16 +1442,9 @@ def _make_chirp(
     _typing.FloatArray,
     _typing.FloatArray,
 ]:
-    """A noisy chirp with chunks missing, to fill in.
+    """Generates the chirp dataset of :func:`load_dataset`.
 
-    A toy regression problem with one feature: ``y = A(x) sin(phi(x))`` on
-    ``0 <= x <= 10``, where the amplitude ``A(x) = 1 + 0.2 x`` grows from 1
-    to 3 and the frequency ``phi'(x) / 2 pi = 0.2 + 0.03 x`` from 0.2 to 0.5
-    cycles per unit of ``x``. Gaussian noise is added to the training rows,
-    and ``n_gaps`` chunks of ``x`` are cut out of them and returned, without
-    noise, as the test rows, so the true curve is known where a model has to
-    interpolate. The gaps never overlap: the range is cut into ``n_gaps``
-    equal segments and each segment holds one gap, placed at random.
+    The curve, the gaps and the options are described there.
 
     Args:
         n_samples: Points evenly spaced over ``0 <= x <= 10``, before the gaps

@@ -36,12 +36,14 @@ Typical usage example:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import contextlib
 import dataclasses
 import functools
 import io
 import math
 import pathlib
+import threading
 from typing import Any
 
 import numpy as np
@@ -75,6 +77,26 @@ class Member:
     seed: int
 
 
+# Mutable global state by design: ``sys.stdout`` is one per process, so the
+# swaps that silence upstream's prints take turns.
+_SILENCE = threading.Lock()
+
+
+@contextlib.contextmanager
+def _silenced() -> Iterator[None]:
+    """Discards what is printed to stdout inside it, one thread at a time.
+
+    ``contextlib.redirect_stdout`` swaps the process's ``sys.stdout``; two
+    threads that overlap would restore it in the wrong order and leave it on
+    a discarded buffer.
+
+    Yields:
+        None.
+    """
+    with _SILENCE, contextlib.redirect_stdout(io.StringIO()):
+        yield
+
+
 def load_network(checkpoint: pathlib.Path, device: str) -> Any:
     """Builds LimiX-2's network from its checkpoint, ready for inference.
 
@@ -92,7 +114,7 @@ def load_network(checkpoint: pathlib.Path, device: str) -> Any:
 
     loading = _limix_source.load().loading
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    with contextlib.redirect_stdout(io.StringIO()):  # upstream prints
+    with _silenced():  # upstream prints
         network, _ = loading.load_from_checkpoint(state)
     return network.to(device).eval()
 
@@ -267,7 +289,7 @@ def _encode(
     targets = {"data": _tensor(member.y, device)[None]}
     # With no queries upstream prints a warning that this is self-attention;
     # it is, by design.
-    with contextlib.redirect_stdout(io.StringIO()):
+    with _silenced():
         tokens, feature_mask, y_type, *_ = network._encoder(  # noqa: SLF001 - upstream exposes no encoder API.
             features,
             targets,

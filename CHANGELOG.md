@@ -27,6 +27,16 @@ change the API.
 
 ### Changed
 
+- `lazy.plotting.diagnostics.diagnostic_panel` computes the point estimates
+  once instead of twice, with the same figure to the bit. On 5,000 rows and
+  500 bins its median time fell from 0.59 s to 0.54 s.
+- `import lazy` no longer imports h5py or scikit-learn's dataset loaders.
+  `lazy.datasets` and `lazy.selection` load when first accessed, as
+  attributes of `lazy` or by import, so code that uses them is unchanged.
+- TabFM's `bin_prior_` is set by `fit` instead of written by every
+  prediction, so threads predicting on one model no longer change it. Its
+  value is the same: the bin fractions of the last member group's context,
+  at the last dither. A model pickled without it gets it when unpickled.
 - On its own buckets (the default grid of TabPFN, LimiX, a bagged model and
   TabFM's `"grid"` bins), a histogram's densities are each bucket's mass over
   its width, computed directly instead of through differences of cumulative
@@ -44,6 +54,11 @@ change the API.
   `LazyEnsembleModel`'s peak memory falls from 119 to 99 MiB, and a bagged
   5,000-bucket model's `predict_quantiles` from 301 to 269 MiB, with the
   same results to the bit.
+- `LazyEnsembleModel` pools its members one at a time, into one running sum,
+  so it holds one member's distribution of a chunk instead of all of them.
+  With two members on the CPU benchmark, its peak memory falls from 99 to
+  96 MiB; the saving grows with the number of members. The results are the
+  same to the bit.
 - `predict_quantiles`, `predict_interval` and `predict_pit` reduce each of
   the model's `chunk_size` chunks of rows as it is predicted, instead of every
   row's distribution at once, so their peak memory no longer grows with the
@@ -99,6 +114,16 @@ change the API.
   once could read the checkpoint path of the machine that made the pickle,
   which on another machine does not exist. The path is now found again
   before the model marks it found.
+- LimiX-2 predicting from two threads at once could leave `sys.stdout` on
+  a discarded buffer, so that later prints vanished. The threads now take
+  turns to silence upstream's prints.
+- An unpickled Kumo model predicting from two threads at once recorded each
+  key/value cache twice, one recording after the other, and briefly held
+  two caches on the device. It now records each cache once, under a lock.
+- An unpickled LimiX model predicting from two threads at once could fail
+  with a `TypeError`, or leave members uncached depending on timing: the
+  second thread used the key/value caches before the first had rebuilt
+  them. The second thread now waits for the rebuild.
 - The warning that a cached checkpoint snapshot may be incomplete names the
   user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a

@@ -271,7 +271,7 @@ def _upstream_settings(
         )
         settings["PREPROCESS_TRANSFORMS"] = tuple(
             _preprocessor(name, "numeric", original, limit, None)
-            for name, original in _cycle(group.native_transforms)
+            for name, original in _shortest_period(group.native_transforms)
         )
         settings["FINGERPRINT_FEATURE"] = False
         settings["POLYNOMIAL_FEATURES"] = "no"
@@ -461,9 +461,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # target on the whole context (see the module docstring).
     supports_native_bagging = False
     native_outlier_clipping = True
-    # The fast checkpoint runs DC1's 1,000 + 1,000 rows on a CPU in
-    # about 11 s with eight members (TabPFN-3.5 26 s, TabICL 7 s), within the
-    # 5,000 context rows upstream allows on a CPU.
+    # Only the fast checkpoint is quick enough on a CPU, where upstream
+    # allows 5,000 context rows.
     cpu_friendly_versions = ("v3.5-fast",)
     cpu_note = (
         " and refuses more than 5,000 context rows there (1,000 before v3)"
@@ -911,7 +910,7 @@ def _with_bagging_remedy(
     )
 
 
-def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
+def _shortest_period(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
     """The shortest prefix of ``tokens`` that repeats to give all of them.
 
     Upstream shares the members out among its preprocessing configs in
@@ -928,9 +927,9 @@ def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
         ``transforms=("power", "power", "none")``.
 
     Examples:
-        >>> _cycle(("a", "b", "a", "b", "a"))
+        >>> _shortest_period(("a", "b", "a", "b", "a"))
         ('a', 'b')
-        >>> _cycle(("a", "a", "b", "a", "a", "b"))
+        >>> _shortest_period(("a", "a", "b", "a", "a", "b"))
         ('a', 'a', 'b')
     """
     for length in range(1, len(tokens)):

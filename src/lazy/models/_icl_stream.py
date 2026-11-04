@@ -412,7 +412,7 @@ def streaming_available() -> bool:
     """Whether the installed ``tabfm`` exposes the KV-cache API needed here.
 
     The PyPI release of ``tabfm`` 1.0.0/1.0.1 has no ``prefill`` / ``decode``
-    and no cache helpers; they arrived later, in the repository. Everything
+    and no cache helpers; only the repository build has them. Everything
     here therefore has to be optional, with the upstream ``predict_proba`` as
     the fallback (see :class:`lazy.models.tabfm.TabFMHistogram`).
     """
