@@ -469,7 +469,7 @@ def _legacy_copy(
             f"lazy.datasets is using {legacy} from its old cache directory, "
             f"{legacy.parent}; the cache is now {data_home()}. Move the "
             "files there to silence this.",
-            UserWarning,
+            _warnings.LazyWarning,
         )
     return legacy
 

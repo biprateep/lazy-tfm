@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
+  warning classes, and `lazy.GridCoverageWarning`, issued when densities are
+  renormalised because the native grid misses part of their probability.
+  `lazy.ImportNameWarning`, `lazy.LimiXSourceWarning` and
+  `lazy.TabFMPerformanceWarning` are now exported from `lazy`.
 - `lazy models` lists every pinned checkpoint, its default version and
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
   weights of the checkpoints named, with the licence notice, so the cache
@@ -31,6 +36,12 @@ change the API.
 
 ### Changed
 
+- The warning for rows with probability outside the native grid is now a
+  `lazy.GridCoverageWarning`. Its text starts with "Densities are
+  renormalised on the native grid" and gives the row count and the grid at
+  the end. Every `UserWarning` class of lazy, and the warnings that were
+  plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
+  `filterwarnings("ignore", category=UserWarning)` still catches them.
 - `predict_cdf` returns each row's native CDF at the bin centres, exactly,
   as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
   densities on the grid, which drops the probability outside the grid and

@@ -1040,7 +1040,14 @@ class TestTabICL:
 
         monkeypatch.setattr(est, "_distribution_chunks", lambda X: iter([dist]))
         X = pd.DataFrame({"a": [0.0, 1.0]})
-        with pytest.warns(UserWarning, match="1 of 2 rows put more than 1%"):
+        with pytest.warns(
+            lazy.GridCoverageWarning,
+            match=(
+                "^Densities are renormalised on the native grid where rows "
+                "put more than 1% of their probability outside it: "
+                r"1 of 2 rows, grid \[-0.25, 1.25\]\."
+            ),
+        ):
             est._predict_pdf(X, est.native_grid_)
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
