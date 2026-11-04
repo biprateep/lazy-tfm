@@ -126,6 +126,12 @@ change the API.
 
 ### Deprecated
 
+- Predicting on an `X` with no rows warns with a `FutureWarning` in
+  `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
+  `predict_quantiles`, `predict_interval`, `predict_pit` and
+  `predict_distribution`, which still return empty results. From 0.7.0 they
+  raise `ValueError`, as scikit-learn does and as `fit`, `score` and
+  `evaluate` already do.
 - `lazy setup kumo` warns with a `FutureWarning` and will be removed in
   0.7.0. It still installs `structured-data-models` when
   `sdm.models.KumoTabular` does not import. The `requested` argument of the

@@ -992,18 +992,6 @@ def test_soft_clip_is_kumos_clip():
     assert not np.allclose(theirs[:, 3], queries[:, 3])
 
 
-def test_no_query_rows_give_an_empty_answer(cls, data):
-    X, z, X_test = data
-    model = cls(n_estimators=3, bag_size=40).fit(X, z)
-    empty = pd.DataFrame(X_test[:0])
-    pdfs = model._predict_pdf(empty, model.grid_)
-    assert pdfs.shape == (0, model.grid_.n_bins)
-    dist = model._predict_distribution(empty)
-    full = model._predict_distribution(pd.DataFrame(X_test))
-    assert type(dist) is type(full)
-    assert dist.on_grid(model.grid_).shape == (0, model.grid_.n_bins)
-
-
 @pytest.mark.parametrize(
     "name",
     [
@@ -1219,15 +1207,51 @@ def test_only_uniform_layer_backends_can_register():
         registry.register("plain", Plain)
 
 
-def test_no_query_rows_give_empty_answers_of_the_right_shape(cls, data):
+@pytest.mark.parametrize(
+    ("call", "shape"),
+    [
+        (lambda m, X, z: m.predict(X), (0,)),
+        (lambda m, X, z: m.predict_proba(X), "bins"),
+        (lambda m, X, z: m.predict_pdf(X), "bins"),
+        (lambda m, X, z: m.predict_cdf(X), "bins"),
+        (lambda m, X, z: m.predict_quantiles(X), (0, 3)),
+        (lambda m, X, z: m.predict_interval(X), (0, 2)),
+        (lambda m, X, z: m.predict_pit(X, z), (0,)),
+        (lambda m, X, z: m.predict_distribution(X), "distribution"),
+    ],
+    ids=[
+        "predict",
+        "predict_proba",
+        "predict_pdf",
+        "predict_cdf",
+        "predict_quantiles",
+        "predict_interval",
+        "predict_pit",
+        "predict_distribution",
+    ],
+)
+def test_predicting_no_query_rows_warns_and_returns_an_empty_result(
+    cls, data, call, shape
+):
     X, z, X_test = data
     model = cls(n_estimators=2, progress=False).fit(X, z)
-    empty = X_test[:0]
-    assert model.predict_proba(empty).shape == (0, model.grid_.n_bins)
-    assert model.predict_cdf(empty).shape == (0, model.grid_.n_bins)
-    assert model.predict(empty).shape == (0,)
-    assert model.predict_quantiles(empty).shape == (0, 3)
-    assert len(model.predict_distribution(empty)) == 0
+    with pytest.warns(FutureWarning, match="zero rows of X") as record:
+        out = call(model, X_test[:0], z[:0])
+    assert len(record) == 1
+    if shape == "distribution":
+        assert len(out) == 0
+    elif shape == "bins":
+        assert out.shape == (0, model.grid_.n_bins)
+    else:
+        assert out.shape == shape
+
+
+@pytest.mark.parametrize("method", ["score", "evaluate"])
+def test_scoring_no_query_rows_is_refused(cls, data, method):
+    X, z, X_test = data
+    model = cls(n_estimators=2, progress=False).fit(X, z)
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        getattr(model, method)(X_test[:0], z[:0])
 
 
 def test_fitting_no_rows_is_refused(cls, data):
