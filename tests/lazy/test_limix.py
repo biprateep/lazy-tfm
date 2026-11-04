@@ -8,16 +8,19 @@ import pathlib
 import pickle
 import subprocess
 import sys
+import threading
 import warnings
 
 import fakes
 import limix_skip
 import numpy as np
 import pytest
+import threads
 
 import lazy
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
+from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import limix
 
@@ -408,6 +411,56 @@ def test_an_unpickled_model_rebuilds_only_the_caches_that_fit(
     assert calls == [0]
     assert held[0] == 3
     np.testing.assert_allclose(after, before, rtol=1e-4, atol=1e-7)
+
+
+def test_threads_predicting_on_an_unpickled_model_wait_for_its_caches(
+    monkeypatch, data
+):
+    X, z, X_test = data
+    fakes.install("limix", monkeypatch)
+    model = _model(n_estimators=2).fit(X, z)
+    expected = model.predict_proba(X_test)
+    restored = pickle.loads(pickle.dumps(model))
+    contended = threading.Event()
+    lock_of = _locks.network_lock
+
+    class WatchedLock:
+        """The estimator's lock, noting a thread that finds it held."""
+
+        def __init__(self, lock):
+            self.lock = lock
+
+        def __enter__(self):
+            if self.lock.locked():
+                contended.set()
+            self.lock.acquire()
+
+        def __exit__(self, *exc):
+            self.lock.release()
+
+    prefill = _limix_stream.prefill
+    first = []
+
+    def held_prefill(*args, **kwargs):
+        # The first rebuild waits until the other thread asks for the lock:
+        # without one, that thread decodes with no cache and fails.
+        if not first:
+            first.append(True)
+            assert contended.wait(threads.TIMEOUT)
+        return prefill(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _locks, "network_lock", lambda obj: WatchedLock(lock_of(obj))
+    )
+    monkeypatch.setattr(_limix_stream, "prefill", held_prefill)
+    answers = []
+
+    def predict():
+        answers.append(restored.predict_proba(X_test))
+
+    assert threads.run(predict, predict)
+    for answer in answers:
+        np.testing.assert_array_equal(answer, expected)
 
 
 def test_fitting_without_torch_says_how_to_install_limix(monkeypatch, data):
