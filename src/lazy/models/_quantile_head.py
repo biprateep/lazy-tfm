@@ -148,10 +148,10 @@ class QuantileHead:
             if grid == self.native_grid_ and isinstance(
                 dist, distributions.QuantileDistribution
             ):
-                density, mass = dist._on_grid_and_outside(grid)  # noqa: SLF001 - one interpolation.
+                density, mass = dist._bin_densities_and_outside(grid)  # noqa: SLF001 - one interpolation; the caller normalizes once.
                 outside += int(np.count_nonzero(mass > OUTSIDE_TOLERANCE))
             else:
-                density = dist.on_grid(grid)
+                density = dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
             blocks.append(density)
         if outside:
             _warnings.warn(

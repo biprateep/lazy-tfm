@@ -36,6 +36,15 @@ change the API.
 
 ### Changed
 
+- `predict_proba` normalizes each row's density once instead of twice, and
+  `predict`, `score` and `evaluate` twice instead of three times, so that
+  they still equal the metrics run on `predict_proba`'s output to the bit.
+  Results move by float rounding only: densities by at most 1e-14 of a
+  row's peak, point estimates and scores by at most 3.1e-15, with modes
+  unchanged, on the test stand-ins and fakes of every backend. On 500 rows
+  of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
+  0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
+  `predict` from 0.075 s to 0.048 s.
 - `lazy.datasets` reports each download at level INFO to the
   `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
   do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of

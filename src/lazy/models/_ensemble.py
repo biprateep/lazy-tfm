@@ -1005,7 +1005,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
         # Chunk by chunk, so the full native container never exists at once.
-        blocks = [dist.on_grid(grid) for dist in self._distribution_chunks(X)]
+        blocks = [
+            dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
+            for dist in self._distribution_chunks(X)
+        ]
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
     def _default_grid(self) -> grid_lib.Grid:
