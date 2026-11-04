@@ -1076,16 +1076,18 @@ class TestTabICL:
         )
 
     def test_a_plan_cycling_its_transforms_runs_as_planned(self):
-        assert tabicl._norm_methods(("power", "none", "power")) == [
+        assert _members.cycle_tokens(
+            ("power", "none", "power"), "{tokens}"
+        ) == (
             "power",
             "none",
-        ]
-        assert tabicl._norm_methods(("none",) * 4) == ["none"]
+        )
+        assert _members.cycle_tokens(("none",) * 4, "{tokens}") == ("none",)
 
     def test_repeated_transforms_are_rejected(self):
         """Repeats would be identical members upstream, not more of them."""
-        with pytest.raises(ValueError, match="once per cycle"):
-            tabicl._norm_methods(("power", "power", "none"))
+        with pytest.raises(ValueError, match=r"^\('power', 'power', 'none'\)$"):
+            _members.cycle_tokens(("power", "power", "none"), "{tokens}")
 
     def test_quantile_levels_are_interior_and_symmetric(self):
         levels = tabicl.quantile_levels(999)

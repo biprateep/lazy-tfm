@@ -843,33 +843,11 @@ def _group_tokens(group: _members.MemberGroup) -> tuple[str, ...]:
     """The distinct transforms a group's members cycle through, in order."""
     if group.native_transforms is None:
         return AUTO_TRANSFORMS
-    return _cycle(group.native_transforms)
-
-
-def _cycle(tokens: tuple[str, ...]) -> tuple[str, ...]:
-    """The distinct transforms a group's members cycle through, in order.
-
-    Upstream assigns member ``k`` transform ``k % len(options)``, so the
-    distinct tokens in order run the plan only when it cycles through them.
-
-    Args:
-        tokens: The transform of each member, in member order.
-
-    Returns:
-        The distinct tokens, in order.
-
-    Raises:
-        ValueError: If the plan does not cycle, as ``("power", "power",
-            "identity")`` would. No plan the uniform parameters make does.
-    """
-    distinct = tuple(dict.fromkeys(tokens))
-    cycled = tuple(distinct[i % len(distinct)] for i in range(len(tokens)))
-    if cycled != tuple(tokens):
-        raise ValueError(
-            f"Kumo Tabular cycles its transforms over the members, so it "
-            f"cannot run {tuple(tokens)}"
-        )
-    return distinct
+    return _members.cycle_tokens(
+        group.native_transforms,
+        "Kumo Tabular cycles its transforms over the members, so it "
+        "cannot run {tokens}",
+    )
 
 
 # Hidden from the type checker, which would otherwise type every misspelt

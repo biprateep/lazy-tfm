@@ -671,11 +671,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"unknown version {self.version!r} for {self.backend!r}; "
                 f"known: {known}"
             )
-        if not is_integer(self.chunk_size) or self.chunk_size < 0:
-            raise ValueError(
-                f"chunk_size must be a non-negative int (0 means one pass): "
-                f"{self.chunk_size=}"
-            )
+        check_chunk_size(self.chunk_size)
         valid_cache = isinstance(self.kv_cache, bool | str) and any(
             self.kv_cache == mode and type(self.kv_cache) is type(mode)
             for mode in self.kv_cache_modes
@@ -1118,6 +1114,22 @@ def _is_positive_real(value: object) -> bool:
         and bool(np.isfinite(float(value)))
         and float(value) > 0
     )
+
+
+def check_chunk_size(chunk_size: object) -> None:
+    """Checks that ``chunk_size`` is a non-negative integer.
+
+    Args:
+        chunk_size: Rows per prediction pass; 0 means one pass.
+
+    Raises:
+        ValueError: If ``chunk_size`` is not a non-negative integer.
+    """
+    if not is_integer(chunk_size) or chunk_size < 0:
+        raise ValueError(
+            "chunk_size must be a non-negative int (0 means one pass): "
+            f"{chunk_size=}"
+        )
 
 
 def is_integer(value: object) -> TypeGuard[int]:
