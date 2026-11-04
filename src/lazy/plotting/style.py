@@ -12,12 +12,12 @@ is usable on its own for any figure in the same paper::
 
 The house sheet is ``paper.mplstyle``, shipped alongside this module: Nimbus
 Roman serif with Computer Modern math at 9/10/12 pt, inward ticks on all four
-sides, frameless legends, matplotlib's own tab10 / viridis palettes, tight
-300 dpi output. Widths come from measured journal geometry rather than guesses
+sides, frameless legends, tight 300 dpi output, and matplotlib's own tab10
+property cycle and viridis colormap, pinned so a personal matplotlibrc cannot
+change them. Widths come from measured journal geometry rather than guesses
 -- see :func:`register_journal` for adding your own.
 
-Colour is deliberately not part of the sheet: figures use exactly what
-matplotlib ships unless you call :func:`set_palette`.
+:func:`set_palette` replaces the pinned cycle and colormap.
 
 Depends only on numpy and matplotlib.
 """
@@ -254,12 +254,11 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
 file does not exist, and :func:`verify_style` checks them.
 """
 
-# Colour is deliberately NOT in RC_PARAMS. Unless the user names a palette,
-# figures use exactly what matplotlib ships: the default property cycle
-# (tab10, addressed as C0, C1, ...) for categorical series and the default
-# colormap (viridis) for continuous data. These are taken from matplotlib's
-# own defaults rather than retyped, so they track the installed version and
-# override anything a personal matplotlibrc may have changed.
+# Colour is not in RC_PARAMS. DEFAULT_PALETTE holds matplotlib's default
+# property cycle (tab10, addressed as C0, C1, ...) for categorical series and
+# default colormap (viridis) for continuous data. They are read from
+# matplotlib rather than retyped, so they track the installed version and
+# override anything a personal matplotlibrc has changed.
 DEFAULT_PALETTE: dict[mpl_typing.RcKeyType, Any] = {
     "axes.prop_cycle": mpl.rcParamsDefault["axes.prop_cycle"],
     "image.cmap": mpl.rcParamsDefault["image.cmap"],
@@ -274,11 +273,10 @@ def set_palette(
     cmap: str | None = None,
     n_colors: int | None = None,
 ) -> tuple[list[Any], str]:
-    """Installs a user-stated palette once, in the preamble.
+    """Sets the default property cycle and colormap in ``mpl.rcParams``.
 
-    Only call this when the user has explicitly asked for a palette. Either
-    argument may be omitted; ``None`` for both restores matplotlib's
-    defaults.
+    Either argument may be omitted; ``None`` for both restores matplotlib's
+    defaults (:data:`DEFAULT_PALETTE`).
 
     Args:
         colors: The new property cycle, so series keep addressing it by
@@ -335,9 +333,9 @@ def use_style(
     """Applies the publication rcParams globally and selects the journal.
 
     Prefers the ``paper.mplstyle`` sheet shipped alongside this module and
-    falls back to the equivalent ``RC_PARAMS`` dict if it is missing. Colour
-    is reset to matplotlib's default palettes unless ``palette`` and/or
-    ``cmap`` are given.
+    falls back to the equivalent ``RC_PARAMS`` dict if it is missing. Then
+    calls :func:`set_palette` with ``palette`` and ``cmap``: with neither,
+    colour is matplotlib's default cycle and colormap.
 
     Args:
         style_file: A matplotlib style sheet to use instead of the shipped
@@ -345,10 +343,10 @@ def use_style(
         journal: The journal whose geometry :func:`figsize` and
             :func:`grid_figsize` use from now on: a key of :data:`JOURNALS`
             or a :class:`Journal`.
-        palette: Property cycle, as for ``colors`` in :func:`set_palette`.
-            Pass it only when the user has explicitly stated a palette.
-        cmap: Default colormap, as in :func:`set_palette`. Pass it only when
-            the user has explicitly stated a palette.
+        palette: Property cycle, as for ``colors`` in :func:`set_palette`;
+            None leaves the style sheet's cycle in place.
+        cmap: Default colormap, as in :func:`set_palette`; None leaves the
+            style sheet's colormap in place.
 
     Returns:
         The :class:`Journal` now active.
@@ -370,7 +368,8 @@ def verify_style(
 ) -> dict[str, Any]:
     """Checks that the house rcParams are active and the serif face resolved.
 
-    The palette is reported, not enforced — a user-stated one is legitimate.
+    The palette is reported, not enforced: any palette set with
+    :func:`set_palette` is legitimate.
     A missing paper font is a property of the machine, not of the code, so
     it warns rather than raises unless ``strict_font`` is set.
 
@@ -537,11 +536,11 @@ def better_step(
     ax: mpl_axes.Axes | None = None,
     **kwargs: Any,
 ) -> mpl_axes.Axes:
-    """A 'better' version of matplotlib's step function.
+    """Plots a histogram outline: flat across each bin, vertical between bins.
 
-    Given a set of bin edges and bin heights, this plots the thing that I
-    wish matplotlib's ``step`` command plotted. All extra arguments are
-    passed directly to matplotlib's ``plot`` command.
+    Draws a line through ``(left, height)`` and ``(right, height)`` for every
+    bin, with the vertical jumps between bins.
+    With ``yerr``, also shades the band between the two limits per bin.
 
     Args:
         bin_edges: The bin edges, shape (n_bins + 1,). This should be one
@@ -825,10 +824,9 @@ def save(
     """Saves as a tight 300 dpi PNG — the house output — creating parent dirs.
 
     A path whose suffix is not a format matplotlib can save gets ``.png``
-    appended, so ``"out/model.v2"`` becomes ``out/model.v2.png``. Pass an
-    explicit ``.pdf`` only when
-    a vector figure has been specifically requested. The figure stays open:
-    it belongs to the caller, who closes it.
+    appended, so ``"out/model.v2"`` becomes ``out/model.v2.png``. A suffix
+    matplotlib supports, such as ``.pdf``, selects that format. The figure
+    stays open: it belongs to the caller, who closes it.
 
     Args:
         fig: The figure to save.
