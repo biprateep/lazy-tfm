@@ -84,12 +84,13 @@ def test_an_explicit_recipe_drops_the_clip_and_the_shuffle():
 
 
 def test_members_cycle_through_their_transforms():
-    assert kumo._cycle(("identity", "power", "identity")) == (
-        "identity",
-        "power",
+    group = types.SimpleNamespace(
+        native_transforms=("identity", "power", "identity")
     )
+    assert kumo._group_tokens(group) == ("identity", "power")
+    group.native_transforms = ("power", "power", "identity")
     with pytest.raises(ValueError, match="cycles its transforms"):
-        kumo._cycle(("power", "power", "identity"))
+        kumo._group_tokens(group)
     with pytest.raises(ValueError, match="no transform 'yeo'"):
         kumo._transform(None, "yeo")
 

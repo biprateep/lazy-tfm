@@ -1442,16 +1442,9 @@ def _make_chirp(
     _typing.FloatArray,
     _typing.FloatArray,
 ]:
-    """A noisy chirp with chunks missing, to fill in.
+    """Generates the chirp dataset of :func:`load_dataset`.
 
-    A toy regression problem with one feature: ``y = A(x) sin(phi(x))`` on
-    ``0 <= x <= 10``, where the amplitude ``A(x) = 1 + 0.2 x`` grows from 1
-    to 3 and the frequency ``phi'(x) / 2 pi = 0.2 + 0.03 x`` from 0.2 to 0.5
-    cycles per unit of ``x``. Gaussian noise is added to the training rows,
-    and ``n_gaps`` chunks of ``x`` are cut out of them and returned, without
-    noise, as the test rows, so the true curve is known where a model has to
-    interpolate. The gaps never overlap: the range is cut into ``n_gaps``
-    equal segments and each segment holds one gap, placed at random.
+    The curve, the gaps and the options are described there.
 
     Args:
         n_samples: Points evenly spaced over ``0 <= x <= 10``, before the gaps

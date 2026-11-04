@@ -271,7 +271,7 @@ def _upstream_settings(
         )
         settings["PREPROCESS_TRANSFORMS"] = tuple(
             _preprocessor(name, "numeric", original, limit, None)
-            for name, original in _cycle(group.native_transforms)
+            for name, original in _shortest_period(group.native_transforms)
         )
         settings["FINGERPRINT_FEATURE"] = False
         settings["POLYNOMIAL_FEATURES"] = "no"
@@ -910,7 +910,7 @@ def _with_bagging_remedy(
     )
 
 
-def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
+def _shortest_period(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
     """The shortest prefix of ``tokens`` that repeats to give all of them.
 
     Upstream shares the members out among its preprocessing configs in
@@ -927,9 +927,9 @@ def _cycle(tokens: tuple[Any, ...]) -> tuple[Any, ...]:
         ``transforms=("power", "power", "none")``.
 
     Examples:
-        >>> _cycle(("a", "b", "a", "b", "a"))
+        >>> _shortest_period(("a", "b", "a", "b", "a"))
         ('a', 'b')
-        >>> _cycle(("a", "a", "b", "a", "a", "b"))
+        >>> _shortest_period(("a", "a", "b", "a", "a", "b"))
         ('a', 'a', 'b')
     """
     for length in range(1, len(tokens)):

@@ -435,11 +435,7 @@ def _check_options(pool_bins: object, chunk_size: object) -> None:
         not _ensemble.is_integer(pool_bins) or pool_bins < 2
     ):
         raise ValueError(f"pool_bins must be None or an int >= 2: {pool_bins=}")
-    if not _ensemble.is_integer(chunk_size) or chunk_size < 0:
-        raise ValueError(
-            "chunk_size must be a non-negative int (0 means one pass): "
-            f"{chunk_size=}"
-        )
+    _ensemble.check_chunk_size(chunk_size)
 
 
 def _check_models(models: object) -> list[tuple[str, Member]]:

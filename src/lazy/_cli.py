@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-import sys
 
 from lazy.models import _ensemble
 from lazy.models import _hub
@@ -158,7 +157,3 @@ def _download(parser: argparse.ArgumentParser, specs: Sequence[str]) -> int:
     for spec in specs:
         print(_hub.download_checkpoint(spec))
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -52,6 +52,7 @@ from lazy.models import _transforms
 __all__ = [
     "MemberGroup",
     "MemberSpec",
+    "cycle_tokens",
     "draw_bags",
     "feature_permutations",
     "member_seed",
@@ -310,6 +311,31 @@ def plan(
     )
 
 
+def cycle_tokens(tokens: Sequence[Any], message: str) -> tuple[Any, ...]:
+    """The distinct tokens of a plan, in order, if the plan cycles through them.
+
+    Upstream assigns member ``k`` the option ``k % len(options)``, so the
+    distinct tokens in order run the plan only when it cycles through them.
+
+    Args:
+        tokens: The token of each member's transform, in member order.
+        message: The error text, with ``{tokens}`` standing for ``tokens``
+            as a tuple.
+
+    Returns:
+        The distinct tokens, in order.
+
+    Raises:
+        ValueError: With ``message`` if the plan does not cycle, as
+            ``("power", "power", "none")`` would.
+    """
+    distinct = tuple(dict.fromkeys(tokens))
+    cycled = tuple(distinct[i % len(distinct)] for i in range(len(tokens)))
+    if cycled != tuple(tokens):
+        raise ValueError(message.format(tokens=tuple(tokens)))
+    return distinct
+
+
 def _is_native(
     spec: _transforms.TransformSpec | None, native: Mapping[str, Any]
 ) -> bool:
@@ -324,26 +350,14 @@ def _grouped(
     random_state: int,
 ) -> tuple[MemberGroup, ...]:
     """Members grouped by who implements their transform; see :func:`plan`."""
-    keys: list[str] = []
-    for member in members:
-        key = (
-            "native"
-            if _is_native(member.transform, native)
-            else member.transform.name  # type: ignore[union-attr]  # None is native
-        )
-        if key not in keys:
-            keys.append(key)
+    keys = [
+        "native" if _is_native(m.transform, native) else m.transform.name  # type: ignore[union-attr]  # None is native
+        for m in members
+    ]
     groups = []
-    for index, key in enumerate(keys):
+    for index, key in enumerate(dict.fromkeys(keys)):
         chosen = tuple(
-            m
-            for m in members
-            if (
-                "native"
-                if _is_native(m.transform, native)
-                else m.transform.name  # type: ignore[union-attr]  # None is native
-            )
-            == key
+            m for m, k in zip(members, keys, strict=True) if k == key
         )
         if key == "native":
             tokens = (
