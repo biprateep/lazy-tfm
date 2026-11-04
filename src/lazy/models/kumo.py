@@ -492,12 +492,17 @@ class KumoQuantile(
     ) -> list[distributions.QuantileDistribution]:
         if self.kv_cache and handle.cache is None:
             # Unpickled: the cache was left out, and the same context and
-            # seed record the same one again.
-            handle.cache = self._record(handle)
+            # seed record the same one again, once. The lock is the
+            # estimator's, since a group compares by value and so is not
+            # hashable.
+            with _locks.network_lock(self):
+                if handle.cache is None:
+                    handle.cache = self._record(handle)
+        cache = handle.cache
         network = self._network()
         (queries,) = self._tensors(X)
         with self._autocast():
-            if handle.cache is None:
+            if cache is None:
                 assert handle.context is not None  # Set by _fit_group.
                 x, target = self._tensors(*handle.context)
                 out = network(
@@ -510,7 +515,7 @@ class KumoQuantile(
                     generator=self._generator(handle.seed),
                 )
             else:
-                with _lending(network, handle.cache):
+                with _lending(network, cache):
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
         quantiles = out.numerical.double().cpu().numpy()
