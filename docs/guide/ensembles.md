@@ -101,7 +101,6 @@ test galaxies (4,000 s vs. 80 s), so the pool of the three models costs about
 rows at a time (8,192 by default), calling each member once per chunk, and the
 members' distributions of one chunk set the peak memory.
 
-The weights are equal in this version. Weights fitted to labeled data, and the
-beta-transformed linear pool (BLP), are planned for a future version. While
-fitted exponents lowered the CDE loss of the geometric pool further in our
-tests, they also made its densities too sharp.
+The weights are always equal. Fitted exponents lowered the CDE loss of the
+geometric pool further in our tests, but they also made its densities too
+sharp.

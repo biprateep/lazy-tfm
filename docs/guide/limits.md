@@ -22,25 +22,17 @@ predicted.
 
 Each model was pretrained on contexts and tables up to a maximum size, beyond
 which its performance is not guaranteed. TabPFN enforces the limits stored in
-each checkpoint unless `ignore_pretraining_limits=True`, on the context each
-member sees, which under bagging is its bag (see {doc}`scaling`):
+each checkpoint (see [Versions](../models/tabpfn.md#versions)) unless
+`ignore_pretraining_limits=True`, on the context each member sees, which under
+bagging is its bag (see {doc}`scaling`).
 
-| TabPFN `version` | Max. context rows | Max. features |
-| ---------------- | ----------------: | ------------: |
-| `"v2"`           | 10,000            | 500           |
-| `"v2.5"`         | 50,000            | 2,000         |
-| `"v2.6"`         | 100,000           | 2,000         |
-| `"v3"`           | 1,000,000         | 2,000         |
-| `"v3.5"`         | 1,000,000         | 20,000        |
-| `"v3.5-fast"`    | 1,000,000         | 20,000        |
+LimiX-2 states no maximum context size, but on DC1 photometry its accuracy
+degrades above about 20,000 context rows (see {doc}`../models/limix`). On any
+data, LAZY warns when a member's context is larger, and bagging with a smaller
+`bag_size` keeps every member within it (see {doc}`scaling`).
 
-LimiX states no maximum context size, but in our tests on DC1 photometry its
-accuracy degrades above about 20,000 context rows. LAZY therefore warns when a
-member's context is larger (the whole context without bagging, or a bag of
-more than 20,000 rows), and bagging with a smaller `bag_size` keeps every
-member within it (see {doc}`scaling`). Under `transforms="auto"`, TabFM gives
-each member a random subset of 500 columns when a table has more, and an
-explicit `transforms` turns that cap off. At the other end, TabFM sizes its
+Under `transforms="auto"`, TabFM gives each member a random subset of 500
+columns when a table has more, and an explicit `transforms` turns that cap off. At the other end, TabFM sizes its
 bins to the context, with about five context rows per bin below 500 rows, so a
 small context gives it a coarser histogram rather than an overconfident one.
 The model pages under {doc}`../models/index` give each model's limits in
