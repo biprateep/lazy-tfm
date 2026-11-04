@@ -393,7 +393,7 @@ def verify_style(
             otherwise reports only as a debug-level log line.
 
     Warns:
-        UserWarning: If the font chain fell through to DejaVu and
+        lazy.LazyWarning: If the font chain fell through to DejaVu and
             ``strict_font`` is False.
     """
     expected = mpl.RcParams(RC_PARAMS)  # Runs values through the validators.
@@ -418,7 +418,7 @@ def verify_style(
         if strict_font:
             fatal.append(font_problem)
         else:
-            _warnings.warn(font_problem, UserWarning)
+            _warnings.warn(font_problem, _warnings.LazyWarning)
     if strict and fatal:
         bullets = "\n  - ".join(fatal)
         raise RuntimeError(f"plot style not in effect:\n  - {bullets}")

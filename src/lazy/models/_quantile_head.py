@@ -33,6 +33,7 @@ from lazy import distributions
 from lazy import grid as grid_lib
 
 __all__ = [
+    "GridCoverageWarning",
     "NATIVE_PAD",
     "NATIVE_QUANTILE_BINS",
     "OUTSIDE_TOLERANCE",
@@ -56,6 +57,10 @@ OUTSIDE_TOLERANCE = 0.01
 """The probability a row may put outside the native grid before tabulating it
 there warns.
 """
+
+
+class GridCoverageWarning(_warnings.LazyWarning):
+    """Densities are renormalised because the grid misses part of their mass."""
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -172,12 +177,12 @@ class QuantileHead:
                 )
         if outside:
             _warnings.warn(
-                f"{outside} of {len(X)} rows put more than "
-                f"{OUTSIDE_TOLERANCE:.0%} of their probability outside the "
-                f"native grid [{grid.y_min:g}, {grid.y_max:g}], and their "
-                "densities there are renormalised. Pass a wider y_grid, or "
+                "Densities are renormalised on the native grid where rows "
+                f"put more than {OUTSIDE_TOLERANCE:.0%} of their probability "
+                f"outside it: {outside} of {len(X)} rows, grid "
+                f"[{grid.y_min:g}, {grid.y_max:g}]. Pass a wider y_grid, or "
                 "use predict_distribution, which has full support.",
-                UserWarning,
+                GridCoverageWarning,
             )
         return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 

@@ -31,6 +31,8 @@ from lazy.models._hub import get_checkpoint
 from lazy.models._hub import is_cached
 from lazy.models._hub import LicenseWarning
 from lazy.models._hub import list_versions
+from lazy.models._limix_source import LimiXSourceWarning
+from lazy.models._quantile_head import GridCoverageWarning
 from lazy.models._weights import clear_model_cache
 from lazy.models._weights import model_cache_enabled
 from lazy.models._weights import set_model_cache
@@ -43,6 +45,7 @@ from lazy.models.registry import ESTIMATORS
 from lazy.models.registry import get_estimator
 from lazy.models.registry import list_estimators
 from lazy.models.tabfm import TabFMHistogram
+from lazy.models.tabfm import TabFMPerformanceWarning
 from lazy.models.tabicl import TabICLQuantile
 from lazy.models.tabpfn import TabPFNBarDistribution
 
@@ -53,13 +56,16 @@ __all__ = [
     "DEFAULT_VERSIONS",
     "ESTIMATORS",
     "EnsembleSizeWarning",
+    "GridCoverageWarning",
     "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
     "LicenseWarning",
     "LimiXBarDistribution",
+    "LimiXSourceWarning",
     "PerformanceWarning",
     "TabFMHistogram",
+    "TabFMPerformanceWarning",
     "TabICLQuantile",
     "TabPFNBarDistribution",
     "clear_model_cache",

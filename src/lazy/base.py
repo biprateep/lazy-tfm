@@ -807,7 +807,7 @@ class BaseDensityRegressor(
                 _warnings.warn(
                     f"X has feature names, but {type(self).__name__} was "
                     "fitted without feature names; using columns by position",
-                    UserWarning,
+                    _warnings.LazyWarning,
                 )
             frame.columns = [f"x{i}" for i in range(frame.shape[1])]
             return frame
@@ -816,7 +816,7 @@ class BaseDensityRegressor(
                 "X does not have valid feature names, but "
                 f"{type(self).__name__} was fitted with feature names; using "
                 "columns by position",
-                UserWarning,
+                _warnings.LazyWarning,
             )
             frame.columns = list(fitted)
             return frame

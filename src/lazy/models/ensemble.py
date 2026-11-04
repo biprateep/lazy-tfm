@@ -102,7 +102,7 @@ _EXACT_PPF_MAX_EDGES = 20_000
 _SHARED_PARAMS = ("random_state", "device")
 
 
-class EnsembleSizeWarning(UserWarning):
+class EnsembleSizeWarning(_warnings.LazyWarning):
     """The context is small enough for one weak member to spoil the pool."""
 
 

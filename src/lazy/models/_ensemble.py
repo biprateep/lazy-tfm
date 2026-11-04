@@ -139,11 +139,11 @@ histogram model may answer with a mixture of histograms (TabFM's dithered bins).
 """
 
 
-class ContextSizeWarning(UserWarning):
+class ContextSizeWarning(_warnings.LazyWarning):
     """The context is larger than the model was pretrained for."""
 
 
-class PerformanceWarning(UserWarning):
+class PerformanceWarning(_warnings.LazyWarning):
     """The prediction will be correct but slower than it needs to be."""
 
 
@@ -766,7 +766,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             f"{self.bag_rows_} context row(s). An int bag_size is a row "
             "count and a float one a fraction of the context: bag_size=1 is "
             "one row, bag_size=1.0 all of them.",
-            UserWarning,
+            _warnings.LazyWarning,
         )
 
     def _warn_if_context_too_large(self, n_rows: int) -> None:

@@ -539,3 +539,14 @@ def test_evaluate_scores_plain_residuals_by_default(data):
     with pytest.raises(ValueError, match="scale must be one of"):
         est.evaluate(X, y, scale="log")
     assert est.calls_ == calls
+
+
+def test_every_warning_class_lazy_exports_is_a_lazy_warning():
+    classes = [
+        getattr(lazy, name)
+        for name in lazy.__all__
+        if isinstance(getattr(lazy, name), type)
+        and issubclass(getattr(lazy, name), Warning)
+    ]
+    assert lazy.LazyWarning in classes
+    assert [c for c in classes if not issubclass(c, lazy.LazyWarning)] == []
