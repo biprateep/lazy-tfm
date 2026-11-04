@@ -12,7 +12,6 @@ their own, from the pickled path, as soon as they are unpickled.
 import io
 import pathlib
 import pickle
-import threading
 import time
 
 import fakes
@@ -24,7 +23,6 @@ import threads
 import lazy
 from lazy.models import _device
 from lazy.models import _hub
-from lazy.models import _locks
 
 
 @pytest.fixture
@@ -180,39 +178,23 @@ def test_threads_predicting_on_an_unpickled_model_attach_one_network(
     model = fakes.Backend("tabicl", monkeypatch)(n_estimators=2).fit(X, y)
     expected = model.predict_distribution(X_test).locs
     restored = pickle.loads(pickle.dumps(model))
-    contended = threading.Event()
-    lock_of = _locks.network_lock
-
-    class WatchedLock:
-        """A regressor's lock, noting a thread that finds it held."""
-
-        def __init__(self, obj):
-            self.lock = lock_of(obj)
-            self.watched = isinstance(obj, fake_tabicl.Regressor)
-
-        def __enter__(self):
-            if not self.lock.acquire(blocking=False):
-                if self.watched:
-                    contended.set()
-                self.lock.acquire()
-
-        def __exit__(self, *exc):
-            self.lock.release()
-
+    contended = threads.watch_contention(
+        monkeypatch, lambda obj: isinstance(obj, fake_tabicl.Regressor)
+    )
     relocate = restored._checkpoint
-    first = threading.Lock()  # Only the first caller acquires it.
     relocated = []
 
-    def held_checkpoint():
-        # The first attach waits until the other thread finds the
-        # regressor's lock held: without that lock, both attach at once.
-        if first.acquire(blocking=False):
-            assert contended.wait(threads.TIMEOUT)
+    def counted_checkpoint():
         relocated.append(True)
         return relocate()
 
-    monkeypatch.setattr(_locks, "network_lock", WatchedLock)
-    monkeypatch.setattr(restored, "_checkpoint", held_checkpoint)
+    # The first attach waits until the other thread finds the regressor's
+    # lock held: without that lock, both attach at once.
+    monkeypatch.setattr(
+        restored,
+        "_checkpoint",
+        threads.held_until(contended, counted_checkpoint),
+    )
     answers = _in_threads(
         lambda i: restored.predict_distribution(X_test).locs, 2
     )
