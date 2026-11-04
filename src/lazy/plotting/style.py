@@ -115,7 +115,7 @@ def _deprecated(func: _FuncT) -> _FuncT:
 # Journal geometry
 # --------------------------------------------------------------------------
 PT_PER_INCH = 72.27
-"""LaTeX points per inch: 72.27, not the PostScript point's 72."""
+"""LaTeX points per inch, 72.27 and not the PostScript point's 72."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -253,7 +253,7 @@ SERIF_FALLBACKS = [
     "Liberation Serif",
     "DejaVu Serif",
 ]
-"""Serif faces that ``font.serif`` tries in order: Nimbus Roman under its two
+"""Serif faces that ``font.serif`` tries in order -- Nimbus Roman under its two
 names, then Times New Roman, Liberation Serif and DejaVu Serif.
 """
 
@@ -283,8 +283,10 @@ RC_PARAMS: dict[mpl_typing.RcKeyType, Any] = {
     "savefig.bbox": "tight",
     "savefig.format": "png",
 }
-"""The house rcParams: :func:`use_style` applies them when its style sheet
-file does not exist, and :func:`verify_style` checks them.
+"""The house rcParams.
+
+:func:`use_style` applies them when its style sheet file does not exist, and
+:func:`verify_style` checks them.
 """
 
 # Colour is not in RC_PARAMS. DEFAULT_PALETTE holds matplotlib's default

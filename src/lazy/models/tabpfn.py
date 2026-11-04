@@ -59,6 +59,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -775,16 +776,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        # Every member group's buckets: under bagging each member places
-        # its own, from its bag's targets.
-        edges = np.unique(
-            np.concatenate([_bucket_borders(h) for h in self.handles_])
-        )
-        if edges.size < 3:
-            # A constant target has one bucket; a grid needs two, and
-            # halving it changes no density.
-            edges = np.r_[edges[0], edges.mean(), edges[-1]]
-        return grid_lib.Grid.from_edges(edges, normalization="histogram")
+        return _bucket_head.native_grid(map(_bucket_borders, self.handles_))
 
     def _progress_postfix(
         self, dist: distributions.Distribution
@@ -914,6 +906,12 @@ def _without_networks(regressors: list[Any]) -> bytes:
     return buffer.getvalue()
 
 
+_IDENTITY = (-0.0, 1.0)
+"""The ``(mean, std)`` for borders already in the target's units: adding
+-0.0, unlike 0.0, keeps every float exactly, a border of -0.0 included.
+"""
+
+
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """The fitted regressor's bucket borders in the target's units.
 
@@ -936,11 +934,11 @@ def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """
     znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
     borders = np.asarray(znorm, dtype=np.float64)
-    if not getattr(regressor, "is_constant_target_", False):
-        borders = borders * float(regressor.y_train_std_) + float(
-            regressor.y_train_mean_
-        )
-    return np.maximum.accumulate(borders)
+    if getattr(regressor, "is_constant_target_", False):
+        return _bucket_head.bucket_edges(borders, *_IDENTITY)
+    return _bucket_head.bucket_edges(
+        borders, float(regressor.y_train_mean_), float(regressor.y_train_std_)
+    )
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:
@@ -1035,10 +1033,11 @@ def bucket_masses(
     if regressor is not None:
         borders = _bucket_borders(regressor)
     else:
-        borders = np.maximum.accumulate(
+        borders = _bucket_head.bucket_edges(
             np.asarray(
                 criterion.borders.detach().cpu().numpy(), dtype=np.float64
-            )
+            ),
+            *_IDENTITY,
         )
         if borders.size > 1 and np.any(np.diff(borders) == 0):
             _warnings.warn(

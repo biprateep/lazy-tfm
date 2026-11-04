@@ -24,6 +24,7 @@ the first prediction and cached from then on (:func:`download_checkpoint`).
 from lazy.models._ensemble import ContextEnsembleEstimator
 from lazy.models._ensemble import ContextSizeWarning
 from lazy.models._ensemble import PerformanceWarning
+from lazy.models._hub import Checkpoint
 from lazy.models._hub import CHECKPOINTS
 from lazy.models._hub import DEFAULT_VERSIONS
 from lazy.models._hub import download_checkpoint
@@ -52,6 +53,7 @@ from lazy.models.tabpfn import TabPFNBarDistribution
 
 __all__ = [
     "CHECKPOINTS",
+    "Checkpoint",
     "ContextEnsembleEstimator",
     "ContextSizeWarning",
     "DEFAULT_VERSIONS",

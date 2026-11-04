@@ -184,7 +184,12 @@ is removed in 0.7.0.
 The module below is a starting point for a model called MyModel, whose
 package `mymodel` is assumed to offer a regressor that predicts bucket
 probabilities. Every name from `mymodel` is a stand-in for the real upstream
-API.
+API. Here the regressor returns its bucket edges already in the target's
+units, with probabilities. The skeleton's `_native_grid` joins every member
+group's edges with `native_grid` from `lazy.models._bucket_head`. That module
+also holds `bucket_edges`, which maps standardised borders to the target's
+units, and `softmax`, which turns logits into probabilities, for a model that
+returns those instead.
 
 ```python
 """Target distributions from MyModel's bucket probabilities."""
@@ -196,6 +201,7 @@ from typing import Any
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -281,8 +287,8 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, probabilities)
 
     def _native_grid(self) -> grid_lib.Grid:
-        return grid_lib.Grid.from_edges(
-            self.handles_[0].bucket_edges, normalization="histogram"
+        return _bucket_head.native_grid(
+            handle.edges for handle in self.handles_
         )
 ```
 
