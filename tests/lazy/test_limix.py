@@ -21,7 +21,6 @@ import lazy
 from lazy.models import _device
 from lazy.models import _limix_source
 from lazy.models import _limix_stream
-from lazy.models import _locks
 from lazy.models import _members
 from lazy.models import limix
 
@@ -422,38 +421,16 @@ def test_threads_predicting_on_an_unpickled_model_wait_for_its_caches(
     model = _model(n_estimators=2).fit(X, z)
     expected = model.predict_proba(X_test)
     restored = pickle.loads(pickle.dumps(model))
-    contended = threading.Event()
-    lock_of = _locks.network_lock
-
-    class WatchedLock:
-        """The estimator's lock, noting a thread that finds it held."""
-
-        def __init__(self, lock):
-            self.lock = lock
-
-        def __enter__(self):
-            if self.lock.locked():
-                contended.set()
-            self.lock.acquire()
-
-        def __exit__(self, *exc):
-            self.lock.release()
-
-    prefill = _limix_stream.prefill
-    first = []
-
-    def held_prefill(*args, **kwargs):
-        # The first rebuild waits until the other thread asks for the lock:
-        # without one, that thread decodes with no cache and fails.
-        if not first:
-            first.append(True)
-            assert contended.wait(threads.TIMEOUT)
-        return prefill(*args, **kwargs)
-
-    monkeypatch.setattr(
-        _locks, "network_lock", lambda obj: WatchedLock(lock_of(obj))
+    contended = threads.watch_contention(
+        monkeypatch, lambda obj: obj is restored
     )
-    monkeypatch.setattr(_limix_stream, "prefill", held_prefill)
+    # The first rebuild waits until the other thread finds the estimator's
+    # lock held: without that lock, that thread decodes with no cache.
+    monkeypatch.setattr(
+        _limix_stream,
+        "prefill",
+        threads.held_until(contended, _limix_stream.prefill),
+    )
     answers = []
 
     def predict():
