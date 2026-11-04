@@ -56,6 +56,8 @@ change the API.
   release show the notebooks executed for it, a fork's docs build fetches
   the notebooks from `biprateep/lazy-tfm`, and an offline local build shows
   the tutorials without outputs instead of failing.
+- The user guide has a page that compares LAZY with each model's own
+  package, TabTune and AutoGluon-Tabular, and says when to use each instead.
 
 ### Changed
 
