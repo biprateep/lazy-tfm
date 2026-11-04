@@ -44,6 +44,7 @@ from lazy import _typing
 from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _hub
 from lazy.models import registry
 
 __all__ = ["LazyModel"]
@@ -180,13 +181,15 @@ class LazyModel(base.BaseDensityRegressor):
         """Returns the unfitted backend these parameters describe, validated.
 
         Raises:
-            ValueError: If ``model`` is not a registered backend.
+            UnknownNameError: If ``model`` is not a registered backend.
             TypeError: If the backend does not take one of the parameters.
         """
         if self.model not in registry.ESTIMATORS:
-            raise ValueError(
-                f"unknown model {self.model!r}; "
-                f"known: {registry.list_estimators()}"
+            raise _hub.unknown_name(
+                "backend",
+                self.model,
+                registry.list_estimators(),
+                argument="model",
             )
         cls = registry.ESTIMATORS[self.model]
         defaults = _constructor_defaults(cls)

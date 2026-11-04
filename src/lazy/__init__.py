@@ -100,6 +100,7 @@ from lazy.models import TabFMHistogram
 from lazy.models import TabFMPerformanceWarning
 from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
+from lazy.models import UnknownNameError
 
 try:
     __version__ = metadata.version("lazy-tfm")
@@ -131,6 +132,7 @@ __all__ = [
     "TabFMPerformanceWarning",
     "TabICLQuantile",
     "TabPFNBarDistribution",
+    "UnknownNameError",
     "__version__",
     "as_grid",
     "clear_model_cache",

@@ -29,6 +29,7 @@ and are re-exported from the top-level :mod:`lazy`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import dataclasses
 from importlib import metadata
 import pathlib
@@ -41,6 +42,7 @@ __all__ = [
     "PROVENANCE_KEYS",
     "Checkpoint",
     "LicenseWarning",
+    "UnknownNameError",
     "download_checkpoint",
     "get_checkpoint",
     "is_cached",
@@ -68,6 +70,48 @@ class LicenseWarning(_warnings.LazyWarning):
     download fails. Those are the weights whose upstream package asks the
     user to accept the licence, a step lazy's own download skips.
     """
+
+
+class UnknownNameError(KeyError, ValueError):
+    """A backend name or model version that lazy does not know.
+
+    It is both a ``KeyError`` and a ``ValueError``, so code that caught
+    either for a lookup keeps working. Its message names the valid choices.
+    """
+
+    def __str__(self) -> str:
+        """Returns the message without the quotes ``KeyError`` adds."""
+        # BaseException's, which handles any number of arguments.
+        return ValueError.__str__(self)
+
+
+def unknown_name(
+    kind: str,
+    value: object,
+    known: Sequence[str],
+    backend: str | None = None,
+    argument: str | None = None,
+) -> UnknownNameError:
+    """Returns the error for an unknown backend name or model version.
+
+    Args:
+        kind: What ``value`` should have been, ``"backend"`` or ``"version"``.
+        value: The name that was rejected.
+        known: The valid names, in the order to show them.
+        backend: For a version, the backend it was asked of.
+        argument: The argument that held ``value``, when the caller has one.
+
+    Returns:
+        The error, for the caller to raise.
+    """
+    of = ""
+    if backend is not None:
+        of = f" for {backend!r}"
+    elif argument is not None:
+        of = f" for {argument}"
+    return UnknownNameError(
+        f"unknown {kind} {value!r}{of}; known: {list(known)}"
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -661,8 +705,8 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
         The registered checkpoint.
 
     Raises:
-        KeyError: If the backend is unknown, or has no pinned checkpoint at
-            that version.
+        UnknownNameError: If the backend is unknown, or has no pinned
+            checkpoint at that version.
 
     Examples:
         >>> get_checkpoint("tabpfn").version
@@ -674,17 +718,14 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
         name, _, spelled = name.partition(":")
         version = version if version is not None else spelled
     if name not in DEFAULT_VERSIONS:
-        raise KeyError(
-            f"unknown backend {name!r}; known: {sorted(DEFAULT_VERSIONS)}"
-        )
+        raise unknown_name("backend", name, sorted(DEFAULT_VERSIONS))
     if version is None:
         version = DEFAULT_VERSIONS[name]
     try:
         return CHECKPOINTS[f"{name}:{version}"]
     except KeyError:
-        raise KeyError(
-            f"unknown version {version!r} for {name!r}; "
-            f"known: {list_versions(name)}"
+        raise unknown_name(
+            "version", version, list_versions(name), name
         ) from None
 
 
@@ -726,7 +767,7 @@ def download_checkpoint(name: str, version: str | None = None) -> pathlib.Path:
         The local path of the checkpoint file or snapshot directory.
 
     Raises:
-        KeyError: If there is no pinned checkpoint for ``name`` at
+        UnknownNameError: If there is no pinned checkpoint for ``name`` at
             ``version``.
         ImportError: If what the backend needs beside its weights cannot be
             found or downloaded.
@@ -756,10 +797,21 @@ def is_cached(name: str, version: str | None = None) -> bool:
     Returns:
         ``True`` if the weights, and whatever else the backend fetches
         beside them, can be loaded without a network connection. A snapshot
-        an interrupted download left behind is not cached.
+        an interrupted download left behind is not cached. ``False`` also
+        for a backend or version with no pinned checkpoint, with a
+        ``FutureWarning``: from lazy 0.7.0 that raises
+        :class:`UnknownNameError`.
     """
     try:
         checkpoint = get_checkpoint(name, version)
+    except UnknownNameError as error:
+        _warnings.warn(
+            f"{error}. lazy.is_cached returns False for it; from lazy 0.7.0 "
+            "it raises lazy.UnknownNameError.",
+            FutureWarning,
+        )
+        return False
+    try:
         _prefetch(checkpoint, download=False)
         # This module's own class: the local lookup, without the warning
         # download() gives an unconfirmed snapshot.

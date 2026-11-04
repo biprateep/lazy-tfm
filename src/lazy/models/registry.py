@@ -25,6 +25,7 @@ from typing import Any
 
 from lazy import base
 from lazy.models import _conformance
+from lazy.models import _hub
 from lazy.models import kumo
 from lazy.models import limix
 from lazy.models import tabfm
@@ -87,7 +88,7 @@ def get_estimator(name: str, **params: Any) -> base.BaseDensityRegressor:
         The unfitted backend estimator.
 
     Raises:
-        KeyError: If no backend is registered under ``name``.
+        UnknownNameError: If no backend is registered under ``name``.
 
     Examples:
         >>> get_estimator("tabicl", n_estimators=16)
@@ -96,7 +97,5 @@ def get_estimator(name: str, **params: Any) -> base.BaseDensityRegressor:
     try:
         cls = ESTIMATORS[name]
     except KeyError:
-        raise KeyError(
-            f"unknown estimator {name!r}; known: {list_estimators()}"
-        ) from None
+        raise _hub.unknown_name("backend", name, list_estimators()) from None
     return cls(**params)

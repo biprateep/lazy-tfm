@@ -14,6 +14,9 @@ change the API.
   renormalised because the native grid misses part of their probability.
   `lazy.ImportNameWarning`, `lazy.LimiXSourceWarning` and
   `lazy.TabFMPerformanceWarning` are now exported from `lazy`.
+- `lazy.UnknownNameError`, the error for an unknown backend name or model
+  version. It is both a `KeyError` and a `ValueError`, so existing `except`
+  clauses still catch it, and its message names the valid choices.
 - `lazy models` lists every pinned checkpoint, its default version and
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
   weights of the checkpoints named, with the licence notice, so the cache
@@ -42,6 +45,12 @@ change the API.
   the end. Every `UserWarning` class of lazy, and the warnings that were
   plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
   `filterwarnings("ignore", category=UserWarning)` still catches them.
+- `get_estimator`, `get_checkpoint`, `download_checkpoint`, `LazyModel`,
+  `LazyEnsembleModel` and a backend's `fit` raise `lazy.UnknownNameError`
+  for an unknown backend name or model version, with one message format
+  that names the valid choices. They raised `KeyError` or `ValueError`.
+- `fit` reports an unknown model version before a missing backend package.
+  A missing package is still reported before any other bad parameter.
 - `predict_cdf` returns each row's native CDF at the bin centres, exactly,
   as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
   densities on the grid, which drops the probability outside the grid and
@@ -121,6 +130,9 @@ change the API.
 
 ### Deprecated
 
+- `lazy.is_cached` returns `False` for an unknown backend or version and
+  warns with a `FutureWarning`. From 0.7.0 it raises
+  `lazy.UnknownNameError`.
 - `lazy setup kumo` warns with a `FutureWarning` and will be removed in
   0.7.0. It still installs `structured-data-models` when
   `sdm.models.KumoTabular` does not import. The `requested` argument of the

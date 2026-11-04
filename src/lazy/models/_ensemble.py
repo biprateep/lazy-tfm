@@ -553,7 +553,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         # A missing backend package is the likeliest reason a first fit
-        # fails, so it is reported before any parameter complaint.
+        # fails, so it is reported before any parameter complaint, except
+        # an unknown version: the table of versions needs no package.
+        self._check_version()
         self._import_backend()
         self._before_fit(X, y)
         self._check_uniform_params()
@@ -637,14 +639,20 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         }
         self._after_fit()
 
-    def _check_uniform_params(self) -> None:
-        """Validates the uniform parameters, before anything is loaded."""
+    def _check_version(self) -> None:
+        """Validates ``version``, before anything is imported or loaded.
+
+        Raises:
+            UnknownNameError: If the backend pins no weights at ``version``.
+        """
         known = _hub.list_versions(self.backend or "")
         if known and self.version not in known:
-            raise ValueError(
-                f"unknown version {self.version!r} for {self.backend!r}; "
-                f"known: {known}"
+            raise _hub.unknown_name(
+                "version", self.version, known, self.backend
             )
+
+    def _check_uniform_params(self) -> None:
+        """Validates the uniform parameters, before anything is loaded."""
         check_chunk_size(self.chunk_size)
         valid_cache = isinstance(self.kv_cache, bool | str) and any(
             self.kv_cache == mode and type(self.kv_cache) is type(mode)

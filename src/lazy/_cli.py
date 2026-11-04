@@ -152,8 +152,8 @@ def _download(parser: argparse.ArgumentParser, specs: Sequence[str]) -> int:
     for spec in specs:
         try:
             _hub.get_checkpoint(spec)
-        except KeyError as error:
-            parser.error(error.args[0])
+        except _hub.UnknownNameError as error:
+            parser.error(str(error))
     for spec in specs:
         print(_hub.download_checkpoint(spec))
     return 0

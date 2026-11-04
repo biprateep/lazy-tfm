@@ -469,7 +469,7 @@ def test_sklearn_contract(check):
         ({"models": ["tabpfn"], "pooling": "max"}, ValueError, "pooling"),
         ({"models": "tabpfn"}, ValueError, "non-empty list"),
         ({"models": []}, ValueError, "non-empty list"),
-        ({"models": ["tabdpt"]}, ValueError, "unknown model"),
+        ({"models": ["tabdpt"]}, lazy.UnknownNameError, "unknown backend"),
         ({"models": [3]}, TypeError, "int"),
         ({"models": ["tabpfn"], "pool_bins": 1}, ValueError, "pool_bins"),
         ({"models": ["tabpfn"], "chunk_size": -1}, ValueError, "chunk_size"),
