@@ -57,7 +57,6 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _install
 from lazy.models import _locks
@@ -645,27 +644,13 @@ class KumoQuantile(
                 state["regressor_"] = state["handles_"][0]
         return state
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle on this machine, not the one it was made on.
-
-        ``device="auto"`` is resolved again, so a model fitted on a GPU
-        predicts on the CPU where there is none, and the checkpoint is found
-        again through the hub on next use rather than at the pickled path.
-        """
-        super().__setstate__(state)
-        if "device_" in state and str(self.device).strip().lower() == "auto":
-            self.device_ = _device.resolve_device(self.device)
-            self.mixed_precision_ = bool(
-                self.mixed_precision
-            ) and self.device_.startswith("cuda")
-            moved: dict[str, Any] = {
-                "device": self.device_,
-                "mixed_precision": self.mixed_precision_,
+    def _relocated_provenance(self) -> dict[str, Any]:
+        return {
+            "kumo": {
+                **self.provenance_["kumo"],
+                "autocast": self._autocast_dtype(),
             }
-            recipe = self.provenance_.get("kumo")
-            if isinstance(recipe, dict):
-                moved["kumo"] = {**recipe, "autocast": self._autocast_dtype()}
-            self.provenance_ = {**self.provenance_, **moved}
+        }
 
 
 @dataclasses.dataclass

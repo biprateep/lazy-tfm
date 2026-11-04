@@ -110,6 +110,17 @@ change the API.
 
 ### Fixed
 
+- A LimiX or TabFM model fitted on a GPU with `device="auto"` and unpickled
+  on a machine without one now runs on the CPU with mixed precision off, and
+  its `provenance_` says so. LimiX already moved to the CPU but kept mixed
+  precision on in `mixed_precision_` and `provenance_`, and TabFM tried to
+  load its weights on the missing GPU. In the other direction, a TabFM or
+  TabPFN model fitted on the CPU with `device="auto"` and unpickled on a
+  machine with a GPU now runs on that GPU, as TabICL and Kumo Tabular
+  already did.
+- An unpickled `LazyEnsembleModel` now reports its members' devices as they
+  are after unpickling in `provenance_["members"]`, not as they were when
+  pickled.
 - An unpickled Kumo, LimiX or TabICL model predicting from two threads at
   once could read the checkpoint path of the machine that made the pickle,
   which on another machine does not exist. The path is now found again

@@ -12,6 +12,7 @@ is checked on the real classes. Nothing here needs a GPU or a checkpoint.
 """
 
 import builtins
+import copy
 import inspect
 import pickle
 import re
@@ -30,6 +31,7 @@ import threads
 
 import lazy
 from lazy.models import _conformance
+from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _transforms
@@ -489,6 +491,42 @@ def test_a_pickled_model_predicts_the_same(cls, bag_size, kv_cache, data):
     restored = pickle.loads(pickle.dumps(model))
     np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
     np.testing.assert_array_equal(model.predict_proba(X_test), expected)
+    assert restored.provenance_ == model.provenance_
+
+
+@pytest.mark.filterwarnings("ignore::lazy.PerformanceWarning")
+def test_an_auto_device_is_resolved_again_when_a_gpu_pickle_loads(
+    cls, data, monkeypatch
+):
+    X, z, X_test = data
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")
+    # "auto" in any case, as resolve_device reads it.
+    model = cls(device="Auto", mixed_precision=True).fit(X, z)
+    expected = model.predict_proba(X_test)
+    provenance = copy.deepcopy(model.provenance_)
+    # As if fitted on a GPU, under mixed precision.
+    # The recipe, not the hook under test, writes the GPU's provenance.
+    model.device_, model.mixed_precision_ = "cuda:7", True
+    model.provenance_ = {**model.provenance_, **model._recipe()}
+    assert model.provenance_ != provenance
+    restored = pickle.loads(pickle.dumps(model))
+    assert restored.device_ == "cpu"
+    assert restored.mixed_precision_ is False
+    assert restored.provenance_ == provenance
+    np.testing.assert_array_equal(restored.predict_proba(X_test), expected)
+
+
+def test_an_explicit_device_is_kept_when_a_pickle_loads(data):
+    X, z, _ = data
+    model = standins.HistogramStandIn(n_estimators=1, progress=False)
+    model.fit(X, z)
+    # As if fitted on a GPU that was named.
+    model.device = model.device_ = "cuda:7"
+    model.mixed_precision_ = True
+    model.provenance_ = {**model.provenance_, "device": "cuda:7"}
+    restored = pickle.loads(pickle.dumps(model))
+    assert restored.device_ == "cuda:7"
+    assert restored.mixed_precision_ is True
     assert restored.provenance_ == model.provenance_
 
 

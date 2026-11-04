@@ -205,14 +205,18 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
     ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
-    does not support.
+    does not support. Unpickling under ``device="auto"`` resolves both again
+    on the machine at hand, so a handle that holds a device follows the new
+    ``device_`` in the backend's ``__setstate__``.
 
     Shared code never names a backend. What a backend needs beyond the
     contract above is a hook the package calls on every registered class:
     :meth:`prefetch` for downloads beside the weights,
     :meth:`clear_upstream_caches` for upstream's own caches, :meth:`setup`
-    for ``lazy setup``, and ``cpu_note`` for the CPU warning. Each defaults
-    to doing nothing.
+    for ``lazy setup``, ``cpu_note`` for the CPU warning, and
+    :meth:`_relocated_provenance` for the provenance entries a backend
+    derives from the device, which unpickling under ``device="auto"``
+    brings up to date. Each defaults to doing nothing.
 
     Attributes:
         display_name: The model's name in progress bars and warnings.
@@ -309,6 +313,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     outlier_threshold: float | str | None
     progress: _progress.Progress
     verbose: bool
+    # Set by fit; declared for the type checker only.
+    provenance_: dict[str, Any]
 
     # -- the per-backend interface -----------------------------------------
 
@@ -571,6 +577,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     # -- fitting -----------------------------------------------------------
 
+    def _resolve_device(self) -> None:
+        """Sets ``device_`` from ``device``, and ``mixed_precision_`` for it.
+
+        Reduced precision exists only on a GPU; on a CPU every backend runs
+        in float32.
+
+        Raises:
+            ValueError: If ``device`` is not a device.
+            RuntimeError: If the requested accelerator is unavailable.
+        """
+        self.device_ = _device.resolve_device(self.device)
+        self.mixed_precision_ = bool(self.mixed_precision) and str(
+            self.device_
+        ).startswith("cuda")
+
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         # A missing backend package is the likeliest reason a first fit
         # fails, so it is reported before any parameter complaint.
@@ -580,12 +601,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self._check_backend_params()
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
-        self.device_ = _device.resolve_device(self.device)
-        # Reduced precision exists only on a GPU; on a CPU every backend runs
-        # in float32.
-        self.mixed_precision_ = bool(self.mixed_precision) and str(
-            self.device_
-        ).startswith("cuda")
+        self._resolve_device()
         self._warn_if_slow_on_cpu()
         self._load_checkpoint()
         self.softmax_temperature_: float | None = (
@@ -750,7 +766,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         # Imported here: the registry imports every backend, hence this.
         from lazy.models import registry  # noqa: PLC0415
 
-        auto = str(self.device).strip().lower() == "auto"
+        auto = _device.is_auto(self.device)
         friendly_here = (
             self.cpu_friendly or self.version in self.cpu_friendly_versions
         )
@@ -1063,17 +1079,47 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle; its checkpoint path is found again on next use.
+        """Restores a pickle on this machine, not the one that made it.
 
         The pickled ``checkpoint_`` names a file on the machine that made the
         pickle. :meth:`_checkpoint` looks the pinned checkpoint up again
         through the hub, which downloads it only if this machine lacks it.
         Only a backend that reads its checkpoint after fitting calls it; for
         the others the flag stays unread.
+
+        Under ``device="auto"``, a fitted model resolves ``device_`` and
+        ``mixed_precision_`` again, so a model fitted on a GPU predicts on
+        the CPU where there is none. ``provenance_`` records them, with the
+        backend's own entries from :meth:`_relocated_provenance`. An
+        explicit device is kept.
+
+        Args:
+            state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
         if "checkpoint_" in state:
             self._relocate_checkpoint = True
+        if "device_" in state and _device.is_auto(self.device):
+            self._resolve_device()
+            self.provenance_ = {
+                **self.provenance_,
+                "device": self.device_,
+                "mixed_precision": self.mixed_precision_,
+                **self._relocated_provenance(),
+            }
+
+    def _relocated_provenance(self) -> dict[str, Any]:
+        """The backend's provenance entries that follow the device.
+
+        Called by :meth:`__setstate__` once it has resolved ``device_`` and
+        ``mixed_precision_`` again, to bring up to date the entries the
+        backend's ``_recipe`` derived from them. The default has none.
+
+        Returns:
+            Top-level ``provenance_`` entries, which replace the pickled
+            ones.
+        """
+        return {}
 
     def _checkpoint(self) -> pathlib.Path:
         """The checkpoint path on this machine, relocated after unpickling.

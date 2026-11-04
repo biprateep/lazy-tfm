@@ -10,6 +10,7 @@ marked ``checkpoint`` load one, on the CPU, and run only with
 import dataclasses
 import inspect
 import json
+import pickle
 import threading
 import types
 import warnings
@@ -21,6 +22,7 @@ import pytest
 import threads
 
 import lazy
+from lazy.models import _device
 from lazy.models import _hub
 from lazy.models import _members
 from lazy.models import _transforms
@@ -259,6 +261,27 @@ def test_no_regressor_argument_is_left_to_upstream(monkeypatch, kv_cache):
     # Deprecated: one acts only on n_estimators="auto", one does nothing.
     unused = {"auto_scale_n_estimators", "n_jobs"}
     assert set(est.regressor_.kwargs) == set(accepted) - unused
+
+
+def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2, bag_size=20, device="auto", progress=False
+    ).fit(X, X[:, 0])
+    # As if fitted on a GPU, under mixed precision.
+    est.device_, est.mixed_precision_ = "cuda:7", True
+    for regressor in est.handles_:
+        regressor.inference_precision = "autocast"
+        regressor.to("cuda:7")
+    restored = pickle.loads(pickle.dumps(est))
+    for regressor in restored.handles_:
+        assert regressor.device == "cpu"
+        assert regressor.inference_precision is torch.float32
+        # Read by to(), so set before it.
+        assert regressor.use_autocast_ is False
 
 
 def test_bucket_masses_returns_float64_borders():

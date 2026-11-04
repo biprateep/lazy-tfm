@@ -52,7 +52,6 @@ import numpy as np
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _locks
 from lazy.models import _members
@@ -618,26 +617,12 @@ class TabICLQuantile(
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle on this machine, not the one it was made on.
+        """Restores a pickle, its regressors on this model's device.
 
-        ``device="auto"`` is resolved again, so a model fitted on a GPU
-        predicts on the CPU where there is none, and the checkpoint is found
-        again through the hub on next use rather than at the pickled path.
+        Args:
+            state: The pickled ``__dict__``.
         """
         super().__setstate__(state)
-        if "device_" in state and str(self.device).strip().lower() == "auto":
-            self.device_ = _device.resolve_device(self.device)
-            self.mixed_precision_ = bool(
-                self.mixed_precision
-            ) and self.device_.startswith("cuda")
-            moved: dict[str, Any] = {
-                "device": self.device_,
-                "mixed_precision": self.mixed_precision_,
-            }
-            recipe = self.provenance_.get("tabicl")
-            if isinstance(recipe, dict):
-                moved["tabicl"] = {**recipe, "use_amp": self.mixed_precision_}
-            self.provenance_ = {**self.provenance_, **moved}
         if "handles_" in state:
             self.handles_ = [
                 dataclasses.replace(
@@ -654,6 +639,14 @@ class TabICLQuantile(
                 and len(self.handles_[0].regressors) == 1
             ):
                 self.regressor_ = self.handles_[0].regressors[0]
+
+    def _relocated_provenance(self) -> dict[str, Any]:
+        return {
+            "tabicl": {
+                **self.provenance_["tabicl"],
+                "use_amp": self.mixed_precision_,
+            }
+        }
 
     def _unpickled_regressor(self, pickled: _PickledRegressor) -> Any:
         """A pickled regressor, restored as upstream restores one, but lazily.

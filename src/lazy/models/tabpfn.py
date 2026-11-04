@@ -728,11 +728,35 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         ]
         return {
             **super()._recipe(),
-            "inference_precision": (
-                "autocast" if self.mixed_precision_ else "float32"
-            ),
+            **self._relocated_provenance(),
             "inference_config": upstream,
         }
+
+    def _relocated_provenance(self) -> dict[str, Any]:
+        return {
+            "inference_precision": (
+                "autocast" if self.mixed_precision_ else "float32"
+            )
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle, its regressors on this model's device.
+
+        Upstream's ``to`` moves each regressor's network and key/value cache
+        and sets its precision again, from ``inference_precision``, which is
+        therefore set first. A regressor pickled with CUDA tensors still
+        needs CUDA to unpickle (#197). Estimators pickled together share one
+        network, which ``to`` moves in place, so they should share a device.
+
+        Args:
+            state: The pickled ``__dict__``.
+        """
+        super().__setstate__(state)
+        if "handles_" in state:
+            precision = self._inference_precision()
+            for regressor in self.handles_:
+                regressor.inference_precision = precision
+                regressor.to(self.device_)
 
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray

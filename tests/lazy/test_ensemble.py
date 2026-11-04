@@ -550,6 +550,23 @@ def test_a_fitted_ensemble_pickles(standin_backends, data):
     )
 
 
+def test_an_unpickled_ensemble_reports_its_members_new_provenance(
+    standin_backends, data
+):
+    X, y = data
+    model = lazy.LazyEnsembleModel(["tabpfn", "tabicl"]).fit(X, y)
+    # As if its members were fitted on a GPU under device="auto".
+    for member in model.estimators_:
+        backend = member.estimator_
+        backend.device_ = "cuda:7"
+        # In place: the ensemble's provenance holds this same dict.
+        backend.provenance_["device"] = "cuda:7"
+    again = pickle.loads(pickle.dumps(model))
+    for name, member in again.named_estimators_.items():
+        assert member.provenance_["device"] != "cuda:7"
+        assert again.provenance_["members"][name] == member.provenance_
+
+
 # -- real checkpoints ----------------------------------------------------------
 
 
