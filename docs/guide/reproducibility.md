@@ -169,13 +169,6 @@ two seeds on the GPU; the CRPS moved by about 2% in both cases. With the
 random draws turned off, the two devices agreed to $2 \times 10^{-5}$ of that
 range. Kumo's golden densities are recorded on a CPU.
 
-LimiX-2 adds a random feature positional embedding to its feature tokens.
-LAZY draws it with a generator seeded per member. A CPU generator and a CUDA
-generator give different streams for the same seed, so LAZY draws it on a CPU
-generator, in float32, on every device, and moves it to the device that runs
-the model. So a CPU and a GPU start from the same draw for the same
-`random_state`; with `mixed_precision=True` on a GPU it is then rounded to
-half precision. LimiX-2's golden densities are recorded on a CPU.
 The other backends were measured the same way, each fitted afresh on each
 device in float32 with `random_state=0`:
 
@@ -184,15 +177,23 @@ device in float32 with `random_state=0`:
 | TabPFN | $2.5 \times 10^{-5}$ | 0.23 |
 | TabICL | $6.8 \times 10^{-6}$ | 0.19 |
 | TabFM | $3.9 \times 10^{-6}$ | 0.11 |
-| LimiX-2 | 0.023 | 0.28 |
+| LimiX-2 | $1.4 \times 10^{-5}$ | 0.23 |
 | Kumo Tabular | 0.28 | 0.19 |
 
 The figures are the largest change of the 5%, 50% and 95% quantiles over the
 same 50 rows, as a fraction of a row's 5% to 95% range, on an NVIDIA GB10 and
-its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL and
-TabFM agree across devices to float32 rounding. LimiX-2 differs by more than
-rounding, but by about a tenth of a change of seed; its cause is not yet
-known.
+its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL, TabFM
+and LimiX-2 agree across devices to float32 rounding.
+
+LimiX-2 adds a random feature positional embedding to its feature tokens.
+LAZY draws it with a generator seeded per member. A CPU generator and a CUDA
+generator give different streams for the same seed, so LAZY draws it on a CPU
+generator, in float32, on every device, and moves it to the device that runs
+the model. So a CPU and a GPU start from the same draw for the same
+`random_state`; with `mixed_precision=True` on a GPU it is then rounded to
+half precision. Drawn on the GPU's own generator instead, the embedding
+made the two devices differ by 0.023. LimiX-2's golden densities are recorded
+on a CPU.
 
 So, to repeat a result exactly, run it on the same kind of device, which
 `provenance_` records. Compare results from a CPU and a GPU with scores over
