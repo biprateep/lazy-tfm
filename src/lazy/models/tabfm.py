@@ -61,10 +61,10 @@ from __future__ import annotations
 import collections
 from collections.abc import Callable, Mapping
 import copy
-import functools
 from importlib import util
 import inspect
 import math
+import pathlib
 import types
 from typing import Any
 
@@ -82,7 +82,6 @@ from lazy.models import _icl_stream
 from lazy.models import _install
 from lazy.models import _members
 from lazy.models import _progress
-from lazy.models import _weights
 
 __all__ = [
     "AUTO_BINS",
@@ -496,7 +495,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         support_: The range the equal-mass bins span, (low, high).
         provenance_: Which weights, code and ensemble answered, as a dict.
         checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
-            loads its backbone on the first prediction, so this appears then.
+            loads its backbone on the first prediction, so this is set then,
+            and dropped by the next fit.
         bin_prior_: The bin fractions of the last member group's context
             targets, at the last dither, shape (n_bins,). With bagging
             done natively, the one group's targets are the whole context.
@@ -705,7 +705,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     def _load_checkpoint(self) -> None:
         # The backbone is several gigabytes and loads lazily on the first
-        # prediction (see _backbone); fit only records what it will load.
+        # prediction (see _network_loader); fit only records what it will
+        # load.
         self.provenance_ = _hub.get_checkpoint(
             self.backend, self.version
         ).provenance(device=self.device_)
@@ -828,7 +829,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     def _predict_group(
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.Distribution:
-        model = self._backbone()
+        model = self._network()
         query = _frame(X)
         shifts = self._shifts()
         parts = []
@@ -1269,69 +1270,46 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     # -- backbone -----------------------------------------------------------
 
-    def _backbone(self) -> Any:
-        """The loaded TabFM classification model, cached on the instance.
+    def _network_loader(self) -> tuple[Any, Callable[..., Any]]:
+        """The backbone's precision and upstream's loader.
 
-        The checkpoint is several gigabytes, so it is loaded once per process
-        (:mod:`lazy.models._weights`) and shared by every estimator with the
-        same version, device and precision: it holds nothing between calls,
-        the classifiers and their caches being built per prediction. The
-        weights are stored in float32 and TabFM is designed to compute in
-        bfloat16, which it does here only under ``mixed_precision`` on CUDA;
-        otherwise, the CPU included, the float32 weights are kept. The
-        instance's reference is keyed by ``version``, device and precision so
-        that changing one can never leave a prediction running on the
-        previous model's weights, and it is dropped on pickling: an unpickled
-        estimator reloads, or finds the shared model, on next use.
+        The checkpoint is several gigabytes, so the backbone loads on the
+        first prediction, once per process and precision (see
+        :meth:`_network`): it holds nothing between calls, the classifiers
+        and their caches being built per prediction. The weights are stored
+        in float32 and TabFM is designed to compute in bfloat16, which it
+        does here only under ``mixed_precision`` on CUDA; otherwise, the CPU
+        included, the float32 weights are kept.
         """
-        return self._memoized_network(
-            (self.version, str(self.device_), self.mixed_precision_),
-            self._shared_backbone,
-        )
-
-    def _shared_backbone(self) -> Any:
-        """The checkpoint and the shared model; see :meth:`_backbone`."""
         from tabfm import (  # noqa: PLC0415 - optional backend, imported at use.
             tabfm_v1_0_0_pytorch as tabfm_v1,
         )
         import torch  # noqa: PLC0415 - optional backend, imported at use.
 
-        self.checkpoint_ = _hub.get_checkpoint(
-            self.backend, self.version
-        ).download()
-        # None keeps the stored float32 weights.
-        dtype = torch.bfloat16 if self.mixed_precision_ else None
-        load = tabfm_v1.load
-        return _weights.network(
-            _weights.key(
-                self.backend,
-                self.version,
-                self.checkpoint_,
-                self.device_,
-                dtype or torch.float32,
-                load,
-            ),
-            functools.partial(self._load_backbone, load, dtype),
-        )
+        precision = torch.bfloat16 if self.mixed_precision_ else torch.float32
+        return precision, tabfm_v1.load
 
-    def _load_backbone(self, load: Callable[..., Any], dtype: Any) -> Any:
-        """Reads the backbone from the checkpoint; see :meth:`_backbone`.
+    def _read_network(
+        self, load: Callable[..., Any], checkpoint: pathlib.Path
+    ) -> Any:
+        """Reads the backbone from the checkpoint.
 
         Upstream keeps a process-wide cache of its own, which
         :func:`lazy.clear_model_cache` could not empty; it is bypassed where
         the installed TabFM has the switch.
         """
-        self._log(
-            f"loading TabFM classification checkpoint from {self.checkpoint_}"
-        )
+        self._log(f"loading TabFM classification checkpoint from {checkpoint}")
+        import torch  # noqa: PLC0415 - optional backend, imported at use.
+
         options: dict[str, Any] = {}
         if "use_cache" in inspect.signature(load).parameters:
             options["use_cache"] = False
         return load(
             model_type="classification",
             device=self.device_,
-            checkpoint_path=str(self.checkpoint_),
-            dtype=dtype,
+            checkpoint_path=str(checkpoint),
+            # None keeps the stored float32 weights.
+            dtype=torch.bfloat16 if self.mixed_precision_ else None,
             **options,
         )
 

@@ -14,6 +14,7 @@ is checked on the real classes. Nothing here needs a GPU or a checkpoint.
 import builtins
 import copy
 import inspect
+import pathlib
 import pickle
 import re
 import sys
@@ -35,6 +36,7 @@ from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _transforms
+from lazy.models import _weights
 from lazy.models import registry
 
 
@@ -764,7 +766,7 @@ def test_a_fitted_provenance_holds_every_required_key(cls, data):
 
 
 class _Hooked(standins.HistogramStandIn):
-    """Records when its fit hooks run, and keeps a network memo."""
+    """Records when its fit hooks run, and loads a network of its own."""
 
     def _before_fit(self, X, y):
         self.calls_ = [("before", hasattr(self, "random_state_"), len(y))]
@@ -775,12 +777,21 @@ class _Hooked(standins.HistogramStandIn):
     def _after_fit(self):
         self.calls_.append(("after", "groups" in self.provenance_))
 
-    def network(self):
-        def get():
-            self.loads_ = getattr(self, "loads_", 0) + 1
-            return object()
+    def _checkpoint(self):
+        return pathlib.Path("/hub/hooked.ckpt")
 
-        return self._memoized_network((self.version, self.device_), get)
+    def _network_loader(self):
+        return "float32", _read
+
+    def _read_network(self, load, checkpoint):
+        self.loads_ = getattr(self, "loads_", 0) + 1
+        return load(checkpoint, self.device_)
+
+
+def _read(checkpoint, device):
+    """The stand-in loader: a new network on every call."""
+    del checkpoint, device  # Unused: nothing is read.
+    return object()
 
 
 def test_the_fit_hooks_bracket_the_fit(data):
@@ -793,28 +804,32 @@ def test_the_fit_hooks_bracket_the_fit(data):
     ]
 
 
-def test_a_memoized_network_is_kept_until_its_key_changes(data):
+def test_a_memoized_network_is_kept_until_its_key_changes(monkeypatch, data):
+    # Off, so that only the instance's memo keeps a network.
+    monkeypatch.setattr(_weights, "_SWITCH", {"enabled": False})
     X, z, _ = data
     model = _Hooked().fit(X, z)
-    first = model.network()
-    assert model.network() is first
+    first = model._network()
+    assert model._network() is first
     assert model.loads_ == 1
     model.version = "v1"
-    assert model.network() is not first
+    assert model._network() is not first
     assert model.loads_ == 2
 
 
-def test_a_memoized_network_is_not_pickled(data):
+def test_a_memoized_network_is_not_pickled(monkeypatch, data):
+    # Off, so that only the instance's memo keeps a network.
+    monkeypatch.setattr(_weights, "_SWITCH", {"enabled": False})
     X, z, X_test = data
     model = _Hooked().fit(X, z)
-    model.network()
+    model._network()
     restored = pickle.loads(pickle.dumps(model))
     assert "_network_cache" not in vars(restored)
     assert "_network_cache" in vars(model)  # the original keeps it
     np.testing.assert_array_equal(
         restored.predict_pdf(X_test), model.predict_pdf(X_test)
     )
-    restored.network()
+    restored._network()
     assert restored.loads_ == 2
 
 

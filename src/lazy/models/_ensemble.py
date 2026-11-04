@@ -48,7 +48,8 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
-from collections.abc import Callable, Hashable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+import functools
 import numbers
 import pathlib
 import sys
@@ -68,6 +69,7 @@ from lazy.models import _hub
 from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _transforms
+from lazy.models import _weights
 
 __all__ = [
     "AUTO",
@@ -156,6 +158,12 @@ histogram model may answer with a mixture of histograms (TabFM's dithered bins).
 """
 
 
+_NETWORK_HOOKS = (
+    "{} calls _network, so it must implement _network_loader and _read_network"
+)
+"""The error of a backend that calls ``_network`` without its hooks."""
+
+
 class ContextSizeWarning(UserWarning):
     """The context is larger than the model was pretrained for."""
 
@@ -198,9 +206,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     checked: :meth:`_load_checkpoint` records the checkpoint's and
     :meth:`_recipe` the ensemble's.
 
-    A fitted estimator pickles and predicts the same after unpickling; a network
-    shared through :mod:`lazy.models._weights` is kept through
-    :meth:`_memoized_network`, which ``__getstate__`` drops, so it is fetched
+    A backend that loads its network itself, rather than handing the
+    checkpoint to upstream, gets it from :meth:`_network` and implements
+    :meth:`_network_loader`, which gives the precision and loader that file
+    the network in :mod:`lazy.models._weights`, and :meth:`_read_network`,
+    which loads it from a checkpoint path onto ``device_``. A fitted
+    estimator pickles and predicts the same after unpickling; that network
+    is kept on the instance, which ``__getstate__`` drops, so it is fetched
     again on first use rather than pickled. The device is resolved
     into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
     before the checkpoint loads; a backend runs there, in float32 unless
@@ -1044,33 +1056,60 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     # -- the network ---------------------------------------------------------
 
-    def _memoized_network(
-        self, memo_key: Hashable, get: Callable[[], Any]
-    ) -> Any:
-        """The loaded network, kept on the instance until ``memo_key`` changes.
+    def _network(self) -> Any:
+        """The backend's network, loaded once and shared.
 
-        A backend that loads its network outside the fit (lazily, on the
-        first prediction, say) keeps it here rather than in an attribute of
-        its own: the reference is dropped on pickling and on cloning, and an
-        unpickled estimator calls ``get`` again on first use.
-
-        Args:
-            memo_key: Everything that decides which network the instance
-                needs, such as its version, device and precision; a change
-                calls ``get`` again, so that no prediction can run on the
-                previous one.
-            get: Loads or finds the network, usually through
-                :func:`lazy.models._weights.network`; called only when the
-                instance holds none for ``memo_key``.
+        For a backend that loads its network itself, from
+        :meth:`_network_loader` and :meth:`_read_network`. The network is
+        filed in :mod:`lazy.models._weights` under the backend, version,
+        checkpoint, device, and the precision and loader
+        :meth:`_network_loader` gives, so every estimator with the same
+        settings runs on one network. The instance keeps it under the same
+        key, so a change of any of them finds the right network again, and
+        drops it on pickling and cloning: an unpickled estimator finds it
+        again on first use. The checkpoint is :meth:`_checkpoint`'s, fetched
+        on first use.
 
         Returns:
             The network.
         """
+        precision, load = self._network_loader()
+        checkpoint = self._checkpoint()
+        cache_key = _weights.key(
+            self.backend or "",
+            self.version,
+            checkpoint,
+            self.device_,
+            precision,
+            load,
+        )
         cached_key, network = getattr(self, "_network_cache", (None, None))
-        if network is None or cached_key != memo_key:
-            network = get()
-            self._network_cache = (memo_key, network)
+        if network is None or cached_key != cache_key:
+            network = _weights.network(
+                cache_key,
+                functools.partial(self._read_network, load, checkpoint),
+            )
+            self._network_cache = (cache_key, network)
         return network
+
+    def _network_loader(self) -> tuple[Any, Callable[..., Any]]:
+        """The weights' precision and the loader; see :meth:`_network`.
+
+        Raises:
+            NotImplementedError: Unless the backend implements it.
+        """
+        raise NotImplementedError(_NETWORK_HOOKS.format(type(self).__name__))
+
+    def _read_network(
+        self, load: Callable[..., Any], checkpoint: pathlib.Path
+    ) -> Any:
+        """Loads the network onto ``device_``; see :meth:`_network`.
+
+        Raises:
+            NotImplementedError: Unless the backend implements it.
+        """
+        del load, checkpoint  # Unused: see the error.
+        raise NotImplementedError(_NETWORK_HOOKS.format(type(self).__name__))
 
     def __getstate__(self) -> dict[str, Any]:
         """Pickles without the memoized network, which reloads on first use."""
@@ -1124,14 +1163,18 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _checkpoint(self) -> pathlib.Path:
         """The checkpoint path on this machine, relocated after unpickling.
 
-        Safe from several threads: the path is assigned before the flag is
-        cleared, so a second thread either relocates again, to the same path,
-        or reads the new one, never the pickled one.
+        A backend that defers the download from the fit, by not setting
+        ``checkpoint_`` there, gets it here on first use. Safe from several
+        threads: the path is assigned before the flag is cleared, so a
+        second thread either relocates again, to the same path, or reads
+        the new one, never the pickled one.
 
         Returns:
             ``checkpoint_``, a :class:`pathlib.Path`.
         """
-        if self.__dict__.get("_relocate_checkpoint", False):
+        if "checkpoint_" not in self.__dict__ or self.__dict__.get(
+            "_relocate_checkpoint", False
+        ):
             self.checkpoint_ = self._checkpoint_spec().download()
             self.__dict__.pop("_relocate_checkpoint", None)
         return self.checkpoint_

@@ -419,11 +419,11 @@ def test_limix_refits_reuse_the_network(monkeypatch):
     assert load.calls[-1] == ((pathlib.Path("/hub/LimiX-2.ckpt"), "cuda"), {})
 
 
-def _tabfm_backbone(mixed_precision=False):
+def _tabfm_network(mixed_precision=False):
     est = tabfm.TabFMHistogram()
     est.device_ = "cpu"
     est.mixed_precision_ = mixed_precision
-    return est._backbone()
+    return est._network()
 
 
 def test_tabfm_estimators_share_the_backbone(monkeypatch):
@@ -439,9 +439,9 @@ def test_tabfm_estimators_share_the_backbone(monkeypatch):
     checkpoint = types.SimpleNamespace(download=lambda: "/hub/tabfm")
     monkeypatch.setattr(tabfm._hub, "get_checkpoint", lambda *args: checkpoint)
 
-    first = _tabfm_backbone()
-    assert _tabfm_backbone() is first
-    assert _tabfm_backbone(mixed_precision=True) is not first
+    first = _tabfm_network()
+    assert _tabfm_network() is first
+    assert _tabfm_network(mixed_precision=True) is not first
     # Upstream's own process-wide cache is bypassed for lazy's.
     assert [call["use_cache"] for call in calls] == [False, False]
 

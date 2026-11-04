@@ -5,8 +5,9 @@
 Upstream's classifier fits its preprocessing as it would; only the forward
 pass is faked, on both inference paths (the streamed one and
 ``predict_proba``). Records, for every classifier run, the rows of its view
-and the scaling each of its standardizations was refitted with. Needs the
-tabfm package.
+and the scaling each of its standardizations was refitted with, and in
+``loads`` the checkpoint each backbone load was handed. Needs the tabfm
+package.
 """
 
 import types
@@ -15,7 +16,6 @@ import numpy as np
 import pytest
 
 import fakes
-from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import tabfm
 
@@ -68,12 +68,22 @@ def install(monkeypatch, recorder):
         :class:`lazy.models.tabfm.TabFMHistogram`.
     """
     upstream = pytest.importorskip("tabfm")
+    torch = pytest.importorskip("torch")
     logits = _Logits(recorder)
 
-    def backbone(est):
-        est.checkpoint_ = _hub.get_checkpoint(
-            est.backend, est.version
-        ).download()
+    def load(
+        model_type="classification",
+        checkpoint_path=None,
+        *,
+        device=None,
+        dtype=torch.bfloat16,
+        use_cache=True,
+    ):
+        """Upstream's loader, recording the checkpoint it is handed."""
+        del model_type, device, dtype  # Unused: nothing is read.
+        if use_cache:
+            raise AssertionError("lazy bypasses upstream's own cache")
+        recorder.loads.append(checkpoint_path)
         return types.SimpleNamespace(max_classes=10)
 
     def internal(classifier, X):
@@ -81,7 +91,7 @@ def install(monkeypatch, recorder):
         return logits(classifier, None, frame)["query"]["mean_logits"][None]
 
     monkeypatch.setattr(_icl_stream, "streaming_available", lambda: True)
-    monkeypatch.setattr(tabfm.TabFMHistogram, "_shared_backbone", backbone)
+    monkeypatch.setattr(upstream.tabfm_v1_0_0_pytorch, "load", load)
     monkeypatch.setattr(_icl_stream, "classification_logits", logits)
     monkeypatch.setattr(
         upstream.TabFMClassifier, "_predict_proba_internal", internal

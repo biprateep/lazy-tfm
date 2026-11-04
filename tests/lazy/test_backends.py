@@ -394,11 +394,11 @@ class TestTabFM:
         est = tabfm.TabFMHistogram()
         est.device_ = "cpu"
         est.mixed_precision_ = False
-        first = est._backbone()
+        first = est._network()
         assert loads == [None]
-        assert est._backbone() is first  # cached
+        assert est._network() is first  # cached
         est.mixed_precision_ = True  # what fit resolves on CUDA
-        est._backbone()
+        est._network()
         assert loads == [None, torch.bfloat16]
 
     def test_a_cpu_fit_never_uses_mixed_precision(self, tiny):

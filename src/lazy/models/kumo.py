@@ -40,10 +40,9 @@ the network, which embeds them itself.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 import contextlib
 import dataclasses
-import functools
 from importlib import util
 import pathlib
 import types
@@ -64,7 +63,6 @@ from lazy.models import _members
 from lazy.models import _progress
 from lazy.models import _quantile_head
 from lazy.models import _transforms
-from lazy.models import _weights
 
 __all__ = [
     "AUTO_FEAT_SHUFFLE_METHOD",
@@ -545,38 +543,25 @@ class KumoQuantile(
             outlier_threshold=self.outlier_threshold_,
         )
 
-    def _network(self) -> Any:
-        """The loaded network, cached on the instance per version and device.
+    def _network_loader(self) -> tuple[str, Callable[..., Any]]:
+        """The network's precision and loader; see :meth:`_network`.
 
-        It comes from :mod:`lazy.models._weights`, so every fit with the same
-        checkpoint and device runs on one network: the fitted context lives
-        in each group's handle, which is handed to the network only for the
-        duration of a prediction. The weights are float32 whatever
-        ``mixed_precision`` says, which only autocasts.
+        Every fit with the same checkpoint and device runs on one network:
+        the fitted context lives in each group's handle, which is handed to
+        the network only for the duration of a prediction. The weights are
+        float32 whatever ``mixed_precision`` says, which only autocasts.
         """
-        self._checkpoint()
-        return self._memoized_network(
-            (self.version, self.device_), self._shared_network
-        )
+        return "float32", _load_network
 
-    def _shared_network(self) -> Any:
-        """Finds or loads the shared network; see :meth:`_network`."""
-        return _weights.network(
-            _weights.key(
-                self.backend,
-                self.version,
-                self.checkpoint_,
-                self.device_,
-                "float32",
-                _load_network,
-            ),
-            functools.partial(
-                _load_network,
-                self._import_backend(),
-                self.checkpoint_,
-                SIZES[self.version],
-                self.device_,
-            ),
+    def _read_network(
+        self, load: Callable[..., Any], checkpoint: pathlib.Path
+    ) -> Any:
+        """Builds the version's network; see :meth:`_network`."""
+        return load(
+            self._import_backend(),
+            checkpoint,
+            SIZES[self.version],
+            self.device_,
         )
 
     def _tensors(self, *arrays: _Array) -> tuple[Any, ...]:
