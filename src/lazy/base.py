@@ -4,8 +4,8 @@
 
 The API is scikit-learn's, with one difference: the natural output of these
 models is a conditional density of the target, not a number, so
-:meth:`predict_proba` is the primary method and :meth:`predict` is a
-documented reduction of it::
+:meth:`BaseDensityRegressor.predict_proba` is the primary method and
+:meth:`BaseDensityRegressor.predict` is a documented reduction of it::
 
     model = LazyModel("tabfm", n_estimators=4)
     model.fit(X_train, z_train)
@@ -78,9 +78,11 @@ range on each side.
 """
 
 POINT_ESTIMATORS = metrics.POINT_ESTIMATORS
-"""Reductions of a density to a single value, accepted by the ``method``
-argument of :meth:`BaseDensityRegressor.predict`. ``mode`` and ``peak_mean`` are
-the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions (see :mod:`lazy.metrics`).
+"""Reductions of a density to a single value.
+
+The ``method`` argument of :meth:`BaseDensityRegressor.predict` accepts these.
+``mode`` and ``peak_mean`` are the DC1 ``z_PEAK`` and ``z_WEIGHT`` definitions
+(see :mod:`lazy.metrics`).
 """
 
 # What the public methods accept as features: any table lazy._inputs reads

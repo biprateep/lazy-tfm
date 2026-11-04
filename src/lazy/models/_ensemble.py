@@ -167,8 +167,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     combination, chunking, progress and the native grid -- lives here.
 
     The contract a subclass meets is the following. Its constructor takes every
-    name in :data:`UNIFORM_PARAMS` as a keyword, with the default in
-    :data:`UNIFORM_DEFAULTS`, stores each verbatim and takes no ``**kwargs``, so
+    name in ``UNIFORM_PARAMS`` as a keyword, with the default in
+    ``UNIFORM_DEFAULTS``, stores each verbatim and takes no ``**kwargs``, so
     that ``cls()`` builds a working estimator (``register`` checks this).
     ``_fit`` splits the ensemble into groups of members that one call of the
     model serves together, and :meth:`_fit_group` returns, for each, a *handle*:
@@ -187,7 +187,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     (``member_combination="quantile_trimmed_average"``) also implements
     :meth:`_predict_members`, which answers for each member of a group
     separately, so that the trim spans the whole ensemble. After ``_fit``,
-    ``provenance_`` holds every key in :data:`REQUIRED_PROVENANCE`:
+    ``provenance_`` holds every key in ``REQUIRED_PROVENANCE``:
     :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
     ensemble's.
 

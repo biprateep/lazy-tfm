@@ -95,7 +95,7 @@ def _geometry(
             (g + 1,), or None.
 
     Returns:
-        A tuple (centres, edges): centres shape (g,), and the histogram
+        A tuple (centres, edges) -- centres shape (g,), and the histogram
         edges, shape (g + 1,), or None for trapezoid densities.
 
     Raises:
@@ -170,7 +170,7 @@ def _central_range(
         truth: True values to keep in view, or None.
 
     Returns:
-        A tuple (lo, hi): from the density's 0.1st to 99.9th mass
+        A tuple (lo, hi) -- from the density's 0.1st to 99.9th mass
         percentiles, widened to the finite truth and by a small margin, and
         clipped to the grid.
     """

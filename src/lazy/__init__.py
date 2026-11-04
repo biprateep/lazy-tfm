@@ -56,7 +56,8 @@ The package is laid out as follows.
     ``GridSelection``, ported -- for biasing a catalogue of your own.
 
 Weights are fetched from the Hugging Face Hub on first use and cached
-thereafter; :func:`download_checkpoint` warms that cache ahead of time.
+thereafter; :func:`~lazy.models.download_checkpoint` warms that cache ahead of
+time.
 """
 
 # This file's imports re-export the public API by name; that is its purpose.
@@ -74,6 +75,7 @@ from lazy.base import BaseDensityRegressor
 from lazy.base import POINT_ESTIMATORS
 from lazy.grid import as_grid
 from lazy.grid import Grid
+from lazy.models import Checkpoint
 from lazy.models import CHECKPOINTS
 from lazy.models import clear_model_cache
 from lazy.models import ContextSizeWarning
@@ -112,6 +114,7 @@ _namespace.warn_if_shared()  # noqa: GS026 - the check must run at import.
 __all__ = [
     "BaseDensityRegressor",
     "CHECKPOINTS",
+    "Checkpoint",
     "ContextSizeWarning",
     "DEFAULT_VERSIONS",
     "ESTIMATORS",

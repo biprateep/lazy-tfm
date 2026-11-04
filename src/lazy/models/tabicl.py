@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 NATIVE_QUANTILE_BINS = _quantile_head.NATIVE_QUANTILE_BINS
-"""Bins of the native grid across the training targets' range: as fine as the
+"""Bins of the native grid across the training targets' range. As fine as the
 999 quantiles resolve. The padding adds bins of the same width.
 """
 

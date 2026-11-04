@@ -432,7 +432,7 @@ class Grid:
 
 
 GridLike: TypeAlias = Grid | npt.ArrayLike | Literal["native"] | None
-"""What every ``y_grid`` argument accepts: a grid, an array of bin centres,
+"""What every ``y_grid`` argument accepts -- a grid, an array of bin centres,
 ``"native"`` for the model's own grid, or ``None`` for the model's default.
 """
 

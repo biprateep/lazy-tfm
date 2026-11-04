@@ -29,7 +29,7 @@ is the usual case in a benchmark loop or a config file.
 Constructing a model does nothing but store its arguments, as scikit-learn
 requires: no weights are downloaded, no GPU is touched, the backend package is
 not imported and nothing is validated. The backend is built, and an unknown
-backend name or a parameter it does not take is reported, at :meth:`fit`.
+backend name or a parameter it does not take is reported, at ``fit``.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class LazyModel(base.BaseDensityRegressor):
             :class:`lazy.models.limix.LimiXBarDistribution` and
             :class:`lazy.models.kumo.KumoQuantile` for what each accepts; a
             name the backend does not take raises ``TypeError`` at
-            :meth:`fit`, naming the class.
+            ``fit``, naming the class.
 
     Attributes:
         estimator_: The fitted backend every prediction is delegated to, a
