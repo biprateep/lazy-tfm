@@ -85,7 +85,9 @@ checkpoint and device file the network in the cache, and `_read_network`
 loads it from a checkpoint path onto `device_`. `_network` keeps the
 network on the estimator, which drops it on pickling and finds it again on
 first use, so a pickle does not carry gigabytes of weights (TabFM, LimiX and
-Kumo Tabular do this). The base
+Kumo Tabular do this). TabPFN loads its network the same way and hands it to
+each upstream regressor as a model spec, but its regressors still pickle it.
+The base
 class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,

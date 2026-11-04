@@ -7,7 +7,9 @@ they run on a CPU with nothing downloaded. The checkpoint tests check what
 the stubs cannot: that a shared network answers bit for bit as a fresh one.
 """
 
+import functools
 import importlib.util
+import inspect
 import pathlib
 import pickle
 import threading
@@ -20,6 +22,7 @@ import pytest
 from sklearn import base as sklearn_base
 import threads
 
+from lazy.models import _hub
 from lazy.models import _limix_stream
 from lazy.models import _weights
 from lazy.models import kumo
@@ -201,7 +204,6 @@ def test_a_failed_load_lets_the_next_caller_load():
 
 def _tabpfn(device="cpu", mixed_precision=False, version="v3.5"):
     """A TabPFN estimator in the state fit leaves before loading."""
-    pytest.importorskip("torch")
     est = tabpfn.TabPFNBarDistribution(version=version)
     est.device_ = device
     est.mixed_precision_ = mixed_precision
@@ -209,132 +211,62 @@ def _tabpfn(device="cpu", mixed_precision=False, version="v3.5"):
     return est
 
 
-def _tabpfn_fit(est, load, fit_mode="fit_with_cache"):
-    """What one regressor's fit asks upstream's loader for."""
-    upstream = types.SimpleNamespace(
-        base=types.SimpleNamespace(initialize_tabpfn_model=load)
-    )
-    with est._shared_network(upstream):
-        models, *_ = upstream.base.initialize_tabpfn_model(
-            model_path=est.checkpoint_,
-            which="regressor",
-            fit_mode=fit_mode,
-            softmax_temperature_override=None,
-            n_estimators_override=3,
-        )
-    assert upstream.base.initialize_tabpfn_model is load
-    return models[0]
+@pytest.fixture
+def tabpfn_load(monkeypatch):
+    """Upstream's loader, replaced by one that keeps its signature and counts.
 
+    Returns:
+        The keyword arguments of each call.
+    """
+    pytest.importorskip("tabpfn")
+    from tabpfn import base  # noqa: PLC0415 - optional extra.
+    import torch  # noqa: PLC0415 - optional extra.
 
-def _tabpfn_loader():
+    real = base.initialize_tabpfn_model
     calls = []
 
+    @functools.wraps(real)
     def load(**kwargs):
+        inspect.signature(real).bind(**kwargs)
         calls.append(kwargs)
-        return [_Network()], [{"emsize": 8}], {"borders": [0, 1]}, {"T": 1}
+        return [torch.nn.Module()], [{}], None, None
 
-    return load, calls
+    monkeypatch.setattr(base, "initialize_tabpfn_model", load)
+    return calls
 
 
-def test_tabpfn_refits_reuse_the_network():
-    load, calls = _tabpfn_loader()
-    first = _tabpfn_fit(_tabpfn(), load)
-    assert _tabpfn_fit(_tabpfn(), load) is first
-    assert len(calls) == 1
+def test_tabpfn_refits_reuse_the_network(tabpfn_load):
+    from tabpfn import base  # noqa: PLC0415 - optional extra.
+    import torch  # noqa: PLC0415 - optional extra.
+
+    first = _tabpfn()._network()
+    assert _tabpfn()._network() is first
+    (call,) = tabpfn_load
+    assert call.pop("model_path") == pathlib.Path(
+        "/hub/tabpfn-v3.5.safetensors"
+    )
+    assert call.pop("which") == "regressor"
+    # What keys upstream's own cache, which must not hand two of lazy's
+    # keys one network: the devices and dtype from tabpfn 9.2, and before
+    # it the fit mode that skips the cache.
+    accepted = inspect.signature(base.initialize_tabpfn_model).parameters
+    if "fit_mode" in accepted:
+        assert call == {"fit_mode": "fit_with_cache"}
+    else:
+        assert call == {
+            "devices": (torch.device("cpu"),),
+            "force_inference_dtype": torch.float32,
+        }
 
 
 @pytest.mark.parametrize(
-    ("estimator", "fit_mode"),
-    [
-        ({"device": "cuda"}, "fit_with_cache"),
-        ({"mixed_precision": True}, "fit_with_cache"),
-        ({"version": "v3.5-fast"}, "fit_with_cache"),
-        ({}, "fit_preprocessors"),
-    ],
+    "estimator",
+    [{"device": "cuda"}, {"mixed_precision": True}, {"version": "v3.5-fast"}],
 )
-def test_tabpfn_loads_again_for_other_weights(estimator, fit_mode):
-    load, calls = _tabpfn_loader()
-    first = _tabpfn_fit(_tabpfn(), load)
-    assert _tabpfn_fit(_tabpfn(**estimator), load, fit_mode) is not first
-    assert len(calls) == 2
-
-
-def test_tabpfn_hands_out_copies_of_what_a_fit_may_change():
-    upstream = types.SimpleNamespace(base=types.SimpleNamespace())
-    load, _ = _tabpfn_loader()
-    upstream.base.initialize_tabpfn_model = load
-    est = _tabpfn()
-    with est._shared_network(upstream):
-        first = upstream.base.initialize_tabpfn_model(model_path="/w")
-        second = upstream.base.initialize_tabpfn_model(model_path="/w")
-    assert first[0] is not second[0]  # the lists, not the network
-    assert first[0][0] is second[0][0]
-    for left, right in zip(first[1:], second[1:], strict=True):
-        assert left == right
-        assert left is not right
-
-
-def _overlapping_tabpfn_fits(first_out):
-    """Two TabPFN fits in two threads, the second starting inside the first.
-
-    Args:
-        first_out: Whether the first fit to start is the first to finish.
-
-    Returns:
-        The stand-in upstream module, its loader, the loader's calls and
-        whether both fits finished.
-    """
-    # Here, not in the threads: a skip raised in a thread is lost.
-    pytest.importorskip("torch")
-    load, calls = _tabpfn_loader()
-    upstream = types.SimpleNamespace(
-        base=types.SimpleNamespace(initialize_tabpfn_model=load)
-    )
-    a_in, b_in, a_out, b_out = (threading.Event() for _ in range(4))
-    networks = []
-
-    def fit(est, entered, wait_for, leave, then):
-        with est._shared_network(upstream):
-            entered.set()
-            assert wait_for.wait(threads.TIMEOUT)
-            (models, *_) = upstream.base.initialize_tabpfn_model(
-                model_path=est.checkpoint_, which="regressor"
-            )
-            networks.append(models[0])
-            if leave is not None:
-                assert leave.wait(threads.TIMEOUT)
-        then.set()
-
-    finished = threads.run(
-        lambda: fit(_tabpfn(), a_in, b_in, None if first_out else b_out, a_out),
-        lambda: fit(_tabpfn(), b_in, a_in, a_out if first_out else None, b_out),
-    )
-    assert networks[0] is networks[1]
-    return upstream, load, calls, finished
-
-
-@pytest.mark.parametrize("first_out", [True, False])
-def test_overlapping_tabpfn_fits_in_threads_finish(first_out):
-    """Each thread reaches upstream's loader, never the other fit's."""
-    upstream, load, calls, finished = _overlapping_tabpfn_fits(first_out)
-    assert finished
-    assert len(calls) == 1
-    assert upstream.base.initialize_tabpfn_model is load
-    assert not tabpfn._REDIRECTIONS
-
-
-def test_outside_a_fit_upstreams_loader_answers():
-    """Another thread's call, while a fit runs, is upstream's own."""
-    load, calls = _tabpfn_loader()
-    upstream = types.SimpleNamespace(
-        base=types.SimpleNamespace(initialize_tabpfn_model=load)
-    )
-    with _tabpfn()._shared_network(upstream):
-        assert threads.run(
-            lambda: upstream.base.initialize_tabpfn_model(model_path="/w")
-        )
-    assert calls == [{"model_path": "/w"}]
-    assert not _weights._NETWORKS
+def test_tabpfn_loads_again_for_other_weights(tabpfn_load, estimator):
+    first = _tabpfn()._network()
+    assert _tabpfn(**estimator)._network() is not first
+    assert len(tabpfn_load) == 2
 
 
 class _TabICLRegressor:
@@ -455,7 +387,37 @@ def test_clone_takes_no_network():
     assert "_network_cache" not in vars(sklearn_base.clone(est))
 
 
+def test_a_failed_fit_lets_go_of_the_network(monkeypatch):
+    est = _limix()
+
+    def fail(X, y):
+        del X, y  # Unused: the fit fails once it has a network.
+        est._network_cache = (("v2", "cpu"), _Network())
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr(est, "_fit", fail)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        est.fit(np.zeros((3, 1)), np.zeros(3))
+    assert "_network_cache" not in vars(est)
+
+
 # -- with the real weights -----------------------------------------------------
+
+
+@pytest.mark.checkpoint
+def test_upstreams_own_cache_gives_each_tabpfn_key_its_own_network(
+    monkeypatch,
+):
+    """A regressor casts its network in place, so precisions must not share."""
+    pytest.importorskip("tabpfn")
+    monkeypatch.setenv("TABPFN_MODEL_CACHE_SIZE", "4")
+    path = _hub.get_checkpoint("tabpfn", "v3.5-fast").download()
+    networks = []
+    for mixed_precision in (False, True):
+        est = _tabpfn(version="v3.5-fast", mixed_precision=mixed_precision)
+        est.checkpoint_ = path
+        networks.append(est._network()[0][0])
+    assert networks[0] is not networks[1]
 
 
 @pytest.fixture(scope="module")
