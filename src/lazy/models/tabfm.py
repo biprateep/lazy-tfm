@@ -200,8 +200,10 @@ _CHECK_BUILD = (
 )
 
 _SLOW_PATH_WARNING = (
-    "the installed tabfm has no KV-cache API (TabFM.prefill and "
-    "TabFM.decode; the PyPI releases 1.0.0 and 1.0.1 lack it), so "
+    "the installed tabfm lacks part of the KV-cache API that lazy streams "
+    "through (TabFM.prefill, TabFM.decode and the helpers listed in "
+    "lazy.models._icl_stream.STREAMING_API; the PyPI releases 1.0.0 and "
+    "1.0.1 lack it), so "
     "TabFMHistogram is falling back to upstream predict_proba, which "
     "re-encodes the training context for every chunk of query rows -- "
     "measured at roughly 26x the compute per query row (13.7 ms vs 0.53 ms "
@@ -618,7 +620,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             REPOSITORY_BUILD,
             what="the repository build",
             check=_CHECK_BUILD,
-            missing="the KV-cache API",
+            missing="the KV-cache API (TabFM.prefill, TabFM.decode and "
+            "their helpers)",
             dry_run=dry_run,
         )
 
@@ -1108,7 +1111,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 logits["query"]["mean_logits"], self._temperature()
             )
         else:
-            probs = self._predict_proba_chunked(classifier, X_query)
+            probs = _in_chunks(
+                classifier.predict_proba, X_query, self.chunk_size
+            )
 
         # A class with no context rows at all never appears in `classes_`; it
         # gets zero probability rather than shifting every later column.
@@ -1140,43 +1145,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 keep_cache_on_device=self.keep_cache_on_device,
             )
             return logits["query"]["mean_logits"]
-        size = self.chunk_size if self.chunk_size > 0 else len(X_query)
-        frame = X_query.reset_index(drop=True)
-        blocks = [
-            np.asarray(
-                view._predict_proba_internal(  # noqa: SLF001 - the raw logits.
-                    frame.iloc[start : start + size]
-                )[0],
-                dtype=float,
-            )
-            for start in range(0, len(frame), size)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
-
-    def _predict_proba_chunked(
-        self, classifier: Any, X_query: pd.DataFrame
-    ) -> _typing.FloatArray:
-        """Upstream ``predict_proba``, a bounded number of query rows at a time.
-
-        ``predict_proba`` materialises ``n_members x n_query x n_features`` in
-        one go, which a survey-sized query set cannot afford. Feeding it chunks
-        caps that at ``n_members x chunk_size x n_features``. The in-context
-        stage builds its keys and values from the context rows alone, so
-        query rows never influence one another; the result differs from a
-        single pass only by float rounding, the kernels batching
-        differently. The context forward pass is repeated per chunk, which
-        is the price.
-        """
-        size = self.chunk_size if self.chunk_size > 0 else len(X_query)
-        frame = X_query.reset_index(drop=True)
-        blocks = [
-            np.asarray(
-                classifier.predict_proba(frame.iloc[start : start + size]),
-                dtype=float,
-            )
-            for start in range(0, len(frame), size)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+        internal = view._predict_proba_internal  # noqa: SLF001 - the raw logits.
+        return _in_chunks(
+            lambda rows: internal(rows)[0], X_query, self.chunk_size
+        )
 
     def _classifier(
         self,
@@ -1233,13 +1205,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             **_PINNED_CLASSIFIER_ARGS,
         }
         accepted = inspect.signature(tabfm.TabFMClassifier.__init__).parameters
-        for name, value in (
-            ("cache_context", False),
-            ("maybe_quantize_kv_cache", False),
-            ("keep_cache_on_device", self.keep_cache_on_device),
-        ):
-            if name in accepted:
-                kwargs[name] = value
+        cache_args = {
+            "cache_context": False,
+            "maybe_quantize_kv_cache": False,
+            "keep_cache_on_device": self.keep_cache_on_device,
+        }
+        kwargs.update({k: v for k, v in cache_args.items() if k in accepted})
         return tabfm.TabFMClassifier(**kwargs)
 
     # -- backbone -----------------------------------------------------------
@@ -1269,22 +1240,18 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         """Reads the backbone from the checkpoint.
 
         Upstream keeps a process-wide cache of its own, which
-        :func:`lazy.clear_model_cache` could not empty; it is bypassed where
-        the installed TabFM has the switch.
+        :func:`lazy.clear_model_cache` could not empty, so it is bypassed.
         """
         self._log(f"loading TabFM classification checkpoint from {checkpoint}")
         import torch  # noqa: PLC0415 - optional backend, imported at use.
 
-        options: dict[str, Any] = {}
-        if "use_cache" in inspect.signature(load).parameters:
-            options["use_cache"] = False
         return load(
             model_type="classification",
             device=self.device_,
             checkpoint_path=str(checkpoint),
             # None keeps the stored float32 weights.
             dtype=torch.bfloat16 if self.mixed_precision_ else None,
-            **options,
+            use_cache=False,
         )
 
 
@@ -1374,6 +1341,38 @@ def _member_views(
         view.n_estimators = 1
         views.append(view)
     return views
+
+
+def _in_chunks(
+    predict: Callable[[pd.DataFrame], Any],
+    X_query: pd.DataFrame,
+    chunk_size: int,
+) -> _typing.FloatArray:
+    """``predict`` on a bounded number of query rows at a time, stacked.
+
+    Upstream's predictions materialise ``n_members x n_query x n_features``
+    in one go, which a survey-sized query set cannot afford. Feeding them
+    chunks caps that at ``n_members x chunk_size x n_features``. The
+    in-context stage builds its keys and values from the context rows alone,
+    so query rows never influence one another; the result differs from a
+    single pass only by float rounding, the kernels batching differently.
+    The context forward pass is repeated per chunk, which is the price.
+
+    Args:
+        predict: Maps query rows to an array with one row per query row.
+        X_query: The query rows.
+        chunk_size: Rows per call; ``0`` passes every row at once.
+
+    Returns:
+        The stacked results, float64, ``(n_query, ...)``.
+    """
+    size = chunk_size if chunk_size > 0 else len(X_query)
+    frame = X_query.reset_index(drop=True)
+    blocks = [
+        np.asarray(predict(frame.iloc[start : start + size]), dtype=float)
+        for start in range(0, len(frame), size)
+    ]
+    return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
 
 def _is_auto(value: object) -> bool:

@@ -258,6 +258,12 @@ change the API.
 - A pandas Series target works on pandas 2.x: `fit`, `score`, `evaluate`
   and `predict_pit` raised `TypeError` for it, since NumPy's masked-array
   helper read the Series' internal block manager instead of its values.
+- A TabFM build that has `TabFM.prefill` and `TabFM.decode` but lacks
+  another API that lazy's KV-cache path calls, such as
+  `EnsembleGenerator.transform_context_only`, now falls back to upstream
+  `predict_proba` with a `TabFMPerformanceWarning`. Prediction raised
+  `AttributeError` before. `lazy setup` now installs the pinned repository
+  build over such a build.
 
 ### Security
 
