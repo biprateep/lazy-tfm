@@ -50,6 +50,12 @@ change the API.
   and the GPU, and how `chunk_size` multiplies the cost of the context when
   `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
   the title's capitals.
+- Each tutorial page notes when its notebook may not match the source
+  shown, and, once the notebook is re-executed, the lazy version and commit
+  it ran on. The docs of a
+  release show the notebooks executed for it, a fork's docs build fetches
+  the notebooks from `biprateep/lazy-tfm`, and an offline local build shows
+  the tutorials without outputs instead of failing.
 
 ### Changed
 
