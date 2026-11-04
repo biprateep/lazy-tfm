@@ -54,7 +54,9 @@ the slowest, and it needs its repository build to be even this fast (see
 Peak memory is bounded by `chunk_size` on every backend (8,192 query rows by
 default), and on TabFM's streaming path `query_block_rows` also bounds the
 host memory of a block of queries. We recommend lowering `chunk_size` on a
-small GPU, and setting it to `0` gives a single pass. On the host, `predict`,
+small GPU, and setting it to `0` gives a single pass. With `kv_cache=False`,
+each forward pass processes the context again, so the context's cost is paid
+once per chunk, and a smaller `chunk_size` then takes longer. On the host, `predict`,
 `score` and `evaluate` work through the query rows a block at a time, and
 `predict_quantiles`, `predict_interval` and `predict_pit` a chunk at a time
 (TabFM, which predicts all its queries together, excepted), so their memory
@@ -132,10 +134,20 @@ Each network is held once, and `lazy.clear_model_cache()` releases all of them
 on, so the memory is returned only once those models are deleted too. Setting
 `LAZY_MODEL_CACHE=0` in the environment, or calling
 `lazy.set_model_cache(False)`, turns the sharing off, and every fit then loads
-its own network. While the cache is safe for the parallel jobs of scikit-learn
-(`n_jobs`), which run in separate processes that each load their own network,
-two threads predicting on the same network at once are not, so we recommend
-turning it off before running fits in threads.
+its own network. Fits and predictions in threads can share a network: a
+network that keeps the context of its last call is locked while it answers,
+so threads on it take turns.
+
+## Parallel jobs
+
+With joblib's default backend, the `n_jobs` of scikit-learn's search and
+cross-validation tools runs each job in a worker process of its own. Each
+worker has its own model cache, so it loads each network that it uses once,
+and the workers share none. With `device="auto"` on a machine with a GPU,
+every worker runs on the same GPU, so that GPU holds one copy of the network
+per worker, beside each job's context and key/value cache. The GPU memory
+that a search needs therefore grows with `n_jobs`, and on one GPU `n_jobs=1`
+needs the least.
 
 ## GPU and CPU
 
