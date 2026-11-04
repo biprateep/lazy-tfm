@@ -142,8 +142,6 @@ class QuantileHead:
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        if X.shape[0] == 0:
-            return np.empty((0, grid.n_bins))
         blocks = []
         outside = 0
         for dist in self._distribution_chunks(X):

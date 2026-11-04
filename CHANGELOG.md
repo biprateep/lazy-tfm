@@ -45,6 +45,11 @@ change the API.
   of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
   0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
   `predict` from 0.075 s to 0.048 s.
+- `lazy.datasets` reports each download at level INFO to the
+  `lazy.datasets` logger instead of printing it, as scikit-learn's fetchers
+  do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
+  the wrong size now warns, with a `lazy.LazyWarning`, before it is fetched
+  again.
 - The warning for rows with probability outside the native grid is now a
   `lazy.GridCoverageWarning`. Its text starts with "Densities are
   renormalised on the native grid" and gives the row count and the grid at
@@ -130,6 +135,12 @@ change the API.
 
 ### Deprecated
 
+- Predicting on an `X` with no rows warns with a `FutureWarning` in
+  `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
+  `predict_quantiles`, `predict_interval`, `predict_pit` and
+  `predict_distribution`, which still return empty results. From 0.7.0 they
+  raise `ValueError`, as scikit-learn does and as `fit`, `score` and
+  `evaluate` already do.
 - `lazy setup kumo` warns with a `FutureWarning` and will be removed in
   0.7.0. It still installs `structured-data-models` when
   `sdm.models.KumoTabular` does not import. The `requested` argument of the
@@ -139,6 +150,9 @@ change the API.
 
 ### Removed
 
+- `lazy.datasets` no longer reads files cached in `~/.cache/lazy-photoz`,
+  the directory used before the package's rename in 0.1.0, which has warned
+  since then. Files left there are downloaded again into `data_home()`.
 - The backend class attribute `setup_needs_name`, and the `then` argument
   of `lazy.models._ensemble.import_extra`, are removed, since no backend
   needs them now. `lazy setup --help` no longer lists backends that
