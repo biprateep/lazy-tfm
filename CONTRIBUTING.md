@@ -54,6 +54,13 @@ tab, optionally with a `pytest -k` expression, or by adding the label
 `checkpoints` to a pull request; removing the label and adding it back runs
 it again.
 
+The docs-checks workflow checks, on request, what the docs build does not.
+Run it from the Actions tab ("Docs checks" -> Run workflow), or by adding the
+label `docs-checks` to a pull request; removing the label and adding it back
+runs it again. One job checks that every external link resolves
+(`sphinx-build -b linkcheck`). The other runs `docs/snippets/*.py` on a CPU,
+with the locked backend packages, and downloads the TabPFN v3.5-fast weights.
+
 The golden tests compare each backend's densities with files in
 `tests/lazy/golden/`, at four torch threads. TabPFN's file was recorded on a
 GitHub runner and matches only there: another processor moves TabPFN by a few
