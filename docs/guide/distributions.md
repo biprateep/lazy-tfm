@@ -14,7 +14,7 @@ returns:
 | `fit(X, y)`                         | The model. Stores the labeled context; no weights change.   |
 | `predict_proba(X, y_grid)`          | `(n_samples, n_bins)` densities on `y_grid`.                |
 | `predict_pdf(X, y_grid)`            | The same; an alias for when "pdf" reads better.             |
-| `predict_cdf(X, y_grid)`            | The cumulative distributions.                               |
+| `predict_cdf(X, y_grid)`            | `(n_samples, n_bins)` CDF values at the bin centres, exact. |
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
 | `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                   |
 | `predict_interval(X, coverage)`     | `(n_samples, 2)` bounds of the central interval, exact.     |
