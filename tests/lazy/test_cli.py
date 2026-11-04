@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""``lazy setup``: TabFM's repository build, LimiX's source and Kumo's sdm."""
+"""The ``lazy`` command: setup, models and download."""
 
 from importlib import util
 import pathlib
@@ -10,7 +10,9 @@ import sys
 
 import pytest
 
+import lazy
 from lazy import _cli
+from lazy.models import _hub
 from lazy.models import _icl_stream
 from lazy.models import _limix_source
 from lazy.models import kumo
@@ -189,3 +191,97 @@ def test_naming_kumo_without_its_dependencies_fails(backends, capsys):
 def test_an_unknown_backend_is_an_error(backends):
     with pytest.raises(SystemExit):
         _cli.main(["setup", "kumoo"])
+
+
+def test_models_lists_every_version_and_marks_the_defaults(monkeypatch, capsys):
+    monkeypatch.setattr(_hub, "is_cached", lambda name, version: False)
+    assert _cli.main(["models"]) == 0
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert rows[0] == ["MODEL", "VERSION", "DEFAULT", "CACHED"]
+    expected = []
+    for name in lazy.list_estimators():
+        expected.extend([name, version] for version in lazy.list_versions(name))
+    assert [row[:2] for row in rows[1:]] == expected
+    defaults = {row[0]: row[1] for row in rows[1:] if row[2] == "yes"}
+    assert defaults == lazy.DEFAULT_VERSIONS
+
+
+def test_models_reports_which_checkpoints_are_cached(monkeypatch, capsys):
+    monkeypatch.setattr(
+        _hub,
+        "is_cached",
+        lambda name, version: (name, version) == ("tabpfn", "v2"),
+    )
+    assert _cli.main(["models"]) == 0
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
+    assert {(row[0], row[1]) for row in rows if row[-1] == "yes"} == {
+        ("tabpfn", "v2")
+    }
+
+
+def test_models_neither_raises_nor_downloads_without_the_backend_package(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _hub.Checkpoint,
+        "download",
+        lambda self: pytest.fail("models must not download"),
+    )
+    monkeypatch.setattr(_hub.Checkpoint, "_fetch", lambda self, **kwargs: 1 / 0)
+    assert _cli.main(["models"]) == 0
+    assert "no" in capsys.readouterr().out
+
+
+def test_download_fetches_each_named_checkpoint(monkeypatch, capsys):
+    calls = []
+
+    def download(name, version=None):
+        calls.append((name, version))
+        return pathlib.Path("/cache") / name
+
+    monkeypatch.setattr(_hub, "download_checkpoint", download)
+    assert _cli.main(["download", "tabpfn:v2.5", "tabicl"]) == 0
+    assert calls == [("tabpfn:v2.5", None), ("tabicl", None)]
+    assert capsys.readouterr().out.splitlines() == [
+        str(pathlib.Path("/cache/tabpfn:v2.5")),
+        str(pathlib.Path("/cache/tabicl")),
+    ]
+
+
+def test_download_of_an_unknown_name_exits_2_naming_the_choices(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _hub,
+        "download_checkpoint",
+        lambda name, version=None: pytest.fail("nothing is downloaded"),
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        _cli.main(["download", "tabicl", "tabpfnn"])
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "tabpfnn" in err
+    assert all(name in err for name in lazy.list_estimators())
+
+
+def test_download_with_no_checkpoint_named_exits_2():
+    with pytest.raises(SystemExit) as exit_info:
+        _cli.main(["download"])
+    assert exit_info.value.code == 2
+
+
+def test_download_passes_the_licence_notice_to_the_user(monkeypatch):
+    def download(self, *, local_files_only=False):
+        _hub._warnings.warn(self.license_note or "notice", _hub.LicenseWarning)
+        return pathlib.Path("/cache")
+
+    monkeypatch.setattr(_hub.Checkpoint, "download", download)
+    with pytest.warns(_hub.LicenseWarning):
+        assert _cli.main(["download", "tabpfn:v2.5"]) == 0
+
+
+def test_download_of_an_unknown_version_exits_2_naming_the_versions(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        _cli.main(["download", "tabicl:v9"])
+    assert exit_info.value.code == 2
+    assert "known: ['v2']" in capsys.readouterr().err
