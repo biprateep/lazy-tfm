@@ -180,14 +180,17 @@ with _lending(network), self._autocast():
         recipe=handle.recipe,
         num_estimators=handle.n_members,
         estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
-        generator=self._generator(handle.seed),
+        generator=self._generator(handle),
     )
     return network._cache
 ```
 
 The group's seed, which the base class draws for its first member, seeds a
-`torch.Generator` on the device, from which upstream draws the members' column
-shuffles and sign flips. With the cache off, the handle keeps the prepared
+CPU `torch.Generator`, from which the recipe draws the members' column
+shuffles and sign flips. Upstream's two steps would draw on the device, where
+a CPU and a GPU give different draws for one seed, so the recipe uses
+subclasses of them (`_kumo_draws`) that draw on the generator's device and
+move the draws to the data's. With the cache off, the handle keeps the prepared
 context, and every prediction reruns the whole forward pass with a generator
 seeded the same way, so that the members are the same in every chunk.
 
@@ -214,7 +217,7 @@ with self._autocast():
             recipe=handle.recipe,
             num_estimators=handle.n_members,
             estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
-            generator=self._generator(handle.seed),
+            generator=self._generator(handle),
         )
     else:
         with _lending(network, handle.cache):

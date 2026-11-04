@@ -34,7 +34,9 @@ random half of the columns, and at most 500 columns are kept. The target is
 z-scored and its sign flipped at random per member, and the answers are
 mapped back. The random sign flips of the columns and of the target are part
 of how the network is run rather than of the recipe, so they stay under an
-explicit ``transforms``. Kumo has no imputation step: missing values reach
+explicit ``transforms``. They and the column shuffles are drawn on a CPU
+generator and moved to the device (:mod:`lazy.models._kumo_draws`), so they
+are the same on every device. Kumo has no imputation step: missing values reach
 the network, which embeds them itself.
 """
 
@@ -201,9 +203,10 @@ class KumoQuantile(
             recipe works in float64, which MPS lacks: a fit on it raises
             ValueError before the checkpoint loads.
         random_state: The ensemble's seed. A group of members runs on a
-            ``torch.Generator`` seeded by its first member,
+            CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
-            column shuffles and sign flips.
+            column shuffles and sign flips, so they are the same on every
+            device.
         chunk_size: Query rows per forward pass. The batch shape can change
             the kernels: on a CPU, a one-row chunk differs by a few parts in
             a million of the quantiles' spread.
@@ -423,6 +426,7 @@ class KumoQuantile(
             ),
             offset=offset,
             scale=scale,
+            cpu_draws=True,
         )
         # The context is kept under either cache setting, so that a pickle,
         # which leaves the cache out, can record it again.
@@ -456,7 +460,7 @@ class KumoQuantile(
                 recipe=handle.recipe,
                 num_estimators=handle.n_members,
                 estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
-                generator=self._generator(handle.seed),
+                generator=self._generator(handle),
             )
             return network._cache  # noqa: SLF001 - upstream's cache.
 
@@ -485,7 +489,7 @@ class KumoQuantile(
                     recipe=handle.recipe,
                     num_estimators=handle.n_members,
                     estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
-                    generator=self._generator(handle.seed),
+                    generator=self._generator(handle),
                 )
             else:
                 with _lending(network, cache):
@@ -557,11 +561,12 @@ class KumoQuantile(
             for array in arrays
         )
 
-    def _generator(self, seed: int) -> Any:
-        """A ``torch.Generator`` on the device, seeded with ``seed``."""
+    def _generator(self, handle: _KumoGroup) -> Any:
+        """The ``torch.Generator`` that draws a group's recipe, seeded."""
         import torch  # noqa: PLC0415 - torch comes with the extra.
 
-        return torch.Generator(device=self.device_).manual_seed(seed)
+        device = "cpu" if handle.cpu_draws else self.device_
+        return torch.Generator(device=device).manual_seed(handle.seed)
 
     def _autocast(self) -> contextlib.AbstractContextManager[Any]:
         """Upstream's float16 autocast under mixed precision, else nothing."""
@@ -637,6 +642,9 @@ class _KumoGroup:
             kept under either ``kv_cache``: without the cache every
             prediction runs on them, and with it an unpickled model records
             the cache from them again.
+        cpu_draws: Whether the recipe draws on a CPU generator, the same
+            on every device. A group unpickled from a lazy release before
+            0.6 lacks it and draws on the model's device, as it was fitted.
     """
 
     n_members: int
@@ -648,6 +656,7 @@ class _KumoGroup:
     scale: float = 1.0
     cache: Any = None
     context: tuple[_typing.FloatArray, _Array] | None = None
+    cpu_draws: bool = False
 
     def provenance(self) -> dict[str, Any]:
         """What ran, for ``provenance_``."""
@@ -703,17 +712,21 @@ def _recipe(
     """
     import torch  # noqa: PLC0415 - torch comes with the extra.
 
+    from lazy.models import _kumo_draws  # noqa: PLC0415 - imports sdm.
+
     pinned = _PINNED_RECIPE
     features = [
         sp.StypeDispatch(
             numerical=[
                 _numerical(sp, tokens, outlier_threshold),
-                sp.FlipSign(pinned["flip_probability"]),
+                _kumo_draws.FlipSign(pinned["flip_probability"]),
             ]
         )
     ]
     if feature_shuffle:
-        features.append(sp.ShuffleColumns(method=AUTO_FEAT_SHUFFLE_METHOD))
+        features.append(
+            _kumo_draws.ShuffleColumns(method=AUTO_FEAT_SHUFFLE_METHOD)
+        )
     features += [
         sp.SelectColumns(pinned["max_columns"], method="first"),
         sp.Cast(torch.float32),
@@ -724,7 +737,7 @@ def _recipe(
             sp.StypeDispatch(
                 numerical=[
                     sp.Standardize(),
-                    sp.FlipSign(pinned["flip_probability"]),
+                    _kumo_draws.FlipSign(pinned["flip_probability"]),
                 ]
             )
         ],

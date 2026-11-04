@@ -115,8 +115,9 @@ quantile spacing past it, so that a fine grid shows no spike there. Its native
 grid is 1,500 equal bins over the range of the context targets, padded by 25%
 on each side. Kumo's preprocessing runs in double precision on the device,
 which Apple's MPS devices do not support, so LAZY refuses `device="mps"`
-before it loads the weights. Kumo Tabular draws its members' random sign flips and
-column shuffles on the model's device, so a CPU and a GPU give different
-ensembles for one seed (see {doc}`../guide/reproducibility`). NVIDIA pretrained Kumo Tabular on tables of up to
+before it loads the weights. NVIDIA's package draws the members' random sign
+flips and column shuffles on the model's device, where a CPU and a GPU give
+different draws for one seed. LAZY draws them on a CPU on every device, so
+both give the same ensemble (see {doc}`../guide/reproducibility`). NVIDIA pretrained Kumo Tabular on tables of up to
 60,000 rows, and LAZY warns above that size, since its accuracy on larger
 contexts has not been measured.

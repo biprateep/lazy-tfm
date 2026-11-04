@@ -83,6 +83,48 @@ def test_an_explicit_recipe_drops_the_clip_and_the_shuffle():
     assert _find(recipe.features, "FlipSign")
 
 
+@pytest.mark.parametrize(
+    ("step", "argument"), [("FlipSign", 0.5), ("ShuffleColumns", "latin")]
+)
+def test_the_random_steps_draw_as_upstreams_do_on_a_cpu(step, argument):
+    sdm = pytest.importorskip("sdm")
+    torch = pytest.importorskip("torch")
+    draws = pytest.importorskip("lazy.models._kumo_draws")
+    rng = np.random.default_rng(5)
+    # Members of unequal widths, one of a single column.
+    tables = [
+        sdm.TableTensor(
+            columns={sdm.Stype.numerical: [f"c{j}" for j in range(width)]},
+            numerical=torch.tensor(rng.normal(size=(4, width))),
+        )
+        for width in (6, 4, 1)
+    ]
+    ensemble = sdm.EnsembleTable.from_tables(tables, (0, 1, 0, 2, 1, 0))
+    theirs, ours = (
+        cls(argument).fit_transform_ensemble(
+            ensemble, generator=torch.Generator().manual_seed(7)
+        )
+        for cls in (getattr(sdm.processing, step), getattr(draws, step))
+    )
+    for member in range(len(ensemble)):
+        assert ours[member].columns == theirs[member].columns
+        assert torch.equal(ours[member].numerical, theirs[member].numerical)
+
+
+def test_fitted_groups_draw_on_a_cpu_and_older_pickles_on_the_device(
+    monkeypatch, data
+):
+    X, y, _ = data
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=2).fit(X, y)
+    model.device_ = "cuda"  # Never reached: the groups draw on a CPU.
+    for handle in model.handles_:
+        assert model._generator(handle).device.type == "cpu"
+    # A group pickled before the field existed lacks it.
+    older = pickle.loads(pickle.dumps(model.handles_[0]))
+    del older.__dict__["cpu_draws"]
+    assert not older.cpu_draws
+
+
 def test_members_cycle_through_their_transforms():
     group = types.SimpleNamespace(
         native_transforms=("identity", "power", "identity")

@@ -42,6 +42,16 @@ change the API.
 
 ### Changed
 
+- Kumo Tabular draws its members' random sign flips and column shuffles on a
+  CPU generator on every device, and moves them to the device, so a CPU and a
+  GPU give the same ensemble for the same `random_state`. NVIDIA's package
+  draws them on the device, where the two give different draws
+  (NVIDIA/structured-data-models#1339). CPU results are unchanged, and so
+  are the golden densities. On a GPU, results change for the same seed: on
+  50 `california_housing` rows, the quantiles moved by up to 0.28 of a row's
+  5% to 95% range, and now agree with the CPU's to 6.6e-6. A Kumo model
+  saved before this release keeps drawing on its device when it is loaded,
+  so it repeats its answers.
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.
