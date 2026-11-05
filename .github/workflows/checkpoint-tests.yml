@@ -1,10 +1,11 @@
 # On request, run the tests that download and load the pinned checkpoints, on
 # a CPU: from the Actions tab ("Checkpoint tests" -> Run workflow, optionally
-# with a pytest -k expression), or by adding the label "checkpoints" to a pull
-# request; to run it again on a pull request, remove the label and add it
-# back. Nothing runs on a schedule. Run by hand with "record" naming backends,
-# it re-records their golden densities instead of testing, and uploads them as
-# the artifact "golden". No login is needed: every pinned checkpoint
+# with a pytest -k expression and a macOS or Windows runner), or by adding the
+# label "checkpoints" to a pull request, which runs on Linux; to run it again
+# on a pull request, remove the label and add it back. Nothing runs on a
+# schedule. Run by hand with "record" naming backends, it re-records their
+# golden densities instead of testing, and uploads them as the artifact
+# "golden". No login is needed: every pinned checkpoint
 # downloads anonymously from Hugging Face.
 #
 # The pinned checkpoints come to about 11 GB (their size_bytes in
@@ -24,6 +25,11 @@ on:
         description: "backends to re-record golden densities for, space-separated, instead of testing (select is then ignored)"
         required: false
         default: ""
+      os:
+        description: "runner; off Linux, select must name the tests, since TabPFN's and TabFM's golden files match only Linux"
+        type: choice
+        options: [ubuntu-latest, macos-latest, windows-latest]
+        default: ubuntu-latest
   pull_request:
     types: [labeled]
 
@@ -33,12 +39,13 @@ permissions:
 jobs:
   checkpoints:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'checkpoints'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.os || 'ubuntu-latest' }}
     timeout-minutes: 90
     # On the job, so that a run another label starts, which skips the job,
-    # cancels nothing: a new request replaces the one still running.
+    # cancels nothing: a new request replaces the one still running on the
+    # same operating system.
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.os }}
       cancel-in-progress: true
     env:
       LAZY_RUN_CHECKPOINT_TESTS: "1"
@@ -48,9 +55,20 @@ jobs:
       # uncached ones by more than float rounding; its AVX2 kernels, on every
       # runner, do not. On an AVX2 runner this changes nothing.
       ATEN_CPU_CAPABILITY: avx2
+    defaults:
+      run:
+        shell: bash
     steps:
+    # TabPFN's and TabFM's golden files match only Linux runners, and the
+    # golden files are recorded there. Said before any install.
+    - name: Refuse a run off Linux that needs the Linux golden files
+      if: runner.os != 'Linux' && (env.RECORD != '' || env.SELECT == '')
+      run: |
+        echo "::error::Off Linux, name the tests with select, and record on ubuntu-latest."
+        exit 1
     # TabPFN's golden file depends on the CPU vendor (tests/lazy/golden_data.py).
     - name: Report the processor
+      if: runner.os == 'Linux'
       run: |
         vendor=$(grep -m1 vendor_id /proc/cpuinfo | cut -d: -f2)
         model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2)
@@ -63,22 +81,28 @@ jobs:
       with:
         enable-cache: true
     - name: Install the locked backend packages with CPU-only PyTorch
+      if: runner.os == 'Linux'
       run: .github/scripts/install-backends-cpu.sh
-    # The CPU install leaves out triton with the CUDA wheels, but LimiX's
-    # network imports it on a CPU too. The install script writes the locked
-    # requirements.txt this step reads.
+    # The CPU install leaves out triton with the CUDA wheels. LimiX runs
+    # without it, but Linux users have it, so the Linux run keeps it. The
+    # install script writes the locked requirements.txt this step reads.
     - name: Install the locked triton for LimiX
+      if: runner.os == 'Linux'
       run: uv pip install "$(grep -E '^triton==' requirements.txt)"
+    # PyTorch's wheels for macOS and Windows are CPU-only, with no triton.
+    - name: Install the locked backend packages
+      if: runner.os != 'Linux'
+      run: uv sync --locked --all-extras --python 3.12
     - name: Run the checkpoint tests
       if: env.RECORD == ''
       run: |
         args=(-m checkpoint -rs)
         if [[ -n "$SELECT" ]]; then args+=(-k "$SELECT"); fi
-        .venv/bin/python -m pytest "${args[@]}"
+        uv run --no-sync python -m pytest "${args[@]}"
     - name: Record the golden densities
       if: env.RECORD != ''
       # Unquoted, so that each name is its own argument.
-      run: .venv/bin/python tests/lazy/record_golden.py $RECORD
+      run: uv run --no-sync python tests/lazy/record_golden.py $RECORD
     - name: Upload the golden densities
       if: env.RECORD != ''
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
