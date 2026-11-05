@@ -148,8 +148,10 @@ style (rendered by napoleon).
 ### The logo
 
 `docs/logo/make_logo.py` draws the logo, its white version, the square icon
-and the favicon, and writes them into `docs/_static/`, where the docs and the
-README pick them up. To change the logo, edit the script and rerun it:
+and the favicons (PNG at 64 and 180 pixels, and an SVG), and writes them
+into `docs/_static/`, where the docs and the README pick them up. The
+[brand page](docs/brand.md) lists the files and the colors. To change the
+logo, edit the script and rerun it:
 
 ```bash
 uv run python docs/logo/make_logo.py

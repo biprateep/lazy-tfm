@@ -47,7 +47,6 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
     "sphinx_design",
-    "sphinx_rtd_theme",
 ]
 
 # _gallery.md is a fragment that tutorials/index.md includes, not a page, and
@@ -558,29 +557,57 @@ copybutton_prompt_text = r"\$ |>>> |\.\.\. "
 copybutton_prompt_is_regexp = True
 
 # -- HTML ---------------------------------------------------------------------
-html_theme = "sphinx_rtd_theme"
-html_title = "lazy-tfm"
-# The logo and favicon are drawn by docs/logo/make_logo.py; the white logo
-# sits on the theme's blue sidebar header.
+html_theme = "pydata_sphinx_theme"
+html_title = "LAZY"
+# The logo and favicons are drawn by docs/logo/make_logo.py (docs/brand.md
+# lists them).
 html_static_path = ["_static"]
-html_css_files = ["gallery.css"]  # The tutorial cards (tutorials/index.md).
-html_logo = "_static/lazy-logo-white.svg"
-html_favicon = "_static/favicon.png"
+# gallery.css styles the tutorial cards (tutorials/index.md). The favicon is
+# the SVG; the PNG sizes are extra link tags, which Sphinx writes from
+# html_css_files, since the theme has no documented favicons option.
+html_favicon = "_static/favicon.svg"
+html_css_files = [
+    "gallery.css",
+    ("favicon.png", {"rel": "icon", "sizes": "64x64", "type": "image/png"}),
+    (
+        "apple-touch-icon.png",
+        {
+            "rel": "apple-touch-icon",
+            "sizes": "180x180",
+            "type": "image/png",
+        },
+    ),
+]
 html_show_sourcelink = False
 html_theme_options = {
+    "logo": {
+        "image_light": "_static/lazy-logo.svg",
+        "image_dark": "_static/lazy-logo-white.svg",
+        "alt_text": "LAZY",
+    },
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/biprateep/lazy-tfm",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "PyPI",
+            "url": "https://pypi.org/project/lazy-tfm/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
     "navigation_depth": 3,
-    "collapse_navigation": False,
-    "style_external_links": True,
-    "prev_next_buttons_location": "both",
-    "logo_only": True,
+    "show_toc_level": 2,
+    "navbar_align": "left",
+    "use_edit_page_button": True,
 }
-# The "Edit on GitHub" link at the top of each page.
+# The "Edit on GitHub" button of each page.
 html_context = {
-    "display_github": True,
     "github_user": "biprateep",
     "github_repo": "lazy-tfm",
     "github_version": "main",
-    "conf_py_path": "/docs/",
+    "doc_path": "docs",
 }
 
 
@@ -687,19 +714,15 @@ def _edit_tutorial_source(  # Sphinx's event signature.
     context: dict[str, Any],
     doctree: object,  # noqa: ARG001
 ) -> None:
-    """Points a tutorial's "Edit on GitHub" link at its py:percent source.
+    """Points a tutorial's edit button at its py:percent source.
 
     The page is built from the executed notebook, which is not on main.
     """
     # Not the gallery page, tutorials/index.md, which is its own source.
     if (TUTORIALS.parent / f"{pagename}.py").exists():
-        context["meta"] = {
-            **(context.get("meta") or {}),
-            "github_url": (
-                "https://github.com/biprateep/lazy-tfm/blob/main/docs/"
-                f"{pagename}.py"
-            ),
-        }
+        context["page_source_suffix"] = ".py"
+    elif pagename.startswith("autoapi/"):  # Generated: no file to edit.
+        context["theme_use_edit_page_button"] = False
 
 
 def _note_tutorial_source(  # Sphinx's event signature.
