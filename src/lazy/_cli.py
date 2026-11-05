@@ -117,7 +117,7 @@ def _models() -> int:
     """Prints a table of every pinned checkpoint.
 
     The columns are the default version, the cache status and whether the
-    licence allows commercial use.
+    license allows commercial use.
 
     Returns:
         0.

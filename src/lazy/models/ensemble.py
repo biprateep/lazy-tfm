@@ -6,7 +6,7 @@
 combines their predicted distributions into one, with equal weights::
 
     model = LazyEnsembleModel(["tabpfn", "limix", "tabfm"])
-    model.fit(X_train, z_train)
+    model.fit(X_train, y_train)
     pdfs = model.predict_proba(X_test)  # the pooled densities
 
 Three pools are available. ``"geometric"`` (the default) is the normalized

@@ -25,7 +25,7 @@
 #
 #     python docs/logo/make_logo.py
 #
-# The colour is the University of Toronto's blue, #1E3765.
+# The color is the University of Toronto's blue, #1E3765.
 
 # %%
 import pathlib
@@ -99,7 +99,7 @@ HEADER = 26.0
 
 SEPARATOR = 0.65
 """Length of the separators between columns, as a fraction of the row height;
-they are centred in the row and touch neither rule.
+they are centered in the row and touch neither rule.
 """
 
 Z_BAR_SCALE = (1.0, 1.0, 0.5)
@@ -131,7 +131,7 @@ def layout() -> tuple[dict[str, list[np.ndarray]], np.ndarray, np.ndarray]:
     """Lays the letters out as the row of a table.
 
     Returns:
-        Each letter's curves, y upwards, centred in its own column on one
+        Each letter's curves, y upwards, centered in its own column on one
         baseline; the column edges, shape (5,); and the top and bottom of the
         row, shape (2,), which clear every letter by ``ROW_PAD``.
     """
@@ -206,7 +206,7 @@ def draw(
     eb: float = 1.3,
     cap: float = 2.6,
 ) -> None:
-    """Draws the logo on ``ax`` in one colour."""
+    """Draws the logo on ``ax`` in one color."""
     placed, edges, (top, bottom) = layout()
     rule = {"color": colour, "solid_capstyle": "butt"}
     for y, width in ((top + HEADER, 2.4), (top, 1.2), (bottom, 2.4)):

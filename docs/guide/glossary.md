@@ -112,8 +112,8 @@ point estimate
 
 pool
   A {class}`~lazy.models.ensemble.LazyEnsembleModel`: several models fitted
-  on the same context, whose distributions are combined. Also called an
-  See {doc}`ensembles`.
+  on the same context, whose distributions are combined. See
+  {doc}`ensembles`.
 
 provenance
   The record in a fitted model's `provenance_` of what answered: the

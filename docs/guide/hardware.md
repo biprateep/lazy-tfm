@@ -47,9 +47,8 @@ of them are fast enough on a CPU, and {doc}`scaling` how fast.
 Two of these limitations are choices of LAZY rather than of the models. Kumo
 Tabular's own package runs on Metal by converting its double-precision steps
 to single precision, which LAZY refuses so that its preprocessing gives the
-same numbers on every device. Since `device="auto"` was written for CUDA, it
-also never selects Metal, whereas TabPFN and TabICL, used on their own, prefer
-it to the CPU.
+same numbers on every device. `device="auto"` also never selects Metal,
+whereas TabPFN and TabICL, used on their own, prefer it to the CPU.
 
 ## Making a model run
 

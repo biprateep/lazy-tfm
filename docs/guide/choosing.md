@@ -30,7 +30,7 @@ default, `version="v1-large"`) had the lowest CRPS on `concrete` and `kin8nm`
 (1.171 vs. 1.204 for TabPFN-3.5 on `concrete`) and tied with its small size
 for the lowest on `yacht`, with a GPU time close to that of TabPFN-3.5. Since
 these numbers come from a single split of a few hundred rows, and we have not
-yet tested Kumo Tabular on contexts as large as those of our own
+tested Kumo Tabular on contexts as large as those of our own
 photometric-redshift experiments, we recommend it beside TabPFN-3.5 and not in
 its place. NVIDIA pretrained it on tables of up to 60,000 rows, beyond which
 `lazy` warns. Of the models in `lazy`, its weights are the only ones above 100
@@ -44,11 +44,11 @@ than 5,000 rows (1,000 for the v2 family) unless
 GPU. On a laptop or a CPU, or when permissive licensing is needed, TabICLv2 is
 the model to use, since it is small, BSD-licensed and fast on a CPU (7 s
 for 1,000 context rows and 1,000 queries, see {doc}`scaling`), at some cost
-in accuracy. For a TabPFN on a CPU, TabPFN-3.5-fast is a smaller TabPFN-3.5
-at under half its size. It is more than twice as fast
+in accuracy. For a TabPFN on a CPU, TabPFN-3.5-fast is a separate, faster
+model at under half the size of TabPFN-3.5. It is more than twice as fast
 on a CPU (within the 5,000-row CPU limit of TabPFN), somewhat faster on a GPU,
-and less accurate than TabPFN-3.5 (−13.05 vs. −13.47 in CDE loss on 10,000 DC1
-context rows), and `lazy` does not warn when it runs on a CPU. Kumo Tabular
+and less accurate than TabPFN-3.5 (see the table in {doc}`scaling`), and
+`lazy` does not warn when it runs on a CPU. Kumo Tabular
 Small (`version="v1-small"`, 28 M parameters) is the other model we consider
 usable on a CPU, and its weights allow commercial use. On the 20-core Arm CPU
 of an NVIDIA GB10, eight of its members took 9 s for 1,000 context rows and
@@ -57,5 +57,5 @@ of an NVIDIA GB10, eight of its members took 9 s for 1,000 context rows and
 ## Licenses
 
 For commercial use, only TabICLv2, TabPFN-2 and Kumo Tabular have weights
-that allow it, under the terms of their licenses, while the others are
-non-commercial. Please check the license of each backend at its original source before use.
+that allow it (see [Can I use it
+commercially?](faq.md#can-i-use-it-commercially)).

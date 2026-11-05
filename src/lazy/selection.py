@@ -24,7 +24,7 @@
 #   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 #   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 #   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""The spectroscopic selection function: how a complete catalogue gets biased.
+"""The spectroscopic selection function: how a complete catalog gets biased.
 
 A photo-z model trained on a spectroscopic sample is trained on the galaxies
 somebody could get a redshift for -- bright, and preferentially at the
@@ -37,7 +37,7 @@ This module builds the hard half. :func:`grid_selection` is a port of RAIL's
 ``rail.creation.degraders.grid_selection.GridSelection``
 (``LSSTDESC/rail_astro_tools``, commit 9c176272), which reproduces the HSC
 PDR2 ratio of spectroscopic to photometric galaxies on a 100 x 100 grid of
-i-band magnitude (13-26) against g-z colour (-2 to 6):
+i-band magnitude (13-26) against g-z color (-2 to 6):
 
 1. every galaxy is assigned the spec/phot ratio of its ``(i, g - z)`` pixel,
    and zero outside the grid;
@@ -54,12 +54,12 @@ i-band magnitude (13-26) against g-z colour (-2 to 6):
 The grid itself is a data file; :func:`lazy.datasets.fetch_hsc_grid` downloads
 and caches it, and :func:`lazy.datasets.make_selection_split` is what you
 normally call -- this module is the piece underneath, and the piece to reach
-for if you want to bias a catalogue of your own.
+for if you want to bias a catalog of your own.
 
 Fidelity note: RAIL builds its per-pixel redshift ceiling indexed
 ``[magnitude][colour]`` and reads it back as ``[colour][magnitude]``, a
 transposition its square grid hides. Here both are indexed consistently, i.e.
-the intended behaviour. The ratio table itself is stored
+the intended behavior. The ratio table itself is stored
 ``[colour][magnitude]`` in the file and RAIL reads it correctly.
 
 Typical usage example:
@@ -96,12 +96,12 @@ HSC_MAGNITUDE_LIMITS = (13.0, 26.0)
 library ever unpickles a downloaded file.
 """
 HSC_COLOR_LIMITS = (-2.0, 6.0)
-"""g-z colour span of the HSC grid, read from the same file."""
+"""g-z color span of the HSC grid, read from the same file."""
 
 
 @dataclasses.dataclass(frozen=True)
 class HSCGrid:
-    """The HSC PDR2 spectroscopic success rate on a colour-magnitude grid.
+    """The HSC PDR2 spectroscopic success rate on a color-magnitude grid.
 
     ``ratios`` is indexed ``[colour bin][magnitude bin]``, matching the file;
     ``spec`` holds the HSC spectroscopic galaxies (``mag``, ``color``,
@@ -111,7 +111,7 @@ class HSCGrid:
         ratios: Spectroscopic / photometric ratio per pixel,
             ``[colour][magnitude]``, shape (n_colour_bins, n_magnitude_bins).
         x_edges: Magnitude bin edges in mag, ``ratios.shape[1] + 1`` of them.
-        y_edges: Colour bin edges in mag, ``ratios.shape[0] + 1`` of them.
+        y_edges: Color bin edges in mag, ``ratios.shape[0] + 1`` of them.
         spec: The HSC spectroscopic sample: ``mag``, ``color``, ``specz``.
 
     Examples:
@@ -160,7 +160,7 @@ class HSCGrid:
         Args:
             path: The HDF5 file.
             magnitude_limits: The i-magnitude span of the grid, in mag.
-            color_limits: The g-z colour span of the grid, in mag.
+            color_limits: The g-z color span of the grid, in mag.
 
         Returns:
             The grid, with evenly spaced bin edges across the two spans.
@@ -191,7 +191,7 @@ class HSCGrid:
 
         Args:
             magnitude: Magnitudes in mag, shape (n_galaxies,).
-            color: Colours in mag, shape (n_galaxies,).
+            color: Colors in mag, shape (n_galaxies,).
 
         Returns:
             A tuple (magnitude_bin, colour_bin) of bin indices, each of shape
@@ -211,7 +211,7 @@ class HSCGrid:
 
         Args:
             px: Magnitude bin indices, shape (n_galaxies,).
-            py: Colour bin indices, shape (n_galaxies,).
+            py: Color bin indices, shape (n_galaxies,).
 
         Returns:
             A mask of shape (n_galaxies,), true where both indices are on the
@@ -224,7 +224,7 @@ class HSCGrid:
         """Returns the per-pixel percentile of the HSC spectroscopic redshifts.
 
         Zero where HSC has no spectra, which removes those pixels entirely --
-        the selection is as blind as the survey it is modelled on. Tables are
+        the selection is as blind as the survey it is modeled on. Tables are
         cached per percentile, because sizing a split re-runs the selection.
 
         Args:
@@ -292,7 +292,7 @@ def grid_selection(
     That is, which galaxies such a campaign would have got a redshift for.
 
     Args:
-        raw: Photometry, with the magnitude and the two colour bands among its
+        raw: Photometry, with the magnitude and the two color bands among its
             columns, in mag. Any frame will do -- it need not have come from
             :func:`~lazy.datasets.fetch_dc1`.
         redshift: True redshifts, one per row, shape (n_galaxies,). The
@@ -302,10 +302,10 @@ def grid_selection(
             downloading it on first use (:func:`lazy.datasets.fetch_hsc_grid`).
         magnitude: Column name for the grid's magnitude axis. The default is
             the LSST column matching HSC's ``i``.
-        color: The two bands whose difference is the grid's colour axis. The
+        color: The two bands whose difference is the grid's color axis. The
             default is the LSST pair matching HSC's ``g - z``.
         seed: Seeds the per-pixel subsampling only. RAIL's default is kept so
-            that the same catalogue gives the same training set here and
+            that the same catalog gives the same training set here and
             there.
         scaling_factor: The per-pixel keep fraction is
             ``ratio * scaling_factor``, capped at keeping everything, and
