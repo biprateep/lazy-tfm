@@ -65,6 +65,11 @@ change the API.
 
 ### Changed
 
+- LimiX-2 on a GPU draws its feature positional embedding as on a CPU, with
+  a CPU generator seeded per member, and moves it to the GPU. LAZY drew it
+  with a GPU generator, which gives another stream for the same seed, so the
+  same `random_state` gave different densities on the two devices. Densities
+  on a GPU change; on a CPU they are unchanged.
 - A constant target, every training value the same, now gets a point mass
   at that value on every backend, as scikit-learn's regressors answer it,
   and no network runs. Its quantiles, intervals and point estimates are the
