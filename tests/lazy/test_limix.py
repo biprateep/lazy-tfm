@@ -74,6 +74,22 @@ def test_fitting_without_the_source_says_how_to_install_it(monkeypatch, data):
         _model().fit(X, z)
 
 
+@pytest.mark.parametrize("unpickled", [False, True])
+def test_without_triton_cuda_is_refused_before_the_network_loads(
+    monkeypatch, data, unpickled
+):
+    X, z, X_test = data
+    backend = fakes.Backend("limix", monkeypatch)
+    pickled = pickle.dumps(backend(device="auto").fit(X, z))
+    monkeypatch.setattr(_limix_source.load(), "triton", False)
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "cuda:0")
+    with pytest.raises(RuntimeError, match="only with triton"):
+        if unpickled:  # device="auto" resolves to CUDA on this machine.
+            pickle.loads(pickled).predict_proba(X_test)
+        else:
+            backend(device="cuda:0").fit(X, z)
+
+
 @pytest.mark.parametrize(
     ("params", "message"),
     [

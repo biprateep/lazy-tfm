@@ -33,6 +33,8 @@ Typical usage example:
 from __future__ import annotations
 
 import atexit
+from collections.abc import Iterator
+import contextlib
 import dataclasses
 import hashlib
 import importlib
@@ -46,7 +48,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import types
+from typing import NoReturn
 import urllib.request
 
 from lazy import _home
@@ -91,6 +95,9 @@ _SUBTREES = {"model": ("model", "v2_0"), "inference": ("inference", "v2_0")}
 _loaded: dict[pathlib.Path, types.SimpleNamespace] = {}
 # Roots an environment variable named after the first load, already warned of.
 _ignored: set[pathlib.Path] = set()
+# Held through load(): two threads loading at once would load LimiX twice, and
+# one could meet the other's triton stand-in.
+_load_lock = threading.Lock()
 
 _INSTALL_HINT = (
     "LimiXBarDistribution needs LimiX's source, which is not on PyPI. lazy "
@@ -101,9 +108,9 @@ _INSTALL_HINT = (
 )
 
 # The top-level modules LimiX's two subtrees import that are not in the
-# standard library or lazy's own requirements: the limix extra's, and triton,
-# which comes with Linux torch wheels.
-_DEPENDENCIES = frozenset({"torch", "einops", "kditransform", "nvtx", "triton"})
+# standard library or lazy's own requirements: the limix extra's. triton, which
+# they import too, has a stand-in (_triton).
+_DEPENDENCIES = frozenset({"torch", "einops", "kditransform", "nvtx"})
 
 
 class LimiXSourceWarning(_warnings.LazyWarning):
@@ -271,53 +278,58 @@ def load() -> types.SimpleNamespace:
 
     Returns:
         A namespace with ``loading`` (``model.v2_0.loading``), ``preprocess``
-        (``inference.v2_0.preprocess``) and ``source`` (a :class:`Source`).
+        (``inference.v2_0.preprocess``), ``source`` (a :class:`Source`) and
+        ``triton`` (whether triton is installed; without it, the network
+        runs on any device but CUDA, as :func:`_triton` explains).
 
     Raises:
         ImportError: If the source cannot be found, or one of its own
-            dependencies (``torch``, ``einops``, ``kditransform``, ``nvtx``,
-            ``triton``) is missing.
+            dependencies (``torch``, ``einops``, ``kditransform``, ``nvtx``)
+            is missing.
     """
-    if _loaded:
-        loaded = next(iter(_loaded.values()))
-        _warn_if_redirected(loaded.source)
-        return loaded
-    source = locate()
-    if source.commit != LIMIX_COMMIT:
-        _warnings.warn(
-            f"LimiX source at {source.root} ({source.origin}) is at commit "
-            f"{source.commit or 'unknown'}; lazy was validated on "
-            f"{LIMIX_COMMIT}. Results may differ.",
-            LimiXSourceWarning,
+    with _load_lock:
+        if _loaded:
+            loaded = next(iter(_loaded.values()))
+            _warn_if_redirected(loaded.source)
+            return loaded
+        source = locate()
+        if source.commit != LIMIX_COMMIT:
+            _warnings.warn(
+                f"LimiX source at {source.root} ({source.origin}) is at commit "
+                f"{source.commit or 'unknown'}; lazy was validated on "
+                f"{LIMIX_COMMIT}. Results may differ.",
+                LimiXSourceWarning,
+            )
+        if _ALIAS not in sys.modules:
+            parent = types.ModuleType(_ALIAS)
+            parent.__path__ = []
+            sys.modules[_ALIAS] = parent
+        # lazy's own cache may be shared, so its code runs only once checked,
+        # and from a private copy: Python would also run a bytecode file
+        # planted beside the sources.
+        root = (
+            _checked_copy(source.root)
+            if source.origin == CACHE_ORIGIN
+            else source.root
         )
-    if _ALIAS not in sys.modules:
-        parent = types.ModuleType(_ALIAS)
-        parent.__path__ = []
-        sys.modules[_ALIAS] = parent
-    # lazy's own cache may be shared, so its code runs only once checked,
-    # and from a private copy: Python would also run a bytecode file
-    # planted beside the sources.
-    root = (
-        _checked_copy(source.root)
-        if source.origin == CACHE_ORIGIN
-        else source.root
-    )
-    try:
-        for name, parts in _SUBTREES.items():
-            _load_package(f"{_ALIAS}.{name}", root.joinpath(*parts))
-        namespace = types.SimpleNamespace(
-            loading=importlib.import_module(f"{_ALIAS}.model.loading"),
-            preprocess=importlib.import_module(
-                f"{_ALIAS}.inference.preprocess"
-            ),
-            source=source,
-        )
-    except ModuleNotFoundError as error:
-        if (error.name or "").partition(".")[0] not in _DEPENDENCIES:
-            raise
-        raise missing_dependency(error.name or "") from error
-    _loaded[source.root] = namespace
-    return namespace
+        try:
+            with _triton() as triton:
+                for name, parts in _SUBTREES.items():
+                    _load_package(f"{_ALIAS}.{name}", root.joinpath(*parts))
+                namespace = types.SimpleNamespace(
+                    loading=importlib.import_module(f"{_ALIAS}.model.loading"),
+                    preprocess=importlib.import_module(
+                        f"{_ALIAS}.inference.preprocess"
+                    ),
+                    source=source,
+                    triton=triton,
+                )
+        except ModuleNotFoundError as error:
+            if (error.name or "").partition(".")[0] not in _DEPENDENCIES:
+                raise
+            raise missing_dependency(error.name or "") from error
+        _loaded[source.root] = namespace
+        return namespace
 
 
 def _warn_if_redirected(source: Source) -> None:
@@ -350,18 +362,63 @@ def missing_dependency(name: str) -> ImportError:
         dependencies and source.
     """
     top = name.partition(".")[0]
-    message = (
+    return ImportError(
         f"LimiXBarDistribution needs {top!r}, one of LimiX's dependencies, "
         "which is not installed. Install them with pip install "
-        "'lazy-tfm[limix]'."
+        "'lazy-tfm[limix]'.",
+        name=name,
     )
-    if top == "triton":
-        message += (
-            " triton is published for Linux only (it comes with Linux torch "
-            "wheels), and LimiX's network imports it, so the backend runs "
-            "on Linux."
-        )
-    return ImportError(message, name=name)
+
+
+@contextlib.contextmanager
+def _triton() -> Iterator[bool]:
+    """Lets LimiX's network import triton, which PyTorch installs on Linux only.
+
+    LimiX's triton modules use only ``triton.jit``, as a decorator, and
+    ``triton.language.constexpr``, in signatures, when they are imported.
+    They launch their kernels only on CUDA tensors, and call PyTorch's
+    ``rms_norm`` on any other device. So when triton is not installed, a
+    stand-in takes its place in ``sys.modules`` while LimiX's modules
+    import, after torch, and only then. Its ``jit`` returns the function
+    unchanged; any other name raises :class:`AttributeError`.
+
+    Yields:
+        Whether triton is installed; if not, the stand-in is in place.
+    """
+    if util.find_spec("triton") is not None:
+        yield True
+        return
+    # torch probes for triton, so it must not import under the stand-in.
+    # Without torch, LimiX's own import of it says what is missing.
+    if util.find_spec("torch") is not None:
+        importlib.import_module("torch")
+    stand_in = types.ModuleType("triton")
+    vars(stand_in).update(
+        jit=lambda kernel: kernel,
+        constexpr=object,
+        language=stand_in,  # One module serves as both.
+        __getattr__=_missing_triton,
+    )
+    names = ("triton", "triton.language")
+    saved = {name: sys.modules[name] for name in names if name in sys.modules}
+    sys.modules.update(dict.fromkeys(names, stand_in))
+    try:
+        yield False
+    finally:
+        for name in names:
+            if name in saved:
+                sys.modules[name] = saved[name]
+            else:
+                del sys.modules[name]
+
+
+def _missing_triton(attribute: str) -> NoReturn:
+    """The triton stand-in's ``__getattr__`` (PEP 562), for names it lacks."""
+    raise AttributeError(
+        f"triton.{attribute} is needed, but triton is not installed. LimiX "
+        "runs its triton kernels on a CUDA device only; on another device it "
+        "needs none."
+    )
 
 
 def _files(root: pathlib.Path) -> list[tuple[str, bytes]]:

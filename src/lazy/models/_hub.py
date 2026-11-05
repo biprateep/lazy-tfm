@@ -525,7 +525,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
             size_bytes=1_625_774_719,
             license_name="StableAI LimiX, non-commercial",
             gpu="yes",
-            cpu="no (and Linux only)",
+            cpu="no",
         ),
         Checkpoint(
             backend="tabicl",

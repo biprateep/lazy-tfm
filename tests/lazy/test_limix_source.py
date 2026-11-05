@@ -3,12 +3,14 @@
 """Finding LimiX's source and loading it under private names."""
 
 import importlib
+from importlib import machinery
 from importlib import metadata
 import importlib.util
 import io
 import pathlib
 import sys
 import tarfile
+import types
 import urllib.error
 import warnings
 
@@ -165,7 +167,7 @@ def test_load_uses_private_names_and_warns_on_another_commit(
     assert _limix_source.load() is limix  # loaded once
 
 
-@pytest.mark.parametrize("module", ["kditransform", "einops", "triton"])
+@pytest.mark.parametrize("module", ["kditransform", "einops"])
 def test_a_missing_dependency_says_how_to_install_it(
     clean_env, tmp_path, module
 ):
@@ -180,9 +182,52 @@ def test_a_missing_dependency_says_how_to_install_it(
         pytest.raises(ImportError, match=r"lazy-tfm\[limix\]") as caught,
     ):
         _limix_source.load()
-    message = str(caught.value)
-    assert repr(module) in message
-    assert ("Linux only" in message) == (module == "triton")
+    assert repr(module) in str(caught.value)
+
+
+# How LimiX's network uses triton when it is imported.
+_TRITON_USER = """\
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def kernel(x, BLOCK: tl.constexpr):
+    return x
+
+
+def launch():
+    return triton.next_power_of_2(3)
+"""
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_limix_imports_triton_whether_or_not_it_is_installed(
+    clean_env, tmp_path, installed
+):
+    root = _fake_source(tmp_path / "L")
+    (root / "model" / "v2_0" / "loading.py").write_text(_TRITON_USER)
+    clean_env.setenv("LAZY_LIMIX_SRC", str(root))
+    tl = types.ModuleType("triton.language")
+    tl.constexpr = int
+    triton = types.ModuleType("triton")
+    triton.__spec__ = machinery.ModuleSpec("triton", None)
+    triton.language = tl
+    triton.jit = lambda kernel: kernel
+    triton.next_power_of_2 = lambda n: 4
+    for name, module in [("triton", triton), (tl.__name__, tl)]:
+        clean_env.setitem(sys.modules, name, module if installed else None)
+    with pytest.warns(_limix_source.LimiXSourceWarning):
+        limix = _limix_source.load()
+    assert limix.triton is installed
+    assert limix.loading.kernel(5, 8) == 5
+    if installed:
+        assert limix.loading.launch() == 4
+    else:
+        with pytest.raises(AttributeError, match="triton is not installed"):
+            limix.loading.launch()
+    # Only LimiX's code ever sees the stand-in.
+    assert sys.modules["triton"] is (triton if installed else None)
 
 
 def test_other_missing_modules_are_not_reworded(clean_env, tmp_path):
