@@ -219,6 +219,11 @@ change the API.
   time of `predict_proba` fell from 0.33 s to 0.27 s and its peak memory
   from 229 MiB to 172 MiB for four bagged members of 5,000 buckets, and from
   0.0132 s to 0.0117 s for 999 quantiles.
+- `predict`, `score` and `evaluate` on a model that chunks its queries (every
+  backend but TabFM, alone or through `LazyModel`) show one progress bar for
+  the whole call; each member of a `LazyEnsembleModel` keeps its own. They used to
+  show one bar per block of about 256 MB of densities, so several in a row
+  for a large query set on a fine grid. Their results are unchanged.
 
 ### Deprecated
 
@@ -272,6 +277,20 @@ change the API.
 
 ### Fixed
 
+- The docs state each measured figure with its setup, and the figures that
+  their sources or re-measurements contradict are corrected. TabFM's
+  key/value cache saves a ratio of 1.6 in time at the defaults (30.1 s
+  against 47.4 s), not 26 times the compute, and `TabFMPerformanceWarning`
+  now says so. LimiX-2's cache takes about 3 GB per member at 20,000 rows,
+  not 2 GB. A refit on a shared
+  network takes 0.03 s for TabPFN-3.5 and 0.1 s for LimiX-2, from 0.7 s and
+  1.3 s. TabFM in bfloat16 moves a typical row's density by about 2% of its
+  peak and single bins by up to 15%, and the NLL on DC1 by at most 0.002;
+  TabPFN's int8 cache moves a row by up to 3% of its peak. Smaller
+  corrections: the rms error of extrapolation on the chirp reaches 2.5, Kumo
+  Tabular matches NVIDIA's code to 2e-7 and its cached GPU path to 0.6% of a
+  row's quantile spread, and TabFM's `n_dither=3` costs 1.8 to 2.8 times a
+  prediction.
 - `load_dataset("bike_sharing")` and `load_dataset("kings_county")` load
   under pandas 3.1, where they raised a `TypeError` from scikit-learn's pandas
   ARFF parser. These two datasets are now read with scikit-learn's

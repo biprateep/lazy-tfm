@@ -69,8 +69,12 @@ CPU generator per member rather than from PyTorch's global one, so LAZY's
 answers agree with LimiX's only within the variation between random seeds,
 not bit for bit. They are drawn on the CPU and moved to the GPU, so a GPU
 starts from the same draw as a CPU. LAZY also adds a key/value cache, which
-upstream LimiX lacks, and lets `n_estimators` take any value by repeating the eight-member recipe. LimiX
-states no maximum context size, but in our tests on DC1 photometry its
-accuracy degrades above about 20,000 context rows, so LAZY warns above that
+upstream LimiX lacks, and lets `n_estimators` take any value by repeating the
+eight-member recipe. LimiX states no maximum context size, but on DC1
+photometry its accuracy degrades above about 20,000 context rows. On all
+390,990 test rows of the representative DC1 set, on a 200-bin grid, its CDE
+loss was −14.15 at 20,000 context rows, −13.98 at 30,000 and −13.60 at
+43,486, while 32 bags of 20,000 rows gave −14.375 at 43,486 (one GB10 GPU,
+lazy commit 0774d1d, LimiX-2 weights de07b67). LAZY therefore warns above that
 size; bagging (e.g., `bag_size=20_000`, so that each member sees at most
 20,000 rows) keeps every member within that size.

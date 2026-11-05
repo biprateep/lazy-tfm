@@ -136,10 +136,10 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             standardization fitted there.
         kv_cache: Run the context through the network once, at fit, and let
             each chunk of queries attend to the result. Exact to the
-            rounding of the precision in use; costs about 2 GB of GPU memory
-            per member at 20,000 context rows. The caches may take 0.6 of
-            the GPU memory free at fit; members whose caches do not fit run
-            uncached, with a warning.
+            rounding of the precision in use; costs about 3 GB of GPU memory
+            per member at 20,000 rows of DC1 (12 features). The caches may
+            take 0.6 of the GPU memory free at fit; members whose caches do
+            not fit run uncached, with a warning.
         y_grid: Default output grid; the native grid is the 5,000 buckets,
             in full.
         device: Where to run.

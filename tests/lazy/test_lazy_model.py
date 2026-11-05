@@ -14,6 +14,7 @@ from sklearn import exceptions
 import standins
 
 import lazy
+from lazy.models import _progress
 from lazy.models import registry
 
 
@@ -325,3 +326,25 @@ def test_quantiles_reduce_the_backends_chunks_one_at_a_time(monkeypatch):
     np.testing.assert_array_equal(
         model.predict_quantiles(X, [0.1, 0.9]), expected
     )
+
+
+def test_predict_shows_the_backends_one_progress_bar_over_all_blocks(
+    monkeypatch,
+):
+    monkeypatch.setitem(registry.ESTIMATORS, "tabicl", standins.QuantileStandIn)
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 2))
+    y = X[:, 0] + rng.normal(0.0, 0.1, 40)
+    model = lazy.LazyModel("tabicl", chunk_size=4, progress=False).fit(X, y)
+    totals = []
+    original = _progress.bar
+
+    def counting(*args, **kwargs):
+        totals.append(kwargs["total"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_progress, "bar", counting)
+    # About eight rows of densities per block, so five blocks.
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 8 * 8 * model.grid.n_bins)
+    model.predict(X)
+    assert totals == [len(X)]

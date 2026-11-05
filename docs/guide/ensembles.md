@@ -74,15 +74,15 @@ levels 0, 0.001, ..., 1, each clipped to the pooling grid (since the ends of a
 bar distribution reach far into the tails), and answers with a
 {class}`~lazy.distributions.QuantileDistribution` that lies within the grid.
 
-## Our own testing
+## Results on DC1
 
-Our own testing on the DC1 photometric redshift benchmark shows that pooling
-different models helps, while pooling the members of one model does not. On a
+Runs on the DC1 photometric redshift benchmark show that pooling different
+models helps, while pooling the members of one model does not. On a
 random subset of 50,000 test galaxies with a context of 43,486 galaxies, scored
 on a grid of 0.001 in redshift, the equal geometric pool of TabPFN-3.5, bagged
 LimiX-2 (32 members on random bags of 20,000 rows) and TabFM lowered the CDE
 loss by 0.277 ± 0.024 relative to TabPFN-3.5, and it was the best calibrated of
-the estimators we tested (a Kolmogorov-Smirnov distance of its PIT values from
+the estimators compared (a Kolmogorov-Smirnov distance of its PIT values from
 uniform of 0.0092 vs. 0.0100 for TabPFN-3.5). On the biased training set, the
 same pool lowered the CDE loss by 0.301 ± 0.033 relative to LimiX-2, the best
 single model there. The cheaper pair of TabPFN-3.5 and TabFM lowered it by
@@ -90,14 +90,18 @@ single model there. The cheaper pair of TabPFN-3.5 and TabFM lowered it by
 recommend the three models together as the configuration that holds up in both
 regimes. In contrast, pooling the eight members of TabPFN-3.5 geometrically,
 instead of averaging them, lowered the CDE loss on its native grid by only
-0.0075.
+0.0075. The models ran the paper's settings, not LAZY's defaults: TabPFN-3.5
+with `kv_cache="int8"`, TabFM with 4 members, 3 dithers and 10 by 10 bins, and
+LimiX-2 with 32 bags of 20,000 rows (one GB10 GPU, lazy-tfm 0.1.0.dev0,
+tabpfn 9.0.0).
 
 The pools need a large enough context. The equal geometric pool of the three
 models beat the best single model at every context size from 5,000 rows in both
 regimes. However, on 1,000 rows of DC1, where TabFM is far behind the other two
 models (by 1.38 in CDE loss), the pool gained only 0.06 over the best single
-model, and the pair of TabPFN-3.5 and TabFM lost 0.07, since an equal pool is
-dragged down by its weakest member. Therefore, `fit` warns with an
+model, and the pair of TabPFN-3.5 and TabFM lost 0.07 (with LimiX-2's bags
+half the context, on a grid of 0.01), since an equal pool is dragged down by
+its weakest member. Therefore, `fit` warns with an
 {class}`~lazy.models.ensemble.EnsembleSizeWarning` when a pool of two or more
 members gets fewer than 3,000 context rows, and we suggest fewer members, or
 the best single model, at those sizes.
@@ -105,13 +109,16 @@ the best single model, at those sizes.
 ## Cost
 
 Every member is a full model, so a pool costs about the sum of its members in
-time and memory, and the members run one after another. LimiX-2 (bagged) and
-TabFM each took about 50 times the wall-clock time of TabPFN-3.5 on our 50,000
-test galaxies (4,000 s vs. 80 s), so the pool of the three models costs about
-50 to 100 times as much as TabPFN-3.5 alone. The pool predicts `chunk_size`
+time and memory, and the members run one after another. LimiX-2 (bagged, and
+without its cache, which fell back for lack of memory) and TabFM each took
+about 50 times the wall-clock time of TabPFN-3.5 on the 50,000 test galaxies
+(4,000 s vs. 80 s), so at those settings the pool of the three models
+cost about 50 to 100 times as much as TabPFN-3.5 alone. The pool predicts `chunk_size`
 rows at a time (8,192 by default), calling each member once per chunk, and the
 members' distributions of one chunk set the peak memory.
 
-The weights are always equal. Fitted exponents lowered the CDE loss of the
-geometric pool further in our tests, but they also made its densities too
-sharp.
+The weights are always equal. In the same runs, fitted exponents lowered the
+CDE loss of the geometric pool by 0.378 ± 0.025 relative to TabPFN-3.5, but
+they also made its densities too sharp: 12 var(PIT), which is 1 for
+calibrated densities, was 1.057 against 0.977 for the equal pool, and the
+fitted pool lost 0.154 in CDE loss at z > 1.5.
