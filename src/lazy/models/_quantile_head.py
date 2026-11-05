@@ -22,6 +22,7 @@ Typical usage example:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -102,8 +103,8 @@ def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
 class QuantileHead:
     """The native grid and density tabulation of a quantile-head backend.
 
-    Mixed in before :class:`~lazy.models.ContextEnsembleEstimator`,
-    whose ``_distribution_chunks`` and ``native_grid_`` it uses. The native
+    Mixed in before :class:`~lazy.models.ContextEnsembleEstimator`, whose
+    ``native_grid_`` it uses and whose ``_tabulate`` it overrides. The native
     grid has :data:`NATIVE_QUANTILE_BINS` equal-width bins across the range of
     every context target (bagged or not), padded by :data:`NATIVE_PAD` of that
     range on each side; tabulating a row that puts more than
@@ -115,7 +116,6 @@ class QuantileHead:
 
     # Provided by ContextEnsembleEstimator; declared for the type checker.
     native_grid_: grid_lib.Grid
-    _distribution_chunks: Any
 
     def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         del X  # Unused: the native grid depends on the targets alone.
@@ -135,12 +135,27 @@ class QuantileHead:
             low - pad, high + pad, n_bins, normalization="histogram"
         )
 
-    def _predict_pdf(
-        self, X: pd.DataFrame, grid: grid_lib.Grid
+    def _tabulate(
+        self,
+        chunks: Iterable[distributions.Distribution],
+        grid: grid_lib.Grid,
     ) -> _typing.FloatArray:
+        """Un-normalized densities of consecutive chunks on ``grid``.
+
+        On the native grid, warns of rows that put more than
+        :data:`OUTSIDE_TOLERANCE` of their probability outside it.
+
+        Args:
+            chunks: The distributions of consecutive chunks of rows.
+            grid: The grid to answer on.
+
+        Returns:
+            Densities, shape (rows, grid.n_bins), which the caller
+            normalizes once.
+        """
         blocks = []
         outside = 0
-        for dist in self._distribution_chunks(X):
+        for dist in chunks:
             if grid == self.native_grid_ and isinstance(
                 dist, distributions.QuantileDistribution
             ):
@@ -149,16 +164,17 @@ class QuantileHead:
             else:
                 density = dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
             blocks.append(density)
+        pdfs = blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
         if outside:
             _warnings.warn(
                 "Densities are renormalised on the native grid where rows "
                 f"put more than {OUTSIDE_TOLERANCE:.0%} of their probability "
-                f"outside it: {outside} of {len(X)} rows, grid "
+                f"outside it: {outside} of {len(pdfs)} rows, grid "
                 f"[{grid.y_min:g}, {grid.y_max:g}]. Pass a wider y_grid, or "
                 "use predict_distribution, which has full support.",
                 GridCoverageWarning,
             )
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+        return pdfs
 
     def _progress_postfix(
         self, dist: distributions.Distribution

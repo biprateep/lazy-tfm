@@ -73,9 +73,10 @@ of the ensemble at once, so that a bagged ensemble, where every member is a
 group of its own, is trimmed the same way as one that runs in a single call.
 
 Every prediction reaches the model through those two methods. The base class
-cuts the queries into chunks and yields each chunk's distributions from
-`_distribution_chunks`, from which every prediction method works: the
-densities, the native distributions, quantiles, intervals and PIT values. A
+cuts the queries into chunks, under one progress bar per call, and works
+every prediction method from the distributions that `_distribution_chunks`
+yields: the densities (tabulated by `_tabulate`), the native distributions,
+quantiles, intervals and PIT values. A
 backend overrides none of these, since the others would bypass an override of
 one. In particular `_predict_distribution` is derived from
 `_distribution_chunks`, so a backend that overrode only the former would be
