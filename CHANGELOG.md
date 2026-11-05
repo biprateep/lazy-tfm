@@ -65,6 +65,10 @@ change the API.
 
 ### Changed
 
+- The documentation uses the PyData Sphinx theme, which has a dark mode,
+  and the favicon comes as an SVG and as PNG files of 64 and 180 pixels.
+  A new brand page lists the spellings of the name, the logo files and the
+  colors. Prose spells the project LAZY.
 - The package metadata lists both authors, as `CITATION.cff` does. Its
   summary and keywords describe conditional density estimation in general,
   with photometric redshifts and astronomy as one use.

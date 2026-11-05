@@ -49,6 +49,7 @@ processor to another:
 ```
 
 ```{figure} figures/figs/chirp_demo.svg
+:class: lazy-figure
 :alt: A noisy chirp with three gaps, filled by TabPFN-3.5-fast's mean and 68% interval.
 :width: 100%
 ```
@@ -86,6 +87,7 @@ API reference <autoapi/lazy/index>
 
 contributing
 citing
+brand
 ```
 
 ```{toctree}
