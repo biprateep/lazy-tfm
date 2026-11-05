@@ -8,7 +8,9 @@
 # branch `tutorials`, which the docs build fetches (see docs/conf.py) and the
 # Colab and GitHub buttons open. This script writes each executed notebook
 # next to its script, and its gallery thumbnail to thumbnails/<name>.png
-# (both ignored by git), ready to be copied there.
+# (both ignored by git), ready to be copied there. Each notebook's metadata
+# records, under `lazy`, the lazy version and commit it ran on and the
+# SHA-256 of its script; the docs note a notebook whose script has changed.
 #
 # Gallery metadata. docs/conf.py builds the cards of docs/tutorials/index.md
 # from the scripts themselves, so a tutorial needs no other registration:
@@ -82,13 +84,20 @@ for name in "${names[@]}"; do
     uv run --no-sync jupyter nbconvert --to notebook --execute --inplace \
       --ExecutePreprocessor.timeout=3600 "$notebook"
     # Progress bars are ipywidgets, which a static page cannot draw: without
-    # their live state they render as a bar stuck at 0%. Drop them.
-    uv run --no-sync python - "$notebook" <<'EOF'
+    # their live state they render as a bar stuck at 0%. Drop them. Then
+    # stamp the code the notebook ran on, which docs/conf.py checks against
+    # the script to note a stale notebook.
+    uv run --no-sync python - "$notebook" "$here/$name.py" \
+      "$(git -C "$here" describe --always --dirty --abbrev=40)" <<'EOF'
+import hashlib
+import pathlib
 import sys
 
 import nbformat
 
-path = sys.argv[1]
+import lazy
+
+path, script, commit = sys.argv[1:]
 nb = nbformat.read(path, as_version=4)
 widget = "application/vnd.jupyter.widget-view+json"
 for cell in nb.cells:
@@ -97,6 +106,12 @@ for cell in nb.cells:
             out for out in cell.outputs if widget not in out.get("data", {})
         ]
 nb.metadata.pop("widgets", None)
+source = pathlib.Path(script).read_bytes()
+nb.metadata["lazy"] = {
+    "version": lazy.__version__,
+    "commit": commit,
+    "source_sha256": hashlib.sha256(source).hexdigest(),
+}
 nbformat.write(nb, path)
 EOF
     echo "wrote $notebook"

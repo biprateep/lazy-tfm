@@ -266,9 +266,7 @@ def test_no_regressor_argument_is_left_to_upstream(monkeypatch, kv_cache):
         n_estimators=1, kv_cache=kv_cache, device="cpu", progress=False
     ).fit(X, X[:, 0])
     accepted = inspect.signature(fake_tabpfn.Regressor.upstream).parameters
-    # Deprecated: one acts only on n_estimators="auto", one does nothing.
-    unused = {"auto_scale_n_estimators", "n_jobs"}
-    assert set(est.regressor_.kwargs) == set(accepted) - unused
+    assert set(est.regressor_.kwargs) == set(accepted)
 
 
 def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch):

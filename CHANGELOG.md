@@ -9,9 +9,14 @@ change the API.
 
 ### Added
 
+- `Checkpoint`, the record that `lazy.get_checkpoint` returns, is now
+  exported from `lazy` and `lazy.models` and documented in the API
+  reference. The page of each package with an `__all__` (`lazy`,
+  `lazy.models` and `lazy.plotting`) lists the names it exports, and the
+  reference builds with no unresolved cross-reference.
 - `lazy.LazyWarning`, a `UserWarning` that is the base of lazy's own
   warning classes, and `lazy.GridCoverageWarning`, issued when densities are
-  renormalised because the native grid misses part of their probability.
+  renormalized because the native grid misses part of their probability.
   `lazy.ImportNameWarning`, `lazy.LimiXSourceWarning` and
   `lazy.TabFMPerformanceWarning` are now exported from `lazy`.
 - `lazy.UnknownNameError`, the error for an unknown backend name or model
@@ -19,14 +24,14 @@ change the API.
   clauses still catch it, and its message names the valid choices.
 - `lazy models` lists every pinned checkpoint, its default version and
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
-  weights of the checkpoints named, with the licence notice, so the cache
+  weights of the checkpoints named, with the license notice, so the cache
   can be warmed from the command line.
 - The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
-  issues a `lazy.LicenseWarning` with their non-commercial licence. TabPFN's
-  own downloader asks for the licence to be accepted, but LAZY downloads the
+  issues a `lazy.LicenseWarning` with their non-commercial license. TabPFN's
+  own downloader asks for the license to be accepted, but LAZY downloads the
   pinned file itself, so the user never saw it.
 - Each pinned checkpoint has a `commercial_use` flag, which says whether the
-  licence of its weights allows commercial use. `lazy models` and the docs'
+  license of its weights allows commercial use. `lazy models` and the docs'
   table of the models show it.
 - The package is marked typed (`py.typed`), so type checkers read its
   annotations.
@@ -39,6 +44,24 @@ change the API.
   and NLL of each row from one normalization, where `per_object_scores`,
   `per_object_crps` and `per_object_nll` normalize once each. `evaluate`
   uses it, with the same results to the bit.
+- The user guide has four new pages: a glossary, how the models work with
+  scikit-learn's tools, saving and loading a fitted model, and every warning
+  that lazy issues. The scaling page states how `n_jobs` uses the model cache
+  and the GPU, and how `chunk_size` multiplies the cost of the context when
+  `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
+  the title's capitals.
+- Each tutorial page notes when its notebook may not match the source
+  shown, and, once the notebook is re-executed, the lazy version and commit
+  it ran on. The docs of a
+  release show the notebooks executed for it, a fork's docs build fetches
+  the notebooks from `biprateep/lazy-tfm`, and an offline local build shows
+  the tutorials without outputs instead of failing.
+- The user guide has a page that compares LAZY with each model's own
+  package, TabTune and AutoGluon-Tabular, and says when to use each instead.
+- The user guide has four concept figures, drawn by
+  `docs/figures/make_figures.py` without a model: the point estimates of a
+  bimodal density, the three pools of an ensemble, chunks and bags of the
+  context, and a grid that ends inside a distribution.
 
 ### Changed
 
@@ -95,10 +118,10 @@ change the API.
   that names the valid choices. They raised `KeyError` or `ValueError`.
 - `fit` reports an unknown model version before a missing backend package.
   A missing package is still reported before any other bad parameter.
-- `predict_cdf` returns each row's native CDF at the bin centres, exactly,
+- `predict_cdf` returns each row's native CDF at the bin centers, exactly,
   as `predict_quantiles` and `predict_pit` do. It computed the CDF from the
   densities on the grid, which drops the probability outside the grid and
-  adds a discretisation error. On the test fakes and stand-ins, on 50 and
+  adds a discretization error. On the test fakes and stand-ins, on 50 and
   500 bins over a range partly outside the support, values moved by up to
   0.32, mostly from the probability outside the grid; the median move was
   at most 0.006.
@@ -323,7 +346,7 @@ change the API.
 - Two grids compare equal when their edges agree to 1e-12 of the largest
   edge's magnitude and to 1e-6 of the narrowest bin's width, instead of to
   1e-12 absolutely. A grid rebuilt from its
-  own centres far from zero (from 10⁷) was unequal to itself, and grids whose
+  own centers far from zero (from 10⁷) was unequal to itself, and grids whose
   edges are all below 1e-12 were equal however they differed. The metrics
   check a `bin_edges` passed with a `Grid` by the same rule, and score with
   the grid's own edges.
@@ -359,6 +382,12 @@ change the API.
   `predict_proba` with a `TabFMPerformanceWarning`. Prediction raised
   `AttributeError` before. `lazy setup` now installs the pinned repository
   build over such a build.
+- The documentation no longer calls TabPFN-3.5-fast a smaller copy of
+  TabPFN-3.5, which it is not, and no longer gives a CDE loss for it that
+  disagrees with the scaling page's table. Several facts that pages
+  repeated, such as TabPFN's pretraining limits on the limits page, now
+  link to the page that holds them, and the pages no longer describe plans, past behaviour
+  or the test suite.
 
 ### Security
 
@@ -368,7 +397,7 @@ change the API.
   `LAZY_DATA_HOME` ran in every LimiX user's `fit`. A checkout named by
   `LAZY_LIMIX_SRC` is still run as it is.
 - `fetch_dc1` checks the cached DC1 test file's SHA-256 before it unpickles
-  it, once per process. Its catalogue has an object column, so loading it
+  it, once per process. Its catalog has an object column, so loading it
   unpickles, and so runs, what the file holds. Before, any cached file of
   the right size was trusted, so anyone able to write to a shared
   `LAZY_DATA_HOME` could plant code there.

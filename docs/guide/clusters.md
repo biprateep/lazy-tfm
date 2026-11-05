@@ -31,9 +31,8 @@ For LimiX-2, `download_checkpoint("limix")` also fetches LimiX's source,
 which is not on PyPI, and `is_cached("limix")` checks for both. Setting
 `HF_HUB_OFFLINE=1` on the compute node has the same effect for the weights
 and also stops the source from being downloaded. The checkpoint that a model
-loads is exactly the one {func}`~lazy.models.download_checkpoint` fetches,
-because the pinned revision is passed to the backend rather than left to its
-own default. Therefore, warming the cache cannot prefetch the wrong file.
+loads is exactly the one {func}`~lazy.models.download_checkpoint` fetches (see
+{doc}`reproducibility`), so warming the cache cannot prefetch the wrong file.
 
 For Kumo Tabular, `download_checkpoint("kumo")` fetches only the weights:
 NVIDIA's `structured-data-models` package comes with the `kumo` extra, so

@@ -12,9 +12,9 @@ switching between them is a string change rather than an import change::
     model = LazyModel("limix", n_estimators=8)
     model = LazyModel("kumo", n_estimators=8)
 
-    model.fit(X_train, z_train)
+    model.fit(X_train, y_train)
     pdfs = model.predict_proba(X_test, y_grid)
-    z = model.predict(X_test, method="mode")
+    y_pred = model.predict(X_test, method="mode")
 
 The concrete classes (:class:`lazy.models.tabfm.TabFMHistogram`,
 :class:`lazy.models.tabicl.TabICLQuantile`,
@@ -29,7 +29,7 @@ is the usual case in a benchmark loop or a config file.
 Constructing a model does nothing but store its arguments, as scikit-learn
 requires: no weights are downloaded, no GPU is touched, the backend package is
 not imported and nothing is validated. The backend is built, and an unknown
-backend name or a parameter it does not take is reported, at :meth:`fit`.
+backend name or a parameter it does not take is reported, at ``fit``.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class LazyModel(base.BaseDensityRegressor):
             regression head, ``"tabpfn"`` and ``"limix"`` from the bucket
             masses TabPFN and LimiX-2 predict natively.
         y_grid: Default output grid for this model: a
-            :class:`lazy.grid.Grid`, an array of bin centres, or ``None``
+            :class:`lazy.grid.Grid`, an array of bin centers, or ``None``
             for the backend's native grid (its ``native_grid_`` after fit).
             Every prediction method takes a ``y_grid`` that overrides it
             per call.
@@ -86,7 +86,7 @@ class LazyModel(base.BaseDensityRegressor):
             :class:`lazy.models.limix.LimiXBarDistribution` and
             :class:`lazy.models.kumo.KumoQuantile` for what each accepts; a
             name the backend does not take raises ``TypeError`` at
-            :meth:`fit`, naming the class.
+            ``fit``, naming the class.
 
     Attributes:
         estimator_: The fitted backend every prediction is delegated to, a
@@ -127,7 +127,7 @@ class LazyModel(base.BaseDensityRegressor):
         Built from ``self.model`` rather than delegated, so the label is the
         name the caller used; the version is appended because a row saying
         only ``tabpfn`` would not say which model produced it. A backend with
-        no ``version`` parameter is labelled by name alone.
+        no ``version`` parameter is labeled by name alone.
         """
         version = self.get_params().get("version")
         return f"{self.model}:{version}" if version else str(self.model)

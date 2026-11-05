@@ -77,8 +77,11 @@ cuts the queries into chunks and yields each chunk's distributions from
 `_distribution_chunks`, from which every prediction method works: the
 densities, the native distributions, quantiles, intervals and PIT values. A
 backend overrides none of these, since the others would bypass an override of
-one. A model that must see every query in one call sets `chunks_queries =
-False`, as TabFM does.
+one. In particular `_predict_distribution` is derived from
+`_distribution_chunks`, so a backend that overrode only the former would be
+bypassed by `predict_quantiles`, `predict_interval` and `predict_pit`. A
+model that must see every query in one call sets `chunks_queries = False`, as
+TabFM does.
 
 `provenance_` records which weights, which code and which ensemble produced a
 set of numbers. The default `_load_checkpoint` sets it from
@@ -173,15 +176,20 @@ cannot, and `lazy setup` runs it for every backend, or for those named on its
 command line: it prints a line saying what it did, skips a backend whose extra
 is not installed, and returns whether the backend is complete (TabFM installs
 its repository build, and LimiX downloads its source). The hook is told by
-`requested=True` that the backend was named; this argument will be removed in
-0.7.0.
+`requested=True` that the backend was named; this argument is deprecated and
+is removed in 0.7.0.
 
 ## A skeleton
 
 The module below is a starting point for a model called MyModel, whose
 package `mymodel` is assumed to offer a regressor that predicts bucket
 probabilities. Every name from `mymodel` is a stand-in for the real upstream
-API.
+API. Here the regressor returns its bucket edges already in the target's
+units, with probabilities. The skeleton's `_native_grid` joins every member
+group's edges with `native_grid` from `lazy.models._bucket_head`. That module
+also holds `bucket_edges`, which maps standardized borders to the target's
+units, and `softmax`, which turns logits into probabilities, for a model that
+returns those instead.
 
 ```python
 """Target distributions from MyModel's bucket probabilities."""
@@ -193,6 +201,7 @@ from typing import Any
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -278,8 +287,8 @@ class MyModelHistogram(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, probabilities)
 
     def _native_grid(self) -> grid_lib.Grid:
-        return grid_lib.Grid.from_edges(
-            self.handles_[0].bucket_edges, normalization="histogram"
+        return _bucket_head.native_grid(
+            handle.edges for handle in self.handles_
         )
 ```
 
@@ -332,8 +341,7 @@ CPU, and skip in the lighter jobs.
 
 The golden file is recorded once, on a CPU at four torch threads
 (`golden_data.THREADS`), and regenerated only for a change
-that is meant to move the densities and that the maintainers have approved (as
-when the tails of the quantile models were spread over one quantile spacing),
+that is meant to move the densities and that the maintainers have approved,
 since it is the guard on the published numbers. Where a backend's densities
 differ between processors, as TabPFN's do, record it on a GitHub
 runner with the checkpoint workflow's `record` input (see the contributing

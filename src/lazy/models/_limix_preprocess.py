@@ -80,7 +80,7 @@ class Recipe:
         softmax_temperature: The temperature on the bucket logits
             (``LimiXPredictor``'s default).
         target_ddof: The degrees of freedom of the target's standard
-            deviation, by which the context targets are standardised (a zero
+            deviation, by which the context targets are standardized (a zero
             one is replaced by 1).
     """
 
@@ -105,7 +105,7 @@ RECIPE = Recipe(
                 "svd_tag": "svd",
             },
             # Yeo-Johnson (upstream's RobustPowerTransformer), missing values
-            # imputed to the mean, standardised again.
+            # imputed to the mean, standardized again.
             "auto_power": {
                 "worker_tags": ["power"],
                 "discrete_flag": False,

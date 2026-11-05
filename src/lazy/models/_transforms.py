@@ -10,7 +10,7 @@ mean the same transform on each:
 
 ========================  ==================================================
 ``none``                  no transform
-``power``                 Yeo-Johnson power transform, standardised; a
+``power``                 Yeo-Johnson power transform, standardized; a
                           column with at most one distinct value in the
                           context (constant, or all missing) is passed
                           through unchanged, as it has nothing to fit
@@ -28,7 +28,7 @@ Under an explicit ``transforms`` value the model sees that transform and
 nothing else optional: each backend turns off its model's extra steps (extra
 feature columns, target transforms, outlier clipping unless
 ``outlier_threshold`` asks for it). What every model still does is its
-unavoidable input handling -- standardising the columns, dropping constant
+unavoidable input handling -- standardizing the columns, dropping constant
 ones, filling missing values where it cannot take them -- which each
 backend's documentation lists.
 
@@ -157,7 +157,7 @@ class ScaffoldTransform:
     """
 
     def __init__(self, spec: TransformSpec, seed: int):
-        """Initialises an unfitted transform."""
+        """Initializes an unfitted transform."""
         self.spec = spec
         self.seed = seed
         self._transformer: object | None = None
@@ -258,7 +258,7 @@ class SoftClip:
     """
 
     def __init__(self, threshold: float):
-        """Initialises an unfitted clip at ``threshold`` standard deviations."""
+        """Initializes an unfitted clip at ``threshold`` standard deviations."""
         self.threshold = float(threshold)
         self._lower: _typing.FloatArray | None = None
         self._upper: _typing.FloatArray | None = None

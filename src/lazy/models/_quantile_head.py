@@ -9,7 +9,7 @@ sees them in float32, a native grid wide enough for the quantiles to
 extrapolate into, and a warning when a row puts noticeable probability
 outside that grid. :class:`QuantileHead` holds them, so that such a backend
 declares ``native_output = "quantiles"``, mixes the class in before
-:class:`~lazy.models._ensemble.ContextEnsembleEstimator` and implements only
+:class:`~lazy.models.ContextEnsembleEstimator` and implements only
 what is its own.
 
 Typical usage example:
@@ -43,14 +43,10 @@ __all__ = [
 ]
 
 NATIVE_QUANTILE_BINS = 1000
-"""Bins of the native grid across the training targets' range: as fine as 999
-quantiles resolve. The padding adds bins of the same width.
-"""
+"""Described at ``lazy.models.tabicl.NATIVE_QUANTILE_BINS``."""
 
 NATIVE_PAD = 0.25
-"""How far the native grid extends beyond the training targets on each side, as
-a fraction of their range: the quantiles extrapolate.
-"""
+"""Described at ``lazy.models.tabicl.NATIVE_PAD``."""
 
 OUTSIDE_TOLERANCE = 0.01
 """The probability a row may put outside the native grid before tabulating it
@@ -59,7 +55,7 @@ there warns.
 
 
 class GridCoverageWarning(_warnings.LazyWarning):
-    """Densities are renormalised because the grid misses part of their mass."""
+    """Densities are renormalized because the grid misses part of their mass."""
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:
@@ -106,7 +102,7 @@ def target_scaling(targets: _typing.FloatArray) -> tuple[float, float]:
 class QuantileHead:
     """The native grid and density tabulation of a quantile-head backend.
 
-    Mixed in before :class:`~lazy.models._ensemble.ContextEnsembleEstimator`,
+    Mixed in before :class:`~lazy.models.ContextEnsembleEstimator`,
     whose ``_distribution_chunks`` and ``native_grid_`` it uses. The native
     grid has :data:`NATIVE_QUANTILE_BINS` equal-width bins across the range of
     every context target (bagged or not), padded by :data:`NATIVE_PAD` of that

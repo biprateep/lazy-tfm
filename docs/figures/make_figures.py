@@ -10,15 +10,16 @@
 # %% [markdown]
 # # The documentation's figures
 #
-# Every figure in the documentation that shows a model's output is made here,
-# so each one can be remade from the code that the page shows. The model is
-# TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU in seconds at these
-# sizes. Running the script rewrites every SVG in `docs/figures/figs/`:
+# Every figure of the landing page and the user guide is made here, so each
+# one can be remade from code. The figures of a model's output use
+# TabPFN-3.5-fast at LAZY's defaults, which runs on a CPU. Running the
+# script rewrites every SVG in `docs/figures/figs/`:
 #
 #     python docs/figures/make_figures.py
 
 # %%
 import pathlib
+import runpy
 
 import matplotlib as mpl
 
@@ -26,9 +27,14 @@ mpl.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import integrate
+from scipy import stats
 
 import lazy
 from lazy import datasets
+from lazy import distributions
+from lazy import metrics
+from lazy.models import ensemble
 
 FIGS = pathlib.Path(__file__).resolve().parent / "figs"
 
@@ -78,6 +84,8 @@ RC_PARAMS = {
     "axes.formatter.use_mathtext": True,
 }
 plt.rcParams.update(RC_PARAMS)
+# No creation date in the files, so a rerun leaves them untouched.
+METADATA = {"Date": None}
 
 # %% [markdown]
 # ## Filling in a curve
@@ -86,30 +94,14 @@ plt.rcParams.update(RC_PARAMS)
 # chunks cut out, and TabPFN-3.5-fast's mean and 68% interval in the gaps.
 
 # %%
-X_train, X_test, y_train, y_test = datasets.load_dataset(
-    "chirp", split=True, return_X_y=True, random_state=0
+# The landing page includes this file, so the model code exists once.
+demo = runpy.run_path(
+    str(pathlib.Path(__file__).resolve().parents[1] / "snippets/quickstart.py")
 )
-
-model = lazy.LazyModel(
-    "tabpfn",
-    version="v3.5-fast",
-    n_estimators=8,
-    transforms="auto",
-    feature_shuffle=True,
-    bag_size=None,
-    kv_cache=True,
-    y_grid=None,
-    device="auto",
-    random_state=0,
-    chunk_size=8192,
-    softmax_temperature="auto",
-    mixed_precision=True,
-    outlier_threshold="auto",
+X_train, X_test, y_train, y_test = (
+    demo[name] for name in ("X_train", "X_test", "y_train", "y_test")
 )
-model.fit(X_train, y_train)
-
-y_mean = model.predict(X_test, method="mean")
-y_low, y_high = model.predict_interval(X_test, coverage=0.68).T
+y_mean, y_low, y_high = (demo[name] for name in ("y_mean", "y_low", "y_high"))
 
 
 # %%
@@ -160,7 +152,7 @@ ax.set_ylabel(r"$y$")
 ax.set_xlim(0, 10)
 ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncols=4)
 FIGS.mkdir(exist_ok=True)
-fig.savefig(FIGS / "chirp_demo.svg", bbox_inches="tight")
+fig.savefig(FIGS / "chirp_demo.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -262,7 +254,7 @@ for i, (loc, scale) in enumerate([(-0.8, 0.5), (0.4, 0.9), (1.0, 0.35)]):
     ax.plot(xs, y_base + 0.55 * pdf / pdf.max(), c="C1", lw=1)
     ax.plot([7.5, 9.7], [y_base, y_base], c=INK, lw=0.5)
 ax.text(8.6, 3.35, r"$p(y \mid x, \mathrm{context})$", ha="center", va="bottom")
-fig.savefig(FIGS / "tfm_schematic.svg", bbox_inches="tight")
+fig.savefig(FIGS / "tfm_schematic.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -310,7 +302,7 @@ for ax in axes[-1]:
     ax.set_xlabel(r"$x$")
 for ax in axes[:, 0]:
     ax.set_ylabel(r"$y$")
-fig.savefig(FIGS / "prior_draws.svg", bbox_inches="tight")
+fig.savefig(FIGS / "prior_draws.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)
 
 # %% [markdown]
@@ -376,5 +368,217 @@ fig.legend(
     loc="outside upper center",
     ncols=4,
 )
-fig.savefig(FIGS / "context_size.svg", bbox_inches="tight")
+fig.savefig(FIGS / "context_size.svg", bbox_inches="tight", metadata=METADATA)
+plt.close(fig)
+
+# %% [markdown]
+# ## Point estimates of a bimodal density
+#
+# The four reductions of `predict` on one skewed, bimodal density, computed
+# by `lazy.metrics.grid_point_estimates`: the mode and the peak mean sit on
+# the main peak, while the mean falls between the peaks.
+
+# %%
+y_grid = lazy.Grid.linear(0.0, 2.0, 400)
+pdf = 0.6 * stats.skewnorm.pdf(
+    y_grid.centers, 3, loc=0.35, scale=0.25
+) + 0.4 * stats.norm.pdf(y_grid.centers, loc=1.45, scale=0.15)
+estimates = metrics.grid_point_estimates(y_grid, pdf[None, :])
+fig, ax = plt.subplots(
+    figsize=(TEXT_WIDTH, 0.32 * TEXT_WIDTH), layout="constrained"
+)
+ax.fill_between(y_grid.centers, pdf, color="C0", alpha=0.3, lw=0)
+ax.plot(y_grid.centers, pdf, c="C0", lw=1)
+for i, (method, ls) in enumerate(
+    [("mode", "-"), ("peak_mean", "--"), ("mean", "-"), ("median", "--")]
+):
+    ax.axvline(
+        estimates[method][0],
+        c=f"C{1 + i // 2}",
+        ls=ls,
+        lw=1.2,
+        label=method.replace("_", " "),  # The font has no underscore.
+    )
+ax.set_xlabel(r"$y$")
+ax.set_ylabel(r"$p(y)$")
+ax.set_xlim(0, 2)
+ax.set_ylim(0, None)
+ax.legend(frameon=False, loc="upper right")
+fig.savefig(
+    FIGS / "point_estimates.svg", bbox_inches="tight", metadata=METADATA
+)
+plt.close(fig)
+
+# %% [markdown]
+# ## Three ways to pool
+#
+# The three pools, drawn from their definitions in the table of
+# docs/guide/ensembles.md rather than by `LazyEnsembleModel`, applied to two
+# members: a bimodal one and a unimodal one. The linear pool keeps
+# both modes, the geometric pool keeps only the shared one and is sharpest,
+# and the quantile pool averages the quantile functions with
+# `QuantileDistribution.average`.
+
+# %%
+y = np.linspace(-0.5, 3.5, 801)
+# The first member predicts a second mode, which the second rules out.
+member_pdfs = np.stack(
+    [
+        0.7 * stats.norm.pdf(y, 1.0, 0.3) + 0.3 * stats.norm.pdf(y, 2.6, 0.2),
+        stats.norm.pdf(y, 1.3, 0.25),
+    ]
+)
+linear = member_pdfs.mean(axis=0)
+# LAZY's floor and levels: the floor as a fraction of the uniform density, and
+# quantiles at every level, the ends at the grid's ends.
+floor = ensemble.LOG_FLOOR / (y[-1] - y[0])
+geometric = np.exp(np.log(member_pdfs + floor).mean(axis=0))
+geometric /= np.trapezoid(geometric, y)
+levels = ensemble.QUANTILE_LEVELS
+member_cdfs = integrate.cumulative_trapezoid(member_pdfs, y, initial=0)
+member_cdfs /= member_cdfs[:, -1:]
+quantile = distributions.QuantileDistribution.average(
+    [
+        distributions.QuantileDistribution(levels, np.interp(levels, cdf, y))
+        for cdf in member_cdfs
+    ]
+).pdf(y)[0]
+fig, axes = plt.subplots(
+    1,
+    3,
+    figsize=(TEXT_WIDTH, 0.3 * TEXT_WIDTH),
+    sharey=True,
+    layout="constrained",
+)
+for ax, (name, pooled) in zip(
+    axes,
+    [("Geometric", geometric), ("Linear", linear), ("Quantile", quantile)],
+    strict=True,
+):
+    for k, ls in enumerate(["--", ":"]):
+        ax.plot(
+            y,
+            member_pdfs[k],
+            c="0.5",
+            ls=ls,
+            lw=1,
+            label=f"Member {k + 1}",
+        )
+    ax.fill_between(y, pooled, color="C1", alpha=0.3, lw=0)
+    ax.plot(y, pooled, c="C1", lw=1.2, label="Pool")
+    ax.set_title(f"{name} pool")
+    ax.set_xlabel(r"$y$")
+    ax.set_xlim(-0.5, 3.5)
+    ax.set_ylim(0, None)
+axes[0].set_ylabel(r"$p(y)$")
+fig.legend(
+    *axes[0].get_legend_handles_labels(),
+    frameon=False,
+    loc="outside upper center",
+    ncols=3,
+)
+fig.savefig(FIGS / "pooling.svg", bbox_inches="tight", metadata=METADATA)
+plt.close(fig)
+
+# %% [markdown]
+# ## A grid that ends inside the distribution
+#
+# One distribution put on a grid that covers it and on one that ends inside
+# it, by `HistogramDistribution.on_grid`: the probability beyond the short
+# grid is dropped, the rest is renormalized, so the density inside rises, and
+# a true value beyond the grid has no density to score.
+
+# %%
+buckets = np.linspace(-1.0, 4.0, 1001)
+skewed = stats.skewnorm(4, loc=0.5, scale=1.0)
+dist = distributions.HistogramDistribution(
+    buckets, np.diff(skewed.cdf(buckets))[None, :]
+)
+wide, short = lazy.Grid.linear(0.0, 3.5, 140), lazy.Grid.linear(0.0, 1.5, 60)
+y_true = 2.2
+fig, ax = plt.subplots(
+    figsize=(TEXT_WIDTH, 0.32 * TEXT_WIDTH), layout="constrained"
+)
+ax.axvspan(short.edges[-1], wide.edges[-1], color="0.92", lw=0)
+ax.text(2.5, 1.0, "outside the short grid", ha="center", va="top")
+ax.plot(
+    wide.centers,
+    dist.on_grid(wide)[0],
+    c="C0",
+    lw=1.2,
+    label=f"Grid on [0, {wide.edges[-1]:g}]",
+)
+ax.plot(
+    short.centers,
+    dist.on_grid(short)[0],
+    c="C1",
+    lw=1.2,
+    label=f"Grid on [0, {short.edges[-1]:g}]",
+)
+ax.axvline(y_true, ymax=0.8, c=INK, ls="--", lw=1, label="True value")
+ax.set_xlabel(r"$y$")
+ax.set_ylabel(r"$p(y)$")
+ax.set_xlim(0, wide.edges[-1])
+ax.set_ylim(0, 1.05)
+ax.legend(frameon=False, loc="upper right", bbox_to_anchor=(1.0, 0.85))
+fig.savefig(FIGS / "grid_cutoff.svg", bbox_inches="tight", metadata=METADATA)
+plt.close(fig)
+
+# %% [markdown]
+# ## Chunks and bags
+#
+# A schematic for the scaling page: every query row attends to every context
+# row its member sees. Chunking splits the queries into passes; bagging leaves
+# a member only the columns of its bag. The context's own work, once per pass
+# without the key/value cache, is not drawn.
+
+# %%
+n_ctx, n_qry, chunk, bag = 16, 12, 4, 8
+in_bag = np.isin(
+    np.arange(n_ctx),
+    np.random.default_rng(1).choice(n_ctx, bag, replace=False),
+)
+fig, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 0.3 * TEXT_WIDTH))
+for ax, columns, title in [
+    (axes[0], np.ones(n_ctx, bool), "Every context row"),
+    (axes[1], in_bag, f"A bag of {bag} context rows"),
+]:
+    for row in range(n_qry):
+        # A gap between chunks, which run as separate passes.
+        y0 = -(row + 1) - 0.4 * (row // chunk)
+        for col in range(n_ctx):
+            ax.add_patch(
+                mpl.patches.Rectangle(
+                    (col, y0),
+                    1,
+                    1,
+                    facecolor="C1" if columns[col] else "0.92",
+                    alpha=0.45 if columns[col] else 1.0,
+                    edgecolor="w",
+                    lw=1,
+                )
+            )
+    for i in range(n_qry // chunk):
+        ax.text(
+            n_ctx + 0.4,
+            -(i + 0.5) * chunk - 0.4 * i,
+            f"chunk {i + 1}",
+            ha="left",
+            va="center",
+        )
+    ax.text(n_ctx / 2, 0.4, "context rows", ha="center", va="bottom")
+    ax.text(
+        -0.4,
+        -n_qry / 2 - 0.4,
+        "query rows",
+        rotation=90,
+        ha="right",
+        va="center",
+    )
+    ax.set_title(title, pad=24)
+    ax.set_xlim(-1.5, n_ctx + 3.5)
+    ax.set_ylim(-n_qry - 0.4 * (n_qry // chunk - 1) - 0.2, 0.2)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
+fig.savefig(FIGS / "chunks_bags.svg", bbox_inches="tight", metadata=METADATA)
 plt.close(fig)

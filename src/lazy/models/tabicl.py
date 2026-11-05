@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 NATIVE_QUANTILE_BINS = _quantile_head.NATIVE_QUANTILE_BINS
-"""Bins of the native grid across the training targets' range: as fine as the
+"""Bins of the native grid across the training targets' range. As fine as the
 999 quantiles resolve. The padding adds bins of the same width.
 """
 
@@ -170,7 +170,7 @@ class TabICLQuantile(
         bag_size: Context rows per member. Scaffolded: one regressor per
             bag, with lazy's own column permutation when
             ``feature_shuffle=True``, its transforms, clip and target
-            standardisation fitted on the bag.
+            standardization fitted on the bag.
         kv_cache: ``True`` (TabICL's ``"kv"`` cache), ``"repr"`` (cached row
             representations, far smaller, re-running the in-context layers)
             or ``False``. Exact on a CPU, to float32 rounding; on a GPU with
@@ -180,7 +180,7 @@ class TabICLQuantile(
         y_grid: Default output grid; the native grid has equal-width bins,
             1,000 across the training targets' range, which extend a quarter
             of that range beyond it on each side. Densities on a grid carry
-            only the mass inside it, renormalised; tabulating a row that puts
+            only the mass inside it, renormalized; tabulating a row that puts
             more than 1% of its probability outside the native grid warns.
         device: Where to run.
         random_state: The ensemble's seed. A group's first regressor is
@@ -314,8 +314,8 @@ class TabICLQuantile(
         group: _members.MemberGroup,
     ) -> _RegressorGroup:
         # TabICL works in float32, which cannot resolve a narrow spread about
-        # a large offset; standardising in float64 first keeps it. Each
-        # group is standardised on its own rows, a bagged member on its bag.
+        # a large offset; standardizing in float64 first keeps it. Each
+        # group is standardized on its own rows, a bagged member on its bag.
         offset, scale = _quantile_head.target_scaling(y)
         handle = self._fit_members(
             # The features stay float64: upstream fits its scaling and power
@@ -347,7 +347,7 @@ class TabICLQuantile(
         Args:
             X: The group's prepared context features, float64, shape
                 ``(n_rows, n_features)``.
-            y: Their standardised targets, float32, shape ``(n_rows,)``.
+            y: Their standardized targets, float32, shape ``(n_rows,)``.
             group: The members to run.
 
         Returns:
@@ -707,7 +707,7 @@ class _RegressorGroup:
         members: For each regressor, the members it stands for, as counts by
             norm method.
         feat_shuffle_method: How upstream permuted the members' columns.
-        offset: The mean the group's targets were standardised by.
+        offset: The mean the group's targets were standardized by.
         scale: Their standard deviation, or 1 for a constant target.
     """
 

@@ -63,12 +63,12 @@ PROVENANCE_KEYS: tuple[str, ...] = (
 
 
 class LicenseWarning(_warnings.LazyWarning):
-    """The licence of weights that lazy is about to download.
+    """The license of weights that lazy is about to download.
 
     Issued before a download that finds nothing cached, for each checkpoint
     with :attr:`Checkpoint.notify_license` set, so it shows again if that
     download fails. Those are the weights whose upstream package asks the
-    user to accept the licence, a step lazy's own download skips.
+    user to accept the license, a step lazy's own download skips.
     """
 
 
@@ -128,8 +128,8 @@ class Checkpoint:
         package: The distribution providing the backend. Its *installed*
             version is half of "which model was this": the weights are the
             other half.
-        commercial_use: Whether the licence of the weights allows commercial
-            use. Read the licence itself before relying on it.
+        commercial_use: Whether the license of the weights allows commercial
+            use. Read the license itself before relying on it.
         allow_patterns: ``snapshot_download`` patterns, for repositories
             holding several models.
         filename: A single file to fetch instead of a filtered snapshot.
@@ -141,7 +141,7 @@ class Checkpoint:
         notify_license: Whether the first download issues
             :class:`LicenseWarning` with :attr:`license_note`. It is set
             where the upstream package's own downloader asks the user to
-            accept the licence.
+            accept the license.
         size_note: The download size, and any limit the model declares.
             The docs quote its first word, such as ``"~880 MB"``.
         display_name: The model's name at this version, as its authors
@@ -383,7 +383,7 @@ class Checkpoint:
             A JSON-serialisable record with the keys ``backend``, ``version``,
             ``repo_id``, ``filename``, ``revision``, ``package`` (the
             backend's distribution and installed version), ``lazy`` (this
-            package's) and ``device``: :data:`PROVENANCE_KEYS`.
+            package's) and ``device``: ``PROVENANCE_KEYS``.
 
         Examples:
             >>> record = get_checkpoint("tabpfn", "v2.5").provenance(
@@ -690,8 +690,10 @@ CHECKPOINTS: dict[str, Checkpoint] = {
         ),
     )
 }
-"""Every pinned checkpoint, keyed ``"<backend>:<version>"``. Built from the
-records themselves so a key can never disagree with what it points at.
+"""Every pinned checkpoint, keyed ``"<backend>:<version>"``.
+
+Built from the records themselves so a key can never disagree with what it
+points at.
 """
 
 DEFAULT_VERSIONS: dict[str, str] = {
@@ -701,8 +703,10 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "tabicl": "v2",
     "tabpfn": "v3.5",
 }
-"""The version each backend loads when none is asked for. Changing one of these
-changes what every unversioned call returns, so they move only deliberately.
+"""The version each backend loads when none is asked for.
+
+Changing one of these changes what every unversioned call returns, so they
+move only deliberately.
 """
 
 

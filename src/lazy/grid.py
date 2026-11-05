@@ -4,9 +4,9 @@
 
 A conditional density estimate here is always a table: one row per object,
 one column per bin of the target, holding a *density* (not a probability) at the
-bin centre. :class:`Grid` owns the bin edges, so the same object gives
-you the centres the metrics integrate over, the edges that mass-conserving
-rebinning needs, and the normalisation convention.
+bin center. :class:`Grid` owns the bin edges, so the same object gives
+you the centers the metrics integrate over, the edges that mass-conserving
+rebinning needs, and the normalization convention.
 
 The grid is an input, not a constant. Nothing in the library requires a
 uniform grid or a particular number of bins -- in particular the "at most ten
@@ -15,10 +15,10 @@ internally, never the grid you ask for output on (:mod:`lazy.models.tabfm`).
 The LSST DESC Data Challenge's own grid, which its published numbers need,
 is :data:`lazy.datasets.DC1_GRID`.
 
-Normalisation is trapezoidal over the bin centres by default. That is the
+Normalization is trapezoidal over the bin centers by default. That is the
 ``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
 integrates with. Native grids, whose bins are far from uniform, are
-``"histogram"``-normalised instead (constant density across each bin);
+``"histogram"``-normalized instead (constant density across each bin);
 pass the :class:`Grid` itself to the :mod:`lazy.metrics` functions and they
 score its densities by its own convention.
 
@@ -83,7 +83,7 @@ class Grid:
             (n_bins + 1,). Stored read-only.
         normalization: How a density on the grid integrates to one.
             ``"trapezoid"`` (the default, the DC1 and qp convention): the
-            trapezoid rule over the bin centres. ``"histogram"``: each bin's
+            trapezoid rule over the bin centers. ``"histogram"``: each bin's
             density is constant across the bin, so ``sum(p * widths) == 1``
             -- exact for the strongly non-uniform native grids of the
             bar-distribution models, where the trapezoid rule is not.
@@ -165,16 +165,16 @@ class Grid:
 
     @classmethod
     def from_centers(cls, centers: npt.ArrayLike) -> Grid:
-        """A grid from bin centres.
+        """A grid from bin centers.
 
-        The inner edges split the gaps between centres and the outer edges
-        extrapolate the ends. That places each centre midway between its
-        edges only on a uniform grid, so the centres must be evenly spaced:
+        The inner edges split the gaps between centers and the outer edges
+        extrapolate the ends. That places each center midway between its
+        edges only on a uniform grid, so the centers must be evenly spaced:
         ``from_centers(g.centers) == g`` for a uniform ``g``. Build a
         non-uniform grid with :meth:`from_edges`.
 
         Args:
-            centers: Strictly increasing, evenly spaced bin centres, shape
+            centers: Strictly increasing, evenly spaced bin centers, shape
                 (n_bins,) with n_bins >= 2.
 
         Returns:
@@ -204,8 +204,8 @@ class Grid:
                 ]
             )
         )
-        # Midpoint edges move the centres of a non-uniform grid; refuse
-        # rather than hand back a grid whose centres are not the input.
+        # Midpoint edges move the centers of a non-uniform grid; refuse
+        # rather than hand back a grid whose centers are not the input.
         shift = np.abs(grid.centers - centers)
         if np.any(shift > 1e-9 * grid.widths):
             raise ValueError(
@@ -220,7 +220,7 @@ class Grid:
 
     @property
     def centers(self) -> _typing.FloatArray:
-        """The bin centres a density row is tabulated at, shape (n_bins,)."""
+        """The bin centers a density row is tabulated at, shape (n_bins,)."""
         return 0.5 * (self.edges[1:] + self.edges[:-1])
 
     @property
@@ -271,7 +271,7 @@ class Grid:
 
     @property
     def histogram_edges(self) -> _typing.FloatArray | None:
-        """The edges when the grid is ``"histogram"``-normalised, else None.
+        """The edges when the grid is ``"histogram"``-normalized, else None.
 
         The :mod:`lazy.metrics` functions read it from the grid to score
         densities by the grid's own convention.
@@ -284,33 +284,33 @@ class Grid:
         """Clip to non-negative and rescale each row to unit mass.
 
         Unit mass by this grid's :attr:`normalization`: the trapezoid rule
-        over the centres, or ``sum(p * widths)`` for a histogram grid.
+        over the centers, or ``sum(p * widths)`` for a histogram grid.
 
         Rows that carry no mass at all (all-zero, or all non-finite) become a
         uniform density rather than NaN, so a single degenerate row cannot
         poison an array-wide metric.
 
         Args:
-            pdfs: Densities at the bin centres, shape (n_rows, n_bins).
+            pdfs: Densities at the bin centers, shape (n_rows, n_bins).
 
         Returns:
-            The normalised densities, shape (n_rows, n_bins).
+            The normalized densities, shape (n_rows, n_bins).
         """
         return metrics.normalize_grid_pdfs(self, pdfs)[1]
 
     def cdf(self, density: npt.ArrayLike) -> _typing.FloatArray:
-        """Cumulative distribution at the bin centres.
+        """Cumulative distribution at the bin centers.
 
         By the trapezoid rule, or for a histogram grid exactly: the mass
         below a bin's left edge plus half the bin's own.
 
         Args:
-            density: Densities at the bin centres, shape (n_rows, n_bins).
+            density: Densities at the bin centers, shape (n_rows, n_bins).
 
         Returns:
             An array of the same shape as ``density``; column ``j`` is the
             mass below ``centers[j]``. By the trapezoid rule column 0 is
-            exactly zero, since the rule starts at the first centre; on a
+            exactly zero, since the rule starts at the first center; on a
             histogram grid it is half the first bin's mass, since the mass
             starts at the first edge.
         """
@@ -329,14 +329,14 @@ class Grid:
         Each output bin is given the exact probability mass the input
         histogram places inside it. The input is piecewise constant, so its
         CDF is piecewise linear and evaluating that CDF at this grid's edges
-        is exact. Point-sampling the input density at the output centres
+        is exact. Point-sampling the input density at the output centers
         instead would silently drop input bins narrower than an output bin --
         which is the normal case for the equal-mass quantile bins a classifier
         produces where the targets crowd together.
 
         Args:
             probs: Finite, non-negative masses, shape (n_rows, n_input_bins);
-                each row is renormalised to sum to one.
+                each row is renormalized to sum to one.
             edges: The finite, non-decreasing edges the masses are defined
                 on, shape (n_input_bins + 1,).
 
@@ -383,9 +383,9 @@ class Grid:
         ``values[i]`` are the values at cumulative probabilities
         ``levels``. Those pairs define a CDF; evaluating it at this grid's
         edges and differencing gives each bin exactly the mass the quantiles
-        place inside it. Differencing at the bin *centres* instead
+        place inside it. Differencing at the bin *centers* instead
         (``np.gradient``) would smear any feature narrower than a bin into its
-        neighbours and would not conserve mass.
+        neighbors and would not conserve mass.
 
         Args:
             values: Quantiles of the target, shape (n_rows, n_quantiles).
@@ -393,7 +393,7 @@ class Grid:
                 shape (n_quantiles,).
 
         Returns:
-            Normalised densities on this grid, shape (n_rows, n_bins).
+            Normalized densities on this grid, shape (n_rows, n_bins).
         """
         _deprecated(
             "from_quantiles",
@@ -432,7 +432,7 @@ class Grid:
 
 
 GridLike: TypeAlias = Grid | npt.ArrayLike | Literal["native"] | None
-"""What every ``y_grid`` argument accepts: a grid, an array of bin centres,
+"""What every ``y_grid`` argument accepts -- a grid, an array of bin centers,
 ``"native"`` for the model's own grid, or ``None`` for the model's default.
 """
 
@@ -447,7 +447,7 @@ def as_grid(grid: GridLike) -> Grid:
     ``y_grid=np.linspace(0, 3, 300)`` works anywhere.
 
     Args:
-        grid: A :class:`Grid`, or an array of evenly spaced bin centres
+        grid: A :class:`Grid`, or an array of evenly spaced bin centers
             (see :meth:`Grid.from_centers`). ``None`` and ``"native"`` are
             not accepted: only an estimator can resolve them.
 

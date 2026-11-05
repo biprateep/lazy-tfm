@@ -3,7 +3,7 @@
 """Target distributions from LimiX-2's bucket probabilities.
 
 LimiX-2 (Stable AI) is an in-context tabular foundation model whose regressor
-is, underneath, a classifier over 5,000 buckets of the standardised target:
+is, underneath, a classifier over 5,000 buckets of the standardized target:
 buckets fixed in the checkpoint, stretched and shifted by the context
 targets' mean and standard deviation. Upstream's ``predict`` averages its
 ensemble members' bucket probabilities and returns their mean; the density is
@@ -32,7 +32,7 @@ where it is the vocabulary's transform (``none``, ``none+original``,
 ``quantile_uniform``) and are scaffolded otherwise, ``feature_shuffle`` onto
 its column shuffler, and ``bag_size`` is scaffolded as the paper's bagged
 LimiX-2 was -- one member per bag, running one of upstream's pipelines with
-its seeds and column shuffle and standardising the target on its own bag,
+its seeds and column shuffle and standardizing the target on its own bag,
 members mixed as densities. LimiX-2 was pretrained on contexts of up to
 about 20,000 rows, and a :class:`~lazy.models.ContextSizeWarning` says so
 when a member's context is larger: the whole context unbagged, or each bag
@@ -59,6 +59,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
@@ -97,12 +98,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     all-missing context columns dropped, then either a uniform quantile
     transform with the original columns and SVD components appended, or
     upstream's Yeo-Johnson (missing values imputed to the mean,
-    standardised), then the column shuffle. Under an explicit
+    standardized), then the column shuffle. Under an explicit
     ``transforms`` a member sees that transform and what LimiX cannot do
     without: the constant and all-missing columns dropped, and inside the
     network missing values replaced by the context mean (with an indicator),
-    each column standardised on the context and clipped at 100 standard
-    deviations. Either way the context targets are standardised (mean and
+    each column standardized on the context and clipped at 100 standard
+    deviations. Either way the context targets are standardized (mean and
     sample standard deviation), as the buckets are in those units.
 
     The parameters every backend shares mean what :doc:`/guide/interface`
@@ -132,7 +133,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             cover the context (a larger bag warns, as a larger context
             does). Each bagged member is one of upstream's pipelines run
             alone on its bag, its transforms, clip and target
-            standardisation fitted there.
+            standardization fitted there.
         kv_cache: Run the context through the network once, at fit, and let
             each chunk of queries attend to the result. Exact to the
             rounding of the precision in use; costs about 2 GB of GPU memory
@@ -171,7 +172,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         provenance_: Which weights, code and ensemble answered, as a dict;
             ``limix_pipelines`` lists each member's pipeline token.
         handles_: Every fitted member group.
-        borders_: The buckets' borders in standardised units, shape
+        borders_: The buckets' borders in standardized units, shape
             (``n_buckets_`` + 1,).
         n_buckets_: How many buckets the network predicts.
         n_context_: Context rows ``fit`` was given.
@@ -421,14 +422,12 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(edges, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        # Every group's buckets: a bagged member standardises its target on
-        # its own bag, so places its buckets there.
-        edges = [
-            _bucket_edges(self.borders_, handle["mean"], handle["std"])
+        # Fit has checked that no group's buckets merge.
+        return _bucket_head.native_grid(
+            _bucket_head.bucket_edges(
+                self.borders_, handle["mean"], handle["std"]
+            )
             for handle in self.handles_
-        ]
-        return grid_lib.Grid.from_edges(
-            np.unique(np.concatenate(edges)), normalization="histogram"
         )
 
     def _progress_postfix(
@@ -580,10 +579,9 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             logits = _limix_stream.forward(
                 network, member, queries, mixed_precision=self.mixed_precision_
             )
-        scaled = logits.astype(np.float64) / self._temperature()
-        scaled -= scaled.max(axis=1, keepdims=True)
-        probabilities = np.exp(scaled)
-        return probabilities / probabilities.sum(axis=1, keepdims=True)
+        return _bucket_head.softmax(
+            logits.astype(np.float64), self._temperature()
+        )
 
     def __reduce__(self) -> tuple[Any, ...]:
         """Pickles through :func:`_unpickle`, which loads LimiX's code first.
@@ -607,7 +605,7 @@ def _unpickle(
             refers to LimiX's code, which is then loaded first.
 
     Returns:
-        An uninitialised instance of ``cls``; pickle sets its state.
+        An uninitialized instance of ``cls``; pickle sets its state.
     """
     if fitted:
         _limix_source.load()
@@ -625,21 +623,25 @@ def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
 def _bucket_edges(
     borders: _typing.FloatArray, mean: float, std: float
 ) -> _typing.FloatArray:
-    """The buckets' borders in the target's units.
+    """The buckets' borders in the target's units, checked not to merge.
+
+    The checkpoint's borders are increasing, as a bar distribution's must
+    be, so the shared non-decreasing rule changes none of them, and a merge
+    shows as fewer distinct edges than borders.
 
     Args:
-        borders: The borders in standardised units, shape (n_buckets + 1,).
+        borders: The borders in standardized units, shape (n_buckets + 1,).
         mean: The context targets' mean.
         std: Their standard deviation.
 
     Returns:
-        ``borders * std + mean``, the same shape.
+        ``borders * std + mean``, made non-decreasing, the same shape.
 
     Raises:
         ValueError: If the spread is so small against the mean that float64
             cannot tell neighbouring borders apart.
     """
-    edges = borders * std + mean
+    edges = _bucket_head.bucket_edges(borders, mean, std)
     if np.unique(edges).size < np.unique(borders).size:
         raise ValueError(
             f"the target's spread (standard deviation {std:.3g}) is too "

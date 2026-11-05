@@ -33,7 +33,7 @@ with fewer than four distinct values for a category).
 
 ``bag_size`` runs one regressor per member, fitted on that member's bag
 alone. TabPFN's own row subsampling (``SUBSAMPLE_SAMPLES``) would fit each
-member's preprocessing on its rows but standardise the target, and place the
+member's preprocessing on its rows but standardize the target, and place the
 buckets, with the whole context's mean and standard deviation, and it checks
 the whole context against the size limits; a regressor per bag fits all of
 it on the bag, as every other model does, and only the bag meets the limits.
@@ -59,6 +59,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _bucket_head
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -358,7 +359,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ``"v3.5-fast"``. Each is a separately pinned checkpoint, so
             sweeping this parameter compares model versions on equal terms.
             They differ in more than accuracy: ``"v2"`` is the only one under
-            a commercial-use licence, and it and ``"v2.5"`` declare much
+            a commercial-use license, and it and ``"v2.5"`` declare much
             smaller context limits than v3 (see
             ``ignore_pretraining_limits``).
         n_estimators: Ensemble members, each a forward pass over a
@@ -372,11 +373,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             SVD and the identity target transform. TabPFN runs only ``none``
             natively (its other transforms are not the package's) and lazy
             applies the rest. What runs whatever the recipe: the removal of
-            constant columns and TabPFN's internal standardisation.
+            constant columns and TabPFN's internal standardization.
         feature_shuffle: TabPFN's own feature shuffling.
         bag_size: Context rows per member. Each member is then a regressor
             of its own, fitted on its bag: its preprocessing, outlier clip,
-            target standardisation and buckets all come from those rows, and
+            target standardization and buckets all come from those rows, and
             only the bag must lie within the limits
             ``ignore_pretraining_limits`` describes, so bagging is how TabPFN
             takes a context larger than them.
@@ -441,7 +442,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     upstream_package = "tabpfn"
     native_output = "histogram"
     native_transforms = _native_transforms()
-    # A regressor per bag: upstream's own subsampling standardises the
+    # A regressor per bag: upstream's own subsampling standardizes the
     # target on the whole context (see the module docstring).
     supports_native_bagging = False
     native_outlier_clipping = True
@@ -544,9 +545,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # the package): this way `CHECKPOINTS` is the authority on which
         # TabPFN answers, and `version` means something.
         # Every other argument is passed too, at the value upstream defaults
-        # to today, so that a later default cannot change a prediction. Two
-        # deprecated ones are left out: auto_scale_n_estimators acts only on
-        # n_estimators="auto", and n_jobs does nothing.
+        # to today, so that a later default cannot change a prediction.
+        # auto_scale_n_estimators acts only on n_estimators="auto", and
+        # n_jobs does nothing; both are deprecated upstream.
         tabpfn = self._import_backend()
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
@@ -564,6 +565,8 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             memory_saving_mode="auto",
             keep_cache_on_device=True,
             n_preprocessing_jobs=1,
+            n_jobs=None,
+            auto_scale_n_estimators=True,
             differentiable_input=False,
             eval_metric=None,
             **_cache_options(self.kv_cache),
@@ -773,16 +776,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         return distributions.HistogramDistribution(borders, masses)
 
     def _native_grid(self) -> grid_lib.Grid:
-        # Every member group's buckets: under bagging each member places
-        # its own, from its bag's targets.
-        edges = np.unique(
-            np.concatenate([_bucket_borders(h) for h in self.handles_])
-        )
-        if edges.size < 3:
-            # A constant target has one bucket; a grid needs two, and
-            # halving it changes no density.
-            edges = np.r_[edges[0], edges.mean(), edges[-1]]
-        return grid_lib.Grid.from_edges(edges, normalization="histogram")
+        return _bucket_head.native_grid(map(_bucket_borders, self.handles_))
 
     def _progress_postfix(
         self, dist: distributions.Distribution
@@ -912,6 +906,12 @@ def _without_networks(regressors: list[Any]) -> bytes:
     return buffer.getvalue()
 
 
+_IDENTITY = (-0.0, 1.0)
+"""The ``(mean, std)`` for borders already in the target's units: adding
+-0.0, unlike 0.0, keeps every float exactly, a border of -0.0 included.
+"""
+
+
 def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """The fitted regressor's bucket borders in the target's units.
 
@@ -934,11 +934,11 @@ def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     """
     znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
     borders = np.asarray(znorm, dtype=np.float64)
-    if not getattr(regressor, "is_constant_target_", False):
-        borders = borders * float(regressor.y_train_std_) + float(
-            regressor.y_train_mean_
-        )
-    return np.maximum.accumulate(borders)
+    if getattr(regressor, "is_constant_target_", False):
+        return _bucket_head.bucket_edges(borders, *_IDENTITY)
+    return _bucket_head.bucket_edges(
+        borders, float(regressor.y_train_mean_), float(regressor.y_train_std_)
+    )
 
 
 def path_for_tabpfn(path: pathlib.Path) -> pathlib.Path:
@@ -1033,10 +1033,11 @@ def bucket_masses(
     if regressor is not None:
         borders = _bucket_borders(regressor)
     else:
-        borders = np.maximum.accumulate(
+        borders = _bucket_head.bucket_edges(
             np.asarray(
                 criterion.borders.detach().cpu().numpy(), dtype=np.float64
-            )
+            ),
+            *_IDENTITY,
         )
         if borders.size > 1 and np.any(np.diff(borders) == 0):
             _warnings.warn(

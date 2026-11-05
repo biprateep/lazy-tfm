@@ -40,7 +40,7 @@ differs between backends, because the checkpoints do.
 | `feature_shuffle`     | Each member sees the feature columns in a different order.                                                                           | `True`    |
 | `bag_size`            | Context rows per member: an int is a count (`1` is one row), a float a fraction in (0, 1] (`1.0` is all rows), `None` all rows.      | `None`    |
 | `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
-| `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centres, `"native"`, or `None` for the native grid.                 | `None`    |
+| `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centers, `"native"`, or `None` for the native grid.                 | `None`    |
 | `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
 | `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding, except under TabFM's `prior_shift="em"`, which uses every row of the call. | `8192`    |
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
@@ -75,8 +75,7 @@ The table below shows how each model provides these parameters;
 | members combined      | averaged buckets / mixture               | averaged buckets / mixture                | weighted average of quantiles         | logits averaged; dithers and groups mixed | 20% trimmed mean of quantiles      |
 
 This contract is enforced: {func}`lazy.models.registry.register` refuses a
-backend that lacks any of these parameters or their shared defaults, and the
-conformance tests run every registered backend through every feature. A new
+backend that lacks any of these parameters or their shared defaults. A new
 model joins by subclassing {class}`~lazy.models.ContextEnsembleEstimator`.
 
 ## Ensembling and feature shuffling
@@ -94,9 +93,9 @@ own random subset of the context (below, and {doc}`scaling`).
 With `bag_size` set, each member sees its own random subset of the context
 rows, and LAZY draws these subsets for every model. The rows are drawn without
 replacement within a member and independently across members, from one
-generator seeded with `random_state`, exactly as our own bagged LimiX-2 tests
-drew them. Therefore, member `i` sees the same rows whichever model runs it,
-TabFM included, which would otherwise draw rows of its own. On TabFM the
+generator seeded with `random_state`. Therefore, member `i` sees the same
+rows whichever model runs it, TabFM included, which would otherwise draw rows
+of its own. On TabFM the
 member's coarse classifier sees its bag, and its classifier for coarse bin `j`
 sees the rows of its bag that fall in that bin.
 
@@ -170,8 +169,8 @@ transform such as `robust` changes nothing on them.
 
 `"limix"` is LimiX-2's two pipelines written in the shared vocabulary,
 `("quantile_uniform+original", "power")`, and it can be used on any model. It
-is what our own "with LimiX transforms" tests use. It lacks the SVD components
-of LimiX-2's own quantile pipeline, so on LimiX-2 it differs from `"auto"`.
+lacks the SVD components of LimiX-2's own quantile pipeline, so on LimiX-2 it
+differs from `"auto"`.
 
 ## Outlier clipping
 
@@ -216,18 +215,5 @@ raises `ValueError`.
 
 ## scikit-learn compatibility
 
-Since `get_params`, `set_params` and {func}`sklearn.base.clone` all work, the
-models can be used in scikit-learn pipelines and search objects without
-modification. `LazyModel` flattens the parameters of its backend into its own,
-so `GridSearchCV(model, {"n_estimators": [4, 8]})` needs no prefix. As in
-scikit-learn, constructing a model only stores its parameters, which are
-validated (and the checkpoint loaded) at `fit`. Since the models are pretrained,
-`fit` trains no weights, but with `kv_cache=True` (the default) it builds the
-key/value cache of the context, which costs one forward pass over the context
-per member. TabFM is the exception, since it fits and prefills inside every
-`predict` call (see {doc}`scaling`). `score` returns the negative CDE loss, so
-a search object that maximizes it prefers the better distributions.
-
-Every model is a scikit-learn regressor, so meta-estimators such as
-`StackingRegressor` and {func}`sklearn.inspection.partial_dependence` accept
-it. Its tags declare that it accepts `NaN` features and requires a target.
+Every model is a scikit-learn regressor. {doc}`scikit_learn` describes how it
+differs from a usual one, and what each scikit-learn tool does with it.

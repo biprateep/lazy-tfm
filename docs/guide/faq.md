@@ -55,7 +55,8 @@ we run exactly `n_estimators` members, turn off its automatic detection of
 categorical columns, cache the context at full precision and compute in
 float32 on a CPU (see {doc}`interface` and {doc}`../models/tabpfn`). The
 checkpoint and the preprocessing recipe are pinned and recorded in
-`provenance_` (see {doc}`reproducibility`).
+`provenance_` (see {doc}`reproducibility`). {doc}`related` compares LAZY with
+the other models' packages and with tools such as TabTune and AutoGluon.
 
 ## Why does my interval look too wide or too narrow?
 

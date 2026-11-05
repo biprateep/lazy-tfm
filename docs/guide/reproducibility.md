@@ -42,9 +42,8 @@ model.name_          # 'tabpfn:v2.5', the label evaluate() puts on its row
 The checkpoint that a model loads is exactly the one
 {func}`~lazy.models.download_checkpoint` fetches, because the pinned revision
 is passed to the backend rather than left to its own default. Each model's
-`"auto"` recipe is also written out in LAZY for every version rather than
-read from the installed package, so upgrading TabPFN or TabICL cannot change
-what it runs (see {doc}`interface`).
+`"auto"` recipe is also pinned for every version (see
+[Transforms](interface.md#transforms)).
 
 ## Provenance
 
@@ -54,7 +53,7 @@ and the ensemble that answered, and no local paths, so it means the same thing
 on another machine and survives a trip through JSON:
 
 ```python
-model.fit(X_train, z_train).provenance_
+model.fit(X_train, y_train).provenance_
 # {'backend': 'tabpfn', 'version': 'v2.5',
 #  'repo_id': 'Prior-Labs/tabpfn_2_5',
 #  'filename': 'tabpfn-v2.5-regressor-v2.5_default.ckpt',
@@ -75,8 +74,7 @@ is also the only one whose weights allow commercial use.
 version's license and size notes. We therefore recommend comparing numbers
 only between runs whose `provenance_` agree on the version and the recipe. For
 example, the paper's TabFM numbers come from the streaming path in bfloat16,
-and the cost measurements in {doc}`scaling` predate the change to float32 on
-every CPU.
+and the cost measurements in {doc}`scaling` state the precision they ran at.
 
 ## What changes a prediction
 
@@ -126,10 +124,9 @@ The figures are the largest difference, over 50 rows and 200 bins of
 the torch thread count (one or four), torch's vector kernels
 (`ATEN_CPU_CAPABILITY`), or MKL's code path (`MKL_CBWR`). Two processors
 differ in the same ways: that CPU differed by the same amounts from a GitHub
-runner (TabPFN, TabFM) and from the maintainer's machine that recorded the
-golden densities (Kumo, TabICL). For LimiX-2, the figure is the golden test's
-tolerance, which densities recorded on that machine meet on GitHub's
-runners.
+runner (TabPFN, TabFM) and from a maintainer's machine (Kumo, TabICL). For
+LimiX-2, the figure is not a measured difference but the tolerance that
+densities recorded on a maintainer's machine meet on GitHub's runners.
 
 TabPFN adds a *fingerprint* feature: a hash of each row of its preprocessed
 data, which helps the model tell identical rows apart. The data it hashes is
@@ -137,16 +134,14 @@ float32, so a difference in its last bit, which another processor's
 arithmetic produces, gives that row a different hash. The model then sees a
 different value of that feature, and its density moves by several percent of
 the peak. Without the fingerprint, TabPFN differs across machines by about
-$10^{-5}$ of the peak. This is upstream TabPFN's behaviour, which LAZY's pinned
+$10^{-5}$ of the peak. This is upstream TabPFN's behavior, which LAZY's pinned
 recipe keeps.
 
 So compare results from different machines with scores over many rows (the
-CDE loss, CRPS or NLL), not density by density. The golden tests, which
-compare densities, hold within float32 rounding on any processor, except
-TabPFN's, which holds on the AVX2 GitHub runners that recorded it.
+CDE loss, CRPS or NLL), not density by density.
 
-LimiX-2 needed three changes to make a row's answer independent of which
-other rows share its chunk. The first is that each member's preprocessing is
+Three things make LimiX-2's answer for a row independent of which other
+rows share its chunk. The first is that each member's preprocessing is
 fitted on the context alone (upstream's column filter, categorical detection
 and category encoding also see the queries, and LAZY treats every column as
 numeric). The second is that the feature positional embedding has its own
@@ -181,8 +176,8 @@ The figures are the largest change of the 5%, 50% and 95% quantiles over the
 same 50 rows, as a fraction of a row's 5% to 95% range, on an NVIDIA GB10 and
 its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL, TabFM
 and Kumo Tabular agree across devices to float32 rounding. LimiX-2 differs
-by more than rounding, but by about a tenth of a change of seed; its cause is not yet
-known.
+by more than rounding, but by about a tenth of a change of seed; its cause is
+not yet known.
 
 So, to repeat a result exactly, run it on the same kind of device, which
 `provenance_` records. Compare results from a CPU and a GPU with scores over

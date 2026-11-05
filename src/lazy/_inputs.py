@@ -69,7 +69,7 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
             forms the module docstring lists.
 
     Returns:
-        A tuple (frame, named): the features as a float64 DataFrame with a
+        A tuple (frame, named) -- the features as a float64 DataFrame with a
         fresh index, and whether its column names came from the input (they
         are ``x0, x1, ...`` otherwise).
 
@@ -241,7 +241,7 @@ def _unmask(
         values: An array-like of any shape.
 
     Returns:
-        A tuple (data, mask): the values underneath as an array, and the
+        A tuple (data, mask) -- the values underneath as an array, and the
         mask as a boolean array of the same shape, or ``None`` if the
         values carry no mask.
     """
