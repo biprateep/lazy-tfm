@@ -19,7 +19,7 @@ rcParams::
 The PDF plots take the grid the densities are on: a
 :class:`lazy.grid.Grid`, which says how they integrate (a
 ``"histogram"`` grid, such as a model's native one, holds each density
-constant across its bin), or bare, uniformly spaced bin centres, read by the
+constant across its bin), or bare, uniformly spaced bin centers, read by the
 trapezoid rule, with ``bin_edges=`` to mark them as histograms.
 
 Two families of diagnostic, and they answer different questions:
@@ -87,20 +87,20 @@ def _axes(ax: mpl_axes.Axes | None, **kwargs: Any) -> mpl_axes.Axes:
 def _geometry(
     y_grid: _GridLike, bin_edges: npt.ArrayLike | None
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
-    """The grid's centres, and its bin edges if its densities are histograms.
+    """The grid's centers, and its bin edges if its densities are histograms.
 
     Args:
-        y_grid: A :class:`lazy.grid.Grid`, or bin centres, shape (g,).
-        bin_edges: The edges of histogram densities on centres, shape
+        y_grid: A :class:`lazy.grid.Grid`, or bin centers, shape (g,).
+        bin_edges: The edges of histogram densities on centers, shape
             (g + 1,), or None.
 
     Returns:
-        A tuple (centres, edges) -- centres shape (g,), and the histogram
+        A tuple (centers, edges) -- centers shape (g,), and the histogram
         edges, shape (g + 1,), or None for trapezoid densities.
 
     Raises:
         ValueError: If both a Grid and ``bin_edges`` are given, the edges
-            do not fit the centres, or bare centres are not uniformly
+            do not fit the centers, or bare centers are not uniformly
             spaced, which leaves their bins unknown.
     """
     if isinstance(y_grid, grid.Grid):
@@ -132,11 +132,11 @@ def _geometry(
 def _own(
     edges: npt.NDArray[np.float64] | None,
 ) -> npt.NDArray[np.float64] | None:
-    """Marks edges as lazy's own, so the metrics score the caller's centres.
+    """Marks edges as lazy's own, so the metrics score the caller's centers.
 
     The plots' ``bin_edges`` is not deprecated, and a Grid cannot hold
-    centres that are not the midpoints of its edges, so the metrics get the
-    centres and the edges rather than a Grid.
+    centers that are not the midpoints of its edges, so the metrics get the
+    centers and the edges rather than a Grid.
     """
     return metrics._resolved(edges)  # noqa: SLF001 - see the docstring.
 
@@ -164,9 +164,9 @@ def _central_range(
     """The x-range holding the central mass of a density, and the truth.
 
     Args:
-        centers: Bin centres, shape (g,).
+        centers: Bin centers, shape (g,).
         edges: Histogram edges, shape (g + 1,), or None for trapezoid.
-        density: A normalised density on the grid, shape (g,).
+        density: A normalized density on the grid, shape (g,).
         truth: True values to keep in view, or None.
 
     Returns:
@@ -241,7 +241,7 @@ def plot_actual_vs_predicted(
     """Plots predicted against true values as a log-density image.
 
     A scatter plot of a large sample is a black blob, so this is a 2D
-    histogram on a log colour scale -- which is also the only way the outlier
+    histogram on a log color scale -- which is also the only way the outlier
     islands (catastrophic failures at the wrong value) stay visible against
     the main locus. Objects whose true or predicted value is not finite are
     left out.
@@ -270,7 +270,7 @@ def plot_actual_vs_predicted(
     both = np.concatenate([y_true, y_pred])
     lo = float(y_min if y_min is not None else both.min())
     hi = float(y_max if y_max is not None else both.max())
-    if not hi > lo:  # One value: centre a unit range on it.
+    if not hi > lo:  # One value: center a unit range on it.
         lo, hi = lo - 0.5, hi + 0.5
     extent = [[lo, hi], [lo, hi]]
     counts, _, _ = np.histogram2d(y_true, y_pred, bins=bins, range=extent)
@@ -326,7 +326,7 @@ def plot_residuals(
         y_pred: Point estimates, shape (n_objects,).
         ax: The axes to draw into; a new column-width figure if None.
         n_bins: Number of equal-count bins in the true value.
-        quantiles: Lower edge, centre line and upper edge of the band, as
+        quantiles: Lower edge, center line and upper edge of the band, as
             percentiles between 0 and 100.
         scale: ``"1+y"`` to divide the residual by ``1 + y_true``, or
             ``"none"``.
@@ -529,20 +529,20 @@ def plot_stacked_pdfs(
     only under assumptions that real PDFs rarely satisfy exactly (in
     photometric-redshift work this is the stacked n(z)), but it is what many
     analyses do, so how badly it fails is worth knowing. Each PDF is
-    normalised by its grid's own rule before stacking, and the x-axis spans
+    normalized by its grid's own rule before stacking, and the x-axis spans
     the truth and the central 99.8% of the stacked mass, not the whole grid
     -- a model's native grid reaches far into the tails.
 
     Args:
         y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
-            uniformly spaced bin centres, shape (n_grid,).
+            uniformly spaced bin centers, shape (n_grid,).
         pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid).
         y_true: True values, shape (n_objects,). If given, histogrammed
             on ``truth_bins`` for comparison.
         ax: The axes to draw into; a new column-width figure if None.
         label: Legend label of the stacked PDFs.
         truth_label: Legend label of the true histogram.
-        bin_edges: With bare centres, the bin edges of histogram densities,
+        bin_edges: With bare centers, the bin edges of histogram densities,
             shape (n_grid + 1,), as the module docstring describes.
         truth_bins: The true histogram's bins, as :func:`numpy.histogram`
             takes them, over the finite true values.
@@ -553,7 +553,7 @@ def plot_stacked_pdfs(
         The axes drawn into.
 
     Raises:
-        ValueError: If bare centres are not uniformly spaced; pass the Grid
+        ValueError: If bare centers are not uniformly spaced; pass the Grid
             or ``bin_edges``.
     """
     centers, edges = _geometry(y_grid, bin_edges)
@@ -652,7 +652,7 @@ def plot_pdfs(
 
     Args:
         y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
-            uniformly spaced bin centres, shape (n_grid,).
+            uniformly spaced bin centers, shape (n_grid,).
         pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid), or one PDF,
             shape (n_grid,).
         y_true: True values, shape (n_objects,), marked as dashed
@@ -663,14 +663,14 @@ def plot_pdfs(
         random_state: Seed of the random draw.
         axes: Axes to draw into, one per object; a new text-width grid of
             up to three columns if None. Spare axes are hidden.
-        bin_edges: With bare centres, the bin edges of histogram densities,
+        bin_edges: With bare centers, the bin edges of histogram densities,
             shape (n_grid + 1,), drawn as steps.
 
     Returns:
         The flattened array of axes.
 
     Raises:
-        ValueError: If bare centres are not uniformly spaced (pass the Grid
+        ValueError: If bare centers are not uniformly spaced (pass the Grid
             or ``bin_edges``), ``pdfs`` does not fit the grid, or there is
             no object to draw.
     """
@@ -729,14 +729,14 @@ def diagnostic_panel(
     Args:
         y_true: True values, shape (n_objects,).
         y_grid: The grid the PDFs are on: a :class:`lazy.grid.Grid`, or
-            uniformly spaced bin centres, shape (n_grid,). Point estimates
-            and PIT follow its normalisation, so a histogram grid's
+            uniformly spaced bin centers, shape (n_grid,). Point estimates
+            and PIT follow its normalization, so a histogram grid's
             densities are read as constant across their bins.
         pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid).
         point: Point estimate to use, a key of
             :func:`lazy.metrics.grid_point_estimates`.
         label: Legend label and figure title.
-        bin_edges: With bare centres, the bin edges of histogram densities,
+        bin_edges: With bare centers, the bin edges of histogram densities,
             shape (n_grid + 1,).
         scale: ``"none"`` for plain residuals, or ``"1+y"`` for the
             photometric-redshift convention, which also draws DC1's
@@ -746,7 +746,7 @@ def diagnostic_panel(
         The new :class:`matplotlib.figure.Figure`.
 
     Raises:
-        ValueError: If bare centres are not uniformly spaced; pass the Grid
+        ValueError: If bare centers are not uniformly spaced; pass the Grid
             or ``bin_edges``.
     """
     y_true = np.asarray(y_true, dtype=float)

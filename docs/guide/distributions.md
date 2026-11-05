@@ -14,7 +14,7 @@ returns:
 | `fit(X, y)`                         | The model. Stores the labeled context; no weights change.   |
 | `predict_proba(X, y_grid)`          | `(n_samples, n_bins)` densities on `y_grid`.                |
 | `predict_pdf(X, y_grid)`            | The same; an alias for when "pdf" reads better.             |
-| `predict_cdf(X, y_grid)`            | `(n_samples, n_bins)` CDF values at the bin centres, exact. |
+| `predict_cdf(X, y_grid)`            | `(n_samples, n_bins)` CDF values at the bin centers, exact. |
 | `predict_distribution(X)`           | The model's own distributions, before any grid (see below). |
 | `predict_quantiles(X, quantiles)`   | `(n_samples, n_quantiles)` values, exact.                   |
 | `predict_interval(X, coverage)`     | `(n_samples, 2)` bounds of the central interval, exact.     |
@@ -40,9 +40,9 @@ DESC's [qp](https://github.com/LSSTDESC/qp):
 
 ```python
 dist = model.predict_distribution(X_test)   # one per row
-dist.pdf(z)            # densities at any values of z
-dist.cdf(z)            # cumulative probabilities
-dist.pit(z_true)       # each row's CDF at its own value
+dist.pdf(y)            # densities at any values of y
+dist.cdf(y)            # cumulative probabilities
+dist.pit(y_true)       # each row's CDF at its own value
 dist.ppf([0.16, 0.5, 0.84])                # quantiles, exact
 dist.mean(), dist.median(), dist.mode(), dist.std()
 dist.interval(0.68)    # central credible interval
@@ -56,7 +56,7 @@ Since the operations are exact, `predict_quantiles(X, q)` equals
 a grid, and
 `predict_interval(X, coverage)` gives the bounds of the central interval in the
 same way. The `pdf` and `cdf` methods evaluate every row at every value, so
-`dist.cdf(z_true)` has shape `(n, n)`. The `pit` method instead evaluates
+`dist.cdf(y_true)` has shape `(n, n)`. The `pit` method instead evaluates
 each row at its own value, $F_i(y_i)$, which is the diagonal of that array,
 and `predict_pit(X, y)` equals `predict_distribution(X).pit(y)` in the same
 way. For RAIL and
@@ -145,6 +145,16 @@ recommend calling `predict_proba` once and reducing its output with
 {func}`lazy.metrics.grid_point_estimates`, rather than rerunning the model for
 each definition. The `median` is also `predict_quantiles(X, [0.5])`, which
 is computed without a grid.
+
+```{figure} ../figures/figs/point_estimates.svg
+:alt: A density with a tall skewed peak and a lower second peak, with vertical lines at its mode, peak mean, mean and median.
+:width: 100%
+
+**Figure 1.** The four point estimates of one bimodal density, from
+{func}`~lazy.metrics.grid_point_estimates`. The mode and the peak mean lie on
+the main peak, the median on its flank, and the mean between the two peaks,
+where the density is low.
+```
 
 ## Metrics
 

@@ -176,8 +176,8 @@ cannot, and `lazy setup` runs it for every backend, or for those named on its
 command line: it prints a line saying what it did, skips a backend whose extra
 is not installed, and returns whether the backend is complete (TabFM installs
 its repository build, and LimiX downloads its source). The hook is told by
-`requested=True` that the backend was named; this argument will be removed in
-0.7.0.
+`requested=True` that the backend was named; this argument is deprecated and
+is removed in 0.7.0.
 
 ## A skeleton
 
@@ -187,7 +187,7 @@ probabilities. Every name from `mymodel` is a stand-in for the real upstream
 API. Here the regressor returns its bucket edges already in the target's
 units, with probabilities. The skeleton's `_native_grid` joins every member
 group's edges with `native_grid` from `lazy.models._bucket_head`. That module
-also holds `bucket_edges`, which maps standardised borders to the target's
+also holds `bucket_edges`, which maps standardized borders to the target's
 units, and `softmax`, which turns logits into probabilities, for a model that
 returns those instead.
 
@@ -341,8 +341,7 @@ CPU, and skip in the lighter jobs.
 
 The golden file is recorded once, on a CPU at four torch threads
 (`golden_data.THREADS`), and regenerated only for a change
-that is meant to move the densities and that the maintainers have approved (as
-when the tails of the quantile models were spread over one quantile spacing),
+that is meant to move the densities and that the maintainers have approved,
 since it is the guard on the published numbers. Where a backend's densities
 differ between processors, as TabPFN's do, record it on a GitHub
 runner with the checkpoint workflow's `record` input (see the contributing

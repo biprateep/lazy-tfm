@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Built-in datasets: photo-z catalogues, and a toy curve to fill in.
+"""Built-in datasets: photo-z catalogs, and a toy curve to fill in.
 
 The library is general purpose -- every estimator takes whatever tabular
 features you hand it -- but a photo-z method is hard to judge without a shared
-benchmark, so the LSST DESC PZ Data Challenge catalogue (DC1, Schmidt et al.
+benchmark, so the LSST DESC PZ Data Challenge catalog (DC1, Schmidt et al.
 2020) is available as a one-liner::
 
     from lazy import datasets
@@ -21,9 +21,9 @@ Neither split is a realistic training set: DC1 hands every training galaxy a
 redshift, and real spectroscopic samples are bright, incomplete, and cut in
 redshift by which features fall in the observed window.
 :func:`fetch_dc1_biased` builds that case. It merges both files, reshuffles
-them, and cuts the merged catalogue into a training set a HSC-like campaign
+them, and cuts the merged catalog into a training set a HSC-like campaign
 would plausibly have produced and a hold-out that is distributed like the
-catalogue::
+catalog::
 
     split = datasets.fetch_dc1_biased()
     split.biased        # 35,011 galaxies the selection function kept
@@ -31,7 +31,7 @@ catalogue::
     split.test          # 19,383 representative galaxies, to score on
 
 The selection function itself lives in :mod:`lazy.selection`; it acts on any
-photometry, so a catalogue of your own can be biased the same way.
+photometry, so a catalog of your own can be biased the same way.
 
 The two files total about 1 GB. They are downloaded once from Zenodo record
 10975874, checksummed, and cached under :func:`data_home` -- by default
@@ -48,7 +48,7 @@ them, and they are the reference a real estimator has to beat.
 
 Feature construction lives here because these recipes are photometry-specific,
 not general tabular engineering -- but they act on a plain
-:class:`~pandas.DataFrame`, so a catalogue assembled outside this module goes
+:class:`~pandas.DataFrame`, so a catalog assembled outside this module goes
 through the same code, either via :meth:`Catalog.from_frame` or by calling
 :func:`build_features` on the frame directly.
 
@@ -190,19 +190,19 @@ twice.
 
 @dataclasses.dataclass(frozen=True)
 class Catalog:
-    """Photometry, truth and identifiers for a catalogue of galaxies.
+    """Photometry, truth and identifiers for a catalog of galaxies.
 
     ``raw`` is the photometry as loaded: one column per band, one
     ``<BAND>ERR`` column per band. :meth:`features` turns it into the columns
     an estimator actually sees.
 
     Attributes:
-        split: A label naming the catalogue, carried through to :func:`repr`.
+        split: A label naming the catalog, carried through to :func:`repr`.
         raw: The photometry, magnitudes and their errors in mag, one row per
             galaxy.
         redshift: The true redshifts, shape (n_galaxies,).
         object_id: Identifiers, shape (n_galaxies,).
-        source: For a combined catalogue: 0 for rows from the train file, 1
+        source: For a combined catalog: 0 for rows from the train file, 1
             from test, shape (n_galaxies,); otherwise None.
     """
 
@@ -230,7 +230,7 @@ class Catalog:
         object_id: str | npt.ArrayLike | None = None,
         split: str = "custom",
     ) -> Catalog:
-        """Wraps a catalogue you assembled yourself, to treat it like DC1.
+        """Wraps a catalog you assembled yourself, to treat it like DC1.
 
         Args:
             frame: Photometry, one column per band and one ``<BAND>ERR``
@@ -244,7 +244,7 @@ class Catalog:
             split: A label, carried through to :func:`repr` and nothing else.
 
         Returns:
-            The catalogue.
+            The catalog.
 
         Examples:
             >>> frame = pd.DataFrame(
@@ -280,7 +280,7 @@ class Catalog:
         return cls(split=split, raw=raw, redshift=z, object_id=ids)
 
     def take(self, rows: npt.ArrayLike, *, split: str | None = None) -> Catalog:
-        """Returns the rows named by ``rows``, as a catalogue of their own.
+        """Returns the rows named by ``rows``, as a catalog of their own.
 
         Args:
             rows: Integer positions, in the order you want them back, or a
@@ -353,9 +353,9 @@ def build_features(
     """Turns raw photometry into the tabular view an estimator sees.
 
     Which columns you feed a tabular foundation model matters more than most
-    hyper-parameters. Colours beat magnitudes, and propagating the magnitude
-    errors into colour errors beats leaving them as magnitude errors, so the
-    default is the reference magnitude plus adjacent colours with matching
+    hyper-parameters. Colors beat magnitudes, and propagating the magnitude
+    errors into color errors beats leaving them as magnitude errors, so the
+    default is the reference magnitude plus adjacent colors with matching
     errors.
 
     Args:
@@ -370,15 +370,15 @@ def build_features(
                 without help.
             ``mag-color``
                 The reference-band magnitude and its error, the five unique
-                adjacent colours (``u-g``, ``g-r``, ``r-i``, ``i-z``,
+                adjacent colors (``u-g``, ``g-r``, ``r-i``, ``i-z``,
                 ``z-y``), and their errors, each the quadrature sum of the two
-                magnitude errors forming the colour. The default: same twelve
+                magnitude errors forming the color. The default: same twelve
                 numbers as ``mag``, in the representation that carries the
                 spectral shape setting the redshift.
             ``all``
-                Every magnitude, every one of the fifteen pairwise colours,
+                Every magnitude, every one of the fifteen pairwise colors,
                 and the errors for all of them -- magnitude errors as given,
-                colour errors in quadrature. Redundant by construction, and a
+                color errors in quadrature. Redundant by construction, and a
                 test of whether the model would rather be handed the
                 differences than infer them.
         bands: Band names in wavelength order.
@@ -419,8 +419,8 @@ def build_features(
     errs = raw[list(err_columns)].to_numpy(dtype=np.float32)
     index = {band: i for i, band in enumerate(bands)}
 
-    # Every mode is a choice of which magnitudes to keep and which colours to
-    # form; the errors follow from that choice, in quadrature for colours.
+    # Every mode is a choice of which magnitudes to keep and which colors to
+    # form; the errors follow from that choice, in quadrature for colors.
     keep: tuple[str, ...]
     pairs: tuple[tuple[str, str], ...]
     if mode == "mag":
@@ -485,7 +485,7 @@ def fetch_dc1(
     back, not how much is downloaded.
 
     Args:
-        split: ``False`` (the default) returns one catalogue holding both
+        split: ``False`` (the default) returns one catalog holding both
             files, 434,476 rows, train first, with ``source`` marking which
             file each row came from. ``True`` returns ``(train, test)`` -- the
             challenge's own 43,486/390,990 split, for reproducing its numbers.
@@ -542,7 +542,7 @@ def load_trainz(
     files store it differently: the test file as per-bin probabilities in
     the 200 bins of :data:`DC1_GRID`, the train file as a density sampled
     every 0.002 on ``0 <= z <= 2``. Both come back on :data:`DC1_GRID`, as
-    densities at its bin centres that integrate to one as a histogram,
+    densities at its bin centers that integrate to one as a histogram,
     ``sum(pdf * 0.01) == 1``: the test file's probabilities divided by the
     bin width, and the train file's density integrated over each bin (exact,
     as its edges fall on the train file's samples) and rescaled to unit mass.
@@ -565,7 +565,7 @@ def load_trainz(
 
     Returns:
         A tuple (z_grid, pdfs), or (z_grid, train_pdfs, test_pdfs) when
-        ``split`` is true. ``z_grid`` holds the 200 bin centres of
+        ``split`` is true. ``z_grid`` holds the 200 bin centers of
         :data:`DC1_GRID`, shape (200,); each PDF array has shape
         (n_galaxies, 200).
 
@@ -604,7 +604,7 @@ def _load_split(
         with np.load(path) as saved:
             cat = saved[key]
     except ValueError:
-        # An object column (the test catalogue's _merge) loads only with
+        # An object column (the test catalog's _merge) loads only with
         # pickle, which runs code, so the file must be the published one.
         # The bytes are checked and loaded through one handle, so a file
         # swapped in between is never the one unpickled.
@@ -630,7 +630,7 @@ def _load_trainz_split(
     """Loads one DC1 file's ``trainZ`` N(z) as a density on :data:`DC1_GRID`.
 
     Returns:
-        The density at the bin centres, shape (200,), with
+        The density at the bin centers, shape (200,), with
         ``sum(pdf * DC1_GRID.widths) == 1``, and the file's number of rows.
     """
     path = _cached_path(
@@ -851,10 +851,10 @@ class SelectionSplit:
 
     * :attr:`biased` -- the galaxies the selection function kept. Bright,
       incomplete, and truncated in redshift: the training set.
-    * :attr:`calibration` -- a small sample distributed like the catalogue.
+    * :attr:`calibration` -- a small sample distributed like the catalog.
       Not scored on: it is there to be *used*, as extra context, as importance
       weights, or as a recalibration set.
-    * :attr:`test` -- the rest of the hold-out, distributed like the catalogue
+    * :attr:`test` -- the rest of the hold-out, distributed like the catalog
       and disjoint from everything above.
     * :attr:`unbiased` -- ``None`` unless ``control=True`` was asked for, in
       which case it holds exactly as many galaxies as :attr:`biased`, drawn at
@@ -862,7 +862,7 @@ class SelectionSplit:
       selection from the sample size, for when that distinction is the
       question.
 
-    :attr:`rows` holds each subset's positions in the parent catalogue, so a
+    :attr:`rows` holds each subset's positions in the parent catalog, so a
     split can be frozen to disk and reproduced later, and :attr:`meta` records
     how it was built.
 
@@ -874,11 +874,11 @@ class SelectionSplit:
             or ``None``.
         unbiased: The size-matched random control, or ``None`` if it was not
             asked for.
-        rows: Subset name -> sorted positions in the catalogue the split was
+        rows: Subset name -> sorted positions in the catalog the split was
             cut from.
         meta: How it was built: sizes, seeds, selection arguments, solver
             history.
-        catalog: The catalogue the split was cut from, for
+        catalog: The catalog the split was cut from, for
             :meth:`summary`; ``None`` if it was not kept.
     """
 
@@ -914,14 +914,14 @@ class SelectionSplit:
     ) -> pd.DataFrame:
         """Tabulates each subset: how many, how bright, how deep in redshift.
 
-        The row labelled ``catalog`` is the catalogue the split was cut from.
+        The row labeled ``catalog`` is the catalog the split was cut from.
         Read it against ``test`` to see that the test set is representative,
         and against ``biased`` to see that the training set is not: on DC1 the
         selection moves the median magnitude about a magnitude brighter and
         cuts the faint fraction by roughly an order of magnitude.
 
         Args:
-            magnitude: The band whose magnitudes are summarised.
+            magnitude: The band whose magnitudes are summarized.
             faint: The magnitude, in mag, beyond which a galaxy counts as
                 faint.
 
@@ -1023,11 +1023,11 @@ def make_selection_split(
     initial_rate: float = 0.0864,
     **selection_options: Any,
 ) -> SelectionSplit:
-    """Cuts a catalogue into a biased training set, a control, and a test set.
+    """Cuts a catalog into a biased training set, a control, and a test set.
 
     The recipe, in order:
 
-    1. shuffle the catalogue and cut it in two;
+    1. shuffle the catalog and cut it in two;
     2. the first part is the *pool*: apply
        :func:`~lazy.selection.grid_selection` to it, and what it keeps is
        :attr:`~SelectionSplit.biased`;
@@ -1052,11 +1052,11 @@ def make_selection_split(
         than re-cutting.
 
         The training set cannot exceed what the selection returns on the
-        whole catalogue -- on DC1 that ceiling is 37,626 galaxies, and
+        whole catalog -- on DC1 that ceiling is 37,626 galaxies, and
         reaching it would leave nothing to test on.
 
     Args:
-        catalog: The complete catalogue to cut up, typically ``fetch_dc1()``
+        catalog: The complete catalog to cut up, typically ``fetch_dc1()``
             -- both DC1 files merged, because the challenge's own division is
             far too small on the training side to survive a selection.
         n_train: How many galaxies the biased training set should end up
@@ -1073,8 +1073,8 @@ def make_selection_split(
             the smaller sample -- and costs a second set of runs. It is drawn
             last, so turning it on leaves every other subset unchanged.
         holdout_rows: Restrict the hold-out to these rows: integer
-            positions in the catalogue, each at most once. The default
-            shuffles the whole catalogue, as above. Passing the rows of one
+            positions in the catalog, each at most once. The default
+            shuffles the whole catalog, as above. Passing the rows of one
             source file keeps a model trained on the other file scorable on
             this test set without leakage.
         grid: The selection function; defaults to the cached HSC grid.
@@ -1101,12 +1101,12 @@ def make_selection_split(
 
     Raises:
         ValueError: If a size is out of range, ``holdout_rows`` are not
-            unique positions in the catalogue, or they leave nothing to test
+            unique positions in the catalog, or they leave nothing to test
             on.
         RuntimeError: If the hold-out solver cannot reach ``n_train``, which
-            means the catalogue is too small for a training set that size,
+            means the catalog is too small for a training set that size,
             the selection keeps too little of it, or ``holdout_rows`` leave
-            too much of the catalogue to select from.
+            too much of the catalog to select from.
     """
     if grid is None:
         grid = fetch_hsc_grid()
@@ -1220,7 +1220,7 @@ def _solve_holdout(
     """Sizes the hold-out so that the selection keeps about ``n_train``.
 
     Args:
-        catalog: The catalogue being cut up.
+        catalog: The catalog being cut up.
         candidates: Shuffled rows the hold-out may be drawn from, in order.
         n_train: The target size of the biased training set.
         n_calibration: The calibration sample size; the hold-out keeps at
@@ -1235,7 +1235,7 @@ def _solve_holdout(
 
     Returns:
         A tuple (holdout, pool, biased_rows, history) -- the hold-out rows, in
-        draw order; the rest of the catalogue, sorted; the pool rows the
+        draw order; the rest of the catalog, sorted; the pool rows the
         selection kept; and one record per pass.
 
     Raises:
@@ -1292,7 +1292,7 @@ def _unsolved(
     Args:
         history: The solver's record of its passes.
         n_train: The training-set size asked for.
-        n: The catalogue's size.
+        n: The catalog's size.
         n_candidates: How many rows may be held out.
 
     Returns:
@@ -1509,6 +1509,11 @@ class _Entry:
             its categories from worst to best.
         generated: Whether the data is generated on the spot by
             :func:`_make_chirp` rather than downloaded.
+        parser: The ARFF parser :func:`sklearn.datasets.fetch_openml` uses.
+            ``"liac-arff"`` for a dataset with integer-valued nominal
+            columns, whose categories pandas 3.1 reads as integers, which
+            scikit-learn's pandas parser then fails on; ``"auto"`` (the
+            pandas parser) otherwise.
     """
 
     data_id: int | None
@@ -1523,6 +1528,7 @@ class _Entry:
     )
 
     generated: bool = False
+    parser: Literal["auto", "liac-arff"] = "auto"
 
     @property
     def source(self) -> str:
@@ -1589,6 +1595,7 @@ _REGISTRY: dict[str, _Entry] = {
         n_features=21,
         description="House sale prices in King County, WA, 2014-2015",
         license="CC0",
+        parser="liac-arff",
     ),
     "bike_sharing": _Entry(
         data_id=44063,
@@ -1600,6 +1607,7 @@ _REGISTRY: dict[str, _Entry] = {
         citation=(
             "Fanaee-T & Gama 2013, Progress in Artificial Intelligence, 1-15"
         ),
+        parser="liac-arff",
     ),
     "wine_quality": _Entry(
         data_id=46964,
@@ -1890,6 +1898,7 @@ def load_dataset(
             data_home=str(_resolve_home(data_home)),
             target_column=entry.target,
             as_frame=True,
+            parser=entry.parser,
         )
         features = bunch.data
         for column, categories in entry.ordered.items():

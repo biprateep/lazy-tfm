@@ -55,7 +55,7 @@ there warns.
 
 
 class GridCoverageWarning(_warnings.LazyWarning):
-    """Densities are renormalised because the grid misses part of their mass."""
+    """Densities are renormalized because the grid misses part of their mass."""
 
 
 def quantile_levels(n_quantiles: int) -> _typing.FloatArray:

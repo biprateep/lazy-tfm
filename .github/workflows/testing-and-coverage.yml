@@ -42,13 +42,7 @@ jobs:
     - name: Install the locked environment
       run: uv sync --locked --python ${{ matrix.python-version }}
     - name: Run unit tests with pytest
-      run: uv run --no-sync pytest --cov --cov-report=xml
-    # The legs measure the same code, so one report is enough.
-    - name: Upload coverage report to codecov
-      if: matrix.python-version == '3.12'
-      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
+      run: uv run --no-sync pytest --cov
 
   # The suite on the other platforms users install on. One Python version
   # each, since the Linux legs already cover the versions.
@@ -112,12 +106,7 @@ jobs:
     - name: Run unit tests with pytest
       # This job also runs the tests that need a backend package, so it
       # holds coverage to a higher floor than pyproject.toml's.
-      run: .venv/bin/python -m pytest --cov --cov-report=xml --cov-fail-under=89
-    - name: Upload coverage report to codecov
-      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        flags: backends
+      run: .venv/bin/python -m pytest --cov --cov-fail-under=89
 
   # The same build and checks the release runs, on every push and pull request,
   # so a packaging mistake surfaces here rather than on release day.

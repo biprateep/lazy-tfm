@@ -2,7 +2,7 @@
 # https://docs.readthedocs.io/en/stable/config-file/v2.html
 #
 # The docs are built from the same locked environment CI uses, so a build that
-# passes here passes there.
+# passes here passes there. Warnings fail the build, as in CI.
 
 version: 2
 
@@ -16,7 +16,7 @@ build:
       - uv sync --locked --group docs
     build:
       html:
-        - uv run --no-sync sphinx-build -T -b html docs $READTHEDOCS_OUTPUT/html
+        - uv run --no-sync sphinx-build -T -W --keep-going -b html docs $READTHEDOCS_OUTPUT/html
 
 sphinx:
   configuration: docs/conf.py
