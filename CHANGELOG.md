@@ -65,6 +65,9 @@ change the API.
 
 ### Changed
 
+- The package metadata lists both authors, as `CITATION.cff` does. Its
+  summary and keywords describe conditional density estimation in general,
+  with photometric redshifts and astronomy as one use.
 - Kumo Tabular draws its members' random sign flips and column shuffles on a
   CPU generator on every device, and moves them to the device, so a CPU and a
   GPU give the same ensemble for the same `random_state`. NVIDIA's package
