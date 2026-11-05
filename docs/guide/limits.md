@@ -7,13 +7,15 @@ value.
 
 ## Extrapolation
 
-In our tests, none of the models extrapolated a trend beyond the range of the
-context. We trained every model
-(TabPFN-3.5, TabPFN-3.5-fast, LimiX-2, TabICL and TabFM) on the noisy chirp of
-{func}`load_dataset("chirp") <lazy.datasets.load_dataset>` restricted to x < 8 or x < 7, and predicted
-beyond that range. Every model reverted toward a flat mean, with an interval
-that did not cover the curve, giving an rms error of 1.8 to 2.4 and a
-68%-interval coverage of 21% to 55%. Therefore, the width of the predicted
+None of the models extrapolated a trend beyond the range of the context. We
+trained every model (TabPFN-3.5, TabPFN-3.5-fast, LimiX-2, TabICL and TabFM)
+on the noisy chirp without gaps,
+{func}`load_dataset("chirp", n_gaps=0) <lazy.datasets.load_dataset>`,
+restricted to x < 8 or x < 7, and predicted beyond that range. Every model
+reverted toward a flat mean, with an interval that did not cover the curve.
+Against the noise-free curve, the mean of each density had an rms error of 1.8
+to 2.5, and the 68% interval a coverage of 21% to 55% (see [Measurement
+setup](scaling.md#measurement-setup)). Therefore, the width of the predicted
 distribution is not a reliable warning of extrapolation, and we recommend
 identifying queries outside the range of the context before they are
 predicted.
@@ -109,8 +111,8 @@ In-context learning assumes that the context and the queries come from the
 same population. When the training set is biased, for example because only
 the brightest or easiest objects were labeled, the predicted distributions
 inherit the distribution of the context targets, and this mismatch, rather
-than the estimator, is usually what limits the accuracy. Our own testing
-shows that LimiX-2 performs best in this regime (see {doc}`choosing`). TabFM
+than the estimator, is usually what limits the accuracy. On DC1,
+LimiX-2 performs best in this regime (see {doc}`choosing`). TabFM
 also takes `prior_shift="em"`, a label-shift correction estimated by
 expectation maximization, for when the context's targets are distributed
 unlike the queries' while the features given the target are not.

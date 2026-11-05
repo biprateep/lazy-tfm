@@ -83,14 +83,16 @@ terminal or in a notebook but not when output goes to a file).
 An in-context model reads the whole context for every query. With
 `kv_cache=True` it reads the context once and each chunk of queries attends to
 what was stored, so a large query set costs little more than its own rows. The
-cache keeps the processed context in memory, which for LimiX-2 takes about 2
-GB per member at 20,000 context rows, so its eight members want a GPU with
-16–24 GB or more at that size. LimiX-2 has no cache upstream, so LAZY ports
+cache keeps the processed context in memory, which for LimiX-2 takes about 3
+GB per member at 20,000 rows of DC1, so its eight members want 24 GB or more
+at that size (cache on minus cache off, after a fit and a prediction; see
+[Measurement setup](#measurement-setup)). LimiX-2 has no cache upstream, so LAZY ports
 one, which falls back, with a warning, when the device lacks the room.
 
 TabPFN caches at full precision. Its own default is an int8 cache that moves
-densities by up to about half a percent, and `kv_cache="int8"` (or `"fp8"`)
-asks for it.
+densities by about half a percent of the peak for a typical row, and up to 3%
+(TabPFN-3.5, 10,000 DC1 context rows and 2,000 test rows; see [Measurement
+setup](#measurement-setup)), and `kv_cache="int8"` (or `"fp8"`) asks for it.
 TabICL caches keys and values, while `kv_cache="repr"` stores the smaller row
 representations instead and re-runs its in-context layers. TabFM uses its
 streaming prefill/decode path, which needs the repository build (see
@@ -106,7 +108,8 @@ a model was pretrained on. LimiX-2
 degrades above about 20,000 context rows, and a
 {class}`~lazy.models.ContextSizeWarning` says so whenever a member's context
 is larger (the whole context without bagging, or a bag of more than 20,000
-rows). The remedy it suggests is the one we used in our own tests:
+rows). The remedy it suggests is the one that the DC1 runs of
+{doc}`../models/limix` used:
 
 ```python
 model = lazy.LazyModel("limix", bag_size=20_000, n_estimators=32)
@@ -136,9 +139,9 @@ a fit, since the context and its key/value cache belong to the fitted model.
 LAZY therefore keeps every network it loads for the rest of the Python process
 and reuses it in any later fit with the same version, checkpoint, device and
 precision, so a grid search, a cross-validation or a sweep over `n_estimators`
-loads each network once. On the GB10, with one member and
-500 context rows, this cuts a refit of TabPFN-3.5 on the GPU from 0.8 s to
-under 0.1 s, and one of LimiX-2 from 1.5 s to 0.2 s. A shared network gives
+loads each network once. With one member and 500 DC1 context rows on the
+GPU, this cuts the median of 7 refits after a warm-up of TabPFN-3.5 from 0.7 s to 0.03 s, and that of LimiX-2 from 1.3 s to 0.1 s (see
+[Measurement setup](#measurement-setup)). A shared network gives
 predictions bit for bit identical to those of a freshly loaded one.
 
 Each network is held once, and `lazy.clear_model_cache()` releases all of them
@@ -174,3 +177,19 @@ and Kumo Tabular Small (`version="v1-small"`, 28 M parameters) is small
 enough for a CPU, while LimiX-2, TabFM and Kumo Tabular's Medium and Large
 need a GPU.
 {doc}`choosing` describes which model to use on each.
+
+## Measurement setup
+
+The figures in these docs that link to this section were measured with this
+setup. Kumo Tabular's comparison with NVIDIA's code ran on the CPU, and every
+other figure on the GPU.
+
+| Item | Value |
+| --- | --- |
+| Commit | `main` at ccc88a6 |
+| Machine | one NVIDIA GB10 (Grace-Blackwell), 20 Arm cores, 128 GB of memory shared by CPU and GPU |
+| Driver, CUDA | 580.178.04, CUDA 13.0 |
+| Threads | `torch.set_num_threads(4)`; OMP not set |
+| Libraries | Python 3.12.14, torch 2.14.0, numpy 2.5.3, scikit-learn 1.9.1, tabpfn 9.0.0, tabicl 2.2.0, tabfm 1.0.1 (the repository build of `lazy setup`), structured-data-models 0.2.1, LimiX source 516bf39 |
+| Data | DC1 rows drawn with `numpy.random.default_rng(0)` from its challenge split; OpenML splits by `train_test_split(test_size=0.1, random_state=0)` |
+| Settings | each backend's defaults and `random_state=0` (42 on the golden problem), unless the figure states otherwise |

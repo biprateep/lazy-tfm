@@ -76,5 +76,5 @@ values broadening them.
 
 With a GPU, the default TabPFN-3.5 is close to the most accurate model at a
 fraction of the cost. Without one, or when permissive licensing is needed,
-TabICLv2 is the model to use, and in our own testing LimiX-2 performs best
-when the training set is biased. {doc}`choosing` gives the reasons.
+TabICLv2 is the model to use, and on DC1 LimiX-2 performs best when
+the training set is biased. {doc}`choosing` gives the reasons.

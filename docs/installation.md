@@ -46,7 +46,7 @@ lazy setup
 ```
 
 - **TabFM.** The extra installs TabFM's PyPI release, which has no KV-cache
-  API and takes about 26 times the compute for the same answers. `lazy setup`
+  API. `lazy setup`
   replaces it with the repository build, at the commit `lazy` was validated
   on. Without it, `fit` warns with a `TabFMPerformanceWarning`. When the
   environment is a uv project's own (its `.venv`), `uv sync` would put the
