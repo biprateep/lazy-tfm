@@ -25,12 +25,8 @@ RTOL = {
 differently, which the narrowly spaced quantiles of TabICL and Kumo amplify
 most. LimiX moves by 4e-6 with the thread count alone.
 
-TabPFN's file holds on a GitHub Linux runner (AVX2), where the checkpoint
-workflow recorded it: two runners gave the same densities to the bit. Another
-processor moves its densities by 3% to 5% of the peak, so its golden test
-passes only on that platform: TabPFN hashes each row of its float32
-preprocessed data into a fingerprint feature, so a last-bit difference gives a
-different feature. See "Across machines" in the reproducibility guide.
+TabPFN has a file per CPU vendor (``golden_data.PER_VENDOR``), each recorded
+by the checkpoint workflow on a GitHub runner of that vendor.
 """
 
 ATOL = {
@@ -40,15 +36,14 @@ ATOL = {
     "tabfm": 2.5e-5,
     "limix": 1e-6,
 }
-"""Absolute tolerance per backend, as a fraction of the peak density. Two
-runners agreed to the bit on TabPFN, so its 1e-5 (and its 1e-4 relative) are a
-margin chosen, not measured, for a change of runner image on the same
-processor. TabFM's file, in float32, differed by up to 6.1e-6 of the peak
-between the runner (AVX2) that recorded it and a 4-core AVX-512 machine, so
-2.5e-5 leaves a margin of four. Kumo's and TabICL's
-far-tail bins move by more than their relative tolerance on another CPU: by up
-to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine (TabICL's at one
-thread and at four), so 3e-6 leaves a margin of four.
+"""Absolute tolerance per backend, as a fraction of the peak density. TabPFN's
+1e-5 is twice the largest difference measured between runners of one vendor:
+4.8e-6, between AMD's EPYC 7763 and its 9V74 and 9V45. TabFM's file, in
+float32, differed by up to 6.1e-6 of the peak between the runner (AVX2) that
+recorded it and a 4-core AVX-512 machine, so 2.5e-5 leaves a margin of four.
+Kumo's and TabICL's far-tail bins move by more than their relative tolerance
+on another CPU: by up to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine
+(TabICL's at one thread and at four), so 3e-6 leaves a margin of four.
 """
 
 
@@ -59,7 +54,7 @@ def test_the_default_path_reproduces_the_golden_densities(name):
         lazy.ESTIMATORS[name]()._import_backend()
     except ImportError as error:
         pytest.skip(f"{name} is not installed: {error}")
-    reference = np.load(golden_data.GOLDEN_DIR / f"{name}.npz")
+    reference = np.load(golden_data.path(name))
     _, _, X_test = golden_data.problem()
     with golden_data.pinned_threads():
         pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)
@@ -80,7 +75,11 @@ def _platforms(reference: np.lib.npyio.NpzFile) -> str:
     if "provenance" not in reference:
         return ""
     provenance = json.loads(str(reference["provenance"]))
-    return (
-        f"recorded on {provenance.get('cpu_capability', 'an unrecorded CPU')}; "
-        f"this machine is {torch.backends.cpu.get_cpu_capability()}"
+    recorded = " ".join(
+        str(provenance.get(key, "unrecorded"))
+        for key in ("cpu_vendor", "cpu_capability")
     )
+    here = (
+        f"{golden_data.cpu_vendor()} {torch.backends.cpu.get_cpu_capability()}"
+    )
+    return f"recorded on {recorded}; this machine is {here}"

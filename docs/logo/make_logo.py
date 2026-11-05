@@ -26,8 +26,13 @@
 #     python docs/logo/make_logo.py
 #
 # The color is the University of Toronto's blue, #1E3765.
+#
+# The icon is also written as favicons: square PNGs of 64 and 180 pixels
+# (the last for Apple's home-screen icon) and `favicon.svg`, which takes a
+# lighter tint when the browser is in dark mode.
 
 # %%
+import io
 import pathlib
 
 import matplotlib as mpl
@@ -42,6 +47,17 @@ from scipy import interpolate
 
 UOFT_BLUE = "#1E3765"
 """The University of Toronto's blue."""
+
+DARK_TINT = "#A9BFE8"
+"""A light tint of the blue, which the SVG favicon takes on a dark browser
+theme, where the blue itself would not show.
+"""
+
+FAVICON_SIZES = {
+    "favicon.png": 64,
+    "apple-touch-icon.png": 180,
+}
+"""The icon's square PNGs, as file name and side in pixels."""
 
 OUT = pathlib.Path(__file__).resolve().parents[1] / "_static"
 """Where the rendered files go."""
@@ -321,6 +337,26 @@ if __name__ == "__main__":
         save(fig, stem)
     fig, ax = plt.subplots(figsize=(2, 2))
     draw_icon(ax)
-    # The favicon is the icon at 64 by 64 pixels (2 inches at 32 dpi).
-    fig.savefig(OUT / "favicon.png", transparent=True, dpi=32)
+    # The icon is 2 inches square, so a dpi of half the side gives the side.
+    for name, side in FAVICON_SIZES.items():
+        fig.savefig(OUT / name, transparent=True, dpi=side / 2)
+    # The SVG favicon is the same whole square as the PNGs, not cropped.
+    buffer = io.StringIO()
+    fig.savefig(
+        buffer,
+        format="svg",
+        transparent=True,
+        metadata={"Date": None, "Creator": None},
+    )
     save(fig, "lazy-icon")
+    icon = buffer.getvalue()
+    blue = UOFT_BLUE.lower()
+    scheme = (
+        f"<style>:root{{--ink:{blue}}}@media (prefers-color-scheme:dark)"
+        f"{{:root{{--ink:{DARK_TINT.lower()}}}}}</style>"
+    )
+    if blue not in icon or "<defs>" not in icon:
+        raise RuntimeError("matplotlib's SVG has no blue or no <defs> to tint")
+    (OUT / "favicon.svg").write_text(
+        icon.replace(blue, "var(--ink)").replace("<defs>", f"<defs>{scheme}", 1)
+    )

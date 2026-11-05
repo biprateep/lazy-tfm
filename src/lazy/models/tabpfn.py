@@ -335,6 +335,14 @@ def _recipe_slot(
     return pairs[index - per_pair * len(pairs)]
 
 
+_LATER_ARGUMENTS: dict[str, Any] = {"enable_torch_compile": False}
+"""Arguments that tabpfn releases after 9.0 add, at their defaults there.
+
+Each is passed only where the installed ``TabPFNRegressor`` accepts it, so
+that a later default cannot change a prediction.
+"""
+
+
 def _cache_options(kv_cache: bool | str) -> dict[str, Any]:
     """TabPFN's fit mode and cache precision for a ``kv_cache`` value.
 
@@ -549,6 +557,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         # auto_scale_n_estimators acts only on n_estimators="auto", and
         # n_jobs does nothing; both are deprecated upstream.
         tabpfn = self._import_backend()
+        accepted = inspect.signature(tabpfn.TabPFNRegressor).parameters
         regressor = tabpfn.TabPFNRegressor(
             n_estimators=group.n_members,
             model_path=self._model_specs(tabpfn),
@@ -570,6 +579,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             differentiable_input=False,
             eval_metric=None,
             **_cache_options(self.kv_cache),
+            **{k: v for k, v in _LATER_ARGUMENTS.items() if k in accepted},
         )
         try:
             regressor.fit(X, y)

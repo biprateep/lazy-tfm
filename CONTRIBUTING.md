@@ -62,11 +62,14 @@ runs it again. One job checks that every external link resolves
 with the locked backend packages, and downloads the TabPFN v3.5-fast weights.
 
 The golden tests compare each backend's densities with files in
-`tests/lazy/golden/`, at four torch threads. TabPFN's file was recorded on a
-GitHub runner and matches only there: another processor moves TabPFN by a few
-percent of the peak. To re-record golden files, which needs Biprateep's
-approval, run the workflow by hand with `record` naming the backends, and
-commit those backends' files from its `golden` artifact.
+`tests/lazy/golden/`, at four torch threads. TabPFN has two files, one for
+GitHub's AMD runners (`tabpfn.npz`) and one for its Intel runners
+(`tabpfn_intel.npz`), since the two vendors move TabPFN by a few percent of
+the peak; the test picks the file for the processor it runs on. To re-record
+golden files, which needs Biprateep's approval, run the workflow by hand with
+`record` naming the backends, and commit those backends' files from its
+`golden` artifact. The workflow's runner is AMD or Intel at random, so
+re-recording TabPFN takes a run on each.
 
 On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
 lockfile, on Linux, with Python 3.12 on macOS and Windows too. It also runs
@@ -148,8 +151,10 @@ style (rendered by napoleon).
 ### The logo
 
 `docs/logo/make_logo.py` draws the logo, its white version, the square icon
-and the favicon, and writes them into `docs/_static/`, where the docs and the
-README pick them up. To change the logo, edit the script and rerun it:
+and the favicons (PNG at 64 and 180 pixels, and an SVG), and writes them
+into `docs/_static/`, where the docs and the README pick them up. The
+[brand page](docs/brand.md) lists the files and the colors. To change the
+logo, edit the script and rerun it:
 
 ```bash
 uv run python docs/logo/make_logo.py

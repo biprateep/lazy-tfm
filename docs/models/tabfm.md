@@ -88,7 +88,7 @@ level gets $\lfloor\sqrt{n/5}\rfloor$ bins, between 2 and 10, for a context of
 $n$ rows, so that a final bin holds about five context rows, and every context
 of 500 rows or more gets 10 by 10. With fewer rows per bin the histogram is
 overconfident. On one split of `yacht` (277 context rows, split seed
-299792458) with 4 members, for example (one GB10 GPU, lazy commit 59b2f01), the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517
+299792458) with 4 members, for example (one GB10 GPU, LAZY commit 59b2f01), the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517
 and the NLL from 1.28 to 0.50 relative to 10 by 10. An integer sets a level's bin count
 explicitly, from 2 to 10, and always gives equal-mass bins.
 
@@ -113,5 +113,5 @@ records which bins a fit used.
 which lowered the NLL in 12 of 13 settings, at 1.8 to 2.8 times the cost of a
 prediction. The settings were `yacht`, `energy` and `concrete` with 3 seeds
 each, and DC1 at 1,000 and 10,000 context rows with 2,000 test rows and 1
-seed, all with 4 members and a 1,000-bin grid, on one GB10 GPU at lazy commit
+seed, all with 4 members and a 1,000-bin grid, on one GB10 GPU at LAZY commit
 59b2f01. The exception was `yacht` at 7 by 7 bins (NLL +0.02).

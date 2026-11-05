@@ -78,6 +78,10 @@ change the API.
   `provenance_` then holds only `backend`, `version` and
   `constant_target`. Results for any other target are unchanged, and so
   are the golden densities.
+- The documentation uses the PyData Sphinx theme, which has a dark mode,
+  and the favicon comes as an SVG and as PNG files of 64 and 180 pixels.
+  A new brand page lists the spellings of the name, the logo files and the
+  colors. Prose spells the project LAZY.
 - The package metadata lists both authors, as `CITATION.cff` does. Its
   summary and keywords describe conditional density estimation in general,
   with photometric redshifts and astronomy as one use.
@@ -290,6 +294,9 @@ change the API.
   about 1e-17 rather than to 0; the bag is now left unscaled, as TabICL and
   Kumo Tabular leave it.
 
+- With `tabpfn` 9.2 or later installed, TabPFN passes
+  `enable_torch_compile=False` instead of leaving it to upstream's default,
+  so a later default cannot change its densities. Outputs do not change.
 - The docs state each measured figure with its setup, and the figures that
   their sources or re-measurements contradict are corrected. TabFM's
   key/value cache saves a ratio of 1.6 in time at the defaults (30.1 s

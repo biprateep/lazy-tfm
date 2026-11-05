@@ -46,6 +46,7 @@ the table defines each pool and when we would use it:
 | `"quantile"`  | $\frac{1}{K} \sum_k Q_k$, the average quantile function (Vincentization). | Members that agree on the shape and differ in location or width.                 |
 
 ```{figure} ../figures/figs/pooling.svg
+:class: lazy-figure
 :alt: Three panels showing the linear, geometric and quantile pools of two member densities, one with two peaks and one with a single peak.
 :width: 100%
 
