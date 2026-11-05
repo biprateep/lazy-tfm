@@ -44,7 +44,17 @@ jobs:
       LAZY_RUN_CHECKPOINT_TESTS: "1"
       SELECT: ${{ inputs.select }}
       RECORD: ${{ inputs.record }}
+      # Torch's AVX-512 kernels move TabPFN's cached densities away from its
+      # uncached ones by more than float rounding; its AVX2 kernels, on every
+      # runner, do not. On an AVX2 runner this changes nothing.
+      ATEN_CPU_CAPABILITY: avx2
     steps:
+    # TabPFN's golden file depends on the CPU vendor (tests/lazy/golden_data.py).
+    - name: Report the processor
+      run: |
+        vendor=$(grep -m1 vendor_id /proc/cpuinfo | cut -d: -f2)
+        model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2)
+        echo "::notice title=Processor::${vendor# },${model}"
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false

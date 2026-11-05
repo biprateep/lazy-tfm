@@ -24,6 +24,12 @@ from lazy import datasets
 
 GOLDEN_DIR = pathlib.Path(__file__).with_name("golden")
 
+PER_VENDOR = frozenset({"tabpfn"})
+"""Backends whose densities differ between Intel and AMD processors beyond the
+golden tolerance (see "Across machines" in the reproducibility guide), so
+they have a golden file per vendor (see :func:`path`).
+"""
+
 GRID = datasets.DC1_GRID
 """The grid every golden density is tabulated on."""
 
@@ -110,6 +116,41 @@ def fit(name: str) -> Any:
     """
     X_train, z, _ = problem()
     return lazy.LazyModel(name, **RECORDED_PARAMS[name]).fit(X_train, z)
+
+
+def path(name: str, vendor: str | None = None) -> pathlib.Path:
+    """The golden file of the backend ``name`` for a CPU vendor.
+
+    Args:
+        name: A key of :data:`RECORDED_PARAMS`.
+        vendor: A ``vendor_id`` such as ``"GenuineIntel"``; None for this
+            machine's (:func:`cpu_vendor`).
+
+    Returns:
+        ``golden/<name>.npz``, or ``golden/<name>_intel.npz`` for a backend
+        in :data:`PER_VENDOR` on an Intel processor.
+    """
+    vendor = vendor or cpu_vendor()
+    if name in PER_VENDOR and vendor == "GenuineIntel":
+        return GOLDEN_DIR / f"{name}_intel.npz"
+    return GOLDEN_DIR / f"{name}.npz"
+
+
+def cpu_vendor() -> str | None:
+    """The CPU vendor in ``/proc/cpuinfo``, such as ``"AuthenticAMD"``.
+
+    Returns:
+        The first ``vendor_id``, or None where the file or the field is
+        missing (off Linux, or on a processor that does not state one).
+    """
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as cpuinfo:
+            for line in cpuinfo:
+                if line.startswith("vendor_id"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
 
 
 def problem() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
