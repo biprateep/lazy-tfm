@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterator
+import numbers
 from typing import Any, TypeAlias
 
 import numpy as np
@@ -708,14 +709,44 @@ class BaseDensityRegressor(
             its densities, shape (rows, grid.n_bins). No rows give one
             empty block.
         """
+        if X.empty:
+            yield slice(0, 0), np.zeros((0, grid.n_bins))
+            return
         size = max(1, _BLOCK_BYTES // (8 * grid.n_bins))
         chunk = getattr(self, "chunk_size", None)
-        if isinstance(chunk, int) and not isinstance(chunk, bool) and chunk > 0:
-            size = max(chunk, size - size % chunk)
-        for start in range(0, max(len(X), 1), size):
-            rows = slice(start, start + size)
+        if isinstance(chunk, numbers.Integral) and not isinstance(chunk, bool):
+            chunk = int(chunk)
+            if chunk > 0:
+                size = max(chunk, size - size % chunk)
+        for rows, pdfs in self._pdf_blocks(X, grid, size):
+            # Rebound, so that the raw block is freed while the caller works.
+            pdfs = self._checked_densities(pdfs, rows.stop - rows.start, grid)
+            yield rows, pdfs
+
+    def _pdf_blocks(
+        self, X: pd.DataFrame, grid: grid_lib.Grid, size: int
+    ) -> Iterator[tuple[slice, _typing.FloatArray]]:
+        """Un-normalized densities of validated features, a block at a time.
+
+        This default calls :meth:`_predict_pdf` once per block. A model that
+        predicts its queries a chunk at a time overrides it to answer every
+        block from one pass over its chunks, under one progress bar.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features), with
+                n_samples >= 1.
+            grid: The grid to answer on.
+            size: Rows per block; the last block may hold fewer.
+
+        Yields:
+            Tuples (rows, pdfs): the slice of ``X`` a block covers, with an
+            explicit start and stop, and its densities, shape
+            (rows, grid.n_bins).
+        """
+        for start in range(0, len(X), size):
+            rows = slice(start, min(start + size, len(X)))
             block = X.iloc[rows].reset_index(drop=True)
-            yield rows, self._densities(block, grid)
+            yield rows, self._predict_pdf(block, grid)
 
     def _densities(
         self, X: pd.DataFrame, grid: grid_lib.Grid
@@ -736,11 +767,29 @@ class BaseDensityRegressor(
         """
         if X.empty:
             return np.zeros((0, grid.n_bins))
-        pdfs = np.asarray(self._predict_pdf(X, grid), dtype=float)
-        if pdfs.shape != (len(X), grid.n_bins):
+        return self._checked_densities(self._predict_pdf(X, grid), len(X), grid)
+
+    def _checked_densities(
+        self, pdfs: npt.ArrayLike, n_rows: int, grid: grid_lib.Grid
+    ) -> _typing.FloatArray:
+        """``pdfs`` normalized on ``grid``, once their shape is checked.
+
+        Args:
+            pdfs: Un-normalized densities from the backend.
+            n_rows: The rows they answer.
+            grid: The grid they are on.
+
+        Returns:
+            Densities, shape (n_rows, grid.n_bins).
+
+        Raises:
+            RuntimeError: If ``pdfs`` is not of shape (n_rows, grid.n_bins).
+        """
+        pdfs = np.asarray(pdfs, dtype=float)
+        if pdfs.shape != (n_rows, grid.n_bins):
             raise RuntimeError(
                 f"{type(self).__name__} returned {pdfs.shape}, expected"
-                f" {(len(X), grid.n_bins)}"
+                f" {(n_rows, grid.n_bins)}"
             )
         return grid.normalize(pdfs)
 

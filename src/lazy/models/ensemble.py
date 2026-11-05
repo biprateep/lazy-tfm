@@ -361,11 +361,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        blocks = [
-            dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
-            for dist in self._distribution_chunks(X)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+        return _ensemble.tabulate(self._distribution_chunks(X), grid)
 
     def _distribution_chunks(
         self, X: pd.DataFrame
