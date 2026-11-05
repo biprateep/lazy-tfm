@@ -41,7 +41,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name in args.backends or sorted(golden_data.RECORDED_PARAMS):
             model = golden_data.fit(name)
             pdfs = model.predict_proba(X_test, golden_data.GRID)
-            path = golden_data.GOLDEN_DIR / f"{name}.npz"
+            path = golden_data.path(name)
             np.savez_compressed(
                 path,
                 pdfs=pdfs,
@@ -73,6 +73,7 @@ def _recording() -> dict[str, object]:
         "machine": platform.platform(),
         "cpus": os.cpu_count(),
         # TabPFN's CPU densities differ between processors.
+        "cpu_vendor": golden_data.cpu_vendor(),
         "cpu_capability": torch.backends.cpu.get_cpu_capability(),
         "torch_threads": torch.get_num_threads(),
         "thread_variables": {
