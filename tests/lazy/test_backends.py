@@ -282,10 +282,8 @@ class TestTabFM:
         [
             np.r_[np.zeros(100), np.linspace(0.01, 1.0, 100)],
             np.arange(300) % 5.0,
-            np.full(200, 0.5),
-            np.full(200, 1e12),
         ],
-        ids=["zero-inflated", "integer-valued", "constant", "constant-large"],
+        ids=["zero-inflated", "integer-valued"],
     )
     def test_tied_targets_give_valid_bins(self, z, monkeypatch):
         """Ties collapse quantiles into empty bins, which must stay valid."""
@@ -436,13 +434,6 @@ class TestTabFM:
         ).fit(X, z)
         assert est.mixed_precision_ is False
         assert est.provenance_["mixed_precision"] is False
-
-    def test_a_constant_target_fits_with_a_valid_native_grid(self):
-        generator = np.random.default_rng(0)
-        X = generator.normal(size=(200, 2))
-        est = tabfm.TabFMHistogram(n_estimators=1).fit(X, np.full(200, 0.5))
-        assert est.native_grid_.y_min == 0.5
-        assert 0.5 < est.native_grid_.y_max < 0.5 + 1e-5
 
     def test_repeated_transforms_keep_their_weights(self, tiny):
         """Upstream cycles norm_methods, so repeats in it are members."""
@@ -1043,15 +1034,6 @@ class TestTabICL:
         assert grid.n_bins == 1500
         np.testing.assert_allclose(grid.widths, 1.6 / 1000)
 
-    @pytest.mark.parametrize("value", [0.0, 0.5, -1e4])
-    def test_a_constant_target_is_padded_on_its_own_scale(self, value):
-        est = tabicl.TabICLQuantile()
-        est._support = (value, value)
-        grid = est._native_grid()
-        pad = 0.01 * max(abs(value), 1.0)
-        assert grid.y_min == pytest.approx(value - pad)
-        assert grid.y_max == pytest.approx(value + pad)
-
     def test_mass_outside_the_native_grid_warns(self, monkeypatch):
         levels = tabicl.quantile_levels(99)
         inside = np.linspace(0.1, 0.9, 99)
@@ -1292,19 +1274,6 @@ class TestTabPFN:
         assert np.all(np.diff(est.borders_) > 0)
         dist = est.predict_distribution(X[60:])
         np.testing.assert_array_equal(dist.bins, est.borders_)
-
-    @pytest.mark.checkpoint
-    def test_a_constant_target_predicts_one_narrow_bucket(self):
-        generator = np.random.default_rng(0)
-        X = generator.normal(size=(60, 3))
-        est = tabpfn.TabPFNBarDistribution(
-            n_estimators=1, device="cpu", progress=False
-        ).fit(X[:50], np.full(50, 1e4))
-        assert est.n_buckets_ == 1
-        assert est.native_grid_.y_min < 1e4 < est.native_grid_.y_max
-        dist = est.predict_distribution(X[50:])
-        np.testing.assert_allclose(dist.masses.sum(axis=1), 1.0)
-        np.testing.assert_allclose(dist.ppf([0.5])[:, 0], 1e4)
 
     def test_a_logit_count_that_misses_the_buckets_is_reported(self):
         """A mismatch here would otherwise reach `rebin` as a bare error."""

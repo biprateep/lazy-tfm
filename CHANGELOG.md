@@ -65,6 +65,19 @@ change the API.
 
 ### Changed
 
+- A constant target, every training value the same, now gets a point mass
+  at that value on every backend, as scikit-learn's regressors answer it,
+  and no network runs. Its quantiles, intervals and point estimates are the
+  value, `predict_proba` puts all of the probability in the grid bin that
+  holds it, and the native grid has three bins centred on it.
+  `LazyEnsembleModel` gives the same point mass under every pooling.
+  Before, the backends disagreed: LimiX-2 raised `ValueError` at `y = 0.3`
+  and gave quantiles 1.4 units wide at `y = 7.0`, TabICL gave quantiles
+  0.04 units wide, and TabPFN and TabFM gave one narrow bucket or bin. The
+  fitted model's `constant_target_` records the value. On a backend,
+  `provenance_` then holds only `backend`, `version` and
+  `constant_target`. Results for any other target are unchanged, and so
+  are the golden densities.
 - The package metadata lists both authors, as `CITATION.cff` does. Its
   summary and keywords describe conditional density estimation in general,
   with photometric redshifts and astronomy as one use.

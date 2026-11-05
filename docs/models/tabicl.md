@@ -42,9 +42,8 @@ LAZY's.
 ## Built-in standardizations
 
 TabICL z-scores the target with the mean and standard deviation of the context
-(a constant target is left unscaled) and maps the predicted quantiles back to
-the original units. The features go
-through a fixed pipeline before the network: missing values are imputed with
+(a bag whose targets are all equal is left unscaled) and maps the predicted
+quantiles back to the original units. The features go through a fixed pipeline before the network: missing values are imputed with
 the column mean, constant columns are dropped, every column is z-scored on the
 context and clipped at 100 standard deviations, then each member applies its
 own transform (none, or a power transform) and soft-clips outliers at 4

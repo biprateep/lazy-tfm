@@ -756,7 +756,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             (network,), *_ = self._network()
             for regressor in self.handles_:
                 regressor.models_ = [network]
-                # A constant target runs no network, so has no engine.
+                # A bag whose targets are all equal runs no network: no engine.
                 engine = getattr(regressor, "executor_", None)
                 if engine is not None:
                     engine._set_models([network])  # noqa: SLF001 - upstream's.
@@ -922,9 +922,10 @@ def _bucket_borders(regressor: Any) -> _typing.FloatArray:
     z-normalised borders and the context targets' mean and standard
     deviation; the buckets, and so the masses in them, are the same ones.
 
-    For a constant target upstream skips the model altogether, predicts one
-    bucket around the constant, and keeps that bucket (already in the
-    target's units) as ``znorm_space_bardist_``.
+    For a constant target (here, a bag whose targets are all equal) upstream
+    skips the model altogether, predicts one bucket around the constant,
+    and keeps that bucket (already in the target's units) as
+    ``znorm_space_bardist_``.
 
     Args:
         regressor: A fitted ``tabpfn.TabPFNRegressor``.

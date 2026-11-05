@@ -400,6 +400,86 @@ def test_quantiles_invert_the_distribution(cls, data):
         )
 
 
+def _refuse(*args, **kwargs):
+    """A network load or group fit that a constant target must not reach."""
+    raise AssertionError("a constant target ran the model")
+
+
+def _assert_a_point_mass(model, value, X_test):
+    """Every answer of ``model`` is a point mass at ``value``."""
+    quantiles = model.predict_quantiles(X_test, [0.0, 0.16, 0.5, 0.84, 1.0])
+    np.testing.assert_array_equal(quantiles, value)
+    np.testing.assert_array_equal(model.predict_interval(X_test), value)
+    for method in lazy.POINT_ESTIMATORS:
+        np.testing.assert_allclose(
+            model.predict(X_test, method), value, rtol=1e-15
+        )
+    grid = lazy.Grid.linear(
+        value - 1.0, value + 1.5, 25, normalization="histogram"
+    )
+    masses = model.predict_proba(X_test, grid) * grid.widths
+    expected = np.zeros(grid.n_bins)
+    expected[grid.bin_index(value)] = 1.0
+    np.testing.assert_allclose(masses, np.tile(expected, (len(X_test), 1)))
+    np.testing.assert_array_equal(
+        model.predict_pit(X_test, np.full(len(X_test), value)), 1.0
+    )
+    restored = pickle.loads(pickle.dumps(model))
+    np.testing.assert_array_equal(restored.predict_quantiles(X_test), value)
+
+
+# The std of 70 copies rounds to 4.2e-17 for 0.1, 5.6e-17 for 0.3, 0 for 7.0.
+@pytest.mark.parametrize("value", [0.1, 0.3, 7.0])
+def test_a_constant_target_gets_a_point_mass_without_the_model(
+    cls, value, data, monkeypatch
+):
+    X, _, X_test = data
+    monkeypatch.setattr(getattr(cls, "cls", cls), "_fit_group", _refuse)
+    monkeypatch.setattr(lazy.Checkpoint, "download", _refuse)
+    model = cls(n_estimators=3).fit(X, np.full(len(X), value))
+    assert model.provenance_["constant_target"] == value
+    _assert_a_point_mass(model, value, X_test)
+
+
+def test_a_constant_targets_point_mass_converts_to_qp(cls, data):
+    pytest.importorskip("qp")
+    X, _, X_test = data
+    model = cls(n_estimators=1).fit(X, np.full(len(X), 0.3))
+    ensemble = model.predict_distribution(X_test).to_qp()
+    assert ensemble.npdf == len(X_test)
+    np.testing.assert_allclose(
+        ensemble.cdf(np.array([0.29, 0.31])), [[0, 1]] * len(X_test), atol=1e-12
+    )
+
+
+@pytest.mark.parametrize("pooling", lazy.models.ensemble.POOLINGS)
+def test_a_pool_of_a_constant_target_is_its_members_point_mass(
+    cls, pooling, data
+):
+    X, _, X_test = data
+    model = lazy.LazyEnsembleModel(
+        [cls(n_estimators=2), standins.QuantileStandIn(n_estimators=2)],
+        pooling=pooling,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", lazy.EnsembleSizeWarning)
+        model.fit(X, np.full(len(X), 0.3))
+    _assert_a_point_mass(model, 0.3, X_test)
+
+
+@pytest.mark.parametrize("value", [0.0, 0.5, -1e4])
+def test_a_constant_targets_grid_is_centred_on_it_at_its_own_scale(value, data):
+    X, _, _ = data
+    model = standins.HistogramStandIn().fit(X, np.full(len(X), value))
+    grid = model.native_grid_
+    pad = 0.01 * max(abs(value), 1.0)
+    np.testing.assert_allclose(
+        grid.edges, value + pad * np.array([-1, -1 / 3, 1 / 3, 1])
+    )
+    assert grid.centers[1] == value
+    assert grid.normalization == "histogram"
+
+
 def test_predict_cdf_at_a_quantile_returns_its_level(cls, data):
     X, z, X_test = data
     model = cls().fit(X, z)

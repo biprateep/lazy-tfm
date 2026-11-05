@@ -160,7 +160,11 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         weights_: Each member's weight in the pool, shape (n_members,);
             ``1 / n_members`` each.
         native_grid_: The pooling grid, a histogram-normalized
-            :class:`~lazy.grid.Grid` of equal bins.
+            :class:`~lazy.grid.Grid` of equal bins; for a constant target,
+            the members' three bins about it.
+        constant_target_: Set only when every training target is equal:
+            the value, which every row then gets as a point mass, without
+            pooling.
         provenance_: What answered: each member's own ``provenance_`` by
             name, and the pooling, weights and pooling grid.
 
@@ -293,11 +297,17 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         self.named_estimators_ = sklearn_utils.Bunch(**dict(members))
         self.weights_ = np.full(len(members), 1.0 / len(members))
         self.pooling_ = pooling
-        self.native_grid_ = _pool_grid(
-            self.y_range_,
-            [_member_grid(member) for member in self.estimators_],
-            self.pool_bins,
-        )
+        if y.min() == y.max():
+            # A pool would smear the point mass across a pooling bin, so
+            # the ensemble answers it directly, as each backend does.
+            self.constant_target_ = float(y[0])
+            self.native_grid_ = _ensemble.constant_grid(self.constant_target_)
+        else:
+            self.native_grid_ = _pool_grid(
+                self.y_range_,
+                [_member_grid(member) for member in self.estimators_],
+                self.pool_bins,
+            )
         self.provenance_ = self._provenance(members)
 
     def _provenance(
@@ -320,6 +330,8 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
                 for name, member in members
             },
         }
+        if hasattr(self, "constant_target_"):
+            recipe["constant_target"] = self.constant_target_
         if self.pooling_ == "geometric":
             recipe["log_floor"] = LOG_FLOOR
         if self.pooling_ == "quantile":
@@ -377,8 +389,13 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
                 n_samples >= 1.
 
         Yields:
-            One pooled distribution per chunk of rows, in order.
+            One pooled distribution per chunk of rows, in order; for a
+            constant target, the members' point mass at it, in one chunk.
         """
+        constant = getattr(self, "constant_target_", None)
+        if constant is not None:
+            yield _ensemble.point_masses(constant, len(X))
+            return
         named = "feature_names_in_" in vars(self)
         size = int(self.chunk_size) or len(X)
         for start in range(0, len(X), size):
@@ -590,7 +607,7 @@ def _pool_grid(
         A histogram-normalized grid of equal bins.
     """
     low, high = y_range
-    pad = POOL_PADDING * (high - low) or POOL_PADDING * max(abs(low), 1.0)
+    pad = POOL_PADDING * (high - low)
     start, stop = low - pad, high + pad
     union_start = min(grid.y_min for grid in member_grids)
     union_stop = max(grid.y_max for grid in member_grids)

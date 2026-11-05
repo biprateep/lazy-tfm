@@ -212,8 +212,8 @@ class TabICLQuantile(
         grid_: The resolved default output grid.
         native_grid_: The native grid, histogram-normalised: 1,500 bins over
             the training targets' range (all of them, bagged or not) padded
-            by a quarter of it on each side (a constant target is padded by
-            1% of its value, and at least by 0.01).
+            by a quarter of it on each side; for a constant target, the
+            three bins that ``ContextEnsembleEstimator`` gives it.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         regressor_: The fitted ``tabicl.TabICLRegressor``, when one serves
