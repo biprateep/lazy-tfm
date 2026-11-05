@@ -272,6 +272,9 @@ change the API.
 
 ### Fixed
 
+- With `tabpfn` 9.2 or later installed, TabPFN passes
+  `enable_torch_compile=False` instead of leaving it to upstream's default,
+  so a later default cannot change its densities. Outputs do not change.
 - The docs state each measured figure with its setup, and the figures that
   their sources or re-measurements contradict are corrected. TabFM's
   key/value cache saves a ratio of 1.6 in time at the defaults (30.1 s
