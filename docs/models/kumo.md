@@ -86,8 +86,8 @@ the installed package, so an upgrade of `sdm` cannot change what
 `transforms="auto"` runs. We use 8 members for every size, the same seed (0)
 as every other model, and we treat every column as numeric. We also
 standardize the target in double precision before Kumo standardizes it again
-(a constant target is left unscaled), since a narrow spread about a large
-offset can be rounded away in single precision. The members' quantiles are
+(a bag whose targets are all equal is left unscaled), since a narrow spread
+about a large offset can be rounded away in single precision. The members' quantiles are
 combined by NVIDIA's trimmed mean, which we take over every member of the
 ensemble at once, so that a bagged ensemble, whose members run one at a time,
 is combined in the same way as one that runs in a single call. Under an

@@ -38,17 +38,15 @@ from lazy.models import ensemble
 
 FIGS = pathlib.Path(__file__).resolve().parent / "figs"
 
-# Figure defaults for the documentation site, not a journal. The Read the
-# Docs theme sets body text at 16 px in a content column about 696 px wide
-# (800 px less two 3.236 em gutters), and the figures fill that column, so a
-# 7.25 in figure is shown at 96 px per inch and 12 pt type lands at 16 px,
-# the size of the text around it.
+# Figure defaults for the documentation site, not a journal. The figures fill
+# the theme's content column, so their type is scaled with the column's width.
 TEXT_WIDTH = 7.25  # in inches
-SMALL_SIZE = 10.5  # in pts; 14 px on the page
-NORMAL_SIZE = 12  # 16 px, the body text
-BIG_SIZE = 13.5  # 18 px
-# The theme's text color; the background is left transparent so the
-# figures sit on the page's own (#fcfcfc).
+SMALL_SIZE = 10.5  # in pts
+NORMAL_SIZE = 12  # in pts; near the body text
+BIG_SIZE = 13.5  # in pts
+# Dark grey ink on a transparent background, so the figures sit on the page's
+# own. docs/_static/gallery.css inverts them in the dark theme, so each one
+# is included with `:class: lazy-figure`.
 INK = "#404040"
 SERIF_FALLBACKS = ["CMU Serif", "Latin Modern Roman", "cmr10"]
 

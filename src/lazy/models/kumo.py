@@ -227,7 +227,8 @@ class KumoQuantile(
         grid_: The resolved default output grid.
         native_grid_: The native grid, histogram-normalized: 1,500 bins over
             the training targets' range (all of them, bagged or not) padded
-            by a quarter of it on each side.
+            by a quarter of it on each side; for a constant target, the
+            three bins that ``ContextEnsembleEstimator`` gives it.
         checkpoint_: The pinned checkpoint file, a :class:`pathlib.Path`.
         provenance_: Which weights, code and ensemble answered, as a dict.
         handles_: Per member group, its fitted context.

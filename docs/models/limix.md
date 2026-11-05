@@ -46,8 +46,8 @@ regression configuration shipped with LimiX, next to LAZY's.
 ## Built-in standardizations
 
 LimiX-2 z-scores the target with the mean and the sample standard deviation of
-the context (a constant target is left unscaled), and its buckets are fixed in
-that standardized space. Before the network, each member drops constant and
+the context (a bag whose targets are all equal is left unscaled), and its
+buckets are fixed in that standardized space. Before the network, each member drops constant and
 empty columns and applies its transform: a quantile transform with one
 quantile per five rows, kept beside the original features and followed by a
 singular value decomposition, or a power transform followed by
@@ -75,6 +75,6 @@ photometry its accuracy degrades above about 20,000 context rows. On all
 390,990 test rows of the representative DC1 set, on a 200-bin grid, its CDE
 loss was −14.15 at 20,000 context rows, −13.98 at 30,000 and −13.60 at
 43,486, while 32 bags of 20,000 rows gave −14.375 at 43,486 (one GB10 GPU,
-lazy commit 0774d1d, LimiX-2 weights de07b67). LAZY therefore warns above that
+LAZY commit 0774d1d, LimiX-2 weights de07b67). LAZY therefore warns above that
 size; bagging (e.g., `bag_size=20_000`, so that each member sees at most
 20,000 rows) keeps every member within that size.

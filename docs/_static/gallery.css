@@ -1,22 +1,33 @@
-/* Tutorial gallery cards (docs/tutorials/index.md): a thin border in the
-   theme's grey, the thumbnail on top, and the theme's link blue on hover. */
+/* Tutorial gallery cards (docs/tutorials/index.md): a thin border, the
+   thumbnail on top, and the theme's link color on hover. The colors are the
+   theme's variables, so both themes read well. */
 .lazy-gallery-card {
-  border: 1px solid #e1e4e5;
+  border: 1px solid var(--pst-color-border);
   border-radius: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .lazy-gallery-card:hover {
-  border-color: #2980b9;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  border-color: var(--pst-color-link-hover);
+  box-shadow: 0 2px 6px var(--pst-color-shadow);
 }
 .lazy-gallery-card .sd-card-img-top {
-  border-bottom: 1px solid #e1e4e5;
+  border-bottom: 1px solid var(--pst-color-border);
   border-radius: 0;
 }
 .lazy-gallery-card .sd-card-title {
-  color: #2980b9;
+  color: var(--pst-color-link);
   font-size: 1em;
 }
 .lazy-gallery-card .sd-card-text {
   font-size: 0.9em;
+}
+
+/* The figures (docs/figures/make_figures.py, with the class lazy-figure) are
+   transparent SVGs drawn in dark grey, which a dark page hides. In the dark
+   theme they are inverted, which makes the ink light and keeps the hues
+   close to their own. The theme's white backing for images in the dark
+   theme is removed, as the inversion would blacken it. */
+html[data-theme="dark"] img.lazy-figure {
+  background: transparent;
+  filter: invert(1) hue-rotate(180deg);
 }

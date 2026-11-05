@@ -90,7 +90,8 @@ def native_grid(edges: Iterable[_typing.FloatArray]) -> grid_lib.Grid:
     """
     union = np.unique(np.concatenate(list(edges)))
     if union.size < 3:
-        # A constant target has one bucket; a grid needs two, and halving
+        # Every member group's context is constant (a constant target never
+        # gets here), so there is one bucket; a grid needs two, and halving
         # it changes no density.
         union = np.r_[union[0], union.mean(), union[-1]]
     return grid_lib.Grid.from_edges(union, normalization="histogram")

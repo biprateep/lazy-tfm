@@ -124,13 +124,10 @@ class QuantileHead:
         self._support = (float(np.min(y)), float(np.max(y)))
 
     def _native_grid(self) -> grid_lib.Grid:
+        # The base class fits a constant target itself, so high > low.
         low, high = self._support
-        if high > low:
-            pad = NATIVE_PAD * (high - low)
-            n_bins = round(NATIVE_QUANTILE_BINS * (1.0 + 2.0 * NATIVE_PAD))
-        else:
-            pad = 0.01 * max(abs(high), 1.0)
-            n_bins = NATIVE_QUANTILE_BINS
+        pad = NATIVE_PAD * (high - low)
+        n_bins = round(NATIVE_QUANTILE_BINS * (1.0 + 2.0 * NATIVE_PAD))
         return grid_lib.Grid.linear(
             low - pad, high + pad, n_bins, normalization="histogram"
         )

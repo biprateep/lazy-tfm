@@ -17,7 +17,7 @@ were pretrained on at most 10,000 and 50,000 rows, respectively.
 LimiX-2 performs best when the training set is biased (i.e.,
 unrepresentative of the test set). On the 35,011 rows of the biased DC1 set,
 scored on a hold-out of 19,383, bagged LimiX-2 had a CDE loss of −14.372,
-against −14.19 for TabPFN-3.5 and −14.01 for TabFM (one GB10 GPU, lazy
+against −14.19 for TabPFN-3.5 and −14.01 for TabFM (one GB10 GPU, LAZY
 commit 0774d1d, LimiX-2 weights de07b67). However, LimiX-2
 degrades above about 20,000 context rows, so a larger training set needs
 bagging, with `bag_size=20_000` (so that each member sees at most 20,000 rows)

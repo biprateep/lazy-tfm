@@ -147,6 +147,7 @@ each definition. The `median` is also `predict_quantiles(X, [0.5])`, which
 is computed without a grid.
 
 ```{figure} ../figures/figs/point_estimates.svg
+:class: lazy-figure
 :alt: A density with a tall skewed peak and a lower second peak, with vertical lines at its mode, peak mean, mean and median.
 :width: 100%
 

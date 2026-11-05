@@ -50,6 +50,7 @@ the slowest, and it needs its repository build to be even this fast (see
 {doc}`../installation`).
 
 ```{figure} ../figures/figs/chunks_bags.svg
+:class: lazy-figure
 :alt: Two grids of query rows by context rows, split into three chunks of query rows; in the second grid only half the context columns are filled.
 :width: 100%
 

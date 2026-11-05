@@ -70,6 +70,23 @@ change the API.
   with a GPU generator, which gives another stream for the same seed, so the
   same `random_state` gave different densities on the two devices. Densities
   on a GPU change; on a CPU they are unchanged.
+- A constant target, every training value the same, now gets a point mass
+  at that value on every backend, as scikit-learn's regressors answer it,
+  and no network runs. Its quantiles, intervals and point estimates are the
+  value, `predict_proba` puts all of the probability in the grid bin that
+  holds it, and the native grid has three bins centred on it.
+  `LazyEnsembleModel` gives the same point mass under every pooling.
+  Before, the backends disagreed: LimiX-2 raised `ValueError` at `y = 0.3`
+  and gave quantiles 1.4 units wide at `y = 7.0`, TabICL gave quantiles
+  0.04 units wide, and TabPFN and TabFM gave one narrow bucket or bin. The
+  fitted model's `constant_target_` records the value. On a backend,
+  `provenance_` then holds only `backend`, `version` and
+  `constant_target`. Results for any other target are unchanged, and so
+  are the golden densities.
+- The documentation uses the PyData Sphinx theme, which has a dark mode,
+  and the favicon comes as an SVG and as PNG files of 64 and 180 pixels.
+  A new brand page lists the spellings of the name, the logo files and the
+  colors. Prose spells the project LAZY.
 - The package metadata lists both authors, as `CITATION.cff` does. Its
   summary and keywords describe conditional density estimation in general,
   with photometric redshifts and astronomy as one use.
@@ -276,6 +293,11 @@ change the API.
   install only when named.
 
 ### Fixed
+
+- LimiX-2 fits a bagged context in which one bag's targets are all equal.
+  It raised `ValueError` when such a bag's standard deviation rounded to
+  about 1e-17 rather than to 0; the bag is now left unscaled, as TabICL and
+  Kumo Tabular leave it.
 
 - With `tabpfn` 9.2 or later installed, TabPFN passes
   `enable_torch_compile=False` instead of leaving it to upstream's default,

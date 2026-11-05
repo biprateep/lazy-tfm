@@ -67,18 +67,12 @@ def test_a_varying_target_is_standardized_by_its_mean_and_std():
     assert scale == np.std(targets) > 0
 
 
-@pytest.mark.parametrize("bag_size", [None, 50])
-@pytest.mark.parametrize("name", ["tabicl", "kumo"])
-def test_a_constant_context_gives_the_same_answer_at_any_value(
-    monkeypatch, name, bag_size
-):
-    """The answer about the constant does not hang on float rounding."""
+@pytest.mark.parametrize("name", ["tabicl", "kumo", "limix"])
+def test_a_bag_whose_targets_are_all_equal_fits(monkeypatch, name):
+    """A bag of tied targets inside a varying context is left unscaled."""
     X = np.random.default_rng(0).normal(size=(100, 3))
-    backend = fakes.Backend(name, monkeypatch)
-    answers = []
-    for value in (0.1, 0.3):
-        model = backend(bag_size=bag_size).fit(X, np.full(100, value))
-        answers.append(model.predict_distribution(X[:5]).locs - value)
-    np.testing.assert_allclose(answers[0], answers[1], rtol=0, atol=1e-12)
-    # On the scale of one standardized unit, not of float rounding.
-    assert (np.ptp(answers[0], axis=1) > 1.0).all()
+    y = np.full(100, 0.3)
+    y[0] = 1.0
+    model = fakes.Backend(name, monkeypatch)(bag_size=10, n_estimators=8)
+    dist = model.fit(X, y).predict_distribution(X[:5])
+    assert np.isfinite(dist.ppf([0.05, 0.5, 0.95])).all()

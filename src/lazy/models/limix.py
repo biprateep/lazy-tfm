@@ -616,6 +616,8 @@ def _standardisation(y: _typing.FloatArray) -> tuple[float, float]:
     """Upstream's target scaling, as a tuple (mean, sample std or 1)."""
     y = np.asarray(y, dtype=np.float64)
     ddof = _limix_preprocess.RECIPE.target_ddof
+    if y.min() == y.max():  # Its std may round to 1e-17, not to 0.
+        return float(y[0]), 1.0
     std = float(y.std(ddof=ddof)) if y.size > ddof else 0.0
     return float(y.mean()), std if std > 0 else 1.0
 
