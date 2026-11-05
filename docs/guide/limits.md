@@ -77,6 +77,19 @@ coarse precision), the predicted CDF at the true value is not expected to be
 uniform even for a well-calibrated model. The PIT histogram and the statistics
 computed from it will then flag a miscalibration that may not be there.
 
+## A constant target
+
+When every training target has the same value, every model answers each row
+with a point mass at that value, as scikit-learn's regressors do, and runs no
+network. Its quantiles, intervals and point estimates are the value, and
+{meth}`~lazy.base.BaseDensityRegressor.predict_proba` puts all of the
+probability in the grid bin that holds it. The native grid then has three
+bins, the middle one centred on the value, spanning 1% of the value on each
+side and at least 0.01. The PIT of a target equal to the value is 1. In
+`provenance_`, `constant_target` records the value. A context of one row is
+a constant target. A {class}`~lazy.models.ensemble.LazyEnsembleModel` gives
+the same point mass, under every pooling, and its pooling grid is that grid.
+
 ## Ties at flat-topped peaks
 
 The `mode` is the center of the highest bin, and when several adjacent bins

@@ -871,10 +871,8 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ]
             return edges, edges[bounds], fine
         low, high = self.support_
-        # A constant target still gets a bin of non-zero width, on its scale.
-        span = high - low if high > low else max(abs(high), 1.0)
         coarse = quantile_edges(
-            y, self.n_coarse_bins_, low, high + 1e-6 * span, shift
+            y, self.n_coarse_bins_, low, high + 1e-6 * (high - low), shift
         )
         labels = _bin_labels(coarse, y)
         fine = [

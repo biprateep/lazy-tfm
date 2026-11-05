@@ -46,8 +46,8 @@ regression configuration shipped with LimiX, next to LAZY's.
 ## Built-in standardizations
 
 LimiX-2 z-scores the target with the mean and the sample standard deviation of
-the context (a constant target is left unscaled), and its buckets are fixed in
-that standardized space. Before the network, each member drops constant and
+the context (a bag whose targets are all equal is left unscaled), and its
+buckets are fixed in that standardized space. Before the network, each member drops constant and
 empty columns and applies its transform: a quantile transform with one
 quantile per five rows, kept beside the original features and followed by a
 singular value decomposition, or a power transform followed by

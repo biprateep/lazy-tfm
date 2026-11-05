@@ -66,7 +66,9 @@ __all__ = [
     "ContextEnsembleEstimator",
     "ContextSizeWarning",
     "PerformanceWarning",
+    "constant_grid",
     "import_extra",
+    "point_masses",
     "tabulate",
 ]
 
@@ -131,7 +133,8 @@ REQUIRED_PROVENANCE: tuple[str, ...] = (
 """The keys every fitted backend's ``provenance_`` carries: which weights and
 code answered (:data:`lazy.models._hub.PROVENANCE_KEYS`, recorded by
 ``_load_checkpoint``) and the ensemble's resolved settings (``_recipe``). A
-backend may record more.
+backend may record more. A fit on a constant target runs neither, and
+records only ``backend``, ``version`` and ``constant_target``.
 """
 
 _NATIVE_TYPES: dict[str, tuple[type[distributions.Distribution], ...]] = {
@@ -193,6 +196,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     ``provenance_`` holds every key in ``REQUIRED_PROVENANCE``:
     :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
     ensemble's.
+
+    A context whose targets are all equal is fitted here alone, once the
+    parameters, ``device`` and ``transforms`` are validated and
+    :meth:`_before_fit` has run: no checkpoint loads and no member is
+    fitted. ``constant_target_`` records the value, which every query then
+    gets as a point mass, a
+    :class:`~lazy.distributions.HistogramDistribution` with one zero-width
+    bucket, whatever ``native_output`` says. Its native grid has three
+    bins, the middle one centred on the value, and its ``provenance_`` holds
+    only ``backend``, ``version`` and ``constant_target``.
 
     A backend that loads its network itself, rather than handing the
     checkpoint to upstream, gets it from :meth:`_network` and implements
@@ -647,6 +660,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
         self._resolve_device()
+        specs = _transforms.parse(self.transforms)
+        if y.min() == y.max():
+            self._fit_constant(float(y[0]), len(y))
+            return
         self._warn_if_slow_on_cpu()
         self._load_checkpoint()
         self.softmax_temperature_: float | None = (
@@ -654,7 +671,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             if self.softmax_temperature == AUTO
             else float(self.softmax_temperature)
         )
-        specs = _transforms.parse(self.transforms)
         self.outlier_threshold_ = self._resolve_outlier_threshold(specs)
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
@@ -717,6 +733,27 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             **self._recipe(),
         }
         self._after_fit()
+
+    def _fit_constant(self, value: float, n_rows: int) -> None:
+        """Fits a context whose targets all equal ``value``, with no network.
+
+        Every query's answer is then a point mass at ``value``, as
+        scikit-learn's regressors answer a constant target, so neither the
+        checkpoint nor the members' contexts are needed. ``provenance_``
+        holds ``backend``, ``version`` and ``constant_target``.
+
+        Args:
+            value: The context targets' one value.
+            n_rows: Context rows ``fit`` was given.
+        """
+        self.constant_target_ = value
+        self.n_context_ = int(n_rows)
+        self.native_grid_ = constant_grid(value)
+        self.provenance_ = {
+            "backend": self.backend,
+            "version": self.version,
+            "constant_target": value,
+        }
 
     def _check_version(self) -> None:
         """Validates ``version``, before anything is imported or loaded.
@@ -1044,14 +1081,20 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 queries predicts every row at once.
 
         Yields:
-            One distribution per chunk of rows, in order.
+            One distribution per chunk of rows, in order; for a constant
+            target, its point masses.
         """
+        if size is None:
+            size = int(self.chunk_size) or len(X)
+        constant = getattr(self, "constant_target_", None)
+        if constant is not None:
+            for start in range(0, len(X), size):
+                yield point_masses(constant, min(size, len(X) - start))
+            return
         features = X.to_numpy(dtype=np.float64)
         if not self.chunks_queries:
             yield self._predict_chunk(features)
             return
-        if size is None:
-            size = int(self.chunk_size) or len(features)
         with _progress.bar(
             self.progress,
             total=len(features),
@@ -1410,6 +1453,49 @@ def is_integer(value: object) -> TypeGuard[int]:
     return isinstance(value, numbers.Integral) and not isinstance(
         value, bool | np.bool_
     )
+
+
+def point_masses(
+    value: float, n_rows: int
+) -> distributions.HistogramDistribution:
+    """A point mass at ``value`` for each of ``n_rows`` rows.
+
+    The answer to a constant target: all of the mass in a zero-width
+    bucket at ``value``, between two empty buckets that span the middle bin
+    of :func:`constant_grid`, so that ``to_qp`` has bins of nonzero width.
+
+    Args:
+        value: The context targets' one value.
+        n_rows: How many rows to answer.
+
+    Returns:
+        The distributions, one row each.
+    """
+    low, high = constant_grid(value).edges[1:3]
+    masses = np.zeros((n_rows, 3))
+    masses[:, 1] = 1.0
+    return distributions.HistogramDistribution(
+        np.array([low, value, value, high]), masses
+    )
+
+
+def constant_grid(value: float) -> grid_lib.Grid:
+    """The native grid of a constant target: ``value`` a bin's centre.
+
+    Three equal bins, histogram-normalized, spanning 1% of ``value`` on
+    each side, and at least 0.01. A grid needs two bins; with three, the
+    point mass at ``value`` falls in the middle one, whose centre it is (to
+    float rounding), so every point estimate on the grid is ``value``.
+
+    Args:
+        value: The context targets' one value.
+
+    Returns:
+        The grid.
+    """
+    pad = 0.01 * max(abs(value), 1.0)
+    edges = value + pad * np.array([-1.0, -1.0 / 3.0, 1.0 / 3.0, 1.0])
+    return grid_lib.Grid.from_edges(edges, normalization="histogram")
 
 
 def tabulate(
