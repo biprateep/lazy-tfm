@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Biprateep Dey
 """What the quantile-head backends share: their tails and target scaling."""
 
+import fakes
 import numpy as np
 import pytest
 
@@ -64,3 +65,14 @@ def test_a_varying_target_is_standardized_by_its_mean_and_std():
     offset, scale = _quantile_head.target_scaling(targets)
     assert offset == np.mean(targets)
     assert scale == np.std(targets) > 0
+
+
+@pytest.mark.parametrize("name", ["tabicl", "kumo", "limix"])
+def test_a_bag_whose_targets_are_all_equal_fits(monkeypatch, name):
+    """A bag of tied targets inside a varying context is left unscaled."""
+    X = np.random.default_rng(0).normal(size=(100, 3))
+    y = np.full(100, 0.3)
+    y[0] = 1.0
+    model = fakes.Backend(name, monkeypatch)(bag_size=10, n_estimators=8)
+    dist = model.fit(X, y).predict_distribution(X[:5])
+    assert np.isfinite(dist.ppf([0.05, 0.5, 0.95])).all()
