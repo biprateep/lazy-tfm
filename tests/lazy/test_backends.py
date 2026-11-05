@@ -73,11 +73,11 @@ class TestTabFM:
             assert est.kv_cache_ is True
 
     def test_falling_back_to_the_slow_path_warns(self, tiny, monkeypatch):
-        """A silent 26x slowdown is the worst kind: both paths agree.
+        """A silent slowdown is the worst kind: both paths agree.
 
         Without the KV-cache API every chunk of query rows re-encodes the whole
-        context, so the only symptom is a prediction that takes a day instead
-        of an hour. The fallback must announce itself.
+        context, so the only symptom is a prediction that takes longer than it
+        should. The fallback must announce itself.
         """
         X, z = tiny
         monkeypatch.setattr(

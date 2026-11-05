@@ -73,8 +73,12 @@ members rather than 32, as for every other model, use the seed 0 rather than
 42, and treat every column as numeric. We compute in float32 on a CPU, where
 TabFM uses bfloat16 everywhere, and LAZY caches the context's keys and values
 in its own implementation, which gives the same answers as re-encoding the
-context up to rounding and, in our tests, about 26 times less compute per
-query row. Under an explicit `transforms`, LAZY turns off both the soft clip
+context up to rounding, in less time. On a GPU with 1 member, 10,000 DC1
+context rows and 10,000 queries at the default `chunk_size` of 8,192, a
+prediction after a warm-up took 30.1 s with `kv_cache=True` and 47.4 s with `kv_cache=False`,
+a ratio of 1.6 (see [Measurement
+setup](../guide/scaling.md#measurement-setup)). The ratio grows as
+`chunk_size` shrinks against the context. Under an explicit `transforms`, LAZY turns off both the soft clip
 and the 500-feature cap.
 
 ## Choosing the bins
@@ -83,8 +87,8 @@ By default (`"auto"`), TabFM picks its bins from the size of the context. Each
 level gets $\lfloor\sqrt{n/5}\rfloor$ bins, between 2 and 10, for a context of
 $n$ rows, so that a final bin holds about five context rows, and every context
 of 500 rows or more gets 10 by 10. With fewer rows per bin the histogram is
-overconfident. On the 277 context rows of `yacht` with 4 members, for
-example, the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517
+overconfident. On one split of `yacht` (277 context rows, split seed
+299792458) with 4 members, for example (one GB10 GPU, lazy commit 59b2f01), the 7 by 7 bins that `"auto"` picks lower the CRPS from 0.631 to 0.517
 and the NLL from 1.28 to 0.50 relative to 10 by 10. An integer sets a level's bin count
 explicitly, from 2 to 10, and always gives equal-mass bins.
 
@@ -96,7 +100,7 @@ coarse classes are the fewest consecutive runs of at most ten of them. The
 density is then built on that grid and never rebinned onto it. However, a bin
 with no context rows gets zero probability, since the classifier cannot
 predict a class it has not seen, so a true value that falls in such a bin has
-zero density. On `yacht`, whose targets crowd at the low end, a grid of 50
+zero density. On the same split of `yacht`, whose targets crowd at the low end, a grid of 50
 equal-width bins left 2 of the 31 test values in empty bins and gave a CRPS of
 0.566 and an NLL of 2.66, against 0.517 and 0.50 for the default equal-mass
 bins. We therefore recommend `"grid"` only for a grid whose every bin is well
@@ -106,5 +110,8 @@ never changes the bins and only rebins the answer, and `provenance_["bins"]`
 records which bins a fit used.
 
 `n_dither=1` is the default. When accuracy matters, we recommend `n_dither=3`,
-which in our tests on `yacht`, `energy`, `concrete` and DC1 lowered the NLL
-in all but one of 13 settings, at two to three times the cost of a prediction.
+which lowered the NLL in 12 of 13 settings, at 1.8 to 2.8 times the cost of a
+prediction. The settings were `yacht`, `energy` and `concrete` with 3 seeds
+each, and DC1 at 1,000 and 10,000 context rows with 2,000 test rows and 1
+seed, all with 4 members and a 1,000-bin grid, on one GB10 GPU at lazy commit
+59b2f01. The exception was `yacht` at 7 by 7 bins (NLL +0.02).

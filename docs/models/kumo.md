@@ -98,15 +98,18 @@ flips of the columns and the target stay, because they are part of how the
 network is run and not a choice of the recipe.
 
 On a CPU, our prediction with the small size matches NVIDIA's own
-implementation to about $3\times 10^{-7}$ in the units of the target on our
-test problem. The cached and uncached predictions agree to float rounding on
+implementation to about $2\times 10^{-7}$ in the units of the target, with 5
+members, on the 200 context and 60 query rows of the synthetic problem in the
+first Kumo test (commit bd0bb9e; see [Measurement
+setup](../guide/scaling.md#measurement-setup)). The cached and uncached predictions agree to float rounding on
 a CPU. A query predicted on its own takes a
 different matrix-multiply path and differs by up to about $10^{-6}$ of the
 quantiles' spread, and a bagged member with missing values whose columns LAZY
 permutes differs by up to about $10^{-5}$. On a GPU, the cached and
 uncached quantiles of the large size differ by at most $5\times 10^{-4}$ in the
-units of the target (0.7% of a row's quantile spread) on the 50 test rows of
-our golden problem, which we attribute to float16 rounding.
+units of the target (0.6% of a row's quantile spread) on the 300 context and 50 test rows of
+the golden problem, which we attribute to float16 rounding (see [Measurement
+setup](../guide/scaling.md#measurement-setup)).
 The checkpoint is read from a pinned revision of the Hugging Face repository
 instead of through upstream's download. The distribution itself is the
 piecewise-linear cumulative distribution through the 999 quantiles, with the

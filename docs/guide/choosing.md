@@ -14,11 +14,14 @@ times the time and five times the memory). For large contexts, TabPFN-3 and
 later were pretrained on contexts up to a million rows, while TabPFN-2 and 2.5
 were pretrained on at most 10,000 and 50,000 rows, respectively.
 
-Our own testing shows that LimiX-2 performs best when the training set is
-biased (i.e., unrepresentative of the test set). However, LimiX-2
+LimiX-2 performs best when the training set is biased (i.e.,
+unrepresentative of the test set). On the 35,011 rows of the biased DC1 set,
+scored on a hold-out of 19,383, bagged LimiX-2 had a CDE loss of −14.372,
+against −14.19 for TabPFN-3.5 and −14.01 for TabFM (one GB10 GPU, lazy
+commit 0774d1d, LimiX-2 weights de07b67). However, LimiX-2
 degrades above about 20,000 context rows, so a larger training set needs
 bagging, with `bag_size=20_000` (so that each member sees at most 20,000 rows)
-and enough members, as in our own tests:
+and enough members, as in those runs:
 
 ```python
 model = lazy.LazyModel("limix", bag_size=20_000, n_estimators=32)
