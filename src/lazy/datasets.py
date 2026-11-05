@@ -1509,6 +1509,11 @@ class _Entry:
             its categories from worst to best.
         generated: Whether the data is generated on the spot by
             :func:`_make_chirp` rather than downloaded.
+        parser: The ARFF parser :func:`sklearn.datasets.fetch_openml` uses.
+            ``"liac-arff"`` for a dataset with integer-valued nominal
+            columns, whose categories pandas 3.1 reads as integers, which
+            scikit-learn's pandas parser then fails on; ``"auto"`` (the
+            pandas parser) otherwise.
     """
 
     data_id: int | None
@@ -1523,6 +1528,7 @@ class _Entry:
     )
 
     generated: bool = False
+    parser: Literal["auto", "liac-arff"] = "auto"
 
     @property
     def source(self) -> str:
@@ -1589,6 +1595,7 @@ _REGISTRY: dict[str, _Entry] = {
         n_features=21,
         description="House sale prices in King County, WA, 2014-2015",
         license="CC0",
+        parser="liac-arff",
     ),
     "bike_sharing": _Entry(
         data_id=44063,
@@ -1600,6 +1607,7 @@ _REGISTRY: dict[str, _Entry] = {
         citation=(
             "Fanaee-T & Gama 2013, Progress in Artificial Intelligence, 1-15"
         ),
+        parser="liac-arff",
     ),
     "wine_quality": _Entry(
         data_id=46964,
@@ -1890,6 +1898,7 @@ def load_dataset(
             data_home=str(_resolve_home(data_home)),
             target_column=entry.target,
             as_frame=True,
+            parser=entry.parser,
         )
         features = bunch.data
         for column, categories in entry.ordered.items():

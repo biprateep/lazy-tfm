@@ -845,6 +845,13 @@ OPENML_NAMES = [
 ]
 
 
+network = pytest.mark.skipif(
+    os.environ.get("LAZY_RUN_NETWORK_TESTS") != "1",
+    reason="set LAZY_RUN_NETWORK_TESTS=1 to run tests that download data",
+)
+"""Marks a test that downloads data."""
+
+
 @pytest.fixture
 def fake_openml(monkeypatch):
     """Replaces fetch_openml with a stand-in; returns the calls it saw.
@@ -862,13 +869,14 @@ def fake_openml(monkeypatch):
     }
     calls = []
 
-    def fetch_openml(*, data_id, data_home, target_column, as_frame):
+    def fetch_openml(*, data_id, data_home, target_column, as_frame, parser):
         calls.append(
             {
                 "data_id": data_id,
                 "data_home": data_home,
                 "target_column": target_column,
                 "as_frame": as_frame,
+                "parser": parser,
             }
         )
         name, row = by_id[data_id]
@@ -939,6 +947,7 @@ def test_every_openml_dataset_loads_by_its_pinned_id(fake_openml, name):
     assert f"OpenML {call['data_id']}" == row["source"]
     assert call["target_column"] == row["target"]
     assert call["as_frame"] is True
+    assert call["parser"] == datasets._REGISTRY[name].parser
     assert dataset.name == name
     assert dataset.target == row["target"]
     assert dataset.X.shape[1] == row["n_features"]
@@ -1045,10 +1054,7 @@ def _no_network(*args, **kwargs):
     raise AssertionError("the cached copy should have been read")
 
 
-@pytest.mark.skipif(
-    os.environ.get("LAZY_RUN_NETWORK_TESTS") != "1",
-    reason="set LAZY_RUN_NETWORK_TESTS=1 to run tests that download data",
-)
+@network
 def test_yacht_downloads_once_then_loads_offline(isolated_home, monkeypatch):
     dataset = datasets.load_dataset("yacht", data_home=isolated_home)
     row = datasets.list_datasets().loc["yacht"]
@@ -1057,6 +1063,19 @@ def test_yacht_downloads_once_then_loads_offline(isolated_home, monkeypatch):
     monkeypatch.setattr(sklearn_openml, "urlopen", _no_network)
     again = datasets.load_dataset("yacht", data_home=isolated_home)
     pd.testing.assert_frame_equal(again.X, dataset.X)
+
+
+@network
+@pytest.mark.parametrize("name", ["bike_sharing", "kings_county"])
+def test_integer_valued_nominal_columns_load(isolated_home, name):
+    dataset = datasets.load_dataset(name, data_home=isolated_home)
+    row = datasets.list_datasets().loc[name]
+    assert dataset.X.shape == (row["n_rows"], row["n_features"])
+    categorical = dataset.X.select_dtypes("category")
+    assert categorical.shape[1] > 0
+    for column in categorical:
+        categories = categorical[column].cat.categories
+        assert all(isinstance(c, str) for c in categories), column
 
 
 def test_dc1_splits_into_the_challenge_train_and_test(fake_dc1, fake_openml):

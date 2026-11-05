@@ -267,6 +267,12 @@ change the API.
 
 ### Fixed
 
+- `load_dataset("bike_sharing")` and `load_dataset("kings_county")` load
+  under pandas 3.1, where they raised a `TypeError` from scikit-learn's pandas
+  ARFF parser. These two datasets are now read with scikit-learn's
+  `liac-arff` parser. Their categories are unchanged. Their floats can differ
+  by one unit in the last place from what the pandas parser gave under
+  pandas 3.0, and `kings_county`'s integer columns are now float64.
 - `on_grid`, and so `predict_proba`, keeps the mass of a zero-width bucket of
   a histogram, which `cdf`, `ppf` and `mean` already counted as a point mass.
   It dropped that mass before: masses `[0.5, 0.5]` in buckets with edges
