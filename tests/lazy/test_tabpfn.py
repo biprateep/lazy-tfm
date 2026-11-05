@@ -269,6 +269,35 @@ def test_no_regressor_argument_is_left_to_upstream(monkeypatch, kv_cache):
     assert set(est.regressor_.kwargs) == set(accepted)
 
 
+def test_an_argument_a_later_tabpfn_adds_is_pinned(monkeypatch):
+    """Tabpfn 9.2 adds enable_torch_compile; its default is not left to it."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    estimator = fakes.install("tabpfn", monkeypatch)
+    signature = inspect.signature(fake_tabpfn.Regressor.upstream)
+    if "enable_torch_compile" not in signature.parameters:
+        compile_arg = inspect.Parameter(
+            "enable_torch_compile",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=False,
+        )
+        signature = signature.replace(
+            parameters=[*signature.parameters.values(), compile_arg]
+        )
+
+    def later_upstream(**kwargs):
+        signature.bind(**kwargs)
+
+    later_upstream.__signature__ = signature
+    monkeypatch.setattr(
+        fake_tabpfn.Regressor, "upstream", staticmethod(later_upstream)
+    )
+    monkeypatch.setattr(fake_tabpfn.Regressor, "__signature__", signature)
+    est = estimator(n_estimators=1, device="cpu", progress=False)
+    est.fit(X, X[:, 0])
+    assert est.regressor_.kwargs["enable_torch_compile"] is False
+
+
 def test_an_unpickled_models_regressors_run_on_its_device(monkeypatch):
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(_device, "resolve_device", lambda device: "cpu")

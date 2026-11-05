@@ -138,7 +138,10 @@ arithmetic produces, gives that row a different hash. The model then sees a
 different value of that feature, and its density moves by several percent of
 the peak. Without the fingerprint, TabPFN differs across machines by about
 $10^{-5}$ of the peak. This is upstream TabPFN's behavior, which LAZY's pinned
-recipe keeps.
+recipe keeps. On GitHub's runners, the split follows the CPU vendor: AMD's
+EPYC 7763, 9V74 and 9V45 agree to $5 \times 10^{-6}$ of the peak, Intel's
+Xeon 6975P-C and Platinum 8573C agree bit for bit, and the two vendors differ
+by about 4%, whether or not the processor has AVX-512.
 
 So compare results from different machines with scores over many rows (the
 CDE loss, CRPS or NLL), not density by density.
