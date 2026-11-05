@@ -146,6 +146,16 @@ recommend calling `predict_proba` once and reducing its output with
 each definition. The `median` is also `predict_quantiles(X, [0.5])`, which
 is computed without a grid.
 
+```{figure} ../figures/figs/point_estimates.svg
+:alt: A density with a tall skewed peak and a lower second peak, with vertical lines at its mode, peak mean, mean and median.
+:width: 100%
+
+**Figure 1.** The four point estimates of one bimodal density, from
+{func}`~lazy.metrics.grid_point_estimates`. The mode and the peak mean lie on
+the main peak, the median on its flank, and the mean between the two peaks,
+where the density is low.
+```
+
 ## Metrics
 
 {mod}`lazy.metrics` implements the metrics of the LSST DESC PZ Data Challenge,

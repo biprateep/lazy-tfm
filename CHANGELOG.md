@@ -50,6 +50,18 @@ change the API.
   and the GPU, and how `chunk_size` multiplies the cost of the context when
   `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
   the title's capitals.
+- Each tutorial page notes when its notebook may not match the source
+  shown, and, once the notebook is re-executed, the lazy version and commit
+  it ran on. The docs of a
+  release show the notebooks executed for it, a fork's docs build fetches
+  the notebooks from `biprateep/lazy-tfm`, and an offline local build shows
+  the tutorials without outputs instead of failing.
+- The user guide has a page that compares LAZY with each model's own
+  package, TabTune and AutoGluon-Tabular, and says when to use each instead.
+- The user guide has four concept figures, drawn by
+  `docs/figures/make_figures.py` without a model: the point estimates of a
+  bimodal density, the three pools of an ensemble, chunks and bags of the
+  context, and a grid that ends inside a distribution.
 
 ### Changed
 
@@ -58,6 +70,19 @@ change the API.
   with a GPU generator, which gives another stream for the same seed, so the
   same `random_state` gave different densities on the two devices. Densities
   on a GPU change; on a CPU they are unchanged.
+- The package metadata lists both authors, as `CITATION.cff` does. Its
+  summary and keywords describe conditional density estimation in general,
+  with photometric redshifts and astronomy as one use.
+- Kumo Tabular draws its members' random sign flips and column shuffles on a
+  CPU generator on every device, and moves them to the device, so a CPU and a
+  GPU give the same ensemble for the same `random_state`. NVIDIA's package
+  draws them on the device, where the two give different draws
+  (NVIDIA/structured-data-models#1339). CPU results are unchanged, and so
+  are the golden densities. On a GPU, results change for the same seed: on
+  50 `california_housing` rows, the quantiles moved by up to 0.28 of a row's
+  5% to 95% range, and now agree with the CPU's to 6.6e-6. A Kumo model
+  saved before this release still draws on the device it runs on, so it
+  repeats its answers on the same kind of device.
 - A pickled TabICL model no longer holds its key/value caches; its first
   prediction after unpickling records them again, with the same results to
   the bit. Kumo Tabular and LimiX already left theirs out; all three now do
@@ -247,6 +272,12 @@ change the API.
 
 ### Fixed
 
+- `load_dataset("bike_sharing")` and `load_dataset("kings_county")` load
+  under pandas 3.1, where they raised a `TypeError` from scikit-learn's pandas
+  ARFF parser. These two datasets are now read with scikit-learn's
+  `liac-arff` parser. Their categories are unchanged. Their floats can differ
+  by one unit in the last place from what the pandas parser gave under
+  pandas 3.0, and `kings_county`'s integer columns are now float64.
 - `on_grid`, and so `predict_proba`, keeps the mass of a zero-width bucket of
   a histogram, which `cdf`, `ppf` and `mean` already counted as a point mass.
   It dropped that mass before: masses `[0.5, 0.5]` in buckets with edges

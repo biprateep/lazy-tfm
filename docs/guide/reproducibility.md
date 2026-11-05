@@ -2,8 +2,7 @@
 
 A prediction from LAZY is fixed by the checkpoint, the context, the seed and
 the shared parameters, up to the rounding of the machine it runs on, and for
-Kumo Tabular and, to a lesser degree, LimiX-2 by the kind of device (see
-[Across devices](#across-devices)).
+LimiX-2 by the kind of device (see [Across devices](#across-devices)).
 This page describes how each is pinned and recorded, and which settings change a
 prediction.
 
@@ -154,18 +153,16 @@ The answers are statistically, not bitwise, those of upstream's
 ## Across devices
 
 Kumo Tabular draws each member's sign flips and column shuffles with a torch
-random generator on the device that runs the model. A CPU generator and a CUDA
-generator give different streams for the same seed, so the same
-`random_state` gives two different ensembles on a CPU and on a GPU. Neither is
-more correct: the two differ as much as two seeds on one device do. On 50
-`california_housing` rows, the 5%, 50% and 95% quantiles moved by up to 28%
-of a row's 5% to 95% range between a CPU and a GPU, and by up to 19% between
-two seeds on the GPU; the CRPS moved by about 2% in both cases. With the
-random draws turned off, the two devices agreed to $2 \times 10^{-5}$ of that
-range.
+random generator. A CPU generator and a CUDA generator give different streams
+for the same seed, and NVIDIA's package draws on the device that runs the
+model (NVIDIA/structured-data-models#1339). So LAZY draws them on a CPU
+generator on every device and moves them to the device, and the same
+`random_state` gives the same ensemble on a CPU and on a GPU. On a CPU these
+are NVIDIA's own draws. A Kumo model saved by LAZY before 0.6 still draws on
+the device it runs on, so it repeats its answers on the same kind of device.
 
-The other backends were measured the same way, each fitted afresh on each
-device in float32 with `random_state=0`:
+Each backend was fitted afresh on each device, in float32 with
+`random_state=0`, on 300 `california_housing` rows, and predicted 50 more:
 
 | Backend | CPU against GPU | Seed 0 against seed 1, on the GPU |
 |---|---:|---:|
@@ -173,12 +170,12 @@ device in float32 with `random_state=0`:
 | TabICL | $6.8 \times 10^{-6}$ | 0.19 |
 | TabFM | $3.9 \times 10^{-6}$ | 0.11 |
 | LimiX-2 | $1.4 \times 10^{-5}$ | 0.23 |
-| Kumo Tabular | 0.28 | 0.19 |
+| Kumo Tabular | $6.6 \times 10^{-6}$ | 0.12 |
 
 The figures are the largest change of the 5%, 50% and 95% quantiles over the
 same 50 rows, as a fraction of a row's 5% to 95% range, on an NVIDIA GB10 and
-its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL, TabFM
-and LimiX-2 agree across devices to float32 rounding.
+its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL, TabFM,
+LimiX-2 and Kumo Tabular agree across devices to float32 rounding.
 
 LimiX-2 adds a random feature positional embedding to its feature tokens.
 LAZY draws it with a generator seeded per member. A CPU generator and a CUDA

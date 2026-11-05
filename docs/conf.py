@@ -16,14 +16,17 @@ Typical usage example:
 # public, lowercase and (for lists and dicts) mutable by design.
 # ruff: noqa: GS004
 
+import hashlib
 from importlib import metadata
 import inspect
+import os
 import pathlib
 import re
 import subprocess
 from typing import Any
 
 import jupytext
+import nbformat
 from sphinx import application
 from sphinx.ext import intersphinx
 from sphinx.util import nodes
@@ -70,7 +73,77 @@ myst_heading_anchors = 3
 nb_execution_mode = "off"
 TUTORIALS = pathlib.Path(__file__).parent / "tutorials"
 TUTORIALS_BRANCH = "tutorials"
+# A fork's `origin` has no `tutorials` branch, so the upstream one is next.
+REMOTES = ("origin", "https://github.com/biprateep/lazy-tfm.git")
 THUMBNAILS = TUTORIALS / "thumbnails"
+
+
+def _sha256(script: pathlib.Path) -> str:
+    """Returns the hex SHA-256 of a tutorial's source, as execute.sh does.
+
+    Args:
+        script: The tutorial's py:percent source.
+
+    Returns:
+        The digest, 64 hex digits.
+    """
+    return hashlib.sha256(script.read_bytes()).hexdigest()
+
+
+def _fetch_branch(git: list[str]) -> list[str]:
+    """Fetches the executed tutorials into ``FETCH_HEAD``.
+
+    It tries each of ``REMOTES`` in turn. A Read the Docs build of a release
+    tag ``v<version>`` first tries the tag ``tutorials/v<version>``, which
+    marks the notebooks executed for that release, then the branch.
+
+    Args:
+        git: The git command, run in the tutorials directory.
+
+    Returns:
+        Each failed fetch's error, or an empty list once a fetch succeeds.
+    """
+    refs = [f"refs/heads/{TUTORIALS_BRANCH}"]
+    if os.environ.get("READTHEDOCS_VERSION_TYPE") == "tag":
+        tag = os.environ["READTHEDOCS_GIT_IDENTIFIER"]  # The tag, not the slug.
+        refs.insert(0, f"refs/tags/{TUTORIALS_BRANCH}/{tag}")
+    errors = []
+    for ref in refs:
+        for remote in REMOTES:
+            fetch = subprocess.run(
+                [*git, "fetch", "--quiet", "--depth=1", remote, ref],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if not fetch.returncode:
+                return []
+            errors.append(f"{remote} {ref}: {fetch.stderr.strip()}")
+    return errors
+
+
+def _unexecuted(path: pathlib.Path) -> bool:
+    """Whether a notebook is one that an offline build wrote unexecuted."""
+    if path.suffix != ".ipynb":
+        return False
+    # A search of the bytes, not a parse of megabytes of outputs.
+    return b'"unexecuted": true' in path.read_bytes()
+
+
+def _on_ci() -> bool:
+    """Whether the build runs on Read the Docs or in CI."""
+    return (
+        os.environ.get("READTHEDOCS") == "True"
+        or os.environ.get("CI") == "true"
+    )
+
+
+def _write_unexecuted(path: pathlib.Path) -> None:
+    """Writes a tutorial's notebook from its script, without outputs."""
+    notebook = jupytext.read(path.with_suffix(".py"))
+    notebook.metadata["lazy"] = {"unexecuted": True}
+    jupytext.write(notebook, path)
+    print(f"cannot fetch the tutorials: wrote {path.name} unexecuted")
 
 
 def _fetch_tutorials() -> None:
@@ -80,45 +153,46 @@ def _fetch_tutorials() -> None:
     written by ``execute.sh``. A file already in the working tree (a fresh
     ``execute.sh`` run) is kept, so a local build shows the local outputs.
     A thumbnail missing from the branch is not an error: its gallery card
-    shows a placeholder.
+    shows a placeholder. If no fetch succeeds, a local build writes each
+    missing notebook from its script, without outputs and marked
+    ``unexecuted``; the next build that can fetch replaces it.
 
     Raises:
-        RuntimeError: If a notebook is neither present nor on the branch.
+        RuntimeError: If a notebook is neither present nor fetched, on Read
+            the Docs or in CI.
     """
-    scripts = sorted(TUTORIALS.glob("*.py"))
     missing = []
-    for script in scripts:
+    for script in sorted(TUTORIALS.glob("*.py")):
         for path in (
             script.with_suffix(".ipynb"),
             THUMBNAILS / f"{script.stem}.png",
         ):
-            if not path.exists():
+            if not path.exists() or _unexecuted(path):
                 missing.append(path)
     if not missing:
         return
     git = ["git", "-C", str(TUTORIALS)]
-    fetch = subprocess.run(
-        [*git, "fetch", "--quiet", "--depth=1", "origin", TUTORIALS_BRANCH],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if fetch.returncode:
-        if any(path.suffix == ".ipynb" for path in missing):
+    errors = _fetch_branch(git)
+    if errors:
+        notebooks = [path for path in missing if path.suffix == ".ipynb"]
+        if notebooks and _on_ci():
             raise RuntimeError(
-                "cannot fetch the executed tutorials from the"
-                f" {TUTORIALS_BRANCH!r} branch: {fetch.stderr.strip()}"
+                f"cannot fetch the executed tutorials: {'; '.join(errors)}"
             )
-        return  # Only thumbnails are missing: the cards show placeholders.
+        for path in notebooks:
+            _write_unexecuted(path)
+        return
     for path in missing:
         show = subprocess.run(
             [*git, "show", f"FETCH_HEAD:{path.relative_to(TUTORIALS)}"],
             capture_output=True,
-            check=path.suffix == ".ipynb",
+            check=path.suffix == ".ipynb" and _on_ci(),
         )
         if not show.returncode:
             path.parent.mkdir(exist_ok=True)
             path.write_bytes(show.stdout)
+        elif path.suffix == ".ipynb":  # A tutorial not yet on the branch.
+            _write_unexecuted(path)
 
 
 _fetch_tutorials()
@@ -628,7 +702,55 @@ def _edit_tutorial_source(  # Sphinx's event signature.
         }
 
 
+def _note_tutorial_source(  # Sphinx's event signature.
+    app: application.Sphinx,
+    docname: str,
+    source: list[str],
+) -> None:
+    """Prepends to a tutorial's notebook the code version it ran on.
+
+    The ``lazy`` metadata that ``execute.sh`` stamps holds the lazy version,
+    the commit and the script's SHA-256. A notebook whose stamp is missing,
+    or whose script has changed since, gets a note that its outputs may not
+    match the code; one that an offline build wrote gets a note that it has
+    no outputs. Only the text Sphinx parses changes, never the file.
+    """
+    script = TUTORIALS.parent / f"{docname}.py"
+    if not script.exists():
+        return
+    app.env.note_dependency(str(script))  # An edit to it updates the note.
+    notebook = nbformat.reads(source[0], as_version=4)
+    stamp = notebook.metadata.get("lazy", {})
+    lines = []
+    if stamp.get("unexecuted"):
+        lines.append(
+            "This build could not fetch the executed notebook, so this page"
+            " has no outputs."
+        )
+    elif stamp.get("source_sha256") != _sha256(script):
+        lines.append(
+            "This notebook was not executed from the source shown, so its"
+            " outputs may not match the code."
+        )
+    if "version" in stamp:
+        lines.append(
+            f"Executed with lazy {stamp['version']}"
+            f" at commit {stamp['commit'][:12]}"
+            + (
+                ", with uncommitted changes."
+                if "dirty" in stamp["commit"]
+                else "."
+            )
+        )
+    if lines:
+        text = "\n\n".join(lines)
+        cell = nbformat.v4.new_markdown_cell(f":::{{note}}\n{text}\n:::")
+        notebook.cells.insert(1, cell)  # After the title cell.
+        source[0] = nbformat.writes(notebook)
+
+
 def setup(app: application.Sphinx) -> None:  # noqa: D103 - Sphinx's extension hook.
     app.connect("autoapi-skip-member", _skip_public_reexports)
     app.connect("missing-reference", _resolve_alias)
     app.connect("html-page-context", _edit_tutorial_source)
+    app.connect("source-read", _note_tutorial_source)
