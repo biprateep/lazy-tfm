@@ -35,6 +35,7 @@ from lazy.models import _conformance
 from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _members
+from lazy.models import _progress
 from lazy.models import _transforms
 from lazy.models import _weights
 from lazy.models import registry
@@ -439,6 +440,16 @@ def test_a_constant_target_gets_a_point_mass_without_the_model(
     model = cls(n_estimators=3).fit(X, np.full(len(X), value))
     assert model.provenance_["constant_target"] == value
     _assert_a_point_mass(model, value, X_test)
+
+
+def test_a_constant_target_answers_every_block_of_a_long_query(
+    cls, data, monkeypatch
+):
+    X, _, X_test = data
+    model = cls(n_estimators=1, chunk_size=4).fit(X, np.full(len(X), 0.3))
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * model.grid_.n_bins)
+    np.testing.assert_allclose(model.predict(X_test), 0.3, rtol=1e-15)
+    assert np.isfinite(model.score(X_test, np.full(len(X_test), 0.3)))
 
 
 def test_a_constant_targets_point_mass_converts_to_qp(cls, data):
@@ -1488,13 +1499,14 @@ def test_blocked_scoring_matches_the_whole_array(
         ),
     }
     calls = []
-    original = type(model)._predict_pdf
+    original = type(model)._tabulate
 
-    def counting(self, features, grid):
-        calls.append(len(features))
-        return original(self, features, grid)
+    def counting(self, chunks, grid):
+        pdfs = original(self, chunks, grid)
+        calls.append(len(pdfs))
+        return pdfs
 
-    monkeypatch.setattr(type(model), "_predict_pdf", counting)
+    monkeypatch.setattr(type(model), "_tabulate", counting)
     # About seven rows of densities per block.
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * grid.n_bins)
     # Equal up to rounding: a block of rows goes through a smaller matrix
@@ -1515,6 +1527,35 @@ def test_blocked_scoring_matches_the_whole_array(
     )
 
 
+# A NumPy integer, as a parameter grid supplies, must align blocks as an int.
+@pytest.mark.parametrize(
+    "chunk_size", [0, 4, np.int64(4)], ids=["0", "4", "int64-4"]
+)
+def test_predict_score_and_evaluate_show_one_progress_bar_over_all_blocks(
+    cls, chunk_size, data, monkeypatch
+):
+    X, z, X_test = data
+    z_test = np.linspace(0.2, 1.5, len(X_test))
+    model = cls(n_estimators=2, progress=False, chunk_size=chunk_size)
+    model.fit(X, z)
+    if not model.chunks_queries:
+        pytest.skip("a model that does not chunk its queries draws its bars")
+    totals = []
+    original = _progress.bar
+
+    def counting(*args, **kwargs):
+        totals.append(kwargs["total"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_progress, "bar", counting)
+    # About seven rows of densities per block, so three blocks.
+    monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * model.grid_.n_bins)
+    model.predict(X_test)
+    model.score(X_test, z_test)
+    model.evaluate(X_test, z_test)
+    assert totals == [len(X_test)] * 3
+
+
 @pytest.mark.parametrize("chunk_size", [0, 4])
 def test_quantiles_intervals_and_pits_reduce_one_chunk_at_a_time(
     cls, chunk_size, data, monkeypatch
@@ -1528,8 +1569,8 @@ def test_quantiles_intervals_and_pits_reduce_one_chunk_at_a_time(
     seen = []
     original = type(model)._distribution_chunks
 
-    def recording(self, features):
-        for chunk in original(self, features):
+    def recording(self, features, *args):
+        for chunk in original(self, features, *args):
             seen.append(len(chunk))
             yield chunk
 

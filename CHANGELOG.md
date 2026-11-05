@@ -227,6 +227,11 @@ change the API.
   time of `predict_proba` fell from 0.33 s to 0.27 s and its peak memory
   from 229 MiB to 172 MiB for four bagged members of 5,000 buckets, and from
   0.0132 s to 0.0117 s for 999 quantiles.
+- `predict`, `score` and `evaluate` on a model that chunks its queries (every
+  backend but TabFM, alone or through `LazyModel`) show one progress bar for
+  the whole call; each member of a `LazyEnsembleModel` keeps its own. They used to
+  show one bar per block of about 256 MB of densities, so several in a row
+  for a large query set on a fine grid. Their results are unchanged.
 
 ### Deprecated
 

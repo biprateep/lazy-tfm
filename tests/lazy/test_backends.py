@@ -1048,7 +1048,9 @@ class TestTabICL:
         assert outside[0] == 0.0
         assert outside[1] == pytest.approx(3 / 16, abs=0.011)
 
-        monkeypatch.setattr(est, "_distribution_chunks", lambda X: iter([dist]))
+        monkeypatch.setattr(
+            est, "_distribution_chunks", lambda X, size=None: iter([dist])
+        )
         X = pd.DataFrame({"a": [0.0, 1.0]})
         with pytest.warns(
             lazy.GridCoverageWarning,

@@ -32,8 +32,10 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
+import contextlib
 import functools
+import itertools
 import numbers
 import pathlib
 import sys
@@ -67,6 +69,7 @@ __all__ = [
     "constant_grid",
     "import_extra",
     "point_masses",
+    "tabulate",
 ]
 
 UNIFORM_PARAMS: tuple[str, ...] = (
@@ -1066,28 +1069,32 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         return _mixture(parts, weights)
 
     def _distribution_chunks(
-        self, X: pd.DataFrame
-    ) -> Iterator[distributions.Distribution]:
-        """The predicted distributions, chunk by chunk, with a progress bar.
+        self, X: pd.DataFrame, size: int | None = None
+    ) -> Generator[distributions.Distribution, None, None]:
+        """The predicted distributions, chunk by chunk, under one bar.
 
         Args:
             X: Validated features, shape (n_samples, n_features), with
                 n_samples >= 1.
+            size: Rows per chunk, at least 1; None takes ``chunk_size``, or
+                every row when it is 0. A model that does not chunk its
+                queries predicts every row at once.
 
         Yields:
             One distribution per chunk of rows, in order; for a constant
-            target, one point mass per row, in one chunk.
+            target, its point masses.
         """
+        if size is None:
+            size = int(self.chunk_size) or len(X)
         constant = getattr(self, "constant_target_", None)
         if constant is not None:
-            yield point_masses(constant, len(X))
+            for start in range(0, len(X), size):
+                yield point_masses(constant, min(size, len(X) - start))
             return
         features = X.to_numpy(dtype=np.float64)
         if not self.chunks_queries:
             yield self._predict_chunk(features)
             return
-        chunk_size = int(self.chunk_size)
-        size = chunk_size if chunk_size > 0 else len(features)
         with _progress.bar(
             self.progress,
             total=len(features),
@@ -1098,14 +1105,16 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             for start in range(0, len(features), size):
                 stop = min(start + size, len(features))
                 self._log(f"rows {start}:{stop} of {len(features)}")
-                dist = self._predict_chunk(features[start:stop])
+                dists = [self._predict_chunk(features[start:stop])]
                 progress.set_postfix(
                     context=self.n_context_,
-                    **self._progress_postfix(dist),
+                    **self._progress_postfix(dists[0]),
                     refresh=False,
                 )
                 progress.update(stop - start)
-                yield dist
+                # Popped, so that this paused generator holds no chunk while
+                # its caller works on the densities.
+                yield dists.pop()
 
     def _predict_distribution(
         self, X: pd.DataFrame
@@ -1115,12 +1124,54 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _predict_pdf(
         self, X: pd.DataFrame, grid: grid_lib.Grid
     ) -> _typing.FloatArray:
-        # Chunk by chunk, so the full native container never exists at once.
-        blocks = [
-            dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
-            for dist in self._distribution_chunks(X)
-        ]
-        return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+        return self._tabulate(self._distribution_chunks(X), grid)
+
+    def _pdf_blocks(
+        self, X: pd.DataFrame, grid: grid_lib.Grid, size: int
+    ) -> Iterator[tuple[slice, _typing.FloatArray]]:
+        """Every block from one pass over the chunks, under one progress bar.
+
+        A model that does not chunk its queries predicts each block in one
+        pass, as the base class does.
+
+        Args:
+            X: Validated features, shape (n_samples, n_features), with
+                n_samples >= 1.
+            grid: The grid to answer on.
+            size: Rows per block: a whole number of chunks, or a chunk
+                itself when ``chunk_size`` is 0, so each chunk is the one a
+                block of its own would have predicted.
+
+        Yields:
+            Tuples (rows, pdfs): the slice of ``X`` a block covers, and its
+            un-normalized densities, shape (rows, grid.n_bins).
+        """
+        if not self.chunks_queries:
+            yield from super()._pdf_blocks(X, grid, size)
+            return
+        chunk = int(self.chunk_size) or size
+        with contextlib.closing(self._distribution_chunks(X, chunk)) as chunks:
+            for start in range(0, len(X), size):
+                stop = min(start + size, len(X))
+                block = itertools.islice(chunks, -(-(stop - start) // chunk))
+                yield slice(start, stop), self._tabulate(block, grid)
+
+    def _tabulate(
+        self,
+        chunks: Iterable[distributions.Distribution],
+        grid: grid_lib.Grid,
+    ) -> _typing.FloatArray:
+        """Un-normalized densities of consecutive chunks on ``grid``.
+
+        Args:
+            chunks: The distributions of consecutive chunks of rows.
+            grid: The grid to answer on.
+
+        Returns:
+            Densities, shape (rows, grid.n_bins), which the caller
+            normalizes once.
+        """
+        return tabulate(chunks, grid)
 
     def _default_grid(self) -> grid_lib.Grid:
         """The constructor's grid, else this model's native grid."""
@@ -1445,6 +1496,26 @@ def constant_grid(value: float) -> grid_lib.Grid:
     pad = 0.01 * max(abs(value), 1.0)
     edges = value + pad * np.array([-1.0, -1.0 / 3.0, 1.0 / 3.0, 1.0])
     return grid_lib.Grid.from_edges(edges, normalization="histogram")
+
+
+def tabulate(
+    chunks: Iterable[distributions.Distribution], grid: grid_lib.Grid
+) -> _typing.FloatArray:
+    """Un-normalized densities of consecutive chunks of rows on ``grid``.
+
+    Args:
+        chunks: The distributions of consecutive chunks of rows.
+        grid: The grid to answer on.
+
+    Returns:
+        Densities, shape (rows, grid.n_bins), which the caller normalizes
+        once.
+    """
+    blocks = [
+        dist._bin_densities(grid)  # noqa: SLF001 - the caller normalizes once.
+        for dist in chunks
+    ]
+    return blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
 
 
 def _mixture(

@@ -163,6 +163,12 @@ class LazyModel(base.BaseDensityRegressor):
         # called directly rather than through its public method.
         return self.estimator_._predict_pdf(X, grid)  # noqa: SLF001 - delegate.
 
+    def _density_blocks(
+        self, X: pd.DataFrame, grid: grid_lib.Grid
+    ) -> Iterator[tuple[slice, _typing.FloatArray]]:
+        """The backend's densities a block at a time, under its one bar."""
+        return self.estimator_._density_blocks(X, grid)  # noqa: SLF001 - delegate.
+
     def _predict_distribution(
         self, X: pd.DataFrame
     ) -> distributions.Distribution:
