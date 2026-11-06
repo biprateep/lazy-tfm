@@ -108,6 +108,7 @@ _SOURCE = types.SimpleNamespace(
     source=types.SimpleNamespace(
         commit="0" * 40, package="LimiX (fake)", origin="tests/lazy/fakes"
     ),
+    triton=True,
 )
 
 

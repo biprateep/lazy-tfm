@@ -37,11 +37,13 @@ and not run.
 | TabPFN | Supported by TabPFN itself, which needs PyTorch 2.6 or newer for it; expected to work, in single precision | Documented by TabPFN (install PyTorch's ROCm build first); expected to work |
 | TabICL | Supported by TabICL itself; expected to work, in single precision | Not mentioned by TabICL; it uses PyTorch's standard attention, so expected to work |
 | TabFM | Not documented by TabFM; may fail when double-precision arrays reach the GPU, which Metal does not support | Not documented by TabFM; needs a GPU with bfloat16 support under mixed precision |
-| LimiX-2 | Not possible: LimiX needs `triton`, which is published for Linux only | Possible in principle through the Triton build that ships with ROCm's PyTorch, which then runs LimiX's Triton kernels on the AMD GPU |
+| LimiX-2 | Not documented by LimiX; it runs its Triton kernels only on CUDA, and PyTorch's `rms_norm` elsewhere, so expected to work, in single precision | Possible in principle through the Triton build that ships with ROCm's PyTorch, which then runs LimiX's Triton kernels on the AMD GPU |
 | Kumo Tabular | Refused by LAZY, since its preprocessing runs in double precision, which Metal does not support | Possible in principle: its optional Triton kernels would run through ROCm's Triton, and fall back to PyTorch where Triton is missing |
 
-On a CPU, the models are expected to run on Linux, macOS and Windows, except
-LimiX-2, which needs Linux. The table of {doc}`../models/index` shows which
+On a CPU, the models are expected to run on Linux, macOS and Windows. On an
+NVIDIA GPU under Windows, LimiX-2 needs `triton`, which PyTorch installs on
+Linux only, so LAZY refuses `device="cuda"` there unless `triton` is
+installed. The table of {doc}`../models/index` shows which
 of them are fast enough on a CPU, and {doc}`scaling` how fast.
 
 Two of these limitations are choices of LAZY rather than of the models. Kumo
@@ -65,8 +67,8 @@ limits how much of the shared memory PyTorch may take, and TabPFN has its own
 Metal, so we keep its default `kv_cache=True`. If TabFM fails with a
 double-precision error, `kv_cache=False` sends its predictions through TabFM's
 own path, which converts the features before moving them to the GPU, although
-the targets may still fail in the same way. Kumo Tabular and LimiX-2 run on
-the CPU (`device="cpu"`), LimiX-2 only on Linux.
+the targets may still fail in the same way. Kumo Tabular runs on the CPU
+(`device="cpu"`).
 
 On an AMD GPU, we first install PyTorch's ROCm build from the PyTorch ROCm
 index, which according to

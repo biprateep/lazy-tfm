@@ -142,7 +142,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             not fit run uncached, with a warning.
         y_grid: Default output grid; the native grid is the 5,000 buckets,
             in full.
-        device: Where to run.
+        device: Where to run. A CUDA device needs triton, which PyTorch
+            installs on Linux only; any other device runs without it.
         random_state: The ensemble's seed. A group of members is run with
             the seed of its first member, ``i``, drawn from
             ``SeedSequence([random_state, i])``, which seeds each member's
@@ -451,7 +452,20 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     def _read_network(
         self, load: Callable[..., Any], checkpoint: pathlib.Path
     ) -> Any:
-        """Reads the network from the checkpoint; see :meth:`_network`."""
+        """Reads the network from the checkpoint; see :meth:`_network`.
+
+        Raises:
+            RuntimeError: If the device is CUDA and triton is not installed.
+        """
+        # Without triton, LimiX's network runs on any device but CUDA
+        # (_limix_source._triton). Fitting and an unpickled model both come
+        # here, before the network reaches the device.
+        if self.device_.startswith("cuda") and not _limix_source.load().triton:
+            raise RuntimeError(
+                f"{self.display_name} runs on a CUDA device only with "
+                "triton, which is not installed. Install triton, or use "
+                "device='cpu'."
+            )
         self._log(f"loading LimiX network from {checkpoint}")
         return load(checkpoint, self.device_)
 

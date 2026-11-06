@@ -68,8 +68,9 @@ lazy setup
   this ahead of time, for a machine without a network (see
   {doc}`guide/clusters`). `lazy` checks the cached code against a hash of
   that commit before running it. To use your own checkout instead, set
-  `LAZY_LIMIX_SRC` to it; `lazy` runs a checkout as it is. The backend is Linux-only, because LimiX needs
-  `triton`.
+  `LAZY_LIMIX_SRC` to it; `lazy` runs a checkout as it is. On a CUDA
+  device, LimiX needs `triton`, which PyTorch installs on Linux only; on a
+  CPU it runs on Linux, macOS and Windows.
 - **Kumo Tabular.** The extra installs NVIDIA's `structured-data-models`
   package from PyPI; see {doc}`models/kumo`.
 

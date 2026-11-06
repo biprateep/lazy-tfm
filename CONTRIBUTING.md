@@ -50,9 +50,9 @@ LAZY_RUN_CHECKPOINT_TESTS=1 uv run pytest
 ```
 
 The checkpoint-tests workflow runs them on a CPU on request: from the Actions
-tab, optionally with a `pytest -k` expression, or by adding the label
-`checkpoints` to a pull request; removing the label and adding it back runs
-it again.
+tab, optionally with a `pytest -k` expression and a macOS or Windows runner,
+or by adding the label `checkpoints` to a pull request, which runs on Linux;
+removing the label and adding it back runs it again.
 
 The docs-checks workflow checks, on request, what the docs build does not.
 Run it from the Actions tab ("Docs checks" -> Run workflow), or by adding the

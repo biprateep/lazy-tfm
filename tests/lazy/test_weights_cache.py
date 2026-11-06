@@ -23,6 +23,7 @@ from sklearn import base as sklearn_base
 import threads
 
 from lazy.models import _hub
+from lazy.models import _limix_source
 from lazy.models import _limix_stream
 from lazy.models import _weights
 from lazy.models import kumo
@@ -344,6 +345,8 @@ def _limix(device="cpu"):
 def test_limix_refits_reuse_the_network(monkeypatch):
     load = _Loader()
     monkeypatch.setattr(_limix_stream, "load_network", load)
+    source = types.SimpleNamespace(triton=True)  # CUDA needs it.
+    monkeypatch.setattr(_limix_source, "load", lambda: source)
     first = _limix()._network()
     assert _limix()._network() is first
     assert len(load.calls) == 1

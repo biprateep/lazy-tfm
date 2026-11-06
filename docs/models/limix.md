@@ -8,7 +8,7 @@ pretrained model performs classification, regression and missing-value
 imputation. For regression it predicts the probability of each of 5,000
 buckets of the standardized target, which LAZY keeps as the model's native
 distribution. With 406 million parameters it is the second-largest model in
-LAZY, and it needs a GPU and Linux.
+LAZY, and it needs a GPU.
 
 ```python
 model = lazy.LazyModel("limix")
