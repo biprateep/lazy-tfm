@@ -70,6 +70,13 @@ change the API.
 
 ### Changed
 
+- On Windows, the default cache of datasets and LimiX's source is
+  `%LOCALAPPDATA%\lazy-tfm`, the platform's usual place for caches,
+  instead of `~/.cache/lazy-tfm`. Files cached in the old folder are not
+  read: lazy downloads them again, unless `LAZY_DATA_HOME` names the old
+  folder. Otherwise the old folder, up to about 1 GB with DC1, can be
+  deleted. `XDG_CACHE_HOME`, when set, still decides the folder on every
+  platform. Weights are unaffected; they stay in the Hugging Face cache.
 - Under scikit-learn's metadata routing, `y_grid` is no longer metadata.
   Once requested with `set_score_request(y_grid=True)`, a grid with as many
   values as the rows given to a router such as `cross_validate` was split

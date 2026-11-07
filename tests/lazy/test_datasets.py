@@ -15,6 +15,7 @@ import logging
 import os
 import pathlib
 import stat
+import sys
 import time
 
 import numpy as np
@@ -42,11 +43,34 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.delenv("LAZY_DATA_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
     (tmp_path / "home").mkdir()
     return tmp_path
 
 
+def _user_cache(home):
+    """The platform's user cache under the home directory ``home``."""
+    if sys.platform == "win32":
+        return home / "AppData" / "Local"
+    return home / ".cache"
+
+
 def test_default_is_under_the_users_cache(isolated_home):
+    expected = _user_cache(isolated_home / "home") / "lazy-tfm"
+    assert datasets.data_home() == expected
+
+
+def test_windows_uses_local_app_data(isolated_home, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated_home / "local"))
+    assert datasets.data_home() == isolated_home / "local" / "lazy-tfm"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(isolated_home / "xdg"))
+    assert datasets.data_home() == isolated_home / "xdg" / "lazy-tfm"
+
+
+def test_other_platforms_ignore_local_app_data(isolated_home, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated_home / "local"))
     assert (
         datasets.data_home() == isolated_home / "home" / ".cache" / "lazy-tfm"
     )
@@ -59,9 +83,8 @@ def test_xdg_cache_home_is_honoured(isolated_home, monkeypatch):
 
 def test_an_empty_xdg_cache_home_falls_back(isolated_home, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", "")
-    assert (
-        datasets.data_home() == isolated_home / "home" / ".cache" / "lazy-tfm"
-    )
+    expected = _user_cache(isolated_home / "home") / "lazy-tfm"
+    assert datasets.data_home() == expected
 
 
 def test_lazy_data_home_wins_over_xdg(isolated_home, monkeypatch):
@@ -1025,7 +1048,7 @@ def test_openml_downloads_are_cached_under_data_home(
     datasets.load_dataset("yacht")
     # scikit-learn adds the "openml" subfolder itself.
     assert [call["data_home"] for call in fake_openml] == [
-        str(isolated_home / "home" / ".cache" / "lazy-tfm"),
+        str(_user_cache(isolated_home / "home") / "lazy-tfm"),
         str(isolated_home / "explicit"),
         str(isolated_home / "scratch"),
     ]

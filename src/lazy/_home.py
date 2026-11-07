@@ -4,13 +4,16 @@
 
 import os
 import pathlib
+import sys
 
 
 def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
     """Returns the directory cached catalogs live in, creating it if needed.
 
     Resolution order: the ``data_home`` argument, then ``$LAZY_DATA_HOME``,
-    then ``$XDG_CACHE_HOME/lazy-tfm``, then ``~/.cache/lazy-tfm``.
+    then ``$XDG_CACHE_HOME/lazy-tfm``, then the platform's user cache:
+    ``lazy-tfm`` under ``%LOCALAPPDATA%`` on Windows, ``~/.cache/lazy-tfm``
+    elsewhere.
 
     Nothing about the location is baked in, so a shared scratch filesystem or
     a node-local disk is one environment variable away and the same code runs
@@ -31,5 +34,11 @@ def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
 
 def default_home(name: str) -> pathlib.Path:
     """The default cache directory ``name``, under the user's cache."""
-    cache = os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
+    if sys.platform == "win32":
+        user_cache = os.environ.get("LOCALAPPDATA") or (
+            pathlib.Path.home() / "AppData" / "Local"
+        )
+    else:
+        user_cache = pathlib.Path.home() / ".cache"
+    cache = os.environ.get("XDG_CACHE_HOME") or user_cache
     return pathlib.Path(cache).expanduser() / name
