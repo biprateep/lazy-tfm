@@ -7,6 +7,14 @@ change the API.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
+A release that makes each module simpler and faster, and predictions safe
+to run from several threads. Outputs are unchanged except where an entry
+under Changed or Fixed says otherwise, as for LimiX-2 and Kumo Tabular on a
+GPU and for a constant target. Several names and behaviours are deprecated
+and change in 0.7.0; each warns with a `FutureWarning` now.
+
 ### Added
 
 - `Checkpoint`, the record that `lazy.get_checkpoint` returns, is now
@@ -1101,7 +1109,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/biprateep/lazy-tfm/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/biprateep/lazy-tfm/compare/v0.3.0...v0.4.0
