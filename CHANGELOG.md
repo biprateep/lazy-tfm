@@ -26,10 +26,10 @@ change the API.
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
   weights of the checkpoints named, with the license notice, so the cache
   can be warmed from the command line.
-- The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
-  issues a `lazy.LicenseWarning` with their non-commercial license. TabPFN's
-  own downloader asks for the license to be accepted, but LAZY downloads the
-  pinned file itself, so the user never saw it.
+- The first download of every model's weights issues a
+  `lazy.LicenseWarning`. It names the license, which using the weights
+  accepts, and asks that the model be cited as well as LAZY, with a link to
+  the model's docs page, which lists its references.
 - Each pinned checkpoint has a `commercial_use` flag, which says whether the
   license of its weights allows commercial use. `lazy models` and the docs'
   table of the models show it.

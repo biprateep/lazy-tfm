@@ -30,7 +30,7 @@ We also ask that you cite the works describing the tabular foundation model
 you used as a backend, since LAZY builds on their pretrained weights. The
 `provenance_` attribute of a fitted model records exactly which weights, and
 which versions of the code, produced your results, which tells you which of
-these works to cite.
+these works to cite. Each model's page under {doc}`models/index` lists them.
 
 ## Licenses
 
@@ -42,4 +42,7 @@ checkpoints carry their own
 licenses, several of which are non-commercial, and
 {data}`lazy.CHECKPOINTS <lazy.models.CHECKPOINTS>` quotes each one. Therefore,
 please check the license of the checkpoint you are using before applying it
-to your own work.
+to your own work. The first download of each checkpoint issues a
+{class}`~lazy.LicenseWarning` that names its license, which using the weights
+accepts, and the works to cite. `warnings.filterwarnings("ignore",
+category=lazy.LicenseWarning)` silences it.
