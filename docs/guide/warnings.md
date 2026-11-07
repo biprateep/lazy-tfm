@@ -19,7 +19,7 @@ Every class below can be imported from `lazy`.
 | {class}`~lazy.models.tabfm.TabFMPerformanceWarning` | `PerformanceWarning` | At `fit`, the installed `tabfm` lacks the API of TabFM's streaming path, so every chunk of queries processes the context again (see {doc}`../installation`). `kv_cache=False` asks for that path and silences it. |
 | {class}`GridCoverageWarning <lazy.models.GridCoverageWarning>` | `LazyWarning` | On the native grid of an unbagged TabICL or Kumo Tabular model, rows put more than 1% of their probability outside the grid, and their densities are renormalized. A wider `y_grid` avoids it (see {doc}`limits`). |
 | {class}`~lazy.models.ensemble.EnsembleSizeWarning` | `LazyWarning` | At `fit`, a pool of two or more members gets fewer than 3,000 context rows (see {doc}`ensembles`). |
-| {class}`LicenseWarning <lazy.models.LicenseWarning>` | `LazyWarning` | Before LAZY downloads weights whose upstream package asks the user to accept a license: TabPFN v2.5 and later. It names the license. |
+| {class}`LicenseWarning <lazy.models.LicenseWarning>` | `LazyWarning` | Before LAZY first downloads a model's weights. It names their license, which using them accepts, and the model's page, which lists the works to cite as well as LAZY. |
 | {class}`LimiXSourceWarning <lazy.models.LimiXSourceWarning>` | `LazyWarning` | LimiX's source is not at the commit that LAZY was validated on, or `LAZY_LIMIX_SRC` names another source than the one the process loaded. |
 | {class}`~lazy.ImportNameWarning` | `LazyWarning` | At `import lazy`, the unrelated PyPI package `lazy` is installed in the same environment, and the two overwrite each other's files. |
 
