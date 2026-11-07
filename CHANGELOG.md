@@ -48,8 +48,7 @@ change the API.
   scikit-learn's tools, saving and loading a fitted model, and every warning
   that lazy issues. The scaling page states how `n_jobs` uses the model cache
   and the GPU, and how `chunk_size` multiplies the cost of the context when
-  `kv_cache=False`. The citation's BibTeX entry has a plain key and keeps
-  the title's capitals.
+  `kv_cache=False`.
 - Each tutorial page notes when its notebook may not match the source
   shown, and, once the notebook is re-executed, the lazy version and commit
   it ran on. The docs of a
@@ -133,6 +132,16 @@ change the API.
   at 1,200 rows, under `kv_cache=True` (medians of 3 interleaved runs).
   A `copy.deepcopy` also leaves the caches out and rebuilds them on first
   use. Pickles of earlier versions still load, with the caches they hold.
+- A pickled TabPFN model no longer holds its network. Unpickling reattaches
+  the network, so it needs the pinned checkpoint on that machine: it is
+  downloaded through the hub if missing, and `lazy download` fetches it in
+  advance. A pickle made by this version does not load in earlier versions
+  of lazy; pickles made by earlier versions still load. A v3.5 model with 8
+  members and 500 context rows, fitted on a CPU, pickled to 935.6 MB before
+  and 59.4 MB now. Loading it in a fresh process took a median of 2.77 s
+  before and 3.59 s now, since the network is read from the checkpoint (5
+  interleaved runs, 4 torch threads, 4-core Xeon at 2.8 GHz, torch 2.14.0,
+  tabpfn 9.0.0).
 - `predict_proba` normalizes each row's density once instead of twice, and
   `predict`, `score` and `evaluate` twice instead of three times, so that
   they still equal the metrics run on `predict_proba`'s output to the bit.
@@ -142,8 +151,6 @@ change the API.
   of 5,000 buckets, the median time of `predict_proba` fell from 0.047 s to
   0.034 s, its peak memory from 60 MiB to 41 MiB, and the median time of
   `predict` from 0.075 s to 0.048 s.
-- The `sklearn.exceptions.DataConversionWarning` for a target of shape
-  `(n_samples, 1)` points at the caller's line.
 - The error for a non-numeric feature table names only the columns that
   fail to convert, not every column of an array.
 - `lazy.datasets` reports each download at level INFO to the
@@ -151,16 +158,16 @@ change the API.
   do; `logging.basicConfig(level=logging.INFO)` shows it. A cached copy of
   the wrong size now warns, with a `lazy.LazyWarning`, before it is fetched
   again.
-- The warning for rows with probability outside the native grid is now a
-  `lazy.GridCoverageWarning`. Its text starts with "Densities are
-  renormalised on the native grid" and gives the row count and the grid at
-  the end. Every `UserWarning` class of lazy, and the warnings that were
-  plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
+- The warning for rows with probability outside the native grid, a plain
+  `UserWarning` before, is the new `lazy.GridCoverageWarning`. Its text starts
+  with "Densities are renormalised on the native grid" and gives the row count
+  and the grid at the end. Every `UserWarning` class of lazy, and the warnings
+  that were plain `UserWarning`s, now subclass `lazy.LazyWarning`, so
   `filterwarnings("ignore", category=UserWarning)` still catches them.
 - `get_estimator`, `get_checkpoint`, `download_checkpoint`, `LazyModel`,
-  `LazyEnsembleModel` and a backend's `fit` raise `lazy.UnknownNameError`
-  for an unknown backend name or model version, with one message format
-  that names the valid choices. They raised `KeyError` or `ValueError`.
+  `LazyEnsembleModel` and a backend's `fit` raise the new
+  `lazy.UnknownNameError` for an unknown backend name or model version.
+  They raised `KeyError` or `ValueError`, with messages of several formats.
 - `fit` reports an unknown model version before a missing backend package.
   A missing package is still reported before any other bad parameter.
 - `predict_cdf` returns each row's native CDF at the bin centers, exactly,
@@ -176,19 +183,15 @@ change the API.
 - `import lazy` no longer imports h5py or scikit-learn's dataset loaders.
   `lazy.datasets` and `lazy.selection` load when first accessed, as
   attributes of `lazy` or by import, so code that uses them is unchanged.
-- TabFM's `bin_prior_` is set by `fit` instead of written by every
-  prediction, so threads predicting on one model no longer change it. Its
-  value is the same: the bin fractions of the last member group's context,
-  at the last dither. A model pickled without it gets it when unpickled.
-- On its own buckets (the default grid of TabPFN, LimiX, a bagged model and
-  TabFM's `"grid"` bins), a histogram's densities are each bucket's mass over
-  its width, computed directly instead of through differences of cumulative
-  sums, which lost the relative precision of small bins. `predict_proba`,
-  `predict` and `score` on that grid are 2.2 to 2.8 times faster for a
-  5,000-bucket model (`benchmarks/cpu.py`), and their results move slightly
-  toward the exact values: by up to 2.8e-11 of a row's peak on 1,000 rows of
-  5,000 uneven buckets, and more for very narrow buckets carrying little mass,
-  which the old sums could round to zero.
+- On its own buckets (the default grid of an unbagged TabPFN or LimiX model,
+  and TabFM's `"grid"` bins with one dither), a histogram's densities are each
+  bucket's mass over its width, computed directly instead of through
+  differences of cumulative sums, which lost the relative precision of small
+  bins. `predict_proba`, `predict` and `score` on that grid are 2.2 to 2.8
+  times faster for a 5,000-bucket model (`benchmarks/cpu.py`), and their
+  results move slightly toward the exact values: by up to 2.8e-11 of a row's
+  peak on 1,000 rows of 5,000 uneven buckets, and more for very narrow buckets
+  carrying little mass, which the old sums could round to zero.
 - Normalizing densities builds fewer temporary arrays, so a 5,000-bucket
   model's `predict_proba`, `predict` and `score` are 1.7 to 2.0 times faster,
   and their peak memory falls from 88 MiB to 60 to 76 MiB
@@ -236,9 +239,7 @@ change the API.
 - The `kumo` extra installs NVIDIA's `structured-data-models` 0.2.1 or
   later from PyPI, so Kumo Tabular no longer needs `lazy setup kumo`. The
   release's Kumo Tabular code is identical to the commit LAZY was validated
-  on. Without a name, `lazy setup` does nothing for Kumo Tabular. A source
-  checkout gets every backend with `uv sync --extra all`; the `backends`
-  dependency group is gone.
+  on. Without a name, `lazy setup` does nothing for Kumo Tabular.
 - On its native grid, TabICL and Kumo Tabular take each row's probability
   outside the grid from the CDF that tabulating the density already
   evaluates at the grid's ends, instead of interpolating every row's
@@ -263,9 +264,9 @@ change the API.
   0.0132 s to 0.0117 s for 999 quantiles.
 - `predict`, `score` and `evaluate` on a model that chunks its queries (every
   backend but TabFM, alone or through `LazyModel`) show one progress bar for
-  the whole call; each member of a `LazyEnsembleModel` keeps its own. They used to
-  show one bar per block of about 256 MB of densities, so several in a row
-  for a large query set on a fine grid. Their results are unchanged.
+  the whole call; each member of a `LazyEnsembleModel` keeps its own. They
+  used to show one bar per block of about 256 MB of densities, so several in a
+  row for a large query set on a fine grid. Their results are unchanged.
 
 ### Deprecated
 
@@ -296,8 +297,7 @@ change the API.
   `HistogramDistribution(edges, probs).on_grid(grid)` and
   `QuantileDistribution(levels, values).on_grid(grid)` replace them, but
   they normalize the densities by the grid's convention, and the second adds
-  tails beyond the outermost levels. `Grid.rebin` now computes its densities
-  as `HistogramDistribution` does, so it gets the point-mass fix below.
+  tails beyond the outermost levels.
 - The `bin_edges` argument of the `lazy.metrics` functions warns with a
   `FutureWarning` and will be removed in 0.7.0. Results are unchanged. Pass
   `lazy.Grid.from_edges(bin_edges, normalization="histogram")` as the grid
@@ -316,6 +316,8 @@ change the API.
   of `lazy.models._ensemble.import_extra`, are removed, since no backend
   needs them now. `lazy setup --help` no longer lists backends that
   install only when named.
+- The `backends` dependency group. A source checkout gets every backend
+  with `uv sync --extra all`.
 
 ### Fixed
 
@@ -323,7 +325,6 @@ change the API.
   It raised `ValueError` when such a bag's standard deviation rounded to
   about 1e-17 rather than to 0; the bag is now left unscaled, as TabICL and
   Kumo Tabular leave it.
-
 - With `tabpfn` 9.2 or later installed, TabPFN passes
   `enable_torch_compile=False` instead of leaving it to upstream's default,
   so a later default cannot change its densities. Outputs do not change.
@@ -360,19 +361,11 @@ change the API.
   the scores. `histogramize` counted it in the bin below, and dropped one on
   the grid's bottom edge, as did the probability outside the grid that the
   native-grid warning counts. Distributions without point masses are
-  unchanged to the bit.
+  unchanged to the bit. `Grid.rebin` now computes its densities as
+  `HistogramDistribution` does, so it gets this fix too.
 - A TabPFN model fitted on a GPU can now be unpickled on a machine without
   one. Its pickle held the regressors' CUDA tensors, which torch refuses to
-  load there. A TabPFN pickle also no longer holds the network. Unpickling
-  reattaches the network, so it needs the pinned checkpoint on that machine:
-  it is downloaded through the hub if missing, and `lazy download` fetches
-  it in advance. A pickle made by this version does not load in earlier
-  versions of lazy; pickles made by earlier versions still load. A v3.5
-  model with 8 members and 500 context rows, fitted on a CPU, pickled to
-  935.6 MB before and 59.4 MB now. Loading it in a fresh process took a
-  median of 2.77 s before and 3.59 s now, since the network is read from
-  the checkpoint (5 interleaved runs, 4 torch threads, 4-core Xeon at
-  2.8 GHz, torch 2.14.0, tabpfn 9.0.0).
+  load there.
 - A LimiX or TabFM model fitted on a GPU with `device="auto"` and unpickled
   on a machine without one now runs on the CPU with mixed precision off, and
   its `provenance_` says so. LimiX already moved to the CPU but kept mixed
@@ -401,6 +394,10 @@ change the API.
   with a `TypeError`, or leave members uncached depending on timing: the
   second thread used the key/value caches before the first had rebuilt
   them. The second thread now waits for the rebuild.
+- Threads predicting on one TabFM model changed its `bin_prior_`, which
+  every prediction wrote. `fit` now sets it. Its value is the same: the bin
+  fractions of the last member group's context, at the last dither. A model
+  pickled without it gets it when unpickled.
 - The warning that a cached checkpoint snapshot may be incomplete names the
   user's line, as lazy's other warnings do, instead of a line inside lazy.
 - TabPFN no longer claims that chunking the queries gives the same bits on a
@@ -443,7 +440,8 @@ change the API.
   entries, since the descriptions were comments that it does not read.
 - A target with several columns raises a `ValueError`; one with half as
   many rows as X was flattened and fitted on interleaved values. A column
-  vector is flattened with a `DataConversionWarning`, as in scikit-learn.
+  vector is flattened with a `DataConversionWarning`, as in scikit-learn,
+  which points at the caller's line.
 - Sparse features raise a `TypeError` that names the dense alternative, and
   complex features or targets raise instead of losing their imaginary
   part. The errors for `y=None` and for a wrong or zero feature count use
@@ -469,8 +467,9 @@ change the API.
   TabPFN-3.5, which it is not, and no longer gives a CDE loss for it that
   disagrees with the scaling page's table. Several facts that pages
   repeated, such as TabPFN's pretraining limits on the limits page, now
-  link to the page that holds them, and the pages no longer describe plans, past behaviour
-  or the test suite.
+  link to the page that holds them, and the pages no longer describe plans,
+  past behaviour or the test suite. The citation's BibTeX entry has a plain
+  key and keeps the title's capitals.
 
 ### Security
 
