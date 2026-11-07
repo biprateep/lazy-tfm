@@ -34,9 +34,9 @@ The selection function itself lives in :mod:`lazy.selection`; it acts on any
 photometry, so a catalog of your own can be biased the same way.
 
 The two files total about 1 GB. They are downloaded once from Zenodo record
-10975874, checksummed, and cached under :func:`data_home` -- by default
-``$XDG_CACHE_HOME/lazy-tfm`` or ``~/.cache/lazy-tfm``, overridable with
-the ``LAZY_DATA_HOME`` environment variable or the ``data_home`` argument.
+10975874, checksummed, and cached under :func:`data_home`, which gives the
+default folder and how the ``LAZY_DATA_HOME`` environment variable or the
+``data_home`` argument overrides it.
 Nothing is re-downloaded if the cached file is already there and intact.
 Each download is logged at level INFO to the ``lazy.datasets`` logger.
 

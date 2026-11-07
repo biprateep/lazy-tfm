@@ -8,7 +8,7 @@ it:
 | What                 | Default location                                        | Override                             |
 | -------------------- | ------------------------------------------------------- | ------------------------------------ |
 | Pretrained weights   | `~/.cache/huggingface/hub`                              | `HF_HOME`                            |
-| Benchmark catalogs   | `$XDG_CACHE_HOME/lazy-tfm`, else `~/.cache/lazy-tfm` | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
+| Benchmark catalogs   | `$XDG_CACHE_HOME/lazy-tfm`, else `%LOCALAPPDATA%\lazy-tfm` on Windows and `~/.cache/lazy-tfm` elsewhere | `LAZY_DATA_HOME`, else `XDG_CACHE_HOME` |
 | LimiX's source       | `limix/` in the catalogs' directory                     | `LAZY_LIMIX_SRC` (a checkout), else as the catalogs |
 
 Compute nodes often have no outbound network access. We recommend warming the

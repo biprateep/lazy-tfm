@@ -70,6 +70,13 @@ change the API.
 
 ### Changed
 
+- On Windows, the default cache of datasets and LimiX's source is
+  `%LOCALAPPDATA%\lazy-tfm`, the platform's usual place for caches,
+  instead of `~/.cache/lazy-tfm`. Files cached in the old folder are not
+  read: lazy downloads them again, unless `LAZY_DATA_HOME` names the old
+  folder. Otherwise the old folder, up to about 1 GB with DC1, can be
+  deleted. `XDG_CACHE_HOME`, when set, still decides the folder on every
+  platform. Weights are unaffected; they stay in the Hugging Face cache.
 - LimiX-2 on a GPU draws its feature positional embedding as on a CPU, with
   a CPU generator seeded per member, and moves it to the GPU. LAZY drew it
   with a GPU generator, which gives another stream for the same seed, so the
