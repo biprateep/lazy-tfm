@@ -201,6 +201,11 @@ change the API.
   identical results. With eight members of 5,000 buckets, the peak memory of
   `predict_quantiles` on 311 rows falls from 1,069 MiB to 295 MiB, and its
   time from 5.6 s to 1.8 s, as measured.
+- `MixtureDistribution.to_histogram` and `to_qp` also build that histogram
+  a block of rows at a time, with identical results. With eight components
+  of 5,000 buckets on 1,000 rows, the peak memory of `to_histogram` falls
+  from 1,298 MiB to 631 MiB, about twice its 305 MiB result, and its time
+  rises from 1.11 s to 1.25 s, as measured.
 - The minimum dependency versions are raised to ones that install and work
   together: scipy 1.13, scikit-learn 1.6, pandas 2.2.2, matplotlib 3.8.4 and
   h5py 3.11. The old floors allowed pandas and h5py builds for NumPy 1, with

@@ -389,13 +389,13 @@ def test_mixture_ppf_inverts_the_cdf(mixture):
         )
 
 
-def test_mixture_quantiles_and_mode_go_a_block_of_rows_at_a_time(
+def test_mixture_quantiles_mode_and_histogram_go_a_block_of_rows_at_a_time(
     mixture, monkeypatch
 ):
     # Six equal weights do not survive a second normalization exactly, so
     # a block that renormalized them would differ in the last bits.
     mixture = distributions.MixtureDistribution.equal(mixture.components * 3)
-    expected = mixture.to_histogram()
+    expected = mixture.histogramize(mixture.bins)
     monkeypatch.setattr(
         distributions, "_MIXTURE_BLOCK_BYTES", 8 * 4 * mixture.bins.size
     )
@@ -408,6 +408,9 @@ def test_mixture_quantiles_and_mode_go_a_block_of_rows_at_a_time(
         np.testing.assert_array_equal(block.masses, expected.masses[rows])
     np.testing.assert_array_equal(mixture.ppf(LEVELS), expected.ppf(LEVELS))
     np.testing.assert_array_equal(mixture.mode(), expected.mode())
+    np.testing.assert_array_equal(
+        mixture.to_histogram().masses, expected.masses
+    )
 
 
 INVALID_WEIGHTS = [
