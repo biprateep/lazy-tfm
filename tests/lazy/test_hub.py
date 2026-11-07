@@ -155,7 +155,8 @@ def test_an_uncached_snapshot_still_fails_without_the_hub(hub, monkeypatch):
         raise ConnectionError("refused")
 
     monkeypatch.setattr(huggingface_hub, "snapshot_download", refused)
-    with pytest.raises(ConnectionError):
+    # The license shows before the attempt, so again on the next one.
+    with pytest.raises(ConnectionError), pytest.warns(lazy.LicenseWarning):
         _hub.get_checkpoint("tabfm").download()
 
 
@@ -196,40 +197,21 @@ def test_a_single_file_is_trusted_as_it_is(monkeypatch, tmp_path):
     assert calls == [True]
 
 
-@pytest.mark.parametrize(
-    "key",
-    [key for key, spec in _hub.CHECKPOINTS.items() if spec.notify_license],
-)
-def test_the_first_download_shows_the_licence(monkeypatch, tmp_path, key):
+@pytest.mark.parametrize("key", list(_hub.CHECKPOINTS))
+def test_the_first_download_shows_the_license_and_what_to_cite(
+    hub, monkeypatch, tmp_path, key
+):
+    """``hub`` serves the snapshot checkpoint, TabFM; the rest are files."""
     _single_file_hub(monkeypatch, tmp_path, cached=False)
     spec = _hub.get_checkpoint(key)
     with pytest.warns(lazy.LicenseWarning) as record:
         spec.download()
     [warning] = [w for w in record if w.category is lazy.LicenseWarning]
-    assert spec.license_note in str(warning.message)
+    message = str(warning.message)
+    assert spec.license_note in message
+    assert f"cite {spec.display_name} as well as LAZY" in message
+    assert f"/models/{spec.backend}.html" in message
     assert warning.filename == __file__  # the caller's line, not lazy's
-
-
-@pytest.mark.filterwarnings("error::lazy.LicenseWarning")
-def test_a_permissive_checkpoint_downloads_without_a_licence_warning(
-    monkeypatch, tmp_path
-):
-    _single_file_hub(monkeypatch, tmp_path, cached=False)
-    _hub.get_checkpoint("tabpfn:v2").download()
-
-
-def test_the_licence_is_shown_for_tabpfn_from_v2_5_on():
-    """Decision D10: the versions whose own downloader asks for acceptance."""
-    shown = {
-        key for key, spec in _hub.CHECKPOINTS.items() if spec.notify_license
-    }
-    assert shown == {
-        "tabpfn:v2.5",
-        "tabpfn:v2.6",
-        "tabpfn:v3",
-        "tabpfn:v3.5",
-        "tabpfn:v3.5-fast",
-    }
 
 
 @pytest.mark.parametrize("key", list(_hub.CHECKPOINTS))

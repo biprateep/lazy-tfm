@@ -26,10 +26,10 @@ change the API.
   whether it is cached, and `lazy download NAME[:VERSION]` downloads the
   weights of the checkpoints named, with the license notice, so the cache
   can be warmed from the command line.
-- The first download of TabPFN v2.5, v2.6, v3, v3.5 or v3.5-fast weights
-  issues a `lazy.LicenseWarning` with their non-commercial license. TabPFN's
-  own downloader asks for the license to be accepted, but LAZY downloads the
-  pinned file itself, so the user never saw it.
+- The first download of every model's weights issues a
+  `lazy.LicenseWarning`. It names the license, which using the weights
+  accepts, and asks that the model be cited as well as LAZY, with a link to
+  the model's docs page, which lists its references.
 - Each pinned checkpoint has a `commercial_use` flag, which says whether the
   license of its weights allows commercial use. `lazy models` and the docs'
   table of the models show it.
@@ -77,6 +77,14 @@ change the API.
   folder. Otherwise the old folder, up to about 1 GB with DC1, can be
   deleted. `XDG_CACHE_HOME`, when set, still decides the folder on every
   platform. Weights are unaffected; they stay in the Hugging Face cache.
+- Under scikit-learn's metadata routing, `y_grid` is no longer metadata.
+  Once requested with `set_score_request(y_grid=True)`, a grid with as many
+  values as the rows given to a router such as `cross_validate` was split
+  between the folds, so each fold was scored on part of the grid. A grid
+  passed through a router now raises `TypeError`, whatever its length; set
+  `y_grid` in the constructor instead. The models no longer have
+  `set_predict_proba_request` or `set_score_request`, so calling either
+  raises `AttributeError`. `set_predict_request` remains, for `method`.
 - LimiX-2 on a GPU draws its feature positional embedding as on a CPU, with
   a CPU generator seeded per member, and moves it to the GPU. LAZY drew it
   with a GPU generator, which gives another stream for the same seed, so the

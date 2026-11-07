@@ -36,6 +36,7 @@ The table lists what each tool does with a LAZY model.
 | {class}`~sklearn.compose.ColumnTransformer` | Works | As a pipeline step before the model. |
 | {class}`~sklearn.model_selection.GridSearchCV`, {func}`~sklearn.model_selection.cross_val_score`, default scoring | Works | They maximize `score`, the negative CDE loss, so they prefer the better densities. Each candidate is scored on its default grid; a `y_grid` in the constructor scores every candidate on one grid. |
 | The same, with `scoring=` | Works | A point scorer, such as `"neg_mean_absolute_error"`, scores `predict`, which is the mode. |
+| The same, with metadata routing | Works, with a caveat | `y_grid` is an option, not metadata, so routing never passes it on: a grid passed through a router raises `TypeError`. Set the grid in the constructor, `y_grid=...`, instead. `predict`'s `method` can still be requested with `set_predict_request`. |
 | The same, with `n_jobs` | Works | Each job runs in a process of its own (see [Parallel jobs](scaling.md#parallel-jobs)). |
 | {func}`~sklearn.model_selection.cross_val_predict` | Works, with a caveat | `method="predict"` returns the modes. `method="predict_proba"` does not work: scikit-learn treats it as a classifier's method and raises `AttributeError`. Loop over the folds instead. |
 | {class}`~sklearn.compose.TransformedTargetRegressor` | Works, with a caveat | Only `predict` is transformed back. It has no `predict_proba`. |
