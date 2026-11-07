@@ -13,6 +13,7 @@ a search over backends) get one test each.
 
 import numpy as np
 import pytest
+import sklearn
 from sklearn import base as sklearn_base
 from sklearn import model_selection
 from sklearn import pipeline
@@ -54,6 +55,31 @@ def test_every_estimator_is_a_regressor_that_accepts_nan(estimator):
     tags = sklearn_utils.get_tags(estimator)
     assert tags.estimator_type == "regressor"
     assert tags.input_tags.allow_nan
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [lazy.LazyModel(), lazy.LazyEnsembleModel(["tabpfn", "tabicl"])],
+    ids=repr,
+)
+def test_y_grid_is_not_routable_metadata(estimator):
+    routing = estimator.get_metadata_routing()
+    for method in ("predict", "predict_proba", "score"):
+        assert not routing.consumes(method, ["y_grid"])
+    assert not hasattr(estimator, "set_predict_proba_request")
+    assert not hasattr(estimator, "set_score_request")
+    assert hasattr(estimator, "set_predict_request")  # for ``method``
+
+
+def test_routing_refuses_a_grid_rather_than_split_it_by_fold(regression):
+    """A grid as long as the data would otherwise be cut per fold."""
+    X, y = regression
+    model = standins.HistogramStandIn(n_estimators=2, progress=False)
+    with sklearn.config_context(enable_metadata_routing=True):
+        with pytest.raises(TypeError, match="y_grid"):
+            model_selection.cross_validate(
+                model, X, y, cv=2, params={"y_grid": np.linspace(-6, 6, 60)}
+            )
 
 
 # The checks every model fails on purpose, and why.

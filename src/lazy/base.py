@@ -48,12 +48,13 @@ from __future__ import annotations
 import abc
 from collections.abc import Iterator
 import numbers
-from typing import Any, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from sklearn import base as sklearn_base
+from sklearn.utils import metadata_routing
 from sklearn.utils import validation
 
 from lazy import _inputs
@@ -129,6 +130,19 @@ class BaseDensityRegressor(
     """
 
     backend: str | None = None
+
+    # ``y_grid`` is a call-time option, not per-sample metadata, so
+    # scikit-learn's metadata routing never passes it on: a router would
+    # split a grid as long as the data between folds.
+    __metadata_request__predict: ClassVar[dict[str, str]] = {
+        "y_grid": metadata_routing.UNUSED
+    }
+    __metadata_request__predict_proba: ClassVar[dict[str, str]] = {
+        "y_grid": metadata_routing.UNUSED
+    }
+    __metadata_request__score: ClassVar[dict[str, str]] = {
+        "y_grid": metadata_routing.UNUSED
+    }
 
     # Set by each subclass's __init__, which scikit-learn requires to store
     # its parameters verbatim; declared here for the type checker only.
