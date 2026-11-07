@@ -59,11 +59,12 @@ __all__ = [
 # distribution's tail must be to be its mode, relatively.
 _MODE_RTOL = 1e-9
 
-# A mixture's quantiles and mode are those of its histogram on the union of
-# the components' edges, which holds members x buckets values per row: a
-# bagged model's 40,008 for eight members of 5,000 buckets. The rows go a
-# block at a time, so that a block's histogram holds about this many bytes;
-# its components' CDFs take a few times that while it is built.
+# A mixture's quantiles, mode and ``to_histogram`` come from its histogram
+# on the union of the components' edges, which holds members x buckets
+# values per row: a bagged model's 40,008 for eight members of 5,000
+# buckets. The rows go a block at a time, so that a block's histogram holds
+# about this many bytes; its components' CDFs take a few times that while
+# it is built.
 _MIXTURE_BLOCK_BYTES = 32 * 2**20
 
 Ancil: TypeAlias = Mapping[str, npt.NDArray[Any]]
@@ -1021,8 +1022,17 @@ class MixtureDistribution(_Base):
         return out
 
     def to_histogram(self) -> HistogramDistribution:
-        """The mixture as one histogram on the union of edges; exact."""
-        return self.histogramize(self.bins)
+        """The mixture as one histogram on the union of edges; exact.
+
+        The rows are built a block at a time, so the components' CDFs
+        exist for one block at once. The result takes ``8 * n_rows *
+        n_edges`` bytes, held twice while the constructor copies it.
+        """
+        bins = self.bins
+        masses = np.empty((self.npdf, bins.size - 1))
+        for rows, block in self._histogram_blocks():
+            masses[rows] = block.masses
+        return HistogramDistribution(bins, masses, self.ancil)
 
     def _weighted(self, values: Iterable[_typing.FloatArray]) -> Any:
         """The weighted sum of one array per component, accumulated in turn.
