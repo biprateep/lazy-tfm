@@ -580,6 +580,13 @@ html_css_files = [
 ]
 html_show_sourcelink = False
 html_theme_options = {
+    # The banner at the top of every page. The theme fetches it from main, so
+    # editing the file changes it on every version of the docs, and an empty
+    # file hides it. A fetched banner gets the theme's close button.
+    "announcement": (
+        "https://raw.githubusercontent.com/biprateep/lazy-tfm/main/docs/"
+        "_templates/announcement.html"
+    ),
     "logo": {
         "image_light": "_static/lazy-logo.svg",
         "image_dark": "_static/lazy-logo-white.svg",
