@@ -351,13 +351,10 @@ by_outliers
 # within each, so that the default 10 by 10 gives 100 bins, which set the
 # resolution of the histogram. `n_dither` repeats the whole hierarchy with
 # its bin edges shifted by a fraction of a bin and mixes the copies, which
-# smooths the steps of the histogram at a proportional cost. `prior_shift="em"`
-# corrects for label shift, the case in which the targets of the context are
-# distributed unlike those of the queries while the features at a given
-# target, $p(x \mid y)$, are unchanged, as for a biased spectroscopic sample.
-# Since TabFM runs eleven classifiers per hierarchy, it is much slower than
-# TabPFN, so we give it only the first 1,000 context rows and 4 members, and
-# score 300 test rows.
+# smooths the steps of the histogram at a proportional cost. Since TabFM
+# runs eleven classifiers per hierarchy, it is much slower than TabPFN, so we
+# give it only the first 1,000 context rows and 4 members, and score 300 test
+# rows.
 
 # %%
 if importlib.util.find_spec("tabfm") is None:

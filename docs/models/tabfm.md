@@ -64,12 +64,9 @@ The largest difference is that LAZY does not use TabFM's regression output,
 since a single value per row has no distribution to keep. The two-level
 hierarchy of classifiers is LAZY's own construction, and its resolution is set
 by `n_coarse_bins` and `n_fine_bins`; `n_dither` adds copies of the hierarchy
-on shifted bin edges, which smooths the histogram at a proportional cost, and
-`prior_shift="em"` applies a label-shift correction, estimated by expectation
-maximization, for when the context's targets are distributed unlike the
-queries' while the features given the target are not. Within each classifier,
-the settings that affect a prediction are the creators', except that we run 8
-members rather than 32, as for every other model, use the seed 0 rather than
+on shifted bin edges, which smooths the histogram at a proportional cost.
+Within each classifier, the settings that affect a prediction are the
+creators', except that we run 8 members rather than 32, as for every other model, use the seed 0 rather than
 42, and treat every column as numeric. We compute in float32 on a CPU, where
 TabFM uses bfloat16 everywhere, and LAZY caches the context's keys and values
 in its own implementation, which gives the same answers as re-encoding the

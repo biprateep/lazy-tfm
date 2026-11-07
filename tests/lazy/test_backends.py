@@ -301,7 +301,7 @@ class TestTabFM:
         _stub_classifier(est, monkeypatch)
         handle = {"X": tabfm._frame(z[:, None]), "y": z}
         handle["group"] = types.SimpleNamespace(seed=0, member_rows=None)
-        probs, edges, prior = est._hierarchy(
+        probs, edges = est._hierarchy(
             None, handle, tabfm._frame(z[:7, None]), 0.0
         )
         assert probs.shape == (7, 100)
