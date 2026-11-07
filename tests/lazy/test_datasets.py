@@ -1048,7 +1048,7 @@ def test_openml_downloads_are_cached_under_data_home(
     datasets.load_dataset("yacht")
     # scikit-learn adds the "openml" subfolder itself.
     assert [call["data_home"] for call in fake_openml] == [
-        str(isolated_home / "home" / ".cache" / "lazy-tfm"),
+        str(_user_cache(isolated_home / "home") / "lazy-tfm"),
         str(isolated_home / "explicit"),
         str(isolated_home / "scratch"),
     ]
