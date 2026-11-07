@@ -70,6 +70,14 @@ change the API.
 
 ### Changed
 
+- Under scikit-learn's metadata routing, `y_grid` is no longer metadata.
+  Once requested with `set_score_request(y_grid=True)`, a grid with as many
+  values as the rows given to a router such as `cross_validate` was split
+  between the folds, so each fold was scored on part of the grid. A grid
+  passed through a router now raises `TypeError`, whatever its length; set
+  `y_grid` in the constructor instead. The models no longer have
+  `set_predict_proba_request` or `set_score_request`, so calling either
+  raises `AttributeError`. `set_predict_request` remains, for `method`.
 - LimiX-2 on a GPU draws its feature positional embedding as on a CPU, with
   a CPU generator seeded per member, and moves it to the GPU. LAZY drew it
   with a GPU generator, which gives another stream for the same seed, so the
