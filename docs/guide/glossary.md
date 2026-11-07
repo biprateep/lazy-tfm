@@ -29,8 +29,8 @@ checkpoint
 
 chunk
   The query rows that one forward pass predicts: at most `chunk_size` of
-  them, or all of them when `chunk_size=0`. A row's answer does not depend on the other rows in its chunk,
-  except under TabFM's `prior_shift="em"`. See {doc}`scaling`.
+  them, or all of them when `chunk_size=0`. A row's answer does not depend on
+  the other rows in its chunk. See {doc}`scaling`.
 
 context
   The labelled rows passed to `fit`. They play the role of a training set:

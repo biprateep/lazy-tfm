@@ -42,7 +42,7 @@ differs between backends, because the checkpoints do.
 | `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
 | `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centers, `"native"`, or `None` for the native grid.                 | `None`    |
 | `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
-| `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding, except under TabFM's `prior_shift="em"`, which uses every row of the call. | `8192`    |
+| `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding. | `8192`    |
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
 | `mixed_precision`     | The model's reduced-precision path on CUDA, where chunked and cached answers then agree to that precision's rounding; float32 otherwise. | `True`    |
 | `outlier_threshold`   | Soft-clip each feature at this many standard deviations of the context (below). `"auto"` is the model's own clip under `transforms="auto"` and no clip under an explicit value; `None` is no clip. | `"auto"`  |

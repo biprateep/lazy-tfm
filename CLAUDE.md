@@ -29,7 +29,6 @@ Run the checks that `CONTRIBUTING.md` lists before every push.
 - `predict` returns the mode of each row's density by default; `predict(method=...)` picks another point estimate.
 - `predict_proba` returns densities on a grid, not class probabilities; `predict_pdf` is an alias.
 - `score` returns the negative CDE loss, not R².
-- TabFM's `prior_shift="em"` makes one row's answer depend on the other rows in its chunk.
 - The 12 checkpoints and their default versions are pinned in `models/_hub.py`, and each backend pins its recipe per checkpoint version.
 
 ### Code
@@ -51,7 +50,7 @@ Run the checks that `CONTRIBUTING.md` lists before every push.
 - Quantiles, intervals and PIT values come from the native distribution, never from a grid.
 - Each backend pins its recipe per checkpoint version (`_pinned_recipe`). Never take a setting that changes a prediction from the installed upstream package's defaults.
 - Randomness comes from `random_state`. Member `i` of an ensemble is seeded from `SeedSequence([random_state, i])`.
-- A query's answer does not depend on the other queries in its chunk, beyond float rounding where a backend does not claim exact chunking. TabFM's `prior_shift="em"` is the exception.
+- A query's answer does not depend on the other queries in its chunk, beyond float rounding where a backend does not claim exact chunking.
 - A change for speed keeps outputs identical, or states the measured difference and why it is acceptable.
 
 ### Tests

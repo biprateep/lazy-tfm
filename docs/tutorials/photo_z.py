@@ -352,8 +352,7 @@ else:
 # ## Next steps
 #
 # - [Biased training sets](https://lazy-tfm.readthedocs.io/en/latest/guide/limits.html#biased-training-sets):
-#   which model to use with a biased context, and the label-shift correction
-#   of TabFM.
+#   which model to use with a biased context.
 # - [Choosing a model](https://lazy-tfm.readthedocs.io/en/latest/guide/choosing.html):
 #   which model to choose, and what hardware it needs.
 # - [Scaling and performance](https://lazy-tfm.readthedocs.io/en/latest/guide/scaling.html):

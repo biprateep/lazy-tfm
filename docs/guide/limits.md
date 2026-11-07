@@ -126,10 +126,7 @@ same population. When the training set is biased, for example because only
 the brightest or easiest objects were labeled, the predicted distributions
 inherit the distribution of the context targets, and this mismatch, rather
 than the estimator, is usually what limits the accuracy. On DC1,
-LimiX-2 performs best in this regime (see {doc}`choosing`). TabFM
-also takes `prior_shift="em"`, a label-shift correction estimated by
-expectation maximization, for when the context's targets are distributed
-unlike the queries' while the features given the target are not.
+LimiX-2 performs best in this regime (see {doc}`choosing`).
 {func}`~lazy.datasets.fetch_dc1_biased` provides such a training set, with a
 representative calibration sample and a representative test set, and
 {func}`~lazy.selection.grid_selection` applies the same selection to any

@@ -7,6 +7,19 @@ change the API.
 
 ## [Unreleased]
 
+### Removed
+
+- `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
+  no longer exports `prior_shift_em` or sets the fitted attribute
+  `bin_prior_`. The label-shift correction ran on TabFM alone, and it made
+  a row's answer depend on the other rows predicted with it, so `predict`
+  and `predict_proba` could disagree. Passing `prior_shift` is now a
+  `TypeError`, and unpickling a model fitted with `prior_shift="em"` raises
+  a `ValueError` rather than predicting without the correction. Predictions
+  with the default, `prior_shift=None`, are unchanged. A correction that
+  every backend shares is planned in
+  [#300](https://github.com/biprateep/lazy-tfm/issues/300).
+
 ## [0.6.0] - 2026-11-07
 
 A release that makes each module simpler and faster, and predictions safe

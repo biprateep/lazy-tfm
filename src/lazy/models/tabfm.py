@@ -92,7 +92,6 @@ __all__ = [
     "TabFMPerformanceWarning",
     "auto_bin_count",
     "grid_groups",
-    "prior_shift_em",
     "quantile_edges",
 ]
 
@@ -302,50 +301,6 @@ def quantile_edges(
     return np.maximum.accumulate(edges)
 
 
-def prior_shift_em(
-    probs: npt.ArrayLike,
-    prior_train: npt.ArrayLike,
-    n_iter: int = 100,
-    tol: float = 1e-8,
-) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-    """Label-shift correction of classifier posteriors (Saerens et al. 2002).
-
-    A classifier's posteriors carry the target distribution of its context.
-    When the context and the queries come from different populations (in
-    photo-z, a spectroscopic training set and a photometric sample), those
-    distributions differ, and the posteriors inherit
-    the wrong prior. This estimates the query set's own bin prior by EM and
-    re-weights the posteriors by the ratio.
-
-    Args:
-        probs: Classifier posteriors, shape ``(n_query, n_bins)``.
-        prior_train: The bin prior the posteriors carry (the context's bin
-            fractions), shape ``(n_bins,)``; normalized here.
-        n_iter: Maximum number of EM iterations.
-        tol: Stop once no prior entry changes by more than this.
-
-    Returns:
-        A tuple ``(posteriors, prior)``: the re-weighted posteriors, shape
-        ``(n_query, n_bins)``, and the estimated query-set prior, shape
-        ``(n_bins,)``.
-    """
-    posteriors = np.asarray(probs, dtype=float)
-    p_train = np.maximum(np.asarray(prior_train, dtype=float), 1e-12)
-    p_train = p_train / p_train.sum()
-    pi = p_train.copy()
-    for _ in range(n_iter):
-        post = posteriors * (pi / p_train)
-        post /= np.maximum(post.sum(axis=1, keepdims=True), 1e-300)
-        new_pi = post.mean(axis=0)
-        converged = np.abs(new_pi - pi).max() < tol
-        pi = new_pi
-        if converged:
-            break
-    post = posteriors * (pi / p_train)
-    post /= np.maximum(post.sum(axis=1, keepdims=True), 1e-300)
-    return post, pi
-
-
 class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     """Target distributions from TabFM's classifier over a bin hierarchy.
 
@@ -462,12 +417,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             about three times the compute, and suits runs where accuracy
             matters. ``"grid"`` bins take only 1, since shifted
             copies of the grid's edges would no longer be its edges.
-        prior_shift: ``"em"`` applies the label-shift correction of
-            :func:`prior_shift_em` using the context's own bin fractions as
-            the training prior, which is worth having when the context is a
-            biased spectroscopic sample. The correction uses every query row
-            of the call, so a row's answer then depends on the others.
-            ``None`` (default) leaves the posteriors alone.
         member_batch_size: Ensemble members processed together (prefilled
             together on the cached path; TabFM's own ``batch_size``), an int
             of at least 1. This and the next two are memory/throughput knobs
@@ -496,9 +445,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         checkpoint_: The pinned checkpoint, a :class:`pathlib.Path`. TabFM
             loads its backbone on the first prediction, so this is set then,
             and dropped by the next fit.
-        bin_prior_: The bin fractions of the last member group's context
-            targets, at the last dither, shape (n_bins,). With bagging
-            done natively, the one group's targets are the whole context.
         bins_: How the bins were chosen, for example
             ``"auto equal-mass 7x7"`` or ``"grid 50 bins in 5 groups"``.
         n_coarse_bins_: The resolved coarse classes, or a matched grid's
@@ -560,7 +506,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_coarse_bins: int | str = AUTO_BINS,
         n_fine_bins: int | str = AUTO_BINS,
         n_dither: int = 1,
-        prior_shift: str | None = None,
         member_batch_size: int = 1,
         query_block_rows: int = 262_144,
         keep_cache_on_device: bool = True,
@@ -583,7 +528,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.n_coarse_bins = n_coarse_bins
         self.n_fine_bins = n_fine_bins
         self.n_dither = n_dither
-        self.prior_shift = prior_shift
         self.member_batch_size = member_batch_size
         self.query_block_rows = query_block_rows
         self.keep_cache_on_device = keep_cache_on_device
@@ -662,8 +606,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         # _fit sets the clipped context targets before the base class
         # validates, so the layout is fixed here, before any group is fitted.
         self._resolve_bins(self.y_context_.size)
-        if self.prior_shift not in (None, "em"):
-            raise ValueError("prior_shift must be None or 'em'")
         self.inference_ = self._resolve_inference()
 
     def _resolve_inference(self) -> str:
@@ -823,7 +765,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                     f"dither {i + 1}/{self.n_dither}"
                     f" (edge shift {shift:.2f} bins)"
                 )
-                probs, edges, prior = self._hierarchy(
+                probs, edges = self._hierarchy(
                     model,
                     handle,
                     query,
@@ -831,8 +773,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                     progress=progress,
                     dither=f"{i + 1}/{self.n_dither}",
                 )
-                if self.prior_shift == "em":
-                    probs, _ = prior_shift_em(probs, prior)
                 parts.append(distributions.HistogramDistribution(edges, probs))
         if len(parts) == 1:
             return parts[0]
@@ -897,7 +837,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         *,
         progress: Any = None,
         dither: str = "1/1",
-    ) -> tuple[_typing.FloatArray, _typing.FloatArray, _typing.FloatArray]:
+    ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
         """Bin posteriors for one set of dithered edges.
 
         Args:
@@ -910,14 +850,12 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             dither: Which dither this is, for the bar's label.
 
         Returns:
-            A tuple ``(probs, edges, context_bin_prior)``: posteriors, shape
-            ``(n_query, n_bins)``; bin edges, shape ``(n_bins + 1,)``; and
-            the context's bin fractions, shape ``(n_bins,)``.
+            A tuple ``(probs, edges)``: posteriors, shape
+            ``(n_query, n_bins)``, and bin edges, shape ``(n_bins + 1,)``.
         """
         y, X_context, group = handle["y"], handle["X"], handle["group"]
-        edges, coarse_edges, fine_edges, coarse, fines, prior = self._labels(
-            y, shift
-        )
+        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        coarse = _bin_labels(coarse_edges, y)
         n_coarse = coarse_edges.size - 1
         # Each member's rows of this group's context, for natively bagged
         # members; None when every member sees all of them.
@@ -938,7 +876,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         for j in range(n_coarse):
             rows = coarse == j
             n_fine = fine_edges[j].size - 1
-            fine = fines[j]
+            fine = _bin_labels(fine_edges[j], y[rows])
             level_rows = (
                 None
                 if member_rows is None
@@ -966,68 +904,32 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 f"  coarse bin {j + 1}/{n_coarse}"
                 f" ({int(rows.sum())} context rows)"
             )
-        return np.concatenate(blocks, axis=1), edges, prior
+        return np.concatenate(blocks, axis=1), edges
 
     def _shifts(self) -> list[float]:
         """Each dither's edge shift in quantile space, in bins."""
         return [d / self.n_dither for d in range(self.n_dither)]
 
-    def _labels(
-        self, y: _typing.FloatArray, shift: float
-    ) -> tuple[
-        _typing.FloatArray,
-        _typing.FloatArray,
-        list[_typing.FloatArray],
-        _typing.IntArray,
-        list[_typing.IntArray],
-        _typing.FloatArray,
-    ]:
-        """A group's context targets in the bins of one dither.
-
-        Args:
-            y: The group's clipped context targets, shape (n,).
-            shift: Edge shift in quantile space, in bins.
-
-        Returns:
-            A tuple ``(edges, coarse_edges, fine_edges, coarse, fines,
-            prior)``: the bin edges, as :meth:`_edges` gives them; each
-            target's coarse class, shape (n,); the fine classes of each
-            coarse class's targets, one array per coarse class; and the
-            targets' bin fractions, shape (n_bins,).
-        """
-        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
-        coarse = _bin_labels(coarse_edges, y)
-        fines = [
-            _bin_labels(fine_edges[j], y[coarse == j])
-            for j in range(coarse_edges.size - 1)
-        ]
-        prior = np.concatenate(
-            [
-                np.bincount(fine, minlength=fine_edges[j].size - 1)
-                / max(y.size, 1)
-                for j, fine in enumerate(fines)
-            ]
-        )
-        return edges, coarse_edges, fine_edges, coarse, fines, prior
-
-    def _after_fit(self) -> None:
-        """Sets ``bin_prior_``, which no prediction changes."""
-        self._set_bin_prior()
-
-    def _set_bin_prior(self) -> None:
-        """The last member group's bin fractions, at the last dither."""
-        shift = self._shifts()[-1]
-        self.bin_prior_ = self._labels(self.handles_[-1]["y"], shift)[-1]
-
     def __setstate__(self, state: dict[str, Any]) -> None:
-        """Restores a pickle; one made before ``fit`` set the bin prior gets it.
+        """Restores a pickle, refusing one made with ``prior_shift="em"``.
+
+        An accepted pickle drops any ``prior_shift`` or ``bin_prior_``
+        entry, which this class neither takes nor sets.
 
         Args:
             state: The pickled ``__dict__``.
+
+        Raises:
+            ValueError: The model was pickled with ``prior_shift="em"``, a
+                correction this version no longer applies.
         """
-        super().__setstate__(state)
-        if "handles_" in state and "bin_prior_" not in state:
-            self._set_bin_prior()
+        if state.get("prior_shift") == "em":
+            raise ValueError(
+                "this TabFM model was pickled with prior_shift='em', which "
+                "lazy no longer supports; refit it without prior_shift"
+            )
+        stale = ("prior_shift", "bin_prior_")
+        super().__setstate__({k: v for k, v in state.items() if k not in stale})
 
     def _class_probabilities(
         self,

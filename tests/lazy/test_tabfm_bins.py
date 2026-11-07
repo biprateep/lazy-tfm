@@ -208,36 +208,27 @@ def test_a_matched_grid_s_empty_bins_get_zero(monkeypatch):
     assert np.all(masses[:, 12:] == 0.0)
     assert np.all(masses[:, 11] > 0.0)
     np.testing.assert_allclose(masses.sum(axis=1), 1.0)
-    prior = est.bin_prior_
-    assert prior[11] == pytest.approx(5 / z_used.size)
-    np.testing.assert_allclose(prior.sum(), 1.0)
 
 
-def test_the_bin_prior_is_set_by_fitting_and_left_alone_by_predicting(
-    monkeypatch,
-):
+def test_each_member_group_bins_its_own_bag(monkeypatch):
     X, z, X_query = _problem(200)
     # A transform TabFM does not run natively puts each bagged member in a
-    # group of its own, with its own bag, so the groups' priors differ.
+    # group of its own, with its own bag.
     est = fakes.Backend("tabfm", monkeypatch)(
-        n_estimators=3, bag_size=120, n_dither=2, transforms=["quantile"]
+        n_estimators=3, bag_size=120, transforms=["quantile"]
     ).fit(X, z)
     assert len(est.handles_) == 3
-    prior = est.bin_prior_
-    hierarchy = est._hierarchy
-    seen = []
+    binned = []
+    bin_labels = tabfm._bin_labels
 
-    def recorded(*args, **kwargs):
-        out = hierarchy(*args, **kwargs)
-        seen.append(out[2])
-        return out
+    def recorded(edges, values):
+        binned.append(values)
+        return bin_labels(edges, values)
 
-    monkeypatch.setattr(est, "_hierarchy", recorded)
+    monkeypatch.setattr(tabfm, "_bin_labels", recorded)
     est.predict_distribution(X_query)
-    assert est.bin_prior_ is prior
-    # The prior the last group used at the last dither, as predictions see it.
-    np.testing.assert_array_equal(prior, seen[-1])
-    assert any(not np.array_equal(seen[0], other) for other in seen[1:])
+    for handle in est.handles_:
+        assert any(values is handle["y"] for values in binned)
 
 
 def test_a_refit_at_another_version_loads_that_versions_checkpoint(
@@ -259,13 +250,16 @@ def test_a_refit_at_another_version_loads_that_versions_checkpoint(
     assert recorder.loads == [str(pinned.download()), str(other.download())]
 
 
-def test_a_pickle_without_the_bin_prior_gets_it(monkeypatch):
+def test_a_pickle_fitted_with_the_em_prior_shift_is_refused(monkeypatch):
     X, z, _ = _problem(200)
-    est = fakes.Backend("tabfm", monkeypatch)(n_dither=2).fit(X, z)
-    prior = est.bin_prior_
-    del est.bin_prior_  # As a model fitted before fit set it.
-    np.testing.assert_array_equal(
-        pickle.loads(pickle.dumps(est)).bin_prior_, prior
+    est = fakes.Backend("tabfm", monkeypatch)().fit(X, z)
+    est.prior_shift = "em"
+    with pytest.raises(ValueError, match="prior_shift='em'"):
+        pickle.loads(pickle.dumps(est))
+    est.prior_shift, est.bin_prior_ = None, np.ones(3)
+    assert (
+        not {"prior_shift", "bin_prior_"}
+        & vars(pickle.loads(pickle.dumps(est))).keys()
     )
 
 
@@ -280,14 +274,16 @@ def test_a_grid_of_ten_bins_or_fewer_is_one_classifier(monkeypatch):
 
 
 def test_targets_outside_a_matched_grid_go_to_its_end_bins(monkeypatch):
-    X, z, X_query = _problem(300)
+    X, z, _ = _problem(300)
     grid = lazy.Grid.linear(0.3, 1.3, 20)
     with pytest.warns(UserWarning, match="outside the y_grid range"):
         est = _fit(monkeypatch, X, z, y_grid=grid, **GRID)
-    est.predict_distribution(X_query)
-    prior = est.bin_prior_
-    assert prior[0] == pytest.approx(np.mean(z < 0.35))
-    assert prior[-1] == pytest.approx(np.mean(z >= 1.25))
+    edges = est._edges(est.y_context_, 0.0)[0]
+    labels = tabfm._bin_labels(edges, est.handles_[-1]["y"])
+    assert np.mean(labels == 0) == pytest.approx(np.mean(z < 0.35))
+    assert np.mean(labels == edges.size - 2) == pytest.approx(
+        np.mean(z >= 1.25)
+    )
 
 
 def test_a_matched_grid_refuses_dithering(monkeypatch):
