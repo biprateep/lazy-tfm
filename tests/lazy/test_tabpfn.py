@@ -406,6 +406,24 @@ def test_bucket_masses_returns_float64_borders():
         tabpfn.bucket_masses(output)
 
 
+def _no_download(checkpoint, **kwargs):
+    del checkpoint, kwargs  # Unused.
+    raise AssertionError("the checkpoint was fetched")
+
+
+def test_an_fp8_cache_is_refused_on_mps_before_the_checkpoint_loads(
+    monkeypatch,
+):
+    """PyTorch has no float8 on MPS."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(device="mps", kv_cache="fp8")
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
+    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
+    with pytest.raises(ValueError, match="kv_cache='fp8' is not available"):
+        est.fit(X, X[:, 0])
+
+
 def _fit(X, y, **params):
     return tabpfn.TabPFNBarDistribution(
         n_estimators=2, device="cpu", progress=False, **params

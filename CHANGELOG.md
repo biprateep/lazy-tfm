@@ -20,6 +20,13 @@ change the API.
   every backend shares is planned in
   [#300](https://github.com/biprateep/lazy-tfm/issues/300).
 
+### Fixed
+
+- `TabPFNBarDistribution(kv_cache="fp8")` on `device="mps"` now raises a
+  `ValueError` in LAZY's terms before the checkpoint loads. PyTorch has no
+  float8 on MPS, and upstream's later error named its own parameter and
+  values.
+
 ## [0.6.0] - 2026-11-07
 
 A release that makes each module simpler and faster, and predictions safe
