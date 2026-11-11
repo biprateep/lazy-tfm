@@ -20,6 +20,12 @@ change the API.
   every backend shares is planned in
   [#300](https://github.com/biprateep/lazy-tfm/issues/300).
 
+### Fixed
+
+- TabFM now predicts on `device="mps"`. Its streamed prediction moved float64
+  arrays to the device before casting them, which MPS refuses. Outputs on CUDA
+  and the CPU are unchanged.
+
 ## [0.6.0] - 2026-11-07
 
 A release that makes each module simpler and faster, and predictions safe
