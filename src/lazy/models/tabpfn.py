@@ -1057,7 +1057,10 @@ def bucket_masses(
                 "bucket_masses(output, regressor), for float64 borders",
                 RuntimeWarning,
             )
-    masses = torch.softmax(logits.detach().double(), dim=-1).cpu().numpy()
+    logits = logits.detach()
+    if logits.device.type == "mps":  # MPS has no float64.
+        logits = logits.cpu()
+    masses = torch.softmax(logits.double(), dim=-1).cpu().numpy()
     if masses.ndim != 2 or masses.shape[1] != borders.size - 1:
         raise RuntimeError(
             f"TabPFN returned logits of shape {tuple(masses.shape)} for a bar "
