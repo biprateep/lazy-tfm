@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- `device="auto"` now chooses CUDA, then Apple's MPS, then the CPU. On an
+  Apple silicon Mac a model therefore runs on its GPU by default, and the
+  slow-on-CPU warning no longer says that PyTorch sees no GPU when MPS is
+  available.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`

@@ -334,6 +334,7 @@ def test_a_model_fitted_on_a_gpu_unpickles_without_one(monkeypatch):
     registry = [gpu, *torch.serialization._package_registry]
     monkeypatch.setattr(torch.serialization, "_package_registry", registry)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     restored = pickle.loads(pickle.dumps(est))
     np.testing.assert_array_equal(restored.predict_proba(X), expected)
 
@@ -441,6 +442,7 @@ def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
     """TabPFN-3.5-fast is the TabPFN to use without a GPU."""
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     X, y, X_test = small
     with warnings.catch_warnings():
         warnings.simplefilter("error", lazy.PerformanceWarning)
