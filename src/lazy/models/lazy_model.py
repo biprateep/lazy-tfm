@@ -65,8 +65,8 @@ class LazyModel(base.BaseDensityRegressor):
     Args:
         model: Which backend to use; one of :func:`lazy.list_estimators`,
             by default ``"tabpfn"`` (at its default version, TabPFN-3.5).
-            Most backends want a GPU: on a machine where PyTorch sees none,
-            ``device="auto"`` falls back to the CPU and ``fit`` warns unless
+            Most backends want a GPU: on a machine where PyTorch sees no
+            CUDA or MPS device, ``device="auto"`` falls back to the CPU and ``fit`` warns unless
             the backend is CPU-friendly (``"tabicl"``) or runs a CPU-friendly
             version (``"kumo"`` at ``version="v1-small"``, ``"tabpfn"`` at
             ``version="v3.5-fast"``).

@@ -168,7 +168,8 @@ needs the least.
 ## GPU and CPU
 
 Every model chooses its device when it is fitted, and `device="auto"` selects
-CUDA if it is available and the CPU otherwise (see {doc}`../installation`).
+CUDA if it is available, then an Apple silicon GPU, and the CPU otherwise (see
+{doc}`../installation`).
 Most of the models need a GPU to be practical. TabPFN refuses large CPU
 contexts (see [Context and feature limits](limits.md#context-and-feature-limits))
 unless `ignore_pretraining_limits=True` or a `bag_size` keeps every bag within
