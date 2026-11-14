@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-14
+
+A release that runs the models on the GPU of an Apple silicon Mac and
+lets `device="auto"` choose it. Outputs on CUDA and the CPU are
+unchanged; on a Mac, `device="auto"` now runs on the GPU, whose outputs
+differ from the CPU's by float32 rounding.
+
 ### Changed
 
 - `device="auto"` now chooses CUDA, then Apple's MPS, then the CPU. On an
@@ -1137,7 +1144,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/biprateep/lazy-tfm/compare/v0.4.0...v0.5.0
