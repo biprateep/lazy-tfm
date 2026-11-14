@@ -46,7 +46,7 @@ differs between backends, because the checkpoints do.
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
 | `mixed_precision`     | The model's reduced-precision path on CUDA, where chunked and cached answers then agree to that precision's rounding; float32 otherwise. | `True`    |
 | `outlier_threshold`   | Soft-clip each feature at this many standard deviations of the context (below). `"auto"` is the model's own clip under `transforms="auto"` and no clip under an explicit value; `None` is no clip. | `"auto"`  |
-| `device`              | `"auto"` (CUDA if available), `"cuda"`, `"cuda:1"`, `"mps"`, `"cpu"`, or a `torch.device`.                        | `"auto"`  |
+| `device`              | `"auto"` (CUDA, then MPS, if available), `"cuda"`, `"cuda:1"`, `"mps"`, `"cpu"`, or a `torch.device`.                        | `"auto"`  |
 | `progress`            | A progress bar, over the query rows (TabFM: over its in-context stages): `"auto"` shows it on a terminal or in a notebook, `True` always, `False` never. | `"auto"`  |
 | `verbose`             | Print log messages to stdout.                                                                                                        | `False`   |
 | `version`             | Which pinned checkpoint (see {func}`lazy.list_versions`); `provenance_` records which one answered.                                  | per model |

@@ -12,11 +12,9 @@ does not.
 
 ## How LAZY chooses a device
 
-With `device="auto"`, LAZY takes the GPU when `torch.cuda.is_available()` is
-true and the CPU otherwise, so it never chooses an Apple GPU on its own. On a
-Mac, a model therefore runs on the CPU unless `device="mps"` is passed, and a
-model that is slow on a CPU warns that PyTorch sees no GPU, even when the
-Metal backend is available. An AMD GPU, in contrast, is chosen by `"auto"`:
+With `device="auto"`, LAZY takes a CUDA GPU when `torch.cuda.is_available()`
+is true, then an Apple GPU when `torch.backends.mps.is_available()` is true,
+and the CPU otherwise. An AMD GPU is chosen by `"auto"` too:
 PyTorch's ROCm builds expose AMD GPUs through the same `torch.cuda` interface,
 as devices named `"cuda"` (see PyTorch's
 [HIP notes](https://docs.pytorch.org/docs/stable/notes/hip.html)), so LAZY
@@ -45,10 +43,6 @@ NVIDIA GPU under Windows, LimiX-2 needs `triton`, which PyTorch installs on
 Linux only, so LAZY refuses `device="cuda"` there unless `triton` is
 installed. The table of {doc}`../models/index` shows which
 of them are fast enough on a CPU, and {doc}`scaling` how fast.
-
-One of these limitations is a choice of LAZY rather than of the models:
-`device="auto"` never selects Metal, whereas TabPFN and TabICL, used on their
-own, prefer it to the CPU.
 
 ## Making a model run
 

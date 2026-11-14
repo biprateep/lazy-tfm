@@ -15,7 +15,8 @@ _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
 def resolve_device(device: object = "auto") -> str:
     """Turns a ``device`` parameter into a concrete torch device string.
 
-    ``"auto"`` picks CUDA when it is usable and falls back to CPU otherwise.
+    ``"auto"`` picks CUDA when it is usable, then Apple's MPS, and falls back
+    to CPU otherwise.
     Any other value names a device outright, so ``"cuda:1"`` works, and an
     explicit ``"cuda"`` (or ``"mps"``) on a machine without one raises rather
     than silently running a foundation model on the CPU for hours.
@@ -117,12 +118,14 @@ def free_memory(device: object) -> int | None:
 
 
 def _auto() -> str:
-    """CUDA if usable, else CPU."""
+    """CUDA if usable, else MPS if usable, else CPU."""
     try:
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
     except ImportError:  # pragma: no cover - torch is a backend extra
         return "cpu"
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 def _check_cuda(name: str, device: object) -> None:

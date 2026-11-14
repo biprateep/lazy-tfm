@@ -29,6 +29,12 @@ def test_auto_prefers_cuda(two_gpus):
     assert _device.resolve_device("auto") == "cuda"
 
 
+def test_auto_takes_mps_when_cuda_is_missing(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert _device.resolve_device("auto") == "mps"
+
+
 @pytest.mark.parametrize(
     ("device", "expected"),
     [

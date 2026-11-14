@@ -33,8 +33,9 @@ The backends run on PyTorch, which the extras pull in. The default PyTorch
 wheel from PyPI suits most Linux machines with an NVIDIA GPU. However, make sure to check the compatibility of the PyTorch version with your system before installing.
 
 Every model chooses its device when it is fitted (`device="auto"` selects
-CUDA if it is available and the CPU otherwise), and passing `device="cuda"`
-explicitly on a machine without CUDA raises an error.
+CUDA if it is available, then an Apple silicon GPU (`"mps"`), and the CPU
+otherwise), and passing `device="cuda"` explicitly on a machine without CUDA
+raises an error.
 
 ## Specific backend installation notes
 

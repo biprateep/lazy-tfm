@@ -173,6 +173,7 @@ class _SlowOnCPU(standins.HistogramStandIn):
 def no_gpu(monkeypatch):
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
 
 
 def test_a_gpu_model_falling_back_to_the_cpu_warns(data, no_gpu):
