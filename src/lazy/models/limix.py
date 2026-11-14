@@ -60,6 +60,7 @@ from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _bucket_head
+from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
@@ -681,18 +682,9 @@ def _cache_dtype(network: Any, *, mixed_precision: bool) -> Any:
 
 def _release_device_memory(network: Any) -> None:
     """Returns the memory PyTorch holds unused on the network's GPU."""
-    import torch  # noqa: PLC0415 - an optional, heavy extra.
-
-    if next(network.parameters()).device.type == "cuda":
-        torch.cuda.empty_cache()
+    _device.release_memory(next(network.parameters()).device)
 
 
 def _free_device_memory(network: Any) -> int | None:
     """Free bytes on the network's GPU, or None on CPU."""
-    import torch  # noqa: PLC0415 - an optional, heavy extra.
-
-    device = next(network.parameters()).device
-    if device.type != "cuda":
-        return None
-    free, _ = torch.cuda.mem_get_info(device)
-    return int(free)
+    return _device.free_memory(next(network.parameters()).device)

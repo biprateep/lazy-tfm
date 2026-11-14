@@ -29,6 +29,12 @@ def test_auto_prefers_cuda(two_gpus):
     assert _device.resolve_device("auto") == "cuda"
 
 
+def test_auto_takes_mps_when_cuda_is_missing(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert _device.resolve_device("auto") == "mps"
+
+
 @pytest.mark.parametrize(
     ("device", "expected"),
     [
@@ -59,3 +65,21 @@ def test_a_missing_accelerator_is_an_error(no_accelerator, device):
 def test_a_cuda_index_beyond_the_visible_devices_is_an_error(two_gpus):
     with pytest.raises(RuntimeError, match="only 2 CUDA"):
         _device.resolve_device("cuda:2")
+
+
+def test_release_memory_empties_the_cache_of_the_devices_kind(monkeypatch):
+    emptied = []
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: emptied.append(0))
+    monkeypatch.setattr(torch.mps, "empty_cache", lambda: emptied.append(1))
+    for device in ("cpu", "mps", torch.device("cuda", 1)):
+        _device.release_memory(device)
+    assert emptied == [1, 0]
+
+
+def test_free_memory_on_mps_is_metals_share_less_what_torch_holds(
+    monkeypatch,
+):
+    monkeypatch.setattr(torch.mps, "recommended_max_memory", lambda: 10)
+    monkeypatch.setattr(torch.mps, "driver_allocated_memory", lambda: 3)
+    assert _device.free_memory("mps") == 7
+    assert _device.free_memory("cpu") is None

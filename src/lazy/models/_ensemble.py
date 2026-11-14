@@ -221,19 +221,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     :meth:`_rebuild_caches` records them again before the first prediction
     (the defaults pickle a handle whole). ``copy.deepcopy`` goes through the
     pickle methods, so a deep copy rebuilds its caches too. The device is
-    resolved
-    into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
-    before the checkpoint loads; a backend runs there, in float32 unless
-    ``mixed_precision_`` is set (only on CUDA), and raises on a device its model
-    does not support. Unpickling under ``device="auto"`` resolves both again
-    on the machine at hand, so a handle that holds a device follows the new
-    ``device_`` in the backend's ``__setstate__``.
+    resolved into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or
+    ``"mps"``) before the checkpoint loads; a backend runs there, in float32
+    unless ``mixed_precision_`` is set (only on CUDA). A device its model
+    cannot use is named by :meth:`_device_problem`: ``device="auto"`` then
+    takes the CPU, and a device named outright raises. Unpickling under
+    ``device="auto"`` resolves both again on the machine at hand, so a handle
+    that holds a device follows the new ``device_`` in the backend's
+    ``__setstate__``.
 
     Shared code never names a backend. What a backend needs beyond the
     contract above is a hook the package calls on every registered class:
     :meth:`prefetch` for downloads beside the weights,
     :meth:`clear_upstream_caches` for upstream's own caches, :meth:`setup`
-    for ``lazy setup``, ``cpu_note`` for the CPU warning, and
+    for ``lazy setup``, ``cpu_note`` for the CPU warning,
+    :meth:`_device_problem` for a device the model cannot use, and
     :meth:`_relocated_provenance` for the provenance entries a backend
     derives from the device, which unpickling under ``device="auto"``
     brings up to date. Each defaults to doing nothing.
@@ -633,20 +635,69 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     # -- fitting -----------------------------------------------------------
 
-    def _resolve_device(self) -> None:
+    def _device_problem(self, device: str) -> str | None:
+        """Why this model cannot run on ``device`` here, or None if it can.
+
+        A backend overrides it for a limit of its own model or settings.
+        Under ``device="auto"`` a problem moves the model to the CPU, with
+        a warning; a device named outright raises.
+
+        Args:
+            device: A resolved device, such as ``"mps"``.
+
+        Returns:
+            The reason, as a clause, or None.
+        """
+        del device  # Unused: no limit by default.
+        return None
+
+    def _refuse_device(self, device: str, problem: str) -> None:
+        """Raises the error for a named device the model cannot use.
+
+        Args:
+            device: The device named, such as ``"mps"``.
+            problem: Why, from :meth:`_device_problem`.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError(
+            f"{self.display_name} cannot run on device={device!r} here: "
+            f"{problem}. Use device='cpu' or device='auto'."
+        )
+
+    def _resolve_device(self) -> bool:
         """Sets ``device_`` from ``device``, and ``mixed_precision_`` for it.
 
         Reduced precision exists only on a GPU; on a CPU every backend runs
         in float32.
 
+        Returns:
+            Whether ``"auto"`` moved the model to the CPU, with a warning,
+            from a GPU that :meth:`_device_problem` rules out.
+
         Raises:
-            ValueError: If ``device`` is not a device.
+            ValueError: If ``device`` is not a device, or names one that
+                :meth:`_device_problem` rules out.
             RuntimeError: If the requested accelerator is unavailable.
         """
-        self.device_ = _device.resolve_device(self.device)
+        device = _device.resolve_device(self.device)
+        problem = None if device == "cpu" else self._device_problem(device)
+        if problem is not None:
+            if not _device.is_auto(self.device):
+                self._refuse_device(device, problem)
+            _warnings.warn(
+                f"{self.display_name} cannot run on device={device!r} here: "
+                f"{problem}. device='auto' runs it on the CPU instead; pass "
+                "device='cpu' to do so without this warning.",
+                PerformanceWarning,
+            )
+            device = "cpu"
+        self.device_ = device
         self.mixed_precision_ = bool(self.mixed_precision) and str(
             self.device_
         ).startswith("cuda")
+        return problem is not None
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         # A missing backend package is the likeliest reason a first fit
@@ -659,12 +710,13 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self._check_backend_params()
         _progress.check_progress(self.progress)
         self.random_state_ = _resolve_seed(self.random_state)
-        self._resolve_device()
+        fell_back = self._resolve_device()
         specs = _transforms.parse(self.transforms)
         if y.min() == y.max():
             self._fit_constant(float(y[0]), len(y))
             return
-        self._warn_if_slow_on_cpu()
+        if not fell_back:
+            self._warn_if_slow_on_cpu()
         self._load_checkpoint()
         self.softmax_temperature_: float | None = (
             self._auto_softmax_temperature()
@@ -1316,10 +1368,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         ``mixed_precision_`` again, so a model fitted on a GPU predicts on
         the CPU where there is none. ``provenance_`` records them, with the
         backend's own entries from :meth:`_relocated_provenance`. An
-        explicit device is kept.
+        explicit device is kept, unless :meth:`_device_problem` rules it out
+        on this machine.
 
         Args:
             state: The pickled ``__dict__``.
+
+        Raises:
+            ValueError: If the model's explicit device cannot run it here.
         """
         super().__setstate__(state)
         if "handles_" in state:
@@ -1336,6 +1392,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 "mixed_precision": self.mixed_precision_,
                 **self._relocated_provenance(),
             }
+        elif "device_" in state and self.device_ != "cpu":
+            problem = self._device_problem(self.device_)
+            if problem is not None:
+                self._refuse_device(self.device_, problem)
 
     def _relocated_provenance(self) -> dict[str, Any]:
         """The backend's provenance entries that follow the device.

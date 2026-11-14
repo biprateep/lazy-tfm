@@ -45,6 +45,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
+import functools
 from importlib import util
 import pathlib
 import types
@@ -200,9 +201,12 @@ class KumoQuantile(
             across the training targets' range, extended by a quarter of
             that range on each side. Tabulating a row that puts more than 1%
             of its probability outside the native grid warns.
-        device: Where to run. Apple's MPS is not supported, since the
-            recipe works in float64, which MPS lacks: a fit on it raises
-            ValueError before the checkpoint loads.
+        device: Where to run. MPS has no float64, so on MPS the features
+            reach upstream in float32 and its recipe runs in float32, as
+            upstream's own ``Cast`` does there; elsewhere it runs in
+            float64. On a Mac whose MPS gets upstream's network wrong,
+            checked once per process, ``"auto"`` runs it on the CPU with a
+            warning and ``"mps"`` raises ValueError.
         random_state: The ensemble's seed. A group of members runs on a
             CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
@@ -390,16 +394,14 @@ class KumoQuantile(
     def _member_trim_fraction(self) -> float:
         return self.trim_fraction_
 
-    def _load_checkpoint(self) -> None:
-        # The recipe casts to float64 and the context goes to the device in
-        # float64, which MPS cannot hold; better said before any download.
-        if self.device_ == "mps":
-            raise ValueError(
-                f"{self.display_name} does not run on device='mps': its "
-                "preprocessing works in float64, which MPS does not "
-                "support. Use device='cpu' or a CUDA device."
+    def _device_problem(self, device: str) -> str | None:
+        if device == "mps" and not _mps_matmul_into_views_works():
+            return (
+                "this Mac's MPS writes wrong matrix products into strided "
+                "views, which upstream's network uses, so its predictions "
+                "would be wrong"
             )
-        super()._load_checkpoint()
+        return None
 
     def _after_fit(self) -> None:
         self.n_quantiles_ = _N_QUANTILES
@@ -494,7 +496,7 @@ class KumoQuantile(
                 with _lending(network, handle.cache):
                     out = network.predict(queries)
         # Shape (n_members, n_queries, n_quantiles), each member's sorted.
-        quantiles = out.numerical.double().cpu().numpy()
+        quantiles = out.numerical.cpu().double().numpy()
         if quantiles.shape[-1] != self.n_quantiles_:
             raise RuntimeError(
                 f"{self.display_name} returned {quantiles.shape[-1]} "
@@ -548,13 +550,17 @@ class KumoQuantile(
     def _tensors(self, *arrays: _Array) -> tuple[Any, ...]:
         """Arrays as tensors on the device; a 1-D target becomes a column.
 
-        Copied, since the arrays may be read-only views.
+        Copied, since the arrays may be read-only views. MPS has no
+        float64, so there the features go in float32, the precision
+        upstream's ``Cast`` itself falls back to on MPS.
         """
         import torch  # noqa: PLC0415 - torch comes with the extra.
 
+        dtype = torch.float32 if self.device_ == "mps" else None
         return tuple(
             torch.tensor(
                 array if array.ndim == 2 else array[:, None],
+                dtype=dtype,
                 device=self.device_,
             )
             for array in arrays
@@ -693,6 +699,37 @@ def _lending(network: Any, cache: Any = None) -> Iterator[None]:
             yield
         finally:
             network._cache = None  # noqa: SLF001 - upstream's cache.
+
+
+@functools.cache
+def _mps_matmul_into_views_works() -> bool:
+    """Whether MPS writes a batched matmul into a strided ``out`` correctly.
+
+    Upstream's network writes products into transposed slices of a buffer,
+    which MPS fills with wrong values on some Macs, silently. Checked once
+    per process, against the CPU.
+
+    Returns:
+        True when the MPS product matches the CPU's to float32 rounding.
+    """
+    import torch  # noqa: PLC0415 - torch comes with the extra.
+
+    generator = torch.Generator().manual_seed(0)
+    # Smaller products come out right even where larger ones do not; the
+    # second size is the cell embedding's at 400 rows and 5 features.
+    for n_groups, n_rows, n_inner, n_out in (
+        (4, 64, 32, 32),
+        (5, 400, 96, 128),
+    ):
+        a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
+        b = torch.randn(n_groups, n_inner, n_out, generator=generator)
+        buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
+        view = buffer[:, 1:, :]
+        torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
+        expected = torch.matmul(a, b).transpose(0, 1)
+        if not torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4):
+            return False
+    return True
 
 
 def _recipe(

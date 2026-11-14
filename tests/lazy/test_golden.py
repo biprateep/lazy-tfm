@@ -47,14 +47,24 @@ on another CPU: by up to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine
 """
 
 
-@pytest.mark.checkpoint
-@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
-def test_the_default_path_reproduces_the_golden_densities(name):
+def _skip_unless_installed(name):
     try:
         lazy.ESTIMATORS[name]()._import_backend()
     except ImportError as error:
         pytest.skip(f"{name} is not installed: {error}")
-    reference = np.load(golden_data.path(name))
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
+def test_the_default_path_reproduces_the_golden_densities(name):
+    _skip_unless_installed(name)
+    vendor = golden_data.cpu_vendor()
+    if name in golden_data.PER_VENDOR and vendor not in golden_data.VENDORS:
+        pytest.skip(
+            f"{name} has no golden file for this processor (vendor {vendor});"
+            f" it has one for each of {', '.join(golden_data.VENDORS)}"
+        )
+    reference = np.load(golden_data.path(name, vendor))
     _, _, X_test = golden_data.problem()
     with golden_data.pinned_threads():
         pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)
@@ -83,3 +93,31 @@ def _platforms(reference: np.lib.npyio.NpzFile) -> str:
         f"{golden_data.cpu_vendor()} {torch.backends.cpu.get_cpu_capability()}"
     )
     return f"recorded on {recorded}; this machine is {here}"
+
+
+MPS_GAP = {"tabpfn": 0.1}
+"""Largest change of a row's 5%, 50% and 95% quantiles from the CPU to MPS,
+as a fraction of its 5% to 95% range; 1e-3 for the others, which moved by
+under 2e-5 on an Apple M3 Ultra. TabPFN moved by 0.039 there, through its
+fingerprint feature (see ``RTOL``); a wrong MPS kernel moves a model by over 1.
+"""
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
+def test_auto_on_an_apple_gpu_answers_as_the_cpu_does(name):
+    torch = pytest.importorskip("torch")
+    if not torch.backends.mps.is_available():
+        pytest.skip("no Apple GPU (MPS) here")
+    _skip_unless_installed(name)
+    X_train, z, X_test = golden_data.problem()
+    levels = [0.05, 0.5, 0.95]
+    answers = {}
+    for device in ("cpu", "auto"):
+        params = {**golden_data.RECORDED_PARAMS[name], "device": device}
+        with golden_data.pinned_threads():
+            model = lazy.LazyModel(name, **params).fit(X_train, z)
+            answers[device] = model.predict_quantiles(X_test, quantiles=levels)
+    cpu = answers["cpu"]
+    gap = np.abs(answers["auto"] - cpu).max(axis=1) / (cpu[:, 2] - cpu[:, 0])
+    assert gap.max() < MPS_GAP.get(name, 1e-3)

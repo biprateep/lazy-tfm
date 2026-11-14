@@ -167,18 +167,49 @@ def data():
     return X[:60], X[:60, 0] + 0.1 * rng.normal(size=60), X[60:]
 
 
-def _no_download(checkpoint, **kwargs):
-    del checkpoint, kwargs  # Unused.
-    raise AssertionError("the checkpoint was fetched")
+@pytest.mark.parametrize(
+    ("device", "dtype"), [("cpu", "float64"), ("mps", "float32")]
+)
+def test_features_reach_mps_in_float32(monkeypatch, device, dtype):
+    """MPS has no float64; elsewhere the features stay float64."""
+    torch = pytest.importorskip("torch")
+    seen = []
+    real = torch.tensor
+
+    def tensor(data, *, dtype=None, device=None):
+        del device  # Unused: no MPS device in CI.
+        seen.append(real(data, dtype=dtype).dtype)
+        return seen[-1]
+
+    monkeypatch.setattr(torch, "tensor", tensor)
+    model = kumo.KumoQuantile()
+    model.device_ = device
+    model._tensors(np.zeros((3, 2)))
+    assert seen == [getattr(torch, dtype)]
 
 
-def test_mps_is_refused_before_the_checkpoint_loads(monkeypatch, data):
-    """The recipe works in float64, which MPS lacks."""
+@pytest.mark.parametrize("works", [True, False])
+def test_mps_is_ruled_out_only_where_it_gets_strided_products_wrong(
+    monkeypatch, works
+):
+    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: works)
+    model = kumo.KumoQuantile()
+    assert (model._device_problem("mps") is None) == works
+    assert model._device_problem("cuda") is None
+
+
+def test_where_mps_gets_strided_products_wrong_auto_runs_on_the_cpu(
+    monkeypatch, data
+):
+    """Upstream's network on such an MPS ignores the features, silently."""
     X, y, _ = data
     backend = fakes.Backend("kumo", monkeypatch)
     monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
-    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
-    with pytest.raises(ValueError, match="Kumo Tabular does not run on"):
+    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: False)
+    with pytest.warns(lazy.PerformanceWarning, match="strided views"):
+        assert backend(device="auto").fit(X, y).device_ == "cpu"
+    monkeypatch.setattr(_hub.Checkpoint, "download", fakes.no_download)
+    with pytest.raises(ValueError, match="strided views"):
         backend(device="mps").fit(X, y)
 
 
