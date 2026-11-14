@@ -334,6 +334,7 @@ def test_a_model_fitted_on_a_gpu_unpickles_without_one(monkeypatch):
     registry = [gpu, *torch.serialization._package_registry]
     monkeypatch.setattr(torch.serialization, "_package_registry", registry)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     restored = pickle.loads(pickle.dumps(est))
     np.testing.assert_array_equal(restored.predict_proba(X), expected)
 
@@ -406,6 +407,50 @@ def test_bucket_masses_returns_float64_borders():
         tabpfn.bucket_masses(output)
 
 
+class _MPSLogits:
+    """Logits on an MPS device, which refuses float64 as MPS does."""
+
+    def __init__(self, logits):
+        self.logits = logits
+        self.device = types.SimpleNamespace(type="mps")
+
+    def detach(self):
+        return self
+
+    def double(self):
+        raise TypeError("Cannot convert a MPS Tensor to float64 dtype")
+
+    def cpu(self):
+        return self.logits
+
+
+def test_bucket_masses_reads_logits_on_mps():
+    """MPS has no float64, so the softmax runs on the CPU."""
+    torch = pytest.importorskip("torch")
+    logits = torch.randn(2, 4)
+    output = {
+        "criterion": types.SimpleNamespace(borders=torch.linspace(0.0, 1.0, 5)),
+        "logits": _MPSLogits(logits),
+    }
+    _, masses = tabpfn.bucket_masses(output)
+    np.testing.assert_allclose(
+        masses, torch.softmax(logits.double(), dim=-1).numpy()
+    )
+
+
+def test_an_fp8_cache_is_refused_on_mps_before_the_checkpoint_loads(
+    monkeypatch,
+):
+    """PyTorch has no float8 on MPS."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(device="mps", kv_cache="fp8")
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
+    monkeypatch.setattr(_hub.Checkpoint, "download", fakes.no_download)
+    with pytest.raises(ValueError, match="kv_cache='fp8' needs float8"):
+        est.fit(X, X[:, 0])
+
+
 def _fit(X, y, **params):
     return tabpfn.TabPFNBarDistribution(
         n_estimators=2, device="cpu", progress=False, **params
@@ -441,6 +486,7 @@ def test_the_fast_checkpoint_runs_on_a_cpu_without_the_warning(
     """TabPFN-3.5-fast is the TabPFN to use without a GPU."""
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     X, y, X_test = small
     with warnings.catch_warnings():
         warnings.simplefilter("error", lazy.PerformanceWarning)

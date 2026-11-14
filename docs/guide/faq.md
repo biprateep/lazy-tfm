@@ -7,6 +7,8 @@ medium and large sizes of Kumo Tabular need one. Without a GPU, we recommend
 TabICLv2, which is small, BSD-licensed and fast on a CPU,
 TabPFN-3.5-fast with a context of at most 5,000 rows, or Kumo Tabular's small
 size (`version="v1-small"`), whose weights also permit commercial use. {doc}`choosing` and {doc}`scaling` give the details.
+On an Apple silicon Mac, `device="auto"` uses its GPU, and {doc}`hardware`
+states what runs there.
 
 ## What does fit do?
 
