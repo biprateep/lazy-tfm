@@ -42,6 +42,11 @@ change the API.
   float8 on MPS, and upstream's later error named its own parameter and
   values.
 
+- On `device="mps"`, `lazy.clear_model_cache()` now returns the memory of the
+  dropped networks, TabFM's streamed prediction empties the MPS cache between
+  member batches, and LimiX-2 sizes its key/value caches within the GPU's
+  recommended memory instead of without a limit.
+
 ## [0.6.0] - 2026-11-07
 
 A release that makes each module simpler and faster, and predictions safe

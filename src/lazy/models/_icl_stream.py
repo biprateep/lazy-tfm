@@ -41,6 +41,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from lazy import _typing
+from lazy.models import _device
 
 Consumer: TypeAlias = Callable[
     [str, int, int, int, int, npt.NDArray[np.float32]], None
@@ -213,7 +214,6 @@ def stream_icl(
     Xs_ctx, ys_ctx, cat_ctx, d_ctx = context_tensors(generator)
     n_members = int(Xs_ctx.shape[0])
     device = next(model.parameters()).device
-    is_cuda = device.type == "cuda"
 
     encoded = {
         name: estimator.X_encoder_.transform(frame.reset_index(drop=True))
@@ -239,8 +239,7 @@ def stream_icl(
             )
         if not keep_cache_on_device:
             cache = tabfm_model.move_cache_to_device(cache, "cpu")
-            if is_cuda:
-                torch.cuda.empty_cache()
+            _device.release_memory(device)
             cache = tabfm_model.move_cache_to_device(cache, device)
         cat_batch = to_dev(None if cat_ctx is None else cat_ctx[m0:m1])
         d_batch = to_dev(None if d_ctx is None else d_ctx[m0:m1])
@@ -271,8 +270,7 @@ def stream_icl(
                 del views
         del cache, cat_batch, d_batch
         gc.collect()
-        if is_cuda:
-            torch.cuda.empty_cache()
+        _device.release_memory(device)
         if log is not None:
             elapsed = time.time() - started
             eta = elapsed / m1 * (n_members - m1)

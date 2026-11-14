@@ -117,6 +117,8 @@ def clear_model_cache() -> int:
         torch = sys.modules.get("torch")
         if torch is not None and torch.cuda.is_initialized():
             torch.cuda.empty_cache()
+        if torch is not None and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
     return dropped
 
 
