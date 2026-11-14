@@ -30,6 +30,9 @@ golden tolerance (see "Across machines" in the reproducibility guide), so
 they have a golden file per vendor (see :func:`path`).
 """
 
+VENDORS = ("AuthenticAMD", "GenuineIntel")
+"""The CPU vendors a backend in :data:`PER_VENDOR` has a golden file for."""
+
 GRID = datasets.DC1_GRID
 """The grid every golden density is tabulated on."""
 
