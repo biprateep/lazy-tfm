@@ -406,6 +406,37 @@ def test_bucket_masses_returns_float64_borders():
         tabpfn.bucket_masses(output)
 
 
+class _MPSLogits:
+    """Logits on an MPS device, which refuses float64 as MPS does."""
+
+    def __init__(self, logits):
+        self.logits = logits
+        self.device = types.SimpleNamespace(type="mps")
+
+    def detach(self):
+        return self
+
+    def double(self):
+        raise TypeError("Cannot convert a MPS Tensor to float64 dtype")
+
+    def cpu(self):
+        return self.logits
+
+
+def test_bucket_masses_reads_logits_on_mps():
+    """MPS has no float64, so the softmax runs on the CPU."""
+    torch = pytest.importorskip("torch")
+    logits = torch.randn(2, 4)
+    output = {
+        "criterion": types.SimpleNamespace(borders=torch.linspace(0.0, 1.0, 5)),
+        "logits": _MPSLogits(logits),
+    }
+    _, masses = tabpfn.bucket_masses(output)
+    np.testing.assert_allclose(
+        masses, torch.softmax(logits.double(), dim=-1).numpy()
+    )
+
+
 def _fit(X, y, **params):
     return tabpfn.TabPFNBarDistribution(
         n_estimators=2, device="cpu", progress=False, **params
