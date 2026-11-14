@@ -651,6 +651,21 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         del device  # Unused: no limit by default.
         return None
 
+    def _refuse_device(self, device: str, problem: str) -> None:
+        """Raises the error for a named device the model cannot use.
+
+        Args:
+            device: The device named, such as ``"mps"``.
+            problem: Why, from :meth:`_device_problem`.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError(
+            f"{self.display_name} cannot run on device={device!r} here: "
+            f"{problem}. Use device='cpu' or device='auto'."
+        )
+
     def _resolve_device(self) -> bool:
         """Sets ``device_`` from ``device``, and ``mixed_precision_`` for it.
 
@@ -670,10 +685,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         problem = None if device == "cpu" else self._device_problem(device)
         if problem is not None:
             if not _device.is_auto(self.device):
-                raise ValueError(
-                    f"{self.display_name} cannot run on device={device!r} "
-                    f"here: {problem}. Use device='cpu' or device='auto'."
-                )
+                self._refuse_device(device, problem)
             _warnings.warn(
                 f"{self.display_name} cannot run on device={device!r} here: "
                 f"{problem}. device='auto' runs it on the CPU instead; pass "
@@ -1356,10 +1368,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         ``mixed_precision_`` again, so a model fitted on a GPU predicts on
         the CPU where there is none. ``provenance_`` records them, with the
         backend's own entries from :meth:`_relocated_provenance`. An
-        explicit device is kept.
+        explicit device is kept, unless :meth:`_device_problem` rules it out
+        on this machine.
 
         Args:
             state: The pickled ``__dict__``.
+
+        Raises:
+            ValueError: If the model's explicit device cannot run it here.
         """
         super().__setstate__(state)
         if "handles_" in state:
@@ -1376,6 +1392,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 "mixed_precision": self.mixed_precision_,
                 **self._relocated_provenance(),
             }
+        elif "device_" in state and self.device_ != "cpu":
+            problem = self._device_problem(self.device_)
+            if problem is not None:
+                self._refuse_device(self.device_, problem)
 
     def _relocated_provenance(self) -> dict[str, Any]:
         """The backend's provenance entries that follow the device.

@@ -226,6 +226,24 @@ def test_a_named_device_the_model_cannot_use_is_an_error(data, only_mps):
         _NoMPS(device="mps").fit(X, z)
 
 
+class _MPSBrokenLater(_SlowOnCPU):
+    broken = False
+
+    def _device_problem(self, device):
+        return "it broke" if device == "mps" and self.broken else None
+
+
+def test_unpickling_onto_a_named_device_the_model_cannot_use_is_an_error(
+    data, only_mps, monkeypatch
+):
+    """A model saved where its device worked, loaded where it does not."""
+    X, z, _ = data
+    saved = pickle.dumps(_MPSBrokenLater(device="mps").fit(X, z))
+    monkeypatch.setattr(_MPSBrokenLater, "broken", True)
+    with pytest.raises(ValueError, match="here: it broke"):
+        pickle.loads(saved)
+
+
 def test_the_cpu_warning_suggests_every_cpu_friendly_declaration(data, no_gpu):
     expected = set()
     for name, cls in lazy.ESTIMATORS.items():

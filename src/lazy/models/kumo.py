@@ -714,16 +714,22 @@ def _mps_matmul_into_views_works() -> bool:
     """
     import torch  # noqa: PLC0415 - torch comes with the extra.
 
-    # Smaller products come out right even where larger ones do not.
-    n_groups, n_rows, n_inner, n_out = 4, 64, 32, 32
     generator = torch.Generator().manual_seed(0)
-    a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
-    b = torch.randn(n_groups, n_inner, n_out, generator=generator)
-    buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
-    view = buffer[:, 1:, :]
-    torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
-    expected = torch.matmul(a, b).transpose(0, 1)
-    return torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4)
+    # Smaller products come out right even where larger ones do not; the
+    # second size is the cell embedding's at 400 rows and 5 features.
+    for n_groups, n_rows, n_inner, n_out in (
+        (4, 64, 32, 32),
+        (5, 400, 96, 128),
+    ):
+        a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
+        b = torch.randn(n_groups, n_inner, n_out, generator=generator)
+        buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
+        view = buffer[:, 1:, :]
+        torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
+        expected = torch.matmul(a, b).transpose(0, 1)
+        if not torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4):
+            return False
+    return True
 
 
 def _recipe(

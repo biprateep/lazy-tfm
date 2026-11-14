@@ -115,8 +115,9 @@ def test_auto_on_an_apple_gpu_answers_as_the_cpu_does(name):
     answers = {}
     for device in ("cpu", "auto"):
         params = {**golden_data.RECORDED_PARAMS[name], "device": device}
-        model = lazy.LazyModel(name, **params).fit(X_train, z)
-        answers[device] = model.predict_quantiles(X_test, quantiles=levels)
+        with golden_data.pinned_threads():
+            model = lazy.LazyModel(name, **params).fit(X_train, z)
+            answers[device] = model.predict_quantiles(X_test, quantiles=levels)
     cpu = answers["cpu"]
     gap = np.abs(answers["auto"] - cpu).max(axis=1) / (cpu[:, 2] - cpu[:, 0])
     assert gap.max() < MPS_GAP.get(name, 1e-3)
