@@ -40,7 +40,10 @@ What happens to the key/value cache depends on the backend:
 A model fitted with `device="auto"` chooses its device again when it loads,
 so a model fitted on a GPU predicts on the CPU of a machine without one.
 `provenance_` then records the new device and precision. A model fitted with
-an explicit device, such as `device="cuda"`, keeps it. A CPU and a GPU can
+an explicit device, such as `device="cuda"`, keeps it, and loading it raises
+a `ValueError` where the model cannot run on that device, such as Kumo
+Tabular saved with `device="mps"` and loaded on a Mac whose GPU fails LAZY's
+check (see {doc}`hardware`). A CPU and a GPU can
 give different answers for the same inputs and seed (see
 [Across devices](reproducibility.md#across-devices)).
 

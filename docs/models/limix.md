@@ -39,7 +39,7 @@ regression configuration shipped with LimiX, next to LAZY's.
 | Categorical columns | detected (fewer than 4 distinct values in at least 100 rows) and encoded | off: every column is numeric |
 | Preprocessing fitted on | the context and the queries together | the context only |
 | Key/value cache | none | on, ported from LimiX (`kv_cache=True`) |
-| Precision | float16 autocast on a GPU, float32 on a CPU | the same (`mixed_precision=True`) |
+| Precision | float16 autocast on a GPU, float32 on a CPU | float16 autocast on a CUDA GPU, float32 on a CPU or an Apple GPU (`mixed_precision=True`) |
 | Random seed | 0 | `random_state=0` |
 | Row subsampling | none | none (`bag_size=None`) |
 

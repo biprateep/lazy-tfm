@@ -137,10 +137,36 @@ its caches.
 
 The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
-CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
-and raises a clear error on a device its model does not support, before the
-checkpoint is loaded (Kumo Tabular refuses `"mps"`, which has no double
-precision). No current backend is tested on `"mps"`.
+CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set.
+A backend whose model or settings cannot run on a device overrides
+`_device_problem(device)` to return the reason as a clause (TabPFN's
+`kv_cache="fp8"` on `"mps"`, or Kumo Tabular on an MPS that writes wrong
+products into strided views). The base class then runs the model on the CPU
+with a warning under `device="auto"`, and raises a `ValueError` before the
+checkpoint is loaded when the device was named outright.
+
+A backend runs on CUDA, on an Apple GPU (MPS) and on the CPU, and these rules
+keep it there:
+
+- Nothing in float64 or float8 goes to the device, since MPS has neither.
+  Work that needs float64 runs on the CPU (TabPFN's bucket softmax moves its
+  logits there first), and a float64 array is cast as it moves
+  (`tensor.to(device, dtype)`, as `_icl_stream` does).
+- Memory is freed and measured through `_device.release_memory` and
+  `_device.free_memory`, never through `torch.cuda`, which only
+  `_device.py` and `_weights.py` call; `test_device.py` checks this.
+- Random draws use a CPU generator and move to the device, so that every
+  device gives the same ensemble for one seed.
+- Autocast and reduced precision run only where `mixed_precision_` is set.
+- Where upstream fails on a device, `_device_problem` names it; where it may
+  run but give wrong answers there, `_device_problem` checks for that first,
+  as Kumo Tabular does on MPS.
+
+Outputs that are finite do not show that a device is right: Kumo Tabular
+once gave finite, wrong answers on MPS. The checkpoint test
+`test_auto_on_an_apple_gpu_answers_as_the_cpu_does` compares every backend
+in `golden_data.RECORDED_PARAMS` on MPS with the CPU. CI has no GPU, so it
+runs only on a Mac with `LAZY_RUN_CHECKPOINT_TESTS=1`.
 
 An estimator unpickled under `device="auto"` resolves `device_` and
 `mixed_precision_` again on the machine at hand, so a model fitted on a GPU
@@ -326,6 +352,7 @@ start.
 | Small CPU settings for the checkpoint tests | `tests/lazy/backend_settings.py` | `test_backend_completeness.py`, `test_conformance_backends.py` |
 | A fake upstream, with `install` and `SETTINGS` | `tests/lazy/fakes/<name>.py` | `test_backend_completeness.py`, `test_conformance.py`, `test_bagging.py` |
 | A real-weights entry in the shared-network test | `_REAL` in `tests/lazy/test_weights_cache.py` | `test_backend_completeness.py` |
+| A checkpoint run on an Apple silicon Mac, where MPS agrees with the CPU, and a row in its table | `docs/guide/hardware.md` | `test_golden.py` on a Mac, review |
 | A row in the hand-written model list | `docs/installation.md` | review |
 | A line in the changelog | `CHANGELOG.md`, under `[Unreleased]` | review |
 
@@ -348,4 +375,4 @@ differ between processors, as TabPFN's do, record it on a GitHub
 runner with the checkpoint workflow's `record` input (see the contributing
 guide), so that CI can check it. The tests that load a checkpoint run
 only with `LAZY_RUN_CHECKPOINT_TESTS=1`, so a new backend is finished when
-both the default suite and that run pass.
+both the default suite and that run pass, on a CUDA machine and on a Mac.

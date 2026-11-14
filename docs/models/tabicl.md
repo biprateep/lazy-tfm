@@ -35,7 +35,7 @@ LAZY's.
 | Outlier clipping | soft clip at 4 standard deviations | the same (`outlier_threshold="auto"`) |
 | Categorical columns | ordinal-encoded when the input marks them | off: every column is numeric |
 | Key/value cache | off | on (`kv_cache=True`) |
-| Mixed precision | on a GPU above 1,024 rows or 60 features | on for every GPU run (`mixed_precision=True`) |
+| Mixed precision | on a GPU above 1,024 rows or 60 features | on for every CUDA GPU run, off on an Apple GPU (`mixed_precision=True`) |
 | Random seed | 42 | `random_state=0` |
 | Row subsampling | none | none (`bag_size=None`) |
 
@@ -58,8 +58,8 @@ quietly runs fewer, and LAZY adds members to make up the count. We also fix
 the order of the members, which upstream takes from a Python set and which can
 therefore change between sessions. We use the same seed (0) as every other
 model rather than TabICL's 42, and we treat every column as numeric. LAZY also
-caches the context's keys and values and uses mixed precision on every GPU
-run rather than only for large tables, both of which change the predictions
+caches the context's keys and values and uses mixed precision on every CUDA
+GPU run rather than only for large tables, both of which change the predictions
 only by rounding. The distribution itself is the piecewise-linear cumulative
 distribution through the 999 quantiles, with the 0.1% of probability beyond
 each outermost quantile spread evenly over one quantile spacing past it,

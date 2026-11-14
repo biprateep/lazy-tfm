@@ -135,8 +135,9 @@ def _test_gaps(name, cls):
         found.append(
             "no golden settings in tests/lazy/golden_data.RECORDED_PARAMS"
         )
-    vendors = ("AuthenticAMD", "GenuineIntel")
-    for golden in sorted({golden_data.path(name, v) for v in vendors}):
+    for golden in sorted(
+        {golden_data.path(name, v) for v in golden_data.VENDORS}
+    ):
         if not golden.is_file():
             found.append(
                 f"no golden file tests/lazy/golden/{golden.name} (record it"

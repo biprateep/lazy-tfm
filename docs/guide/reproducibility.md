@@ -181,7 +181,9 @@ Each backend was fitted afresh on each device, in float32 with
 The figures are the largest change of the 5%, 50% and 95% quantiles over the
 same 50 rows, as a fraction of a row's 5% to 95% range, on an NVIDIA GB10 and
 its CPU. Each device repeats its own answer to the bit. TabPFN, TabICL, TabFM,
-LimiX-2 and Kumo Tabular agree across devices to float32 rounding.
+LimiX-2 and Kumo Tabular agree across devices to float32 rounding. On the
+GPU of an Apple silicon Mac they agree with the CPU to the same rounding (see
+{doc}`hardware`).
 
 LimiX-2 adds a random feature positional embedding to its feature tokens.
 LAZY draws it with a generator seeded per member. A CPU generator and a CUDA

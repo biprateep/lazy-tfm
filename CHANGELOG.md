@@ -7,6 +7,34 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- `device="auto"` now chooses CUDA, then Apple's MPS, then the CPU. On an
+  Apple silicon Mac a model therefore runs on its GPU by default, and its
+  outputs there differ from the CPU's by float32 rounding.
+- A model whose settings cannot run on the GPU that `device="auto"` finds now
+  runs on the CPU with a `PerformanceWarning` that gives the reason, and
+  naming that GPU outright raises a `ValueError` before the checkpoint loads.
+  This covers TabPFN's `kv_cache="fp8"` on MPS, which has no float8, and Kumo
+  Tabular on a Mac whose MPS writes wrong matrix products into strided views.
+- Kumo Tabular now runs on `device="mps"` where that check passes, instead of
+  always raising a `ValueError`. MPS has no float64, so there its features
+  reach upstream in float32 and its recipe runs in float32, as upstream's own
+  `Cast` does on MPS. Outputs on CUDA and the CPU are unchanged.
+
+### Fixed
+
+- TabPFN now predicts on `device="mps"`. The bucket softmax ran in float64 on
+  the device, which MPS lacks, so every prediction raised a `TypeError`.
+  Outputs on CUDA and the CPU are unchanged.
+- TabFM now predicts on `device="mps"`. Its streamed prediction moved float64
+  arrays to the device before casting them, which MPS refuses. Outputs on CUDA
+  and the CPU are unchanged.
+- On `device="mps"`, `lazy.clear_model_cache()` now returns the memory of the
+  dropped networks, TabFM's streamed prediction empties the MPS cache between
+  member batches, and LimiX-2 sizes its key/value caches within the GPU's
+  recommended memory instead of without a limit.
+
 ## [0.6.0] - 2026-11-07
 
 A release that makes each module simpler and faster, and predictions safe

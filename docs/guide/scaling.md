@@ -93,7 +93,7 @@ one, which falls back, with a warning, when the device lacks the room.
 TabPFN caches at full precision. Its own default is an int8 cache that moves
 densities by about half a percent of the peak for a typical row, and up to 3%
 (TabPFN-3.5, 10,000 DC1 context rows and 2,000 test rows; see [Measurement
-setup](#measurement-setup)), and `kv_cache="int8"` (or `"fp8"`) asks for it.
+setup](#measurement-setup)), and `kv_cache="int8"` (or `"fp8"`, which an Apple GPU cannot run) asks for it.
 TabICL caches keys and values, while `kv_cache="repr"` stores the smaller row
 representations instead and re-runs its in-context layers. TabFM uses its
 streaming prefill/decode path, which needs the repository build (see
@@ -168,7 +168,8 @@ needs the least.
 ## GPU and CPU
 
 Every model chooses its device when it is fitted, and `device="auto"` selects
-CUDA if it is available and the CPU otherwise (see {doc}`../installation`).
+CUDA if it is available, then an Apple silicon GPU, and the CPU otherwise (see
+{doc}`../installation`).
 Most of the models need a GPU to be practical. TabPFN refuses large CPU
 contexts (see [Context and feature limits](limits.md#context-and-feature-limits))
 unless `ignore_pretraining_limits=True` or a `bag_size` keeps every bag within

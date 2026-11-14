@@ -42,7 +42,7 @@ TabFM that LAZY uses, next to LAZY's.
 | Maximum features | 500 | 500 |
 | Categorical columns | detected by data type and ordinal-encoded | off: every column is numeric |
 | Key/value cache | off; the context is re-encoded for every batch | on, with LAZY's own cache (`kv_cache=True`) |
-| Precision | bfloat16, on a GPU and on a CPU | bfloat16 on a GPU, float32 on a CPU |
+| Precision | bfloat16, on a GPU and on a CPU | bfloat16 on a CUDA GPU, float32 on a CPU or an Apple GPU |
 | Random seed | 42 | `random_state=0` |
 | Row subsampling | none | none (`bag_size=None`) |
 
