@@ -65,7 +65,8 @@ The golden tests compare each backend's densities with files in
 `tests/lazy/golden/`, at four torch threads. TabPFN has two files, one for
 GitHub's AMD runners (`tabpfn.npz`) and one for its Intel runners
 (`tabpfn_intel.npz`), since the two vendors move TabPFN by a few percent of
-the peak; the test picks the file for the processor it runs on. To re-record
+the peak; the test picks the file for the processor it runs on, and skips
+TabPFN on any other processor, such as Apple silicon. To re-record
 golden files, which needs Biprateep's approval, run the workflow by hand with
 `record` naming the backends, and commit those backends' files from its
 `golden` artifact. The workflow's runner is AMD or Intel at random, so

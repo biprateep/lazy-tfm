@@ -54,7 +54,13 @@ def test_the_default_path_reproduces_the_golden_densities(name):
         lazy.ESTIMATORS[name]()._import_backend()
     except ImportError as error:
         pytest.skip(f"{name} is not installed: {error}")
-    reference = np.load(golden_data.path(name))
+    vendor = golden_data.cpu_vendor()
+    if name in golden_data.PER_VENDOR and vendor not in golden_data.VENDORS:
+        pytest.skip(
+            f"{name} has no golden file for this processor (vendor {vendor});"
+            f" it has one for each of {', '.join(golden_data.VENDORS)}"
+        )
+    reference = np.load(golden_data.path(name, vendor))
     _, _, X_test = golden_data.problem()
     with golden_data.pinned_threads():
         pdfs = golden_data.fit(name).predict_proba(X_test, golden_data.GRID)
