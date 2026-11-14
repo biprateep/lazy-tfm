@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Biprateep Dey
 """The ``device`` parameter, resolved without touching a GPU."""
 
+import pathlib
+
 import pytest
 
 from lazy.models import _device
@@ -83,3 +85,16 @@ def test_free_memory_on_mps_is_metals_share_less_what_torch_holds(
     monkeypatch.setattr(torch.mps, "driver_allocated_memory", lambda: 3)
     assert _device.free_memory("mps") == 7
     assert _device.free_memory("cpu") is None
+
+
+def test_only_the_device_modules_call_torch_cuda():
+    # A backend that frees or measures memory through torch.cuda does
+    # nothing, or fails, on MPS; _device dispatches on the device's kind.
+    package = pathlib.Path(_device.__file__).parents[1]
+    allowed = {"_device.py", "_weights.py"}
+    callers = sorted(
+        str(path.relative_to(package))
+        for path in package.rglob("*.py")
+        if path.name not in allowed and "torch.cuda." in path.read_text()
+    )
+    assert callers == []

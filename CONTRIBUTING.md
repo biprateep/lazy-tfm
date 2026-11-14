@@ -132,6 +132,11 @@ Tabular](docs/adding_a_backend_kumo.md) follows one backend through every step.
 Edit `pyproject.toml`, then run `uv lock` and commit both files. CI runs
 `uv sync --locked`, which fails if the lockfile is out of date.
 
+An upgrade of a backend's package changes code that runs on every device.
+Run the checkpoint tests for it on a CUDA machine and on an Apple silicon
+Mac, where `test_auto_on_an_apple_gpu_answers_as_the_cpu_does` compares the
+Apple GPU with the CPU; CI has no GPU.
+
 The published metadata cannot contain direct URLs, since PyPI rejects them.
 To use a development build of a dependency, add it under `[tool.uv.sources]`,
 following the example of `tabfm`.
