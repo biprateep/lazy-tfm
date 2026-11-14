@@ -22,7 +22,6 @@ import pytest
 import threads
 
 import lazy
-from lazy.models import _device
 from lazy.models import _hub
 from lazy.models import kumo
 
@@ -172,14 +171,25 @@ def _no_download(checkpoint, **kwargs):
     raise AssertionError("the checkpoint was fetched")
 
 
-def test_mps_is_refused_before_the_checkpoint_loads(monkeypatch, data):
-    """The recipe works in float64, which MPS lacks."""
-    X, y, _ = data
-    backend = fakes.Backend("kumo", monkeypatch)
-    monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
-    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
-    with pytest.raises(ValueError, match="Kumo Tabular does not run on"):
-        backend(device="mps").fit(X, y)
+@pytest.mark.parametrize(
+    ("device", "dtype"), [("cpu", "float64"), ("mps", "float32")]
+)
+def test_features_reach_mps_in_float32(monkeypatch, device, dtype):
+    """MPS has no float64; elsewhere the features stay float64."""
+    torch = pytest.importorskip("torch")
+    seen = []
+    real = torch.tensor
+
+    def tensor(data, *, dtype=None, device=None):
+        del device  # Unused: no MPS device in CI.
+        seen.append(real(data, dtype=dtype).dtype)
+        return seen[-1]
+
+    monkeypatch.setattr(torch, "tensor", tensor)
+    model = kumo.KumoQuantile()
+    model.device_ = device
+    model._tensors(np.zeros((3, 2)))
+    assert seen == [getattr(torch, dtype)]
 
 
 def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):

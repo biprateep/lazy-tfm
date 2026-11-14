@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Kumo Tabular now runs on `device="mps"` instead of raising a `ValueError`.
+  MPS has no float64, so there its features reach upstream in float32 and its
+  recipe runs in float32, as upstream's own `Cast` does on MPS. Outputs on
+  CUDA and the CPU are unchanged.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
