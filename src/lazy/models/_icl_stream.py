@@ -224,8 +224,9 @@ def stream_icl(
     def to_dev(array: npt.NDArray[Any] | None, dtype: Any = None) -> Any:
         if array is None:
             return None
-        tensor = torch.from_numpy(np.ascontiguousarray(array)).to(device)
-        return tensor if dtype is None else tensor.to(dtype)
+        # Cast as the tensor moves: MPS cannot hold the float64 arrays.
+        tensor = torch.from_numpy(np.ascontiguousarray(array))
+        return tensor.to(device) if dtype is None else tensor.to(device, dtype)
 
     for m0 in range(0, n_members, member_batch_size):
         m1 = min(m0 + member_batch_size, n_members)

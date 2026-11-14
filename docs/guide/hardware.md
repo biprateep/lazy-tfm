@@ -36,7 +36,7 @@ and not run.
 | ----- | ------------------------------ | -------------- |
 | TabPFN | Supported by TabPFN itself, which needs PyTorch 2.6 or newer for it; expected to work, in single precision | Documented by TabPFN (install PyTorch's ROCm build first); expected to work |
 | TabICL | Supported by TabICL itself; expected to work, in single precision | Not mentioned by TabICL; it uses PyTorch's standard attention, so expected to work |
-| TabFM | Not documented by TabFM; may fail when double-precision arrays reach the GPU, which Metal does not support | Not documented by TabFM; needs a GPU with bfloat16 support under mixed precision |
+| TabFM | Not documented by TabFM; LAZY converts its double-precision inputs to single precision before they reach the GPU, which Metal requires | Not documented by TabFM; needs a GPU with bfloat16 support under mixed precision |
 | LimiX-2 | Not documented by LimiX; it runs its Triton kernels only on CUDA, and PyTorch's `rms_norm` elsewhere, so expected to work, in single precision | Possible in principle through the Triton build that ships with ROCm's PyTorch, which then runs LimiX's Triton kernels on the AMD GPU |
 | Kumo Tabular | Refused by LAZY, since its preprocessing runs in double precision, which Metal does not support | Possible in principle: its optional Triton kernels would run through ROCm's Triton, and fall back to PyTorch where Triton is missing |
 
@@ -64,10 +64,7 @@ although it does not help with double precision, which Metal does not support
 at all. The same page describes `PYTORCH_MPS_HIGH_WATERMARK_RATIO`, which
 limits how much of the shared memory PyTorch may take, and TabPFN has its own
 `TABPFN_MPS_MEMORY_FRACTION`. TabPFN's `kv_cache="fp8"` is not available on
-Metal, so we keep its default `kv_cache=True`. If TabFM fails with a
-double-precision error, `kv_cache=False` sends its predictions through TabFM's
-own path, which converts the features before moving them to the GPU, although
-the targets may still fail in the same way. Kumo Tabular runs on the CPU
+Metal, so we keep its default `kv_cache=True`. Kumo Tabular runs on the CPU
 (`device="cpu"`).
 
 On an AMD GPU, we first install PyTorch's ROCm build from the PyTorch ROCm
