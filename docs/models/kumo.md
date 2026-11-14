@@ -63,7 +63,7 @@ default recipe, next to LAZY's.
 | Combining the members | mean of the quantiles, dropping the highest and lowest 20% of members at each level | the same, over every member (a plain mean under an explicit `transforms`) |
 | Categorical columns | encoded by the recipe when the input marks them | off: every column is numeric |
 | Key/value cache | off in a single call, on with `fit` and `predict` | on (`kv_cache=True`) |
-| Mixed precision | float16 autocast on a GPU | the same (`mixed_precision=True`) |
+| Mixed precision | float16 autocast on a GPU | the same on a CUDA GPU, float32 on an Apple GPU (`mixed_precision=True`) |
 | Random seed | none (42 in NVIDIA's benchmarks) | `random_state=0` |
 | Row subsampling | none | none (`bag_size=None`) |
 
@@ -117,8 +117,11 @@ piecewise-linear cumulative distribution through the 999 quantiles, with the
 quantile spacing past it, so that a fine grid shows no spike there. Its native
 grid is 1,500 equal bins over the range of the context targets, padded by 25%
 on each side. Kumo's preprocessing runs in double precision on the device,
-which Apple's MPS devices do not support, so LAZY refuses `device="mps"`
-before it loads the weights. LAZY draws the members' random sign flips and
+which Apple's MPS devices do not support, so on an Apple GPU LAZY gives it
+the features in single precision, as upstream does there. On some Macs, MPS
+gets Kumo's network wrong without an error, so LAZY checks for that first,
+and where it does, `device="auto"` runs Kumo Tabular on the CPU (see
+{doc}`../guide/hardware`). LAZY draws the members' random sign flips and
 column shuffles on a CPU, so a CPU and a GPU give the same ensemble for one
 seed (see {doc}`../guide/reproducibility`). NVIDIA pretrained Kumo Tabular on tables of up to
 60,000 rows, and LAZY warns above that size, since its accuracy on larger

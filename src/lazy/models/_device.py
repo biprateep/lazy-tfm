@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["is_auto", "resolve_device"]
+__all__ = ["free_memory", "is_auto", "release_memory", "resolve_device"]
 
 _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
 """The device strings accepted besides ``"auto"``, case-insensitively."""
@@ -15,7 +15,8 @@ _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
 def resolve_device(device: object = "auto") -> str:
     """Turns a ``device`` parameter into a concrete torch device string.
 
-    ``"auto"`` picks CUDA when it is usable and falls back to CPU otherwise.
+    ``"auto"`` picks CUDA when it is usable, then Apple's MPS, and falls back
+    to CPU otherwise.
     Any other value names a device outright, so ``"cuda:1"`` works, and an
     explicit ``"cuda"`` (or ``"mps"``) on a machine without one raises rather
     than silently running a foundation model on the CPU for hours.
@@ -71,13 +72,60 @@ def is_auto(device: object) -> bool:
     return str(device).strip().lower() == "auto"
 
 
+def release_memory(device: object) -> None:
+    """Returns the memory PyTorch caches unused on a GPU to the system.
+
+    On Apple silicon the GPU shares memory with the system, so memory
+    PyTorch keeps cached slows the whole machine. Does nothing on a CPU.
+
+    Args:
+        device: A torch device, or its string form, such as ``"mps"``.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    kind = torch.device(str(device)).type
+    if kind == "cuda":
+        torch.cuda.empty_cache()
+    elif kind == "mps":
+        torch.mps.empty_cache()
+
+
+def free_memory(device: object) -> int | None:
+    """Free bytes on a GPU, or None on a CPU.
+
+    On MPS, the share of system memory Metal recommends for the GPU, less
+    what PyTorch already holds there.
+
+    Args:
+        device: A torch device, or its string form, such as ``"cuda:0"``.
+
+    Returns:
+        The free bytes, or None when ``device`` is a CPU.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    gpu = torch.device(str(device))
+    if gpu.type == "cuda":
+        free, _ = torch.cuda.mem_get_info(gpu)
+        return int(free)
+    if gpu.type == "mps":
+        return max(
+            0,
+            torch.mps.recommended_max_memory()
+            - torch.mps.driver_allocated_memory(),
+        )
+    return None
+
+
 def _auto() -> str:
-    """CUDA if usable, else CPU."""
+    """CUDA if usable, else MPS if usable, else CPU."""
     try:
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
     except ImportError:  # pragma: no cover - torch is a backend extra
         return "cpu"
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 def _check_cuda(name: str, device: object) -> None:

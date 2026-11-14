@@ -151,6 +151,12 @@ def patch(monkeypatch, seams, patches):
         monkeypatch.setattr(resolve(owner), name, value)
 
 
+def no_download(checkpoint, **kwargs):
+    """Stands in for ``Checkpoint.download`` where nothing may download."""
+    del checkpoint, kwargs  # Unused.
+    raise AssertionError("the checkpoint was fetched")
+
+
 def _download(checkpoint, *, local_files_only=False):
     """Where a checkpoint would be, without fetching it."""
     del local_files_only  # Unused: nothing is fetched.

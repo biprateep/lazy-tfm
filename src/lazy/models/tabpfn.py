@@ -392,6 +392,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         kv_cache: Cache the context's keys and values at fit: ``True``
             (exact, full precision), ``"int8"`` or ``"fp8"`` (quantised:
             smaller, not exact; v3 and later only), or ``False``.
+            ``"fp8"`` cannot run on MPS: there ``device="auto"`` runs on
+            the CPU with a warning, and ``device="mps"`` raises
+            ValueError.
         y_grid: Default output grid; the native grid is the bar
             distribution's own buckets, in full.
         device: Where to run.
@@ -541,6 +544,14 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 f"kv_cache={self.kv_cache!r} would run at full precision; "
                 "use kv_cache=True, or version='v3' or later"
             )
+
+    def _device_problem(self, device: str) -> str | None:
+        if self.kv_cache == "fp8" and device == "mps":
+            return (
+                "kv_cache='fp8' needs float8, which PyTorch lacks on MPS; "
+                "kv_cache='int8' or True runs there"
+            )
+        return None
 
     def _fit_group(
         self,
@@ -1057,7 +1068,10 @@ def bucket_masses(
                 "bucket_masses(output, regressor), for float64 borders",
                 RuntimeWarning,
             )
-    masses = torch.softmax(logits.detach().double(), dim=-1).cpu().numpy()
+    logits = logits.detach()
+    if logits.device.type == "mps":  # MPS has no float64.
+        logits = logits.cpu()
+    masses = torch.softmax(logits.double(), dim=-1).cpu().numpy()
     if masses.ndim != 2 or masses.shape[1] != borders.size - 1:
         raise RuntimeError(
             f"TabPFN returned logits of shape {tuple(masses.shape)} for a bar "
