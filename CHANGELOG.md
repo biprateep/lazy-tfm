@@ -7,6 +7,26 @@ change the API.
 
 ## [Unreleased]
 
+### Removed
+
+- `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
+  no longer exports `prior_shift_em` or sets the fitted attribute
+  `bin_prior_`. The label-shift correction ran on TabFM alone, and it made
+  a row's answer depend on the other rows predicted with it, so `predict`
+  and `predict_proba` could disagree. Passing `prior_shift` is now a
+  `TypeError`, and unpickling a model fitted with `prior_shift="em"` raises
+  a `ValueError` rather than predicting without the correction. Predictions
+  with the default, `prior_shift=None`, are unchanged. A correction that
+  every backend shares is planned in
+  [#300](https://github.com/biprateep/lazy-tfm/issues/300).
+
+## [0.6.1] - 2026-11-14
+
+A release that runs the models on the GPU of an Apple silicon Mac and
+lets `device="auto"` choose it. Outputs on CUDA and the CPU are
+unchanged; on a Mac, `device="auto"` now runs on the GPU, whose outputs
+differ from the CPU's by float32 rounding.
+
 ### Changed
 
 - `device="auto"` now chooses CUDA, then Apple's MPS, then the CPU. On an
@@ -21,19 +41,6 @@ change the API.
   always raising a `ValueError`. MPS has no float64, so there its features
   reach upstream in float32 and its recipe runs in float32, as upstream's own
   `Cast` does on MPS. Outputs on CUDA and the CPU are unchanged.
-
-### Removed
-
-- `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
-  no longer exports `prior_shift_em` or sets the fitted attribute
-  `bin_prior_`. The label-shift correction ran on TabFM alone, and it made
-  a row's answer depend on the other rows predicted with it, so `predict`
-  and `predict_proba` could disagree. Passing `prior_shift` is now a
-  `TypeError`, and unpickling a model fitted with `prior_shift="em"` raises
-  a `ValueError` rather than predicting without the correction. Predictions
-  with the default, `prior_shift=None`, are unchanged. A correction that
-  every backend shares is planned in
-  [#300](https://github.com/biprateep/lazy-tfm/issues/300).
 
 ### Fixed
 
@@ -1150,7 +1157,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/biprateep/lazy-tfm/compare/v0.4.0...v0.5.0
