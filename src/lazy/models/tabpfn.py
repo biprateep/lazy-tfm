@@ -391,8 +391,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             takes a context larger than them.
         kv_cache: Cache the context's keys and values at fit: ``True``
             (exact, full precision), ``"int8"`` or ``"fp8"`` (quantised:
-            smaller, not exact; v3 and later only; ``"fp8"`` not on MPS),
-            or ``False``.
+            smaller, not exact; v3 and later only), or ``False``.
+            ``"fp8"`` cannot run on MPS: there ``device="auto"`` runs on
+            the CPU with a warning, and ``device="mps"`` raises
+            ValueError.
         y_grid: Default output grid; the native grid is the bar
             distribution's own buckets, in full.
         device: Where to run.
@@ -543,16 +545,13 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 "use kv_cache=True, or version='v3' or later"
             )
 
-    def _load_checkpoint(self) -> None:
-        # PyTorch has no float8 on MPS; better said before any download, in
-        # this package's terms rather than upstream's.
-        if self.kv_cache == "fp8" and self.device_ == "mps":
-            raise ValueError(
-                "kv_cache='fp8' is not available on device='mps', since "
-                "PyTorch has no float8 there; use kv_cache='int8' or True, "
-                "or device='cpu'"
+    def _device_problem(self, device: str) -> str | None:
+        if self.kv_cache == "fp8" and device == "mps":
+            return (
+                "kv_cache='fp8' needs float8, which PyTorch lacks on MPS; "
+                "kv_cache='int8' or True runs there"
             )
-        super()._load_checkpoint()
+        return None
 
     def _fit_group(
         self,

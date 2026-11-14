@@ -58,6 +58,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _install
 from lazy.models import _kumo_draws
@@ -203,7 +204,10 @@ class KumoQuantile(
         device: Where to run. MPS has no float64, so on MPS the features
             reach upstream in float32 and its recipe runs in float32, as
             upstream's own ``Cast`` does there; elsewhere it runs in
-            float64.
+            float64. Upstream's network writes matrix products into
+            strided views, which MPS gets wrong on some Macs; there, checked
+            once per process, ``"auto"`` runs it on the CPU with a warning
+            and ``"mps"`` raises ValueError.
         random_state: The ensemble's seed. A group of members runs on a
             CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
@@ -390,6 +394,15 @@ class KumoQuantile(
 
     def _member_trim_fraction(self) -> float:
         return self.trim_fraction_
+
+    def _device_problem(self, device: str) -> str | None:
+        if device == "mps" and not _device.mps_matmul_into_views_works():
+            return (
+                "this Mac's MPS writes wrong matrix products into strided "
+                "views, which upstream's network uses, so its predictions "
+                "would be wrong"
+            )
+        return None
 
     def _after_fit(self) -> None:
         self.n_quantiles_ = _N_QUANTILES

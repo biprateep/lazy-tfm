@@ -196,6 +196,36 @@ def test_an_explicit_cpu_or_a_cpu_friendly_model_does_not_warn(data, no_gpu):
         standins.HistogramStandIn().fit(X, z)
 
 
+class _NoMPS(_SlowOnCPU):
+    def _device_problem(self, device):
+        return "it needs float8" if device == "mps" else None
+
+
+@pytest.fixture
+def only_mps(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+
+
+def test_auto_takes_the_cpu_with_one_warning_for_a_gpu_the_model_cannot_use(
+    data, only_mps
+):
+    X, z, _ = data
+    with pytest.warns(lazy.PerformanceWarning) as info:
+        model = _NoMPS().fit(X, z)
+    assert model.device_ == "cpu"
+    messages = [str(w.message) for w in info]
+    assert len(messages) == 1
+    assert "cannot run on device='mps' here: it needs float8" in messages[0]
+
+
+def test_a_named_device_the_model_cannot_use_is_an_error(data, only_mps):
+    X, z, _ = data
+    with pytest.raises(ValueError, match="here: it needs float8"):
+        _NoMPS(device="mps").fit(X, z)
+
+
 def test_the_cpu_warning_suggests_every_cpu_friendly_declaration(data, no_gpu):
     expected = set()
     for name, cls in lazy.ESTIMATORS.items():

@@ -137,10 +137,15 @@ its caches.
 
 The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<index>"` or
 `"mps"`) before the checkpoint is loaded, and sets `mixed_precision_` only on
-CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set,
-and raises a clear error on a device its model does not support, before the
-checkpoint is loaded (Kumo Tabular refuses `"mps"`, which has no double
-precision). No current backend is tested on `"mps"`.
+CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set.
+A backend whose model or settings cannot run on a device overrides
+`_device_problem(device)` to return the reason as a clause (TabPFN's
+`kv_cache="fp8"` on `"mps"`, or Kumo Tabular on an MPS that writes wrong
+products into strided views). The base class then runs the model on the CPU
+with a warning under `device="auto"`, and raises a `ValueError` before the
+checkpoint is loaded when the device was named outright. Every backend is
+tested on `"mps"` by the checkpoint test
+`test_auto_on_an_apple_gpu_answers_as_the_cpu_does`, on a Mac.
 
 An estimator unpickled under `device="auto"` resolves `device_` and
 `mixed_precision_` again on the machine at hand, so a model fitted on a GPU

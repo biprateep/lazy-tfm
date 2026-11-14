@@ -452,7 +452,7 @@ def test_an_fp8_cache_is_refused_on_mps_before_the_checkpoint_loads(
     est = fakes.install("tabpfn", monkeypatch)(device="mps", kv_cache="fp8")
     monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
     monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
-    with pytest.raises(ValueError, match="kv_cache='fp8' is not available"):
+    with pytest.raises(ValueError, match="kv_cache='fp8' needs float8"):
         est.fit(X, X[:, 0])
 
 

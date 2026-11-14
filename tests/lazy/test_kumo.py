@@ -22,6 +22,7 @@ import pytest
 import threads
 
 import lazy
+from lazy.models import _device
 from lazy.models import _hub
 from lazy.models import kumo
 
@@ -190,6 +191,31 @@ def test_features_reach_mps_in_float32(monkeypatch, device, dtype):
     model.device_ = device
     model._tensors(np.zeros((3, 2)))
     assert seen == [getattr(torch, dtype)]
+
+
+@pytest.mark.parametrize("works", [True, False])
+def test_mps_is_ruled_out_only_where_it_gets_strided_products_wrong(
+    monkeypatch, works
+):
+    monkeypatch.setattr(_device, "mps_matmul_into_views_works", lambda: works)
+    model = kumo.KumoQuantile()
+    assert (model._device_problem("mps") is None) == works
+    assert model._device_problem("cuda") is None
+
+
+def test_where_mps_gets_strided_products_wrong_auto_runs_on_the_cpu(
+    monkeypatch, data
+):
+    """Upstream's network on such an MPS ignores the features, silently."""
+    X, y, _ = data
+    backend = fakes.Backend("kumo", monkeypatch)
+    monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
+    monkeypatch.setattr(_device, "mps_matmul_into_views_works", lambda: False)
+    with pytest.warns(lazy.PerformanceWarning, match="strided views"):
+        assert backend(device="auto").fit(X, y).device_ == "cpu"
+    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
+    with pytest.raises(ValueError, match="strided views"):
+        backend(device="mps").fit(X, y)
 
 
 def test_the_shared_network_serves_one_context_at_a_time(monkeypatch, data):
