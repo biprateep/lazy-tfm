@@ -89,3 +89,35 @@ def _platforms(reference: np.lib.npyio.NpzFile) -> str:
         f"{golden_data.cpu_vendor()} {torch.backends.cpu.get_cpu_capability()}"
     )
     return f"recorded on {recorded}; this machine is {here}"
+
+
+MPS_GAP = {"tabpfn": 0.1}
+"""Largest change of a row's 5%, 50% and 95% quantiles from the CPU to MPS,
+as a fraction of that row's 5% to 95% range, per backend; 1e-3 for the others.
+On an Apple M3 Ultra, with these settings, LimiX moved by 3.5e-6, TabICL by
+1.5e-5 and TabFM by 1.8e-5 (float32 rounding), and TabPFN by 0.039, since its
+fingerprint feature moves it across machines (see ``RTOL``). Each limit leaves
+a margin of over two; MPS's wrong strided products moved Kumo Tabular by 3.9.
+"""
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
+def test_auto_on_an_apple_gpu_answers_as_the_cpu_does(name):
+    torch = pytest.importorskip("torch")
+    if not torch.backends.mps.is_available():
+        pytest.skip("no Apple GPU (MPS) here")
+    try:
+        lazy.ESTIMATORS[name]()._import_backend()
+    except ImportError as error:
+        pytest.skip(f"{name} is not installed: {error}")
+    X_train, z, X_test = golden_data.problem()
+    levels = [0.05, 0.5, 0.95]
+    answers = {}
+    for device in ("cpu", "auto"):
+        params = {**golden_data.RECORDED_PARAMS[name], "device": device}
+        model = lazy.LazyModel(name, **params).fit(X_train, z)
+        answers[device] = model.predict_quantiles(X_test, quantiles=levels)
+    cpu = answers["cpu"]
+    gap = np.abs(answers["auto"] - cpu).max(axis=1) / (cpu[:, 2] - cpu[:, 0])
+    assert gap.max() < MPS_GAP.get(name, 1e-3)
