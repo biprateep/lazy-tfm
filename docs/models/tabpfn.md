@@ -60,7 +60,7 @@ it from the installed `tabpfn` package.
 | Target transforms | none for half the members, a safe power transform for the other half | the same |
 | Categorical columns | detected automatically | off: every column is numeric |
 | Key/value cache | off; int8 when on | on, at full precision (`kv_cache=True`) |
-| Precision | autocast on a GPU, sometimes bfloat16 on a CPU | autocast on a GPU, float32 on a CPU |
+| Precision | autocast on a GPU, sometimes bfloat16 on a CPU | autocast on a CUDA GPU, float32 on a CPU or an Apple GPU |
 | Random seed | 0 | `random_state=0` |
 | Row subsampling | none | none (`bag_size=None`) |
 

@@ -35,7 +35,8 @@ wheel from PyPI suits most Linux machines with an NVIDIA GPU. However, make sure
 Every model chooses its device when it is fitted (`device="auto"` selects
 CUDA if it is available, then an Apple silicon GPU (`"mps"`), and the CPU
 otherwise), and passing `device="cuda"` explicitly on a machine without CUDA
-raises an error.
+raises an error. On a Mac, PyTorch's wheel from PyPI already supports the
+Apple GPU; {doc}`guide/hardware` states what runs there and on AMD GPUs.
 
 ## Specific backend installation notes
 
