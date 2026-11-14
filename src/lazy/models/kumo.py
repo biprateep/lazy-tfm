@@ -45,6 +45,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
+import functools
 from importlib import util
 import pathlib
 import types
@@ -58,7 +59,6 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
-from lazy.models import _device
 from lazy.models import _ensemble
 from lazy.models import _install
 from lazy.models import _kumo_draws
@@ -204,10 +204,9 @@ class KumoQuantile(
         device: Where to run. MPS has no float64, so on MPS the features
             reach upstream in float32 and its recipe runs in float32, as
             upstream's own ``Cast`` does there; elsewhere it runs in
-            float64. Upstream's network writes matrix products into
-            strided views, which MPS gets wrong on some Macs; there, checked
-            once per process, ``"auto"`` runs it on the CPU with a warning
-            and ``"mps"`` raises ValueError.
+            float64. On a Mac whose MPS gets upstream's network wrong,
+            checked once per process, ``"auto"`` runs it on the CPU with a
+            warning and ``"mps"`` raises ValueError.
         random_state: The ensemble's seed. A group of members runs on a
             CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
@@ -396,7 +395,7 @@ class KumoQuantile(
         return self.trim_fraction_
 
     def _device_problem(self, device: str) -> str | None:
-        if device == "mps" and not _device.mps_matmul_into_views_works():
+        if device == "mps" and not _mps_matmul_into_views_works():
             return (
                 "this Mac's MPS writes wrong matrix products into strided "
                 "views, which upstream's network uses, so its predictions "
@@ -700,6 +699,31 @@ def _lending(network: Any, cache: Any = None) -> Iterator[None]:
             yield
         finally:
             network._cache = None  # noqa: SLF001 - upstream's cache.
+
+
+@functools.cache
+def _mps_matmul_into_views_works() -> bool:
+    """Whether MPS writes a batched matmul into a strided ``out`` correctly.
+
+    Upstream's network writes products into transposed slices of a buffer,
+    which MPS fills with wrong values on some Macs, silently. Checked once
+    per process, against the CPU.
+
+    Returns:
+        True when the MPS product matches the CPU's to float32 rounding.
+    """
+    import torch  # noqa: PLC0415 - torch comes with the extra.
+
+    # Smaller products come out right even where larger ones do not.
+    n_groups, n_rows, n_inner, n_out = 4, 64, 32, 32
+    generator = torch.Generator().manual_seed(0)
+    a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
+    b = torch.randn(n_groups, n_inner, n_out, generator=generator)
+    buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
+    view = buffer[:, 1:, :]
+    torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
+    expected = torch.matmul(a, b).transpose(0, 1)
+    return torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4)
 
 
 def _recipe(

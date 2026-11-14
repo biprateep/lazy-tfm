@@ -438,11 +438,6 @@ def test_bucket_masses_reads_logits_on_mps():
     )
 
 
-def _no_download(checkpoint, **kwargs):
-    del checkpoint, kwargs  # Unused.
-    raise AssertionError("the checkpoint was fetched")
-
-
 def test_an_fp8_cache_is_refused_on_mps_before_the_checkpoint_loads(
     monkeypatch,
 ):
@@ -451,7 +446,7 @@ def test_an_fp8_cache_is_refused_on_mps_before_the_checkpoint_loads(
     X = rng.normal(size=(40, 3))
     est = fakes.install("tabpfn", monkeypatch)(device="mps", kv_cache="fp8")
     monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
-    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
+    monkeypatch.setattr(_hub.Checkpoint, "download", fakes.no_download)
     with pytest.raises(ValueError, match="kv_cache='fp8' needs float8"):
         est.fit(X, X[:, 0])
 

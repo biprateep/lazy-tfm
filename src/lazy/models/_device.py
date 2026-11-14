@@ -4,16 +4,9 @@
 
 from __future__ import annotations
 
-import functools
 import re
 
-__all__ = [
-    "free_memory",
-    "is_auto",
-    "mps_matmul_into_views_works",
-    "release_memory",
-    "resolve_device",
-]
+__all__ = ["free_memory", "is_auto", "release_memory", "resolve_device"]
 
 _DEVICE_PATTERN = re.compile(r"cpu|mps|cuda(:\d+)?")
 """The device strings accepted besides ``"auto"``, case-insensitively."""
@@ -122,34 +115,6 @@ def free_memory(device: object) -> int | None:
             - torch.mps.driver_allocated_memory(),
         )
     return None
-
-
-@functools.cache
-def mps_matmul_into_views_works() -> bool:
-    """Whether MPS writes a batched matmul into a strided ``out`` correctly.
-
-    On some Apple silicon setups (seen on macOS 26.0.1 with torch 2.13 to
-    2.15), ``torch.matmul(a, b, out=view)`` on MPS silently writes wrong
-    values when ``view`` is a transposed slice of a larger tensor, as
-    upstream code does to save memory. This checks it once per process on
-    a small product, which takes about a millisecond once Metal has
-    started; the CPU computes the reference.
-
-    Returns:
-        True when the MPS product matches the CPU's to float32 rounding.
-    """
-    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
-
-    # Smaller products happen to come out right on the affected setups.
-    n_groups, n_rows, n_inner, n_out = 4, 64, 32, 32
-    generator = torch.Generator().manual_seed(0)
-    a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
-    b = torch.randn(n_groups, n_inner, n_out, generator=generator)
-    buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
-    view = buffer[:, 1:, :]
-    torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
-    expected = torch.matmul(a, b).transpose(0, 1)
-    return torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4)
 
 
 def _auto() -> str:

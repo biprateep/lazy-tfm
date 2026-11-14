@@ -47,13 +47,17 @@ on another CPU: by up to 7.1e-7 and 2.4e-7 of the peak on a 4-core x86 machine
 """
 
 
-@pytest.mark.checkpoint
-@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
-def test_the_default_path_reproduces_the_golden_densities(name):
+def _skip_unless_installed(name):
     try:
         lazy.ESTIMATORS[name]()._import_backend()
     except ImportError as error:
         pytest.skip(f"{name} is not installed: {error}")
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("name", sorted(golden_data.RECORDED_PARAMS))
+def test_the_default_path_reproduces_the_golden_densities(name):
+    _skip_unless_installed(name)
     vendor = golden_data.cpu_vendor()
     if name in golden_data.PER_VENDOR and vendor not in golden_data.VENDORS:
         pytest.skip(
@@ -93,11 +97,9 @@ def _platforms(reference: np.lib.npyio.NpzFile) -> str:
 
 MPS_GAP = {"tabpfn": 0.1}
 """Largest change of a row's 5%, 50% and 95% quantiles from the CPU to MPS,
-as a fraction of that row's 5% to 95% range, per backend; 1e-3 for the others.
-On an Apple M3 Ultra, with these settings, LimiX moved by 3.5e-6, TabICL by
-1.5e-5 and TabFM by 1.8e-5 (float32 rounding), and TabPFN by 0.039, since its
-fingerprint feature moves it across machines (see ``RTOL``). Each limit leaves
-a margin of over two; MPS's wrong strided products moved Kumo Tabular by 3.9.
+as a fraction of its 5% to 95% range; 1e-3 for the others, which moved by
+under 2e-5 on an Apple M3 Ultra. TabPFN moved by 0.039 there, through its
+fingerprint feature (see ``RTOL``); a wrong MPS kernel moves a model by over 1.
 """
 
 
@@ -107,10 +109,7 @@ def test_auto_on_an_apple_gpu_answers_as_the_cpu_does(name):
     torch = pytest.importorskip("torch")
     if not torch.backends.mps.is_available():
         pytest.skip("no Apple GPU (MPS) here")
-    try:
-        lazy.ESTIMATORS[name]()._import_backend()
-    except ImportError as error:
-        pytest.skip(f"{name} is not installed: {error}")
+    _skip_unless_installed(name)
     X_train, z, X_test = golden_data.problem()
     levels = [0.05, 0.5, 0.95]
     answers = {}

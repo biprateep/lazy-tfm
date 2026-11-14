@@ -167,11 +167,6 @@ def data():
     return X[:60], X[:60, 0] + 0.1 * rng.normal(size=60), X[60:]
 
 
-def _no_download(checkpoint, **kwargs):
-    del checkpoint, kwargs  # Unused.
-    raise AssertionError("the checkpoint was fetched")
-
-
 @pytest.mark.parametrize(
     ("device", "dtype"), [("cpu", "float64"), ("mps", "float32")]
 )
@@ -197,7 +192,7 @@ def test_features_reach_mps_in_float32(monkeypatch, device, dtype):
 def test_mps_is_ruled_out_only_where_it_gets_strided_products_wrong(
     monkeypatch, works
 ):
-    monkeypatch.setattr(_device, "mps_matmul_into_views_works", lambda: works)
+    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: works)
     model = kumo.KumoQuantile()
     assert (model._device_problem("mps") is None) == works
     assert model._device_problem("cuda") is None
@@ -210,10 +205,10 @@ def test_where_mps_gets_strided_products_wrong_auto_runs_on_the_cpu(
     X, y, _ = data
     backend = fakes.Backend("kumo", monkeypatch)
     monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
-    monkeypatch.setattr(_device, "mps_matmul_into_views_works", lambda: False)
+    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: False)
     with pytest.warns(lazy.PerformanceWarning, match="strided views"):
         assert backend(device="auto").fit(X, y).device_ == "cpu"
-    monkeypatch.setattr(_hub.Checkpoint, "download", _no_download)
+    monkeypatch.setattr(_hub.Checkpoint, "download", fakes.no_download)
     with pytest.raises(ValueError, match="strided views"):
         backend(device="mps").fit(X, y)
 

@@ -221,15 +221,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     :meth:`_rebuild_caches` records them again before the first prediction
     (the defaults pickle a handle whole). ``copy.deepcopy`` goes through the
     pickle methods, so a deep copy rebuilds its caches too. The device is
-    resolved
-    into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or ``"mps"``)
-    before the checkpoint loads; a backend runs there, in float32 unless
-    ``mixed_precision_`` is set (only on CUDA). A device its model cannot use
-    is named by :meth:`_device_problem`: ``device="auto"`` then takes the CPU,
-    and a device named outright raises. Unpickling under ``device="auto"``
-    resolves both again on the machine at hand, so a handle that holds a
-    device follows the new
-    ``device_`` in the backend's ``__setstate__``.
+    resolved into ``device_`` (``"cpu"``, ``"cuda"``, ``"cuda:<index>"`` or
+    ``"mps"``) before the checkpoint loads; a backend runs there, in float32
+    unless ``mixed_precision_`` is set (only on CUDA). A device its model
+    cannot use is named by :meth:`_device_problem`: ``device="auto"`` then
+    takes the CPU, and a device named outright raises. Unpickling under
+    ``device="auto"`` resolves both again on the machine at hand, so a handle
+    that holds a device follows the new ``device_`` in the backend's
+    ``__setstate__``.
 
     Shared code never names a backend. What a backend needs beyond the
     contract above is a hook the package calls on every registered class:
