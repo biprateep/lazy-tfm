@@ -7,6 +7,21 @@ change the API.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-15
+
+A release that decides from the macOS version whether Kumo Tabular runs on
+an Apple GPU. Outputs on CUDA and the CPU are unchanged.
+
+### Changed
+
+- Kumo Tabular decides whether it can run on an Apple GPU from the macOS
+  version, instead of from a matrix product it ran on the GPU. From macOS
+  26.6.2 it runs there; before that, `device="auto"` runs it on the CPU with
+  a `PerformanceWarning`, and `device="mps"` raises a `ValueError`. MPS on
+  macOS 26.0.1 gave Kumo Tabular wrong predictions, and on macOS 26.6.2 it
+  gave the CPU's. A Mac before macOS 26.6.2 whose GPU passed the old check
+  now runs Kumo Tabular on the CPU.
+
 ## [0.6.1] - 2026-11-14
 
 A release that runs the models on the GPU of an Apple silicon Mac and
@@ -1144,7 +1159,8 @@ The first release. Everything below is new.
   its documentation now says so. The chunking test checks that chunks are really
   formed.
 
-[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/biprateep/lazy-tfm/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/biprateep/lazy-tfm/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/biprateep/lazy-tfm/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/biprateep/lazy-tfm/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/biprateep/lazy-tfm/compare/v0.5.0...v0.5.1
