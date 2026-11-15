@@ -141,9 +141,10 @@ CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set.
 A backend whose model or settings cannot run on a device overrides
 `_device_problem(device)` to return the reason as a clause (TabPFN's
 `kv_cache="fp8"` on `"mps"`, or Kumo Tabular on MPS before macOS 26.6.2,
-which writes wrong products into strided views). The base class then runs the model on the CPU
-with a warning under `device="auto"`, and raises a `ValueError` before the
-checkpoint is loaded when the device was named outright.
+which writes wrong products into strided views). The base class then runs the
+model on the CPU with a warning under `device="auto"`, and raises a
+`ValueError` before the checkpoint is loaded when the device was named
+outright.
 
 A backend runs on CUDA, on an Apple GPU (MPS) and on the CPU, and these rules
 keep it there:
