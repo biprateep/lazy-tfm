@@ -93,11 +93,8 @@ _VALIDATED_RELEASE = "structured-data-models==0.2.1"
 
 _MPS_MACOS = (26, 6, 2)
 """The oldest macOS on which Kumo Tabular runs on MPS. Upstream's network
-writes batched matrix products into strided views of a buffer, and MPS on
-macOS 26.0.1 (an Apple M3 Ultra, torch 2.13 to 2.15) fills them with wrong
-values, silently, so its predictions ignore the features. On macOS 26.6.2 (an
-Apple M5, torch 2.15) its predictions matched the CPU's. Versions between were
-not run.
+writes matrix products into strided views, which MPS gets wrong on older
+macOS; the hardware guide gives the measurements.
 """
 
 SIZES: dict[str, str] = {
@@ -404,15 +401,18 @@ class KumoQuantile(
         return self.trim_fraction_
 
     def _device_problem(self, device: str) -> str | None:
-        if device == "mps" and _macos_version() < _MPS_MACOS:
-            oldest = ".".join(map(str, _MPS_MACOS))
-            return (
-                f"MPS before macOS {oldest} (this Mac runs "
-                f"{platform.mac_ver()[0] or 'an unknown version'}) can write "
-                "wrong matrix products into strided views, which upstream's "
-                "network uses, so its predictions would be wrong"
-            )
-        return None
+        if device != "mps":
+            return None
+        version = _macos_version()
+        if version >= _MPS_MACOS:
+            return None
+        read = ".".join(map(str, version)) or "no version"
+        return (
+            f"MPS before macOS {'.'.join(map(str, _MPS_MACOS))} can write "
+            "wrong matrix products into strided views, which upstream's "
+            "network uses, so its predictions would be wrong (this Python "
+            f"reads {read} from platform.mac_ver())"
+        )
 
     def _after_fit(self) -> None:
         self.n_quantiles_ = _N_QUANTILES

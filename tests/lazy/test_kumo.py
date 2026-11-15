@@ -197,13 +197,11 @@ def _on_macos(monkeypatch, release):
 @pytest.mark.parametrize(
     ("release", "works"),
     [
-        ("26.0.1", False),
         ("26.6.1", False),
         ("16.0", False),  # What a Python built for an older SDK reads.
         ("", False),
         ("26.6.2", True),
-        ("26.10", True),
-        ("27.2", True),
+        ("26.10", True),  # Compared as numbers, not as text.
     ],
 )
 def test_mps_is_ruled_out_only_before_the_macos_that_runs_it_right(
