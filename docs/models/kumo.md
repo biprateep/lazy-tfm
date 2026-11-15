@@ -118,9 +118,9 @@ quantile spacing past it, so that a fine grid shows no spike there. Its native
 grid is 1,500 equal bins over the range of the context targets, padded by 25%
 on each side. Kumo's preprocessing runs in double precision on the device,
 which Apple's MPS devices do not support, so on an Apple GPU LAZY gives it
-the features in single precision, as upstream does there. On some Macs, MPS
-gets Kumo's network wrong without an error, so LAZY checks for that first,
-and where it does, `device="auto"` runs Kumo Tabular on the CPU (see
+the features in single precision, as upstream does there. Before macOS 26.6.2,
+MPS can get Kumo's network wrong without an error, so there
+`device="auto"` runs Kumo Tabular on the CPU (see
 {doc}`../guide/hardware`). LAZY draws the members' random sign flips and
 column shuffles on a CPU, so a CPU and a GPU give the same ensemble for one
 seed (see {doc}`../guide/reproducibility`). NVIDIA pretrained Kumo Tabular on tables of up to

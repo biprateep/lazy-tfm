@@ -7,6 +7,16 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Kumo Tabular decides whether it can run on an Apple GPU from the macOS
+  version, instead of from a matrix product it ran on the GPU. From macOS
+  26.6.2 it runs there; before that, `device="auto"` runs it on the CPU with
+  a `PerformanceWarning`, and `device="mps"` raises a `ValueError`. MPS on
+  macOS 26.0.1 gave Kumo Tabular wrong predictions, and on macOS 26.6.2 it
+  gave the CPU's. A Mac before macOS 26.6.2 whose GPU passed the old check
+  now runs Kumo Tabular on the CPU.
+
 ## [0.6.1] - 2026-11-14
 
 A release that runs the models on the GPU of an Apple silicon Mac and
