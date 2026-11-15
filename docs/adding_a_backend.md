@@ -140,10 +140,11 @@ The base class resolves `device` into `device_` (`"cpu"`, `"cuda"`, `"cuda:<inde
 CUDA; a backend runs on `device_`, in float32 unless `mixed_precision_` is set.
 A backend whose model or settings cannot run on a device overrides
 `_device_problem(device)` to return the reason as a clause (TabPFN's
-`kv_cache="fp8"` on `"mps"`, or Kumo Tabular on an MPS that writes wrong
-products into strided views). The base class then runs the model on the CPU
-with a warning under `device="auto"`, and raises a `ValueError` before the
-checkpoint is loaded when the device was named outright.
+`kv_cache="fp8"` on `"mps"`, or Kumo Tabular on MPS before macOS 26.6.2,
+which writes wrong products into strided views). The base class then runs the
+model on the CPU with a warning under `device="auto"`, and raises a
+`ValueError` before the checkpoint is loaded when the device was named
+outright.
 
 A backend runs on CUDA, on an Apple GPU (MPS) and on the CPU, and these rules
 keep it there:
@@ -159,8 +160,8 @@ keep it there:
   device gives the same ensemble for one seed.
 - Autocast and reduced precision run only where `mixed_precision_` is set.
 - Where upstream fails on a device, `_device_problem` names it; where it may
-  run but give wrong answers there, `_device_problem` checks for that first,
-  as Kumo Tabular does on MPS.
+  run but give wrong answers there, `_device_problem` rules that out too,
+  as Kumo Tabular does on MPS before macOS 26.6.2.
 
 Outputs that are finite do not show that a device is right: Kumo Tabular
 once gave finite, wrong answers on MPS. The checkpoint test

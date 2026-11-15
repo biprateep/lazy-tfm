@@ -188,24 +188,37 @@ def test_features_reach_mps_in_float32(monkeypatch, device, dtype):
     assert seen == [getattr(torch, dtype)]
 
 
-@pytest.mark.parametrize("works", [True, False])
-def test_mps_is_ruled_out_only_where_it_gets_strided_products_wrong(
-    monkeypatch, works
+def _on_macos(monkeypatch, release):
+    monkeypatch.setattr(
+        kumo.platform, "mac_ver", lambda: (release, ("", "", ""), "arm64")
+    )
+
+
+@pytest.mark.parametrize(
+    ("release", "works"),
+    [
+        ("26.6.1", False),
+        ("16.0", False),  # What a Python built for an older SDK reads.
+        ("", False),
+        ("26.6.2", True),
+        ("26.10", True),  # Compared as numbers, not as text.
+    ],
+)
+def test_mps_is_ruled_out_only_before_the_macos_that_runs_it_right(
+    monkeypatch, release, works
 ):
-    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: works)
+    _on_macos(monkeypatch, release)
     model = kumo.KumoQuantile()
     assert (model._device_problem("mps") is None) == works
     assert model._device_problem("cuda") is None
 
 
-def test_where_mps_gets_strided_products_wrong_auto_runs_on_the_cpu(
-    monkeypatch, data
-):
+def test_before_that_macos_auto_runs_on_the_cpu(monkeypatch, data):
     """Upstream's network on such an MPS ignores the features, silently."""
     X, y, _ = data
     backend = fakes.Backend("kumo", monkeypatch)
     monkeypatch.setattr(_device, "resolve_device", lambda device: "mps")
-    monkeypatch.setattr(kumo, "_mps_matmul_into_views_works", lambda: False)
+    _on_macos(monkeypatch, "26.0.1")
     with pytest.warns(lazy.PerformanceWarning, match="strided views"):
         assert backend(device="auto").fit(X, y).device_ == "cpu"
     monkeypatch.setattr(_hub.Checkpoint, "download", fakes.no_download)

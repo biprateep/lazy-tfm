@@ -55,14 +55,14 @@ model's defaults, and ran TabPFN contexts larger than TabPFN allows on a CPU
 
 The limits are these:
 
-- **Kumo Tabular.** NVIDIA's network writes matrix products into strided
-  views of a buffer, which Metal gets wrong on some Macs, silently: on the M3
-  Ultra above its predictions ignored the features. LAZY checks for this once
-  per process, in about a millisecond. Where the check fails, `"auto"` runs
-  Kumo Tabular on the CPU with a warning, and `device="mps"` raises; where it
-  passes, Kumo Tabular runs on the GPU. On the M5 above, before LAZY had the
-  check, Kumo Tabular on its GPU agreed with its CPU to
-  $4 \times 10^{-5}$ of the range.
+- **Kumo Tabular needs macOS 26.6.2 or later on the GPU.** NVIDIA's network
+  writes matrix products into strided views of a buffer. On the M3 Ultra
+  above, with macOS 26.0.1, Metal fills them with wrong values, silently, and
+  Kumo Tabular's predictions ignored the features. On the M5 above, with
+  macOS 26.6.2, Kumo Tabular on its GPU agreed with its CPU to
+  $4 \times 10^{-5}$ of the range. Before macOS 26.6.2, `"auto"` runs Kumo
+  Tabular on the CPU with a warning, and `device="mps"` raises. macOS 15 and
+  earlier, and the versions between 26.0.1 and 26.6.2, were not run.
 - **TabPFN's `kv_cache="fp8"`.** PyTorch has no float8 on Metal. Under
   `"auto"` such a model runs on the CPU with a warning; `kv_cache="int8"` and
   the default `kv_cache=True` run on the GPU.
