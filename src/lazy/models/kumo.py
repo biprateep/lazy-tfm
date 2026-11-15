@@ -45,9 +45,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 import contextlib
 import dataclasses
-import functools
 from importlib import util
 import pathlib
+import platform
 import types
 import typing
 from typing import Any, TypeAlias
@@ -90,6 +90,15 @@ Tabular, and its ``sdm/models/kumo/tabular`` is the code at
 
 _VALIDATED_RELEASE = "structured-data-models==0.2.1"
 """What the deprecated ``lazy setup kumo`` installs: the validated release."""
+
+_MPS_MACOS = (26, 6, 2)
+"""The oldest macOS on which Kumo Tabular runs on MPS. Upstream's network
+writes batched matrix products into strided views of a buffer, and MPS on
+macOS 26.0.1 (an Apple M3 Ultra, torch 2.13 to 2.15) fills them with wrong
+values, silently, so its predictions ignore the features. On macOS 26.6.2 (an
+Apple M5, torch 2.15) its predictions matched the CPU's. Versions between were
+not run.
+"""
 
 SIZES: dict[str, str] = {
     "v1-large": "large",
@@ -204,9 +213,9 @@ class KumoQuantile(
         device: Where to run. MPS has no float64, so on MPS the features
             reach upstream in float32 and its recipe runs in float32, as
             upstream's own ``Cast`` does there; elsewhere it runs in
-            float64. On a Mac whose MPS gets upstream's network wrong,
-            checked once per process, ``"auto"`` runs it on the CPU with a
-            warning and ``"mps"`` raises ValueError.
+            float64. Before macOS 26.6.2, whose MPS can get upstream's
+            network wrong, ``"auto"`` runs it on the CPU with a warning and
+            ``"mps"`` raises ValueError.
         random_state: The ensemble's seed. A group of members runs on a
             CPU ``torch.Generator`` seeded by its first member,
             ``SeedSequence([random_state, i])``, which draws the members'
@@ -395,11 +404,13 @@ class KumoQuantile(
         return self.trim_fraction_
 
     def _device_problem(self, device: str) -> str | None:
-        if device == "mps" and not _mps_matmul_into_views_works():
+        if device == "mps" and _macos_version() < _MPS_MACOS:
+            oldest = ".".join(map(str, _MPS_MACOS))
             return (
-                "this Mac's MPS writes wrong matrix products into strided "
-                "views, which upstream's network uses, so its predictions "
-                "would be wrong"
+                f"MPS before macOS {oldest} (this Mac runs "
+                f"{platform.mac_ver()[0] or 'an unknown version'}) can write "
+                "wrong matrix products into strided views, which upstream's "
+                "network uses, so its predictions would be wrong"
             )
         return None
 
@@ -701,35 +712,20 @@ def _lending(network: Any, cache: Any = None) -> Iterator[None]:
             network._cache = None  # noqa: SLF001 - upstream's cache.
 
 
-@functools.cache
-def _mps_matmul_into_views_works() -> bool:
-    """Whether MPS writes a batched matmul into a strided ``out`` correctly.
+def _macos_version() -> tuple[int, ...]:
+    """This Mac's macOS version, or ``()`` where it cannot be read.
 
-    Upstream's network writes products into transposed slices of a buffer,
-    which MPS fills with wrong values on some Macs, silently. Checked once
-    per process, against the CPU.
+    Read with :func:`platform.mac_ver`, since PyTorch cannot tell the minor
+    versions of macOS 26 apart. A Python built against an SDK older than
+    macOS 26 reads ``16.0`` there, which is older than :data:`_MPS_MACOS`.
 
     Returns:
-        True when the MPS product matches the CPU's to float32 rounding.
+        The version's numbers, such as ``(26, 0, 1)``.
     """
-    import torch  # noqa: PLC0415 - torch comes with the extra.
-
-    generator = torch.Generator().manual_seed(0)
-    # Smaller products come out right even where larger ones do not; the
-    # second size is the cell embedding's at 400 rows and 5 features.
-    for n_groups, n_rows, n_inner, n_out in (
-        (4, 64, 32, 32),
-        (5, 400, 96, 128),
-    ):
-        a = torch.randn(n_groups, n_rows, n_inner, generator=generator)
-        b = torch.randn(n_groups, n_inner, n_out, generator=generator)
-        buffer = torch.empty(n_rows, 1 + n_groups, n_out, device="mps")
-        view = buffer[:, 1:, :]
-        torch.matmul(a.to("mps"), b.to("mps"), out=view.transpose(0, 1))
-        expected = torch.matmul(a, b).transpose(0, 1)
-        if not torch.allclose(view.cpu(), expected, rtol=1e-4, atol=1e-4):
-            return False
-    return True
+    try:
+        return tuple(int(part) for part in platform.mac_ver()[0].split("."))
+    except ValueError:
+        return ()
 
 
 def _recipe(
