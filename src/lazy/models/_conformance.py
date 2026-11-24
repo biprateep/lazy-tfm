@@ -17,13 +17,15 @@ Typical usage example:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import inspect
+from typing import Any
 
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _transforms
 
-__all__ = ["check_static", "problems"]
+__all__ = ["check_static", "parameter_problems", "problems", "refuse"]
 
 
 def problems(cls: type, name: str) -> list[str]:
@@ -46,7 +48,11 @@ def problems(cls: type, name: str) -> list[str]:
         found.append(f"backend = {cls.backend!r}, registered as {name!r}")
     if name not in _hub.DEFAULT_VERSIONS:
         found.append(f"no pinned checkpoint: add {name!r} to DEFAULT_VERSIONS")
-    found.extend(_parameter_problems(cls))
+    found.extend(
+        parameter_problems(
+            cls, _ensemble.UNIFORM_PARAMS, _ensemble.UNIFORM_DEFAULTS
+        )
+    )
     found.extend(_declaration_problems(cls))
     return found
 
@@ -61,25 +67,57 @@ def check_static(cls: type, name: str) -> None:
     Raises:
         TypeError: If it falls short, listing every problem.
     """
-    found = problems(cls, name)
+    refuse(cls, problems(cls, name))
+
+
+def refuse(cls: type, found: Sequence[str]) -> None:
+    """Raises if a class has problems that keep it out of a registry.
+
+    Args:
+        cls: The candidate class.
+        found: Its problems, one message each.
+
+    Raises:
+        TypeError: If there are any, listing every one.
+    """
     if found:
         details = "\n  - ".join(found)
-        raise TypeError(f"{cls.__name__} cannot be registered:\n  - {details}")
+        name = getattr(cls, "__name__", repr(cls))
+        raise TypeError(f"{name} cannot be registered:\n  - {details}")
 
 
-def _parameter_problems(cls: type) -> list[str]:
-    """The uniform parameters, keyword-only, with the shared defaults."""
+def parameter_problems(
+    cls: type, names: Sequence[str], defaults: Mapping[str, Any]
+) -> list[str]:
+    """The ways a constructor falls short of a set of shared parameters.
+
+    Args:
+        cls: The candidate class.
+        names: The parameters its constructor must take, keyword-only.
+        defaults: The default each of some of them must have.
+
+    Returns:
+        One message per problem: ``**kwargs``, a parameter that is missing,
+        positional or without a default (so that ``cls()`` cannot build
+        it), or another default than the shared one.
+    """
     parameters = inspect.signature(cls.__init__).parameters  # type: ignore[misc]  # a class's own __init__
     found = []
     if any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
         found.append("__init__ takes **kwargs, which hides parameters")
-    for name in _ensemble.UNIFORM_PARAMS:
+    for name in names:
         parameter = parameters.get(name)
         if parameter is None:
             found.append(f"__init__ lacks the uniform parameter {name!r}")
         elif parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
             found.append(f"{name!r} must be keyword-only")
-    for name, default in _ensemble.UNIFORM_DEFAULTS.items():
+    for parameter in list(parameters.values())[1:]:
+        if parameter.default is inspect.Parameter.empty and (
+            parameter.kind
+            not in (parameter.VAR_KEYWORD, parameter.VAR_POSITIONAL)
+        ):
+            found.append(f"{parameter.name!r} has no default")
+    for name, default in defaults.items():
         parameter = parameters.get(name)
         if parameter is not None and parameter.default != default:
             found.append(

@@ -1674,3 +1674,13 @@ def test_threads_relocating_a_pickles_checkpoint_never_see_the_old_path(
     assert threads.run(relocate, relocate)
     assert seen == ["/here/it.ckpt", "/here/it.ckpt"]
     assert "_relocate_checkpoint" not in vars(restored)
+
+
+def test_a_backend_parameter_without_a_default_is_a_problem():
+    class Required(standins.HistogramStandIn):
+        def __init__(self, *, token, **params):
+            super().__init__(**params)
+            self.token = token
+
+    problems = _conformance.problems(Required, "required")
+    assert "'token' has no default" in problems

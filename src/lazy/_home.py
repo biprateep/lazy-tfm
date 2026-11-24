@@ -42,3 +42,21 @@ def default_home(name: str) -> pathlib.Path:
         user_cache = pathlib.Path.home() / ".cache"
     cache = os.environ.get("XDG_CACHE_HOME") or user_cache
     return pathlib.Path(cache).expanduser() / name
+
+
+def umask() -> int:
+    """The process's file-mode creation mask.
+
+    Read from ``/proc`` where there is one, as setting the mask to read it
+    back would change it for every thread in the meantime.
+    """
+    try:
+        with open("/proc/self/status", encoding="ascii") as status:
+            for line in status:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8)
+    except OSError:
+        pass
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
