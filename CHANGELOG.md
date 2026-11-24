@@ -18,6 +18,9 @@ change the API.
 - `lazy.metrics.density_scorer`: a scikit-learn scorer for the CDE loss, the
   CRPS or the NLL of the predicted densities, for `GridSearchCV`,
   `cross_val_score` and `permutation_importance`.
+- The user guide opens with a page of design principles: frozen
+  pretrained models, scikit-learn's API and tools first, and methods that
+  need no training before any that do.
 
 ### Removed
 
