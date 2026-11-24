@@ -6,6 +6,16 @@ Part 1 applies to every session. Part 2 applies only to sessions working through
 
 ## Part 1: Project
 
+### Principle
+
+lazy asks the user to do as little as possible. `docs/guide/philosophy.md` states it for users.
+
+- Models are pretrained and frozen: nothing trains by default, `fit` stores the context and a prediction is a forward pass.
+- scikit-learn's API and tools come first. lazy adds its own equivalent only where scikit-learn's tool cannot carry a density.
+- Training-free methods (bagging, ensembles, transforms, pools of models) improve a prediction before anything trains. Each is a parameter with a sensible default.
+- Data that is not a table goes through a frozen pretrained encoder that turns it into table columns, never through a model trained per dataset.
+- Anything that trains weights is opt-in, never the default.
+
 ### Layout
 
 - `src/lazy/`: the package.

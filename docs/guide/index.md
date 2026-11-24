@@ -8,6 +8,7 @@ the tutorials, which point to this guide as the reference.
 ```{toctree}
 :maxdepth: 1
 
+philosophy
 tfm
 distributions
 interface
