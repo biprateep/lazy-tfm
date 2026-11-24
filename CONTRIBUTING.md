@@ -127,6 +127,13 @@ fakes). `tests/lazy/test_backend_completeness.py` checks every registered
 backend for all of them. [Worked example: Kumo
 Tabular](docs/adding_a_backend_kumo.md) follows one backend through every step.
 
+## Adding an encoder
+
+An encoder turns a column of items that are not table cells (images, text,
+time series) into numeric columns: a subclass of `BaseEncoder`, registered by
+name. [Adding an encoder](docs/adding_an_encoder.md) describes the contract it
+must meet, gives a skeleton, and explains the cache of embeddings.
+
 ## Changing dependencies
 
 Edit `pyproject.toml`, then run `uv lock` and commit both files. CI runs

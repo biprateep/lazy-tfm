@@ -29,6 +29,20 @@ change the API.
   guide has a page on it, "Interpretability".
 - `lazy.base.default_grid`: the grid a model without a native grid answers
   on, for targets between two values.
+- `lazy.encoders`: the contract for encoders, the transformers that turn a
+  column of items which are not table cells (images, text, time series)
+  into numeric columns. `BaseEncoder` reads the column, encodes it in
+  batches, gives a missing item a row of `NaN` and names the output
+  columns; `register`, `list_encoders` and `get_encoder` file encoders by
+  name. With `cache` set, an encoder files each item's embedding on disk,
+  under `embeddings/v1` in the `lazy` data directory, and
+  `clear_embedding_cache` empties it. No encoder ships yet.
+
+### Changed
+
+- `lazy.models.registry.register` refuses a backend whose constructor has a
+  parameter without a default, since `cls()` could not build it. The five
+  backends that ship are unaffected.
 
 ### Removed
 

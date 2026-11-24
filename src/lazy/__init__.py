@@ -47,6 +47,10 @@ The package is laid out as follows.
 :mod:`lazy.metrics`
     The LSST DESC PZ Data Challenge PDF and point metrics, and
     :func:`~lazy.metrics.summarize` for the comparison table.
+:mod:`lazy.encoders`
+    :class:`~lazy.encoders.BaseEncoder`, the contract of the transformers
+    that turn items which are not table cells (images, text, time series)
+    into table columns, their registry and the cache of their embeddings.
 :mod:`lazy.interp`
     :func:`~lazy.interp.explain`: which features a model's predicted
     distributions rely on, by Shapley values, leave-one-out or permutation.
@@ -76,6 +80,7 @@ import types
 import typing
 
 from lazy import _namespace
+from lazy import encoders
 from lazy import interp
 from lazy._namespace import ImportNameWarning
 from lazy._warnings import LazyWarning
@@ -151,6 +156,7 @@ __all__ = [
     "as_grid",
     "clear_model_cache",
     "download_checkpoint",
+    "encoders",
     "get_checkpoint",
     "get_estimator",
     "interp",

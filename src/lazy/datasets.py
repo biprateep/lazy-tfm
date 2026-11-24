@@ -90,6 +90,7 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
+from lazy import _home
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -809,7 +810,7 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
         if not _is_complete(dest, size):  # Else another process was first.
             # mkstemp makes the file private (0600); give it the mode any new
             # file would get, so that a shared cache is readable by others.
-            os.chmod(tmp, 0o666 & ~_umask())
+            os.chmod(tmp, 0o666 & ~_home.umask())
             try:
                 os.replace(tmp, dest)
             except PermissionError:
@@ -820,24 +821,6 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
     finally:
         tmp.unlink(missing_ok=True)
     _LOG.info("cached %s (%.0f MB)", dest, dest.stat().st_size / 1e6)
-
-
-def _umask() -> int:
-    """The process's file-mode creation mask.
-
-    Read from ``/proc`` where there is one, as setting the mask to read it
-    back would change it for every thread in the meantime.
-    """
-    try:
-        with open("/proc/self/status", encoding="ascii") as status:
-            for line in status:
-                if line.startswith("Umask:"):
-                    return int(line.split()[1], 8)
-    except OSError:
-        pass
-    mask = os.umask(0o022)
-    os.umask(mask)
-    return mask
 
 
 # -- the spectroscopically selected split ----------------------------------

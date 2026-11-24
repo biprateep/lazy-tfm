@@ -23,7 +23,7 @@ A backend declares its model's capabilities as class attributes
 {class}`~lazy.models.ContextEnsembleEstimator`) and implements `_fit_group`,
 `_predict_group` and `_native_grid`. Its constructor takes every uniform
 parameter as a keyword with the shared default, stores each one verbatim, and
-takes nothing else positionally, so that `cls()` builds a working estimator; `register` refuses a class that falls
+takes nothing else positionally and gives every parameter a default, so that `cls()` builds a working estimator; `register` refuses a class that falls
 short of this.
 
 The backend also names its upstream package and pins its recipe as class

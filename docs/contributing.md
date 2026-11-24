@@ -9,4 +9,5 @@
 
 adding_a_backend
 adding_a_backend_kumo
+adding_an_encoder
 ```
