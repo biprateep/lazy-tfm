@@ -47,6 +47,9 @@ The package is laid out as follows.
 :mod:`lazy.metrics`
     The LSST DESC PZ Data Challenge PDF and point metrics, and
     :func:`~lazy.metrics.summarize` for the comparison table.
+:mod:`lazy.interp`
+    :func:`~lazy.interp.explain`: which features a model's predicted
+    distributions rely on, by Shapley values, leave-one-out or permutation.
 :mod:`lazy.plotting`
     The publication style, and the standard diagnostic figures.
 :mod:`lazy.datasets`
@@ -73,6 +76,7 @@ import types
 import typing
 
 from lazy import _namespace
+from lazy import interp
 from lazy._namespace import ImportNameWarning
 from lazy._warnings import LazyWarning
 from lazy.base import BaseDensityRegressor
@@ -149,6 +153,7 @@ __all__ = [
     "download_checkpoint",
     "get_checkpoint",
     "get_estimator",
+    "interp",
     "is_cached",
     "list_estimators",
     "list_versions",

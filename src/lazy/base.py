@@ -69,6 +69,7 @@ __all__ = [
     "DEFAULT_PADDING",
     "POINT_ESTIMATORS",
     "BaseDensityRegressor",
+    "default_grid",
 ]
 
 DEFAULT_N_BINS = 200
@@ -215,9 +216,7 @@ class BaseDensityRegressor(
             return self.native_grid
         if self.y_grid is not None:
             return grid_lib.as_grid(self.y_grid)
-        low, high = self.y_range_
-        pad = DEFAULT_PADDING * (high - low) or DEFAULT_PADDING
-        return grid_lib.Grid.linear(low - pad, high + pad, DEFAULT_N_BINS)
+        return default_grid(*self.y_range_)
 
     @property
     def native_grid(self) -> grid_lib.Grid:
@@ -270,7 +269,7 @@ class BaseDensityRegressor(
         self._clear_fitted()
         X, named = _inputs.as_feature_frame(X)
         self._check_not_empty(X)
-        y = _check_target(y, len(X))
+        y = _inputs.check_target(y, len(X))
         try:
             self.n_features_in_ = int(X.shape[1])
             if named:
@@ -454,7 +453,7 @@ class BaseDensityRegressor(
         """
         validation.check_is_fitted(self)
         X = self._check_queries(X)
-        y = _check_target(y, len(X))
+        y = _inputs.check_target(y, len(X))
         pits, start = [], 0
         for dist in self._chunked(X):
             pits.append(dist.pit(y[start : start + len(dist)]))
@@ -595,7 +594,7 @@ class BaseDensityRegressor(
         grid = self._resolve_grid(y_grid)
         X = self._check_features(X)
         self._check_not_empty(X)
-        y = _check_target(y, len(X))
+        y = _inputs.check_target(y, len(X))
         terms = [
             metrics.per_object_scores(y[rows], grid, density)[0]
             for rows, density in self._density_blocks(X, grid)
@@ -646,7 +645,7 @@ class BaseDensityRegressor(
         grid = self._resolve_grid(y_grid)
         X = self._check_features(X)
         self._check_not_empty(X)
-        y = _check_target(y, len(X))
+        y = _inputs.check_target(y, len(X))
         y_pred, scores = [], []
         for rows, density in self._density_blocks(X, grid):
             y_pred.append(metrics.grid_point_estimate(grid, density, method))
@@ -962,23 +961,19 @@ class BaseDensityRegressor(
         )
 
 
-def _check_target(target: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
-    """Validates target values against the feature rows they label.
+def default_grid(low: float, high: float) -> grid_lib.Grid:
+    """The grid of a model without one, for targets between two values.
 
     Args:
-        target: Target values, shape (n_rows,), in any form
-            :func:`lazy._inputs.as_target` accepts.
-        n_rows: The number of feature rows.
+        low: The smallest target.
+        high: The largest target.
 
     Returns:
-        The values as a float64 array, shape (n_rows,).
+        :data:`DEFAULT_N_BINS` uniform bins over ``[low, high]``, widened by
+        :data:`DEFAULT_PADDING` of that range on each side.
     """
-    values = _inputs.as_target(target)
-    if values.size != n_rows:
-        raise ValueError(f"X has {n_rows} rows but y has {values.size} values")
-    if not np.isfinite(values).all():
-        raise ValueError("y contains non-finite values")
-    return values
+    pad = DEFAULT_PADDING * (high - low) or DEFAULT_PADDING
+    return grid_lib.Grid.linear(low - pad, high + pad, DEFAULT_N_BINS)
 
 
 def _check_method(method: str) -> str:
