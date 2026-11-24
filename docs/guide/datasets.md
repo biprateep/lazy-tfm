@@ -64,6 +64,48 @@ X_train, X_test, y_train, y_test = datasets.load_dataset(
 )
 ```
 
+## MulTaBench
+
+[MulTaBench](https://arxiv.org/abs/2605.10616) is a benchmark of tables with
+columns of text or images. Its 40 regression datasets load by name, as
+`"multabench_<name>"`, from the
+[Hugging Face Hub](https://huggingface.co/multabench), each pinned to the commit
+that the `multabench` package 0.2.1 pins. They need the `multabench` extra,
+which reads their parquet tables:
+
+```console
+pip install 'lazy-tfm[multabench]'
+```
+
+20 of them have columns of text, and 20 have a column of images, often with
+text too. `list_datasets()` lists them with the others: MulTaBench's tier
+(`core` or `extended`) and kind are in the description. The image column holds
+the paths of the extracted image files, which {mod}`lazy.image` reads, and
+{attr}`Dataset.modalities <lazy.datasets.Dataset.modalities>` names each
+column of text or images, as MulTaBench types them. That map goes straight
+to {class}`lazy.Tabularizer`:
+
+```python
+train, test = datasets.load_dataset("multabench_khaadi_clothes", split=True)
+model = lazy.make_pipeline(lazy.Tabularizer(train.modalities), lazy.LazyModel())
+model.fit(train.X, train.y)
+model.score(test.X, test.y)
+```
+
+`split=True` gives MulTaBench's own split, TabArena's: three folds repeated
+twice with seed 42, chosen by `fold` (0 to 5, default 0). By default,
+`size="10k"` keeps at most 10,000 training and 5,000 test rows of each split,
+as MulTaBench's results do; `size="full"` keeps them all. The rows keep their
+labels in the whole table.
+
+The tables total 210 MB. The images of a dataset take from 10 MB to 9.3 GB,
+24 GB for all 20. They download with the table and are extracted once under
+{func}`~lazy.datasets.data_home`; `images=False` skips them, and the image
+column then holds the files' names and is left out of `modalities`. Each dataset keeps the licence of its
+source, which the `license` column links. If you use them, cite MulTaBench:
+Arazi et al. 2026, *MulTaBench: Benchmarking Multimodal Tabular Learning with
+Text and Image*, NeurIPS, arXiv:2605.10616.
+
 ## The chirp
 
 The chirp is a toy problem with one feature, `x`, and the target

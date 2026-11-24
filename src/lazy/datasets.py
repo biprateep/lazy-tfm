@@ -54,8 +54,9 @@ through the same code, either via :meth:`Catalog.from_frame` or by calling
 
 For trying a model on something other than photometry, :func:`load_dataset`
 loads a regression dataset by name -- DC1, one of a dozen OpenML datasets
-pinned to their ids, or ``"chirp"``, a one-feature toy curve with chunks cut
-out, generated on the spot -- downloading it once and caching it under
+pinned to their ids, one of MulTaBench's 40 tables with text or images, or
+``"chirp"``, a one-feature toy curve with chunks cut out, generated on the
+spot -- downloading it once and caching it under
 :func:`data_home`, and :func:`list_datasets` lists them without downloading
 anything::
 
@@ -91,6 +92,7 @@ import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
 from lazy import _home
+from lazy import _multabench
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -1449,11 +1451,14 @@ class Dataset:
         y: The target, shape (n_rows,), as float64.
         target: The name of the target column at the source.
         description: What the dataset is, in one line.
-        source: Where it comes from: ``"OpenML <data_id>"``, or a Zenodo
-            record.
+        source: Where it comes from: ``"OpenML <data_id>"``, a Zenodo
+            record, or a MulTaBench repository on the Hugging Face Hub.
         license: The license the source states.
         url: The source's page for the dataset.
         citation: The reference to cite when using it, or ``""`` for none.
+        modalities: The columns of text or images, each mapped to
+            ``"text"`` or ``"image"``, as :class:`lazy.Tabularizer` takes
+            them; empty for a dataset of numbers and categories only.
     """
 
     name: str
@@ -1465,6 +1470,7 @@ class Dataset:
     license: str
     url: str
     citation: str = ""
+    modalities: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.y)
@@ -1492,6 +1498,10 @@ class _Entry:
             its categories from worst to best.
         generated: Whether the data is generated on the spot by
             :func:`_make_chirp` rather than downloaded.
+        multabench: The MulTaBench dataset it is, or ``None``.
+        options: The keywords of :func:`load_dataset` that it takes beyond
+            the common ones.
+        has_split: Whether it has a train/test split of its own.
         parser: The ARFF parser :func:`sklearn.datasets.fetch_openml` uses.
             ``"liac-arff"`` for a dataset with integer-valued nominal
             columns, whose categories pandas 3.1 reads as integers, which
@@ -1512,12 +1522,17 @@ class _Entry:
 
     generated: bool = False
     parser: Literal["auto", "liac-arff"] = "auto"
+    multabench: _multabench.Table | None = None
+    options: frozenset[str] = frozenset()
+    has_split: bool = False
 
     @property
     def source(self) -> str:
         """Where the data comes from."""
         if self.generated:
             return "Generated"
+        if self.multabench is not None:
+            return f"Hugging Face multabench/{self.multabench.repo}"
         if self.data_id is None:
             return "Zenodo 10975874"
         return f"OpenML {self.data_id}"
@@ -1528,6 +1543,11 @@ class _Entry:
         if self.generated:
             return (
                 "https://lazy-tfm.readthedocs.io/en/latest/guide/datasets.html"
+            )
+        if self.multabench is not None:
+            return (
+                "https://huggingface.co/datasets/multabench/"
+                + self.multabench.repo
             )
         if self.data_id is None:
             return "https://zenodo.org/records/10975874"
@@ -1670,6 +1690,7 @@ _REGISTRY: dict[str, _Entry] = {
         description="LSST DESC photo-z Data Challenge 1 galaxy photometry",
         license="CC BY 4.0",
         citation="Schmidt et al. 2020, MNRAS 499, 1587",
+        has_split=True,
     ),
     # The defaults of _make_chirp: 1,000 points, gaps included.
     "chirp": _Entry(
@@ -1680,12 +1701,41 @@ _REGISTRY: dict[str, _Entry] = {
         description="A noisy chirp with chunks cut out, generated on the spot",
         license="MIT",
         generated=True,
+        # The keywords load_dataset passes to _make_chirp.
+        options=frozenset(
+            {"n_samples", "noise", "n_gaps", "gap_width", "random_state"}
+        ),
+        has_split=True,
     ),
 }
 
-# Keywords load_dataset passes to _make_chirp, which no other dataset takes.
-_CHIRP_OPTIONS = frozenset(
-    {"n_samples", "noise", "n_gaps", "gap_width", "random_state"}
+_MULTABENCH_CITATION = (
+    "Arazi et al. 2026, MulTaBench: Benchmarking Multimodal Tabular"
+    " Learning with Text and Image, NeurIPS, arXiv:2605.10616"
+)
+
+
+# MulTaBench's regression datasets, after the others; each keeps the licence
+# of its source.
+_REGISTRY.update(
+    {
+        f"multabench_{name}": _Entry(
+            data_id=None,
+            target=table.target,
+            n_rows=table.n_rows,
+            n_features=table.n_features,
+            description=(
+                f"MulTaBench {table.tier}, {table.modality}:"
+                f" {name.replace('_', ' ')}"
+            ),
+            license=f"As its source states: {table.source}",
+            citation=_MULTABENCH_CITATION,
+            multabench=table,
+            options=frozenset({"fold", "size", "images"}),
+            has_split=True,
+        )
+        for name, table in _multabench.DATASETS.items()
+    }
 )
 
 
@@ -1785,9 +1835,19 @@ def load_dataset(
 ) -> Dataset | _XY | tuple[Dataset, Dataset] | _SplitXY:
     """Loads a demo regression dataset, downloading and caching it on first use.
 
-    Every dataset but DC1 and the chirp is an OpenML dataset pinned to its
-    id, fetched with :func:`sklearn.datasets.fetch_openml` and cached under
-    ``data_home()/"openml"``; later calls read the cache and need no network.
+    The datasets named ``"multabench_<name>"`` are MulTaBench's regression
+    datasets: tables with columns of text or images, each pinned to a
+    commit on the Hugging Face Hub and cached under
+    ``data_home()/"multabench"``. They need the ``multabench`` extra, which
+    reads their parquet tables. An image column holds the paths of the
+    extracted image files, which :mod:`lazy.image` encoders read, and
+    :attr:`Dataset.modalities` names the columns of text and of images;
+    ``return_X_y`` leaves it out.
+
+    The other datasets but DC1 and the chirp are OpenML datasets pinned to
+    their ids, fetched with :func:`sklearn.datasets.fetch_openml` and cached
+    under ``data_home()/"openml"``; later calls read the cache and need no
+    network.
     DC1 is :func:`fetch_dc1`, both files, as the ``"mag-color"`` features.
     Categorical columns with a natural order, such as the grades of
     ``"diamonds"``, come as ordered categoricals, so ``.cat.codes`` turns
@@ -1806,9 +1866,10 @@ def load_dataset(
     Args:
         name: A dataset's name, one of the index of :func:`list_datasets`.
         split: When ``True``, return the dataset's own train/test split:
-            DC1's challenge split, or the chirp's gaps as the test rows.
-            The OpenML datasets have none. When ``False``, the training and
-            test rows come concatenated, in that order.
+            DC1's challenge split, the chirp's gaps as the test rows, or
+            MulTaBench's split ``fold``. The OpenML datasets have none.
+            When ``False``, the training and test rows come concatenated,
+            in that order.
         data_home: Cache directory; see :func:`data_home`.
         return_X_y: When ``True``, return only the features and the target.
         **options: The chirp's options, which no other dataset takes:
@@ -1818,7 +1879,13 @@ def load_dataset(
             ``n_gaps`` (how many chunks to cut out, 0 for none, default 3),
             ``gap_width`` (each chunk's width as a fraction of the range of
             ``x``, default 0.04) and ``random_state`` (a seed or a NumPy
-            Generator, for the noise and where the gaps fall).
+            Generator, for the noise and where the gaps fall). A MulTaBench
+            dataset's options, which no other dataset takes: ``fold`` (its
+            split, 0 to 5, default 0) and ``size`` (``"10k"``, the default,
+            for at most 10,000 training and 5,000 test rows, or
+            ``"full"``), with ``split`` only; and ``images`` (whether to
+            download the images, default ``True``; without them an image
+            column holds the files' names within the dataset).
 
     Returns:
         A :class:`Dataset`, or with ``return_X_y`` a tuple (X, y) of its
@@ -1831,10 +1898,12 @@ def load_dataset(
     Raises:
         ValueError: If ``name`` is not a known dataset, ``split`` is asked of
             one without a split, the source's categories of an ordered column
-            are not the expected ones, or the chirp's gaps do not fit in
-            their segments or a count is negative.
-        TypeError: If ``options`` are given for a dataset other than the
-            chirp, or are not the chirp's.
+            are not the expected ones, the chirp's gaps do not fit in
+            their segments or a count is negative, or ``fold`` or ``size``
+            is given without ``split`` or is not one of its values.
+        ImportError: If a MulTaBench dataset is asked for without pyarrow.
+        TypeError: If ``options`` holds a keyword that the dataset does
+            not take, or ``images`` is not a bool.
         OSError: If a download fails.
 
     Examples:
@@ -1848,17 +1917,20 @@ def load_dataset(
         raise ValueError(
             f"unknown dataset {name!r}; choose one of {sorted(_REGISTRY)}"
         )
-    unknown = set(options) - (_CHIRP_OPTIONS if entry.generated else set())
+    unknown = set(options) - entry.options
     if unknown:
         raise TypeError(
             f"load_dataset({name!r}) got unexpected keywords {sorted(unknown)}"
         )
-    if split and entry.data_id is not None:
+    if split and not entry.has_split:
         raise ValueError(
             f"{name!r} has no train/test split of its own; split it with"
             " sklearn.model_selection.train_test_split"
         )
-    if entry.generated:
+    modalities: dict[str, str] = {}
+    if entry.multabench is not None:
+        parts, modalities = _load_multabench(entry, split, data_home, **options)
+    elif entry.generated:
         x_train, x_test, y_train, y_test = _make_chirp(**options)
         parts = [
             (pd.DataFrame({"x": x_train[:, 0]}), y_train),
@@ -1914,12 +1986,62 @@ def load_dataset(
             license=entry.license,
             url=entry.url,
             citation=entry.citation,
+            modalities=dict(modalities),
         )
         for X, y in parts
     ]
     if split:
         return loaded[0], loaded[1]
     return loaded[0]
+
+
+def _load_multabench(
+    entry: _Entry,
+    split: bool,
+    root: str | pathlib.Path | None,
+    *,
+    fold: int | None = None,
+    size: str | None = None,
+    images: bool = True,
+) -> tuple[list[tuple[pd.DataFrame, _typing.FloatArray]], dict[str, str]]:
+    """A MulTaBench dataset, whole or as MulTaBench splits it.
+
+    Args:
+        entry: The dataset's entry.
+        split: Whether to split it.
+        root: The ``data_home`` argument.
+        fold: The split, from 0 to 5; 0 when ``split`` and ``None``.
+        size: ``"10k"`` or ``"full"``; ``"10k"`` when ``split`` and ``None``.
+        images: Whether to download the images; see :func:`load_dataset`.
+
+    Returns:
+        The parts, (X, y) each, and the modalities of the columns.
+
+    Raises:
+        ValueError: If ``fold`` or ``size`` is given without ``split``, or
+            is not one of its values.
+    """
+    if not split and (fold is not None or size is not None):
+        raise ValueError(
+            "fold and size choose a split of MulTaBench: pass split=True"
+        )
+    fold = 0 if fold is None else fold
+    size = "10k" if size is None else size
+    _multabench.check(fold, size)
+    if not isinstance(images, bool):
+        raise TypeError(f"images must be True or False: {images=}")
+    table = entry.multabench
+    assert table is not None
+    X, y, modalities = _multabench.load(
+        table, _resolve_home(root), images=images
+    )
+    if not split:
+        return [(X, y)], modalities
+    parts = [
+        (X.iloc[rows], y[rows])
+        for rows in _multabench.split(len(y), fold, size)
+    ]
+    return parts, modalities
 
 
 def _resolve_home(root: str | pathlib.Path | None) -> pathlib.Path:
