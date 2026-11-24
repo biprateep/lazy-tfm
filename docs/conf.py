@@ -59,6 +59,7 @@ exclude_patterns = [
     "tutorials/_gallery.md",
     "models/_overview.md",
     "guide/_backends.md",
+    "guide/_encoders.md",
 ]
 root_doc = "index"
 
