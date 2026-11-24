@@ -2,12 +2,14 @@
 # Copyright (c) 2025 Biprateep Dey
 
 import dataclasses
+import pickle
 import warnings
 
 import numpy as np
 import pandas as pd
 import pytest
 from scipy import stats
+import standins
 
 from lazy import grid as grid_lib
 from lazy import metrics
@@ -589,3 +591,36 @@ def _leaves(result):
             leaves.extend(_leaves(part))
         return leaves
     return [np.asarray(result)]
+
+
+@pytest.mark.parametrize("score", metrics.DENSITY_SCORES)
+def test_a_density_scorer_is_minus_the_score_of_the_densities(score):
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(60, 3))
+    y = 2.0 * X[:, 0] + rng.normal(0.0, 0.1, 60)
+    model = standins.HistogramStandIn(n_estimators=2, progress=False)
+    model.fit(X, y)
+    grid = grid_lib.Grid.linear(-6.0, 6.0, 40)
+    scorer = pickle.loads(pickle.dumps(metrics.density_scorer(score, grid)))
+    direct = getattr(metrics, score)(y, grid, model.predict_proba(X, grid))
+    np.testing.assert_allclose(scorer(model, X, y), -direct, rtol=1e-12)
+
+
+def test_an_unknown_density_score_is_refused():
+    with pytest.raises(ValueError, match="score must be one of"):
+        metrics.density_scorer("mae")
+
+
+def test_a_density_scorer_refuses_a_bad_grid_before_any_scoring():
+    metrics.density_scorer("crps", np.array([0.0, 1.0, 2.0]))
+    metrics.density_scorer("crps", "native")
+    with pytest.raises(ValueError, match="evenly spaced"):
+        metrics.density_scorer("crps", np.array([0.0, 1.0, 3.0]))
+    with pytest.raises(ValueError, match="bogus"):
+        metrics.density_scorer("crps", "bogus")
+
+
+def test_a_density_scorer_names_an_estimator_without_evaluate():
+    scorer = metrics.density_scorer("crps")
+    with pytest.raises(TypeError, match="needs an estimator with an evaluate"):
+        scorer(object(), np.zeros((2, 1)), np.zeros(2))

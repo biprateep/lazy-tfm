@@ -35,6 +35,9 @@ The package is laid out as follows.
 :mod:`lazy.models`
     :class:`~lazy.models.lazy_model.LazyModel`, the concrete backends, and the
     registry they are looked up in.
+:mod:`lazy.pipeline`
+    :class:`~lazy.pipeline.LazyPipeline`, a scikit-learn pipeline that keeps
+    the density methods of the model at its end.
 :mod:`lazy.grid`
     :class:`~lazy.grid.Grid`: the output binning, normalization and
     mass-conserving rebinning.
@@ -108,6 +111,8 @@ from lazy.models import TabFMPerformanceWarning
 from lazy.models import TabICLQuantile
 from lazy.models import TabPFNBarDistribution
 from lazy.models import UnknownNameError
+from lazy.pipeline import LazyPipeline
+from lazy.pipeline import make_pipeline
 
 try:
     __version__ = metadata.version("lazy-tfm")
@@ -130,6 +135,7 @@ __all__ = [
     "KumoQuantile",
     "LazyEnsembleModel",
     "LazyModel",
+    "LazyPipeline",
     "LazyWarning",
     "LicenseWarning",
     "LimiXBarDistribution",
@@ -151,6 +157,7 @@ __all__ = [
     "is_cached",
     "list_estimators",
     "list_versions",
+    "make_pipeline",
     "model_cache_enabled",
     "set_model_cache",
 ]

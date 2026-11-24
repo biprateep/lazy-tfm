@@ -9,6 +9,15 @@ change the API.
 
 ### Added
 
+- `lazy.LazyPipeline` and `lazy.make_pipeline`: a scikit-learn `Pipeline`
+  whose last step is a model and which has every prediction method of the
+  model. It has
+  `predict_pdf`, `predict_cdf`, `predict_quantiles`, `predict_interval`,
+  `predict_pit`, `predict_distribution` and `evaluate`, and its `predict`,
+  `predict_proba` and `score` take `method` and `y_grid` as the model's do.
+- `lazy.metrics.density_scorer`: a scikit-learn scorer for the CDE loss, the
+  CRPS or the NLL of the predicted densities, for `GridSearchCV`,
+  `cross_val_score` and `permutation_importance`.
 - `lazy.interp.explain`: which features a model's predicted distributions
   rely on. It attributes each row's CRPS, negative log likelihood and
   predicted mean to the features, or to groups of columns, by Shapley

@@ -32,10 +32,10 @@ The table lists what each tool does with a LAZY model.
 | Tool | Result | Notes |
 | ---- | ------ | ----- |
 | {func}`~sklearn.base.clone` | Works | Copies the parameters; the copy is unfitted. |
-| {class}`~sklearn.pipeline.Pipeline` | Works, with a caveat | `fit`, `predict`, `predict_proba` and `score` pass through. A pipeline has no `predict_pdf`, `predict_quantiles`, `predict_interval`, `predict_pit`, `predict_cdf`, `predict_distribution` or `evaluate`. Call them on the last step with the transformed features: `pipe[-1].predict_quantiles(pipe[:-1].transform(X), q)`. |
+| {class}`~sklearn.pipeline.Pipeline` | Works, with a caveat | `fit`, `predict`, `predict_proba` and `score` pass through. A pipeline has none of a model's other methods, takes `y_grid` and `method` by name only, and its `score` drops `y_grid`. Use {class}`~lazy.pipeline.LazyPipeline` instead (see [Pipelines](#pipelines)). |
 | {class}`~sklearn.compose.ColumnTransformer` | Works | As a pipeline step before the model. |
 | {class}`~sklearn.model_selection.GridSearchCV`, {func}`~sklearn.model_selection.cross_val_score`, default scoring | Works | They maximize `score`, the negative CDE loss, so they prefer the better densities. Each candidate is scored on its default grid; a `y_grid` in the constructor scores every candidate on one grid. |
-| The same, with `scoring=` | Works | A point scorer, such as `"neg_mean_absolute_error"`, scores `predict`, which is the mode. |
+| The same, with `scoring=` | Works, with a caveat | A point scorer, such as `"neg_mean_absolute_error"`, scores `predict`, which is the mode. {func}`~lazy.metrics.density_scorer` scores the densities instead (see [Scorers](#scorers)). |
 | The same, with metadata routing | Works, with a caveat | `y_grid` is an option, not metadata, so routing never passes it on: a grid passed through a router raises `TypeError`. Set the grid in the constructor, `y_grid=...`, instead. `predict`'s `method` can still be requested with `set_predict_request`. |
 | The same, with `n_jobs` | Works | Each job runs in a process of its own (see [Parallel jobs](scaling.md#parallel-jobs)). |
 | {func}`~sklearn.model_selection.cross_val_predict` | Works, with a caveat | `method="predict"` returns the modes. `method="predict_proba"` does not work: scikit-learn treats it as a classifier's method and raises `AttributeError`. Loop over the folds instead. |
@@ -44,3 +44,49 @@ The table lists what each tool does with a LAZY model.
 | {func}`~sklearn.inspection.partial_dependence` | Works | On `predict`. |
 | {func}`~sklearn.utils.estimator_checks.check_estimator` | Fails two checks on purpose | `check_regressors_no_decision_function` fails because `predict_proba` returns densities. `check_dtype_object` fails because a non-numeric cell raises `ValueError`, not `TypeError`. Pass both in `expected_failed_checks`. The checks fit the model, so a real backend loads its checkpoint. |
 | {mod}`pickle`, `joblib` | Works | See {doc}`saving`. |
+
+## Pipelines
+
+{class}`~lazy.pipeline.LazyPipeline` is a scikit-learn
+{class}`~sklearn.pipeline.Pipeline` whose last step is a LAZY model. It has
+every prediction method of the model, with the model's own arguments. Each
+one transforms the features with the earlier steps and calls the model on the
+result. The model's attributes stay on the model, so the default grid of
+`model` below is `model[-1].grid_`. {func}`~lazy.pipeline.make_pipeline` names the steps, as
+scikit-learn's `make_pipeline` does:
+
+```python
+from sklearn import preprocessing
+
+import lazy
+
+model = lazy.make_pipeline(preprocessing.StandardScaler(), lazy.LazyModel())
+model.fit(X_train, y_train)
+low, median, high = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
+```
+
+A search names a parameter of the model `<step>__<parameter>`, here
+`lazymodel__n_estimators`.
+
+## Scorers
+
+scikit-learn's named scorers score `predict`, one number per row.
+{func}`~lazy.metrics.density_scorer` returns a scorer for the predicted
+distributions: minus the CDE loss, the CRPS or the NLL, so that higher is
+better. It works wherever scikit-learn takes `scoring=`, on a LAZY model or
+a `LazyPipeline`; it needs the estimator's `evaluate`, which a scikit-learn
+`Pipeline` or a search object does not have:
+
+```python
+from sklearn import inspection
+
+from lazy import metrics
+
+result = inspection.permutation_importance(
+    model, X_test, y_test, scoring=metrics.density_scorer("crps")
+)
+```
+
+Without a grid, each estimator is scored on its default grid. Pass one grid,
+`metrics.density_scorer("crps", grid)`, to compare estimators whose default
+grids differ.
