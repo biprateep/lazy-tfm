@@ -7,6 +7,17 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `lazy.interp.explain`: which features a model's predicted distributions
+  rely on. It attributes each row's CRPS, negative log likelihood and
+  predicted mean to the features, or to groups of columns, by Shapley
+  values, by leaving one feature out, or by permutation. The first two
+  remove a feature by refitting the model without its column. The user
+  guide has a page on it, "Interpretability".
+- `lazy.base.default_grid`: the grid a model without a native grid answers
+  on, for targets between two values.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`

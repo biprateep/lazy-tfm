@@ -11,6 +11,7 @@ Part 1 applies to every session. Part 2 applies only to sessions working through
 - `src/lazy/`: the package.
   - `base.py` holds `BaseDensityRegressor`, the estimator protocol every model meets.
   - `models/` holds the backends (`tabpfn.py`, `tabicl.py`, `tabfm.py`, `limix.py`, `kumo.py`), the layer they share (`_ensemble.py`, `ContextEnsembleEstimator`), `LazyModel` (`lazy_model.py`, a backend chosen by name), `LazyEnsembleModel` (`ensemble.py`), the registry, and the pinned checkpoints and default versions (`_hub.py`).
+  - `interp.py` holds `explain`, the entry point for interpretability: attributions of a predicted distribution to the features.
   - `grid.py`, `distributions.py` and `metrics.py` hold the output grids, the native distributions and the scores.
   - `datasets.py` is the data API: `load_dataset` and `list_datasets` load every benchmark (OpenML datasets, DC1 from Zenodo, generated data), and every benchmark loads through them. It also holds the DC1 photometry tools. `selection.py` and `plotting/` hold the photometric-redshift selection function and figures.
   - `_cli.py` is the `lazy` command.
