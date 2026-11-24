@@ -42,7 +42,7 @@ from sklearn.utils import validation
 from lazy import _typing
 from lazy import _warnings
 
-__all__ = ["as_feature_frame", "as_target"]
+__all__ = ["as_feature_frame", "as_target", "check_target"]
 
 _COMPLEX = "Complex data not supported"
 _NUMERIC_STRINGS = (
@@ -146,6 +146,35 @@ def as_target(target: Any) -> _typing.FloatArray:
     if values.ndim == 2 and values.shape[1] == 1:
         _warnings.warn(_COLUMN_VECTOR, exceptions.DataConversionWarning)
     return validation.column_or_1d(values)
+
+
+def check_target(
+    target: Any, n_rows: int, names: tuple[str, str] = ("X", "y")
+) -> _typing.FloatArray:
+    """Validates target values against the feature rows they label.
+
+    Args:
+        target: Target values, shape (n_rows,), in any form
+            :func:`as_target` accepts.
+        n_rows: The number of feature rows.
+        names: What the errors call the features and the target.
+
+    Returns:
+        The values as a float64 array, shape (n_rows,).
+
+    Raises:
+        ValueError: If the number of values is not ``n_rows``, or a value
+            is not finite.
+    """
+    features, name = names
+    values = as_target(target)
+    if values.size != n_rows:
+        raise ValueError(
+            f"{features} has {n_rows} rows but {name} has {values.size} values"
+        )
+    if not np.isfinite(values).all():
+        raise ValueError(f"{name} contains non-finite values")
+    return values
 
 
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
