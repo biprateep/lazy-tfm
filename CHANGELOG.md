@@ -7,6 +7,12 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `lazy.metrics.density_scorer`: a scikit-learn scorer for the CDE loss, the
+  CRPS or the NLL of the predicted densities, for `GridSearchCV`,
+  `cross_val_score` and `permutation_importance`.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
