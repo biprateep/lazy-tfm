@@ -282,12 +282,14 @@ def test_a_registered_encoder_is_built_by_name(registry):
 
 
 def test_an_unknown_name_and_what_is_no_class_are_refused(registry):
-    with pytest.raises(lazy.UnknownNameError, match="known: .'counts'"):
+    with pytest.raises(lazy.UnknownNameError, match="known: .*'counts'"):
         encoders.get_encoder("count")
     with pytest.raises(lazy.UnknownNameError, match="unknown modality"):
         encoders.list_encoders("texts")
     with pytest.raises(TypeError, match="is not a BaseEncoder subclass"):
         encoders.register("counts", _Counts())
+    with pytest.raises(ValueError, match="'text' is a modality"):
+        encoders.register("text", _Counts)
 
 
 class _Positional(_Counts):
