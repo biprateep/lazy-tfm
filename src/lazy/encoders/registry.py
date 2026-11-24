@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from lazy import image
+from lazy import text
+from lazy import time
 from lazy.encoders import _base
 from lazy.encoders import _conformance
 from lazy.models import _hub
@@ -36,6 +39,14 @@ def register(name: str, cls: type[_base.BaseEncoder]) -> None:
     """
     _conformance.check_static(cls)
     ENCODERS[name] = cls
+
+
+register("image_pixels", image.Pixels)
+register("image_statistics", image.Statistics)
+register("text_hashing", text.Hashing)
+register("text_statistics", text.Statistics)
+register("time_spectrum", time.Spectrum)
+register("time_statistics", time.Statistics)
 
 
 def list_encoders(modality: str | None = None) -> list[str]:

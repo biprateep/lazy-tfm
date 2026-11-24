@@ -60,7 +60,6 @@ an encoder that is cheap to run, and may be ``True`` on one that is not.
 
 
 class BaseEncoder(
-    sklearn_base.ClassNamePrefixFeaturesOutMixin,
     sklearn_base.TransformerMixin,
     sklearn_base.BaseEstimator,
     abc.ABC,
@@ -86,7 +85,8 @@ class BaseEncoder(
     ``batch_size`` the default in ``BASE_DEFAULTS``, gives every parameter
     a default and takes no ``**kwargs``, so that ``cls()`` builds a working
     encoder (:func:`lazy.encoders.register` checks this). It declares
-    ``modality`` and implements :meth:`_width` and :meth:`_encode`. Each
+    ``modality`` and implements :meth:`_width` and :meth:`_encode`; it may
+    name its columns with :meth:`_names`. Each
     row of an answer of :meth:`_encode` depends on its own item alone,
     whatever the batch holds, and an encoding changes neither the
     encoder's parameters nor its later answers. Every answer is checked to
@@ -116,7 +116,24 @@ class BaseEncoder(
 
     @abc.abstractmethod
     def _width(self) -> int:
-        """The length of an embedding."""
+        """The length of an embedding.
+
+        ``fit`` calls it, so it is also where an encoder checks its own
+        parameters.
+
+        Raises:
+            ValueError: If a parameter of the encoder is not valid.
+        """
+
+    def _names(self) -> Sequence[str] | None:
+        """A name for each column of an embedding, or ``None`` for numbers.
+
+        Returns:
+            :meth:`_width` names, which :meth:`get_feature_names_out`
+            prefixes with the modality and the name of the class; ``None``
+            for the columns to be numbered.
+        """
+        return None
 
     @abc.abstractmethod
     def _encode(self, items: list[Any]) -> _typing.FloatArray:
@@ -197,14 +214,19 @@ class BaseEncoder(
             default=self._unkeyed_parameter,
         )
 
-    def _unkeyed_parameter(self, value: object) -> str:
-        """Refuses a parameter that the default identity cannot hold.
+    def _unkeyed_parameter(self, value: object) -> Any:
+        """A NumPy scalar as Python's; refuses any other parameter.
+
+        Returns:
+            The Python number or bool that a NumPy scalar holds.
 
         Raises:
-            TypeError: Always; ``value`` is not a number, text, ``None``, a
+            TypeError: If ``value`` is not a number, text, ``None``, a
                 list or a dict of those, so its text may not tell two
                 values apart.
         """
+        if isinstance(value, np.generic) and value.dtype.kind in "biuf":
+            return value.item()
         raise TypeError(
             f"{type(self).__name__} cannot cache with a parameter of type"
             f" {type(value).__name__}: override _cache_identity"
@@ -229,10 +251,7 @@ class BaseEncoder(
                 is not one column of items.
         """
         del y  # Unused: an encoder is fitted without the target.
-        if not _ensemble.is_integer(self.batch_size) or self.batch_size < 1:
-            raise ValueError(
-                f"batch_size must be a positive integer: {self.batch_size=}"
-            )
+        positive_integer("batch_size", self.batch_size)
         if not isinstance(self.cache, (bool, str, os.PathLike)) or (
             isinstance(self.cache, str) and not self.cache
         ):
@@ -289,6 +308,38 @@ class BaseEncoder(
             if self.cache is not False:
                 store.save(keys[start : start + self.batch_size], rows)
         return embeddings
+
+    def get_feature_names_out(
+        self, input_features: npt.ArrayLike | None = None
+    ) -> npt.NDArray[np.object_]:
+        """The names of the output columns.
+
+        Args:
+            input_features: Ignored; scikit-learn passes it.
+
+        Returns:
+            ``<modality>_<class>_`` before each column's own name, as
+            ``time_statistics_mean``, or before its number, as
+            ``image_pixels_0``, for an encoder that names no columns. The
+            class is in lower case. Shape (n_features_out,).
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the encoder is not fitted.
+            ValueError: If :meth:`_names` does not give one name per
+                column.
+        """
+        del input_features  # Unused: the names do not depend on the input.
+        validation.check_is_fitted(self, "_n_features_out")
+        names = self._names()
+        if names is None:
+            names = [str(i) for i in range(self._n_features_out)]
+        if len(names) != self._n_features_out:
+            raise ValueError(
+                f"{type(self).__name__}._names gave {len(names)} names for"
+                f" {self._n_features_out} columns"
+            )
+        prefix = f"{self.modality}_{type(self).__name__.lower()}"
+        return np.array([f"{prefix}_{name}" for name in names], dtype=object)
 
     def _checked(self, rows: Any, n_items: int) -> _typing.FloatArray:
         """An answer of :meth:`_encode`, checked against its contract.
@@ -363,6 +414,24 @@ def _as_items(X: Any) -> Sequence[Any] | npt.NDArray[Any]:  # noqa: GS030 - scik
             f" DataFrame or an array), not {type(X).__name__}"
         )
     return list(X)
+
+
+def positive_integer(name: str, value: object) -> int:
+    """A parameter that must be a positive integer, checked.
+
+    Args:
+        name: The name of the parameter, for the message.
+        value: Its value.
+
+    Returns:
+        The value as an ``int``.
+
+    Raises:
+        ValueError: If it is not a positive integer.
+    """
+    if not _ensemble.is_integer(value) or value < 1:
+        raise ValueError(f"{name} must be a positive integer: {name}={value!r}")
+    return int(value)
 
 
 def _is_missing(item: Any) -> bool:
