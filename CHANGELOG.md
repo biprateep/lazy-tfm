@@ -7,6 +7,12 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- The user guide opens with a page of design principles: frozen
+  pretrained models, scikit-learn's API and tools first, and methods that
+  need no training before any that do.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`
