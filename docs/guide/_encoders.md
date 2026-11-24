@@ -1,0 +1,16 @@
+<!-- Written by docs/conf.py from the pinned checkpoints and the registries; do not edit. -->
+
+| Network                                                                                                  | Encoder                                                      | Columns | Weights | Parameters | License of the weights |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------: | ------: | ---------: | ---------------------- |
+| [DINOv2-small with registers](https://huggingface.co/facebook/dinov2-with-registers-small) (**default**) | `lazy.image.Pretrained(model="dinov2-with-registers-small")` |     384 | 0.09 GB |       22 M | Apache-2.0             |
+| [CLIP ViT-B/16](https://huggingface.co/openai/clip-vit-base-patch16)                                     | `lazy.image.Pretrained(model="clip-vit-base-patch16")`       |     512 | 0.60 GB |      150 M | MIT                    |
+| [DINOv2-large](https://huggingface.co/facebook/dinov2-large)                                             | `lazy.image.Pretrained(model="dinov2-large")`                |    1024 |  1.2 GB |      304 M | Apache-2.0             |
+| [SigLIP 2 base](https://huggingface.co/google/siglip2-base-patch16-224)                                  | `lazy.image.Pretrained(model="siglip2-base-patch16-224")`    |     768 |  1.5 GB |      375 M | Apache-2.0             |
+| [E5-small-v2](https://huggingface.co/intfloat/e5-small-v2) (**default**)                                 | `lazy.text.Pretrained(model="e5-small-v2")`                  |     384 | 0.13 GB |       33 M | MIT                    |
+| [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)                        | `lazy.text.Pretrained(model="all-MiniLM-L6-v2")`             |     384 | 0.09 GB |       23 M | Apache-2.0             |
+| [BGE-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)                                       | `lazy.text.Pretrained(model="bge-small-en-v1.5")`            |     384 | 0.13 GB |       33 M | MIT                    |
+| [GTE-ModernBERT-base](https://huggingface.co/Alibaba-NLP/gte-modernbert-base)                            | `lazy.text.Pretrained(model="gte-modernbert-base")`          |     768 | 0.30 GB |      149 M | Apache-2.0             |
+| [Chronos-T5-tiny](https://huggingface.co/amazon/chronos-t5-tiny) (**default**)                           | `lazy.time.Pretrained(model="chronos-t5-tiny")`              |     258 | 0.03 GB |        8 M | Apache-2.0             |
+| [Chronos-T5-mini](https://huggingface.co/amazon/chronos-t5-mini)                                         | `lazy.time.Pretrained(model="chronos-t5-mini")`              |     386 | 0.08 GB |       20 M | Apache-2.0             |
+| [Chronos-T5-small](https://huggingface.co/amazon/chronos-t5-small)                                       | `lazy.time.Pretrained(model="chronos-t5-small")`             |     514 | 0.18 GB |       46 M | Apache-2.0             |
+| [Chronos-Bolt-small](https://huggingface.co/amazon/chronos-bolt-small)                                   | `lazy.time.Pretrained(model="chronos-bolt-small")`           |     514 | 0.19 GB |       48 M | Apache-2.0             |

@@ -85,13 +85,20 @@ limix = [
     "kditransform>=1.0",
     "nvtx>=0.2",
 ]
+encoders = [
+    # The pretrained encoders of lazy.text, lazy.image and lazy.time; their
+    # weights are fetched from Hugging Face on first use.
+    "torch>=2.9.1",
+    "transformers>=5.24", # the backend= of the image processors
+    "chronos-forecasting>=2.2",
+]
 qp = [
     "qp-prob>=1.1", # LSST DESC's PDF package: to_qp()/from_qp() and its file formats, for RAIL
 ]
 # Everything: every backend and every interoperability extra. A new extra
 # joins this list too (tests/lazy/test_packaging.py checks it).
 all = [
-    "lazy-tfm[kumo,limix,qp,tabfm,tabicl,tabpfn]",
+    "lazy-tfm[encoders,kumo,limix,qp,tabfm,tabicl,tabpfn]",
 ]
 
 # PEP 735 groups: development tooling, never published in the wheel metadata.
@@ -267,10 +274,10 @@ warn_redundant_casts = true
 # importing them is not an error, but a misspelled module still is.
 disable_error_code = ["import-untyped"]
 
-# The optional backends: CI type-checks without the extras installed, so these
+# The optional backends and encoders: CI type-checks without the extras installed, so these
 # may be absent. Where they are installed, mypy still reads their types.
 [[tool.mypy.overrides]]
-module = ["qp", "qp.*", "sdm", "sdm.*", "tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*"]
+module = ["chronos", "chronos.*", "qp", "qp.*", "sdm", "sdm.*", "tabfm", "tabfm.*", "tabicl", "tabicl.*", "tabpfn", "tabpfn.*", "torch", "torch.*", "transformers", "transformers.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

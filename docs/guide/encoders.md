@@ -21,11 +21,16 @@ or `NaN`) gets a row of `NaN`, which the models read as missing features.
 {func}`lazy.encoders.list_encoders` lists the encoders by name, and
 {func}`lazy.encoders.get_encoder` builds one from its name.
 
-The encoders on this page are *classical*: fixed computations with no weights
-and no download. They are baselines, and they work offline.
+Each modality has a *pretrained* encoder, a frozen network whose weights are
+pinned to a commit on the Hugging Face Hub, and *classical* encoders, fixed
+computations with no weights and no download. A modality's name picks its
+pretrained encoder, as `LazyModel()` picks TabPFN.
 
 | Name | Class | Columns |
 | ---- | ----- | ------- |
+| `"text_pretrained"` (`"text"`) | {class}`lazy.text.Pretrained` | by `model` |
+| `"image_pretrained"` (`"image"`) | {class}`lazy.image.Pretrained` | by `model` |
+| `"time_pretrained"` (`"time"`) | {class}`lazy.time.Pretrained` | by `model` |
 | `"time_statistics"` | {class}`lazy.time.Statistics` | 13 |
 | `"time_spectrum"` | {class}`lazy.time.Spectrum` | `n_octaves + 1` (9) |
 | `"image_statistics"` | {class}`lazy.image.Statistics` | `8 * n_channels` (24) |
@@ -35,6 +40,114 @@ and no download. They are baselines, and they work offline.
 
 The count in parentheses is that of the default parameters. The models read
 at most a few hundred features well ({doc}`limits`), so keep the total small.
+
+## Pretrained encoders
+
+The pretrained encoders need the `encoders` extra, which installs PyTorch,
+Hugging Face `transformers` and `chronos-forecasting`:
+
+```console
+pip install 'lazy-tfm[encoders]'
+```
+
+Each modality's pretrained encoder runs one of several frozen networks, which
+its `model` parameter names, as a backend's `version` does:
+
+```python
+lazy.text.Pretrained()  # e5-small-v2
+lazy.text.Pretrained(model="gte-modernbert-base")  # a larger network
+lazy.Tabularizer(
+    {"cutout": lazy.image.Pretrained(model="clip-vit-base-patch16")}
+)
+```
+
+Each network's weights are pinned to a commit on the Hugging Face Hub
+({data}`lazy.encoders.CHECKPOINTS`), and its recipe (pooling, prompt, context)
+is pinned in the encoder's class. Installing `lazy` downloads no weights. An
+encoder downloads its network on first use, with a {class}`~lazy.LicenseWarning`
+that names the network and its licence, and loads it once per process.
+{func}`lazy.download_checkpoint` fetches one ahead of time, as for a model, by
+modality and network: `lazy.download_checkpoint("text")` for the default,
+`lazy.download_checkpoint("image:dinov2-large")` for another. So does the
+command `lazy download text image:dinov2-large`, and `lazy models` lists them
+all. Every network here has a licence that allows commercial use, and runs on
+a CPU; each takes `device` as the models do.
+
+```{include} _encoders.md
+```
+
+A row depends on its own item alone, up to float rounding: a batch pads its
+items to one shape, and the items are batched in order of length. The
+pretrained encoders cache their embeddings by default (see
+[The cache](#the-cache)).
+
+### How the networks were chosen
+
+The networks were chosen from published evaluations of frozen embeddings as
+features, and of embeddings fed to tabular foundation models (TFMs). No study
+yet measures them in LAZY's own pipeline, which predicts a distribution; the
+defaults will be confirmed on the MulTaBench benchmark.
+
+- **Text.** On tables, a text encoder's rank on the MTEB leaderboard predicts
+  its value poorly: on MulTaBench text regression and on STRABLE, TF-IDF
+  features match or beat sentence encoders. The default, E5-small-v2, is the
+  text encoder of MulTaBench and of the TabPFN-3.5 report, so results compare
+  directly with theirs. BGE-small-en-v1.5 scores higher on MTEB at the same
+  size, and GTE-ModernBERT-base is the strongest MTEB model near 150 million
+  parameters and reads 8,192 tokens.
+- **Images.** DINOv2-small with registers matches DINOv3-small, the
+  MulTaBench encoder, on ImageNet (87.3 against 87.0 ImageNet-ReaL linear
+  accuracy); DINOv3 requires a sign-up to download. SigLIP 2 base is the
+  strongest frozen network of its size there. CLIP ViT-B/16 is the strongest
+  general network in a study of galaxy redshifts from images (R² 0.43 on HSC
+  and 0.47 on JWST, against 0.38 and 0.44 for DINOv3-base). A network trained
+  on galaxies does better still, but each needs its own package.
+- **Time series.** On light curves of variable stars from ZTF, Chronos-T5
+  embeddings beat Chronos-Bolt's on every classification metric, though
+  features made for light curves beat every pretrained network. Chronos-T5
+  reads one value per token. No general network reads observation times or
+  uncertainties, so an irregular light curve is read as evenly sampled.
+
+Issue [#344](https://github.com/biprateep/lazy-tfm/issues/344) gives the
+sources and the figures.
+
+### Images that are not 8-bit
+
+The image networks read 8-bit RGB. An image of another type, such as a cutout
+of fluxes, is stretched band by band first. With $p_1$ and $p_{99}$ the 1st and
+99th percentiles of a band's values $v$,
+
+$$
+x = \frac{v - p_1}{p_{99} - p_1}, \qquad
+u = \min\!\left(1, \max\!\left(0,
+    \frac{\operatorname{asinh}(20 x)}{\operatorname{asinh}(20)}\right)\right),
+$$
+
+and the network reads $255\,u$. This is the stretch that studies of galaxy
+images with general networks use. It keeps an image's contrast but not its
+brightness or its colour, so a flux or a colour that matters belongs in a
+table column of its own. A network reads one band (grey) or three.
+
+### Citing
+
+If you use a pretrained encoder, cite its network as well as LAZY:
+
+- E5: Wang, L., et al. (2022). Text Embeddings by Weakly-Supervised
+  Contrastive Pre-training. arXiv:2212.03533.
+- BGE: Xiao, S., et al. (2024). C-Pack: Packed Resources for General Chinese
+  Embeddings. SIGIR.
+- all-MiniLM-L6-v2: Wang, W., et al. (2020). MiniLM. NeurIPS. Reimers, N.,
+  and Gurevych, I. (2019). Sentence-BERT. EMNLP.
+- GTE-ModernBERT: Li, Z., et al. (2023). Towards General Text Embeddings with
+  Multi-stage Contrastive Learning. arXiv:2308.03281.
+- DINOv2: Oquab, M., et al. (2024). DINOv2: Learning Robust Visual Features
+  without Supervision. TMLR. Darcet, T., et al. (2024). Vision Transformers
+  Need Registers. ICLR.
+- SigLIP 2: Tschannen, M., et al. (2025). SigLIP 2. arXiv:2502.14786.
+- CLIP: Radford, A., et al. (2021). Learning Transferable Visual Models From
+  Natural Language Supervision. ICML.
+- Chronos: Ansari, A. F., et al. (2024). Chronos: Learning the Language of
+  Time Series. TMLR.
 
 ## The Tabularizer
 
@@ -46,12 +159,17 @@ at most a few hundred features well ({doc}`limits`), so keep the total small.
 - an encoder, such as `lazy.text.Hashing(n_features=32)`.
 
 An embedding can have many columns, such as the 192 of `image_pixels`. The
-Tabularizer reduces each embedding wider than `n_components` (default 8): it
+Tabularizer reduces each embedding wider than `n_components` (default 30): it
 standardizes each column of the embedding and keeps the first `n_components`
 principal components. Both are fitted on the rows given to `fit`, the context,
 as the model is. A missing item gives a row of `NaN`, which is left out of the
-fit and stays `NaN`; the context needs more items that are not missing than
-`n_components`. `n_components=None` keeps every column.
+fit and stays `NaN`. A context with no more items that are not missing than
+`n_components` keeps one component fewer than it has such items, with a
+warning. `n_components=None` keeps every column.
+
+The default follows the published pipelines (MulTaBench, TabPFN's own text
+features, STRABLE), which all keep 30 components per column. STRABLE measured
+15 as worse than 30, and 60 or 120 as no better and slower.
 
 The other columns pass through, unless `remainder` says otherwise, and
 `get_feature_names_out` names every output column. A search tunes the
@@ -64,7 +182,11 @@ an encoder is a scikit-learn transformer on its own, and
 {func}`~lazy.encoders.get_encoder` builds the default encoder of a modality,
 as in `get_encoder("text")`.
 
-## Time series
+## Classical encoders
+
+The classical encoders are baselines that need no download, and work offline.
+
+### Time series
 
 A time series is a row of a numeric array, or a sequence of numbers of any
 length. Values that are not finite are dropped, and the rest is read as evenly
@@ -108,7 +230,7 @@ share of the variance, from `octave0` (the fastest variations) downwards, and
 `peak`, the frequency of the largest $P_k$. The octaves do not depend on
 $n$, so series of different lengths compare. A constant series gives zeros.
 
-## Images
+### Images
 
 An image is an array of shape (height, width) or (height, width, channels),
 the path of an image file, or a Pillow image. An array keeps its values and
@@ -129,7 +251,7 @@ cell. A pixel that straddles two cells counts in each by the area inside it,
 so images of different sizes give the same columns, and the mean of the image
 is kept.
 
-## Text
+### Text
 
 A text is one `str`.
 
@@ -153,5 +275,6 @@ step for that.
 
 Every encoder takes `cache`. With `cache=True`, the row of each item is filed
 on disk and never computed twice ({doc}`../adding_an_encoder` describes the
-files). The classical encoders default to `cache=False`: computing a row costs
-less than reading its file.
+files). The pretrained encoders default to `cache=True`, so a cross-validation
+or a second session runs each network once per item. The classical encoders
+default to `cache=False`: computing a row costs less than reading its file.

@@ -8,6 +8,7 @@ take the column as features. :class:`BaseEncoder` is the contract every
 encoder meets, a scikit-learn transformer; :func:`register`,
 :func:`list_encoders` and :func:`get_encoder` file encoders by name;
 :func:`clear_embedding_cache` empties the cache of embeddings on disk;
+:data:`CHECKPOINTS` pins the weights of the pretrained encoders' models;
 and :class:`Tabularizer` encodes the columns of items of a table.
 """
 
@@ -23,9 +24,13 @@ from lazy.encoders.registry import get_encoder
 from lazy.encoders.registry import list_encoders
 from lazy.encoders.registry import register
 from lazy.encoders.tabularizer import Tabularizer
+from lazy.models._hub import DEFAULT_ENCODER_MODELS as DEFAULT_MODELS
+from lazy.models._hub import ENCODER_CHECKPOINTS as CHECKPOINTS
 
 __all__ = [
+    "CHECKPOINTS",
     "DEFAULT_ENCODERS",
+    "DEFAULT_MODELS",
     "ENCODERS",
     "MODALITIES",
     "BaseEncoder",

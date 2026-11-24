@@ -205,11 +205,11 @@ def test_models_lists_every_version_and_marks_the_defaults(monkeypatch, capsys):
         "COMMERCIAL",
     ]
     expected = []
-    for name in lazy.list_estimators():
+    for name in [*lazy.list_estimators(), *lazy.encoders.DEFAULT_MODELS]:
         expected.extend([name, version] for version in lazy.list_versions(name))
     assert [row[:2] for row in rows[1:]] == expected
     defaults = {row[0]: row[1] for row in rows[1:] if row[2] == "yes"}
-    assert defaults == lazy.DEFAULT_VERSIONS
+    assert defaults == {**lazy.DEFAULT_VERSIONS, **lazy.encoders.DEFAULT_MODELS}
 
 
 def test_models_reports_which_licences_allow_commercial_use(
@@ -220,7 +220,10 @@ def test_models_reports_which_licences_allow_commercial_use(
     rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
     assert {(row[0], row[1]): row[4] == "yes" for row in rows} == {
         (spec.backend, spec.version): spec.commercial_use
-        for spec in _hub.CHECKPOINTS.values()
+        for spec in [
+            *_hub.CHECKPOINTS.values(),
+            *_hub.ENCODER_CHECKPOINTS.values(),
+        ]
     }
 
 

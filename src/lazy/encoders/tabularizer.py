@@ -28,6 +28,7 @@ from sklearn import preprocessing
 from sklearn.utils import validation
 
 from lazy import _typing
+from lazy import _warnings
 from lazy.encoders import _base
 from lazy.encoders import registry
 
@@ -44,13 +45,14 @@ _FITTED = (
 class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     """Encodes the columns of items, reduces them and keeps the others.
 
-    Each column named in ``columns`` is encoded by its encoder, which a
-    modality (``"image"``, ``"text"`` or ``"time"``, through
-    :data:`~lazy.encoders.DEFAULT_ENCODERS`), the name of a registered
-    encoder, or an encoder names. An embedding wider than ``n_components`` is
-    standardized and reduced to its first ``n_components`` principal
-    components. A row of ``NaN``, from a missing item, stays a row of
-    ``NaN``. The other columns pass through, or are dropped, as
+    Each column named in ``columns`` is encoded by its encoder, which a modality
+    (``"image"``, ``"text"`` or ``"time"``, through
+    :data:`~lazy.encoders.DEFAULT_ENCODERS`), the name of a registered encoder,
+    or an encoder object names. An embedding wider than ``n_components`` is
+    standardized and reduced to its first ``n_components`` principal components,
+    or to one fewer than its rows without ``NaN`` when it has no more, with a
+    warning. A row of ``NaN``, from a missing item, stays a row of ``NaN`` and
+    is left out of that fit. The other columns pass through, or are dropped, as
     ``remainder`` says.
 
     The encoders are frozen. The standardization and the principal
@@ -74,7 +76,7 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self,
         columns: Mapping[Hashable, str | _base.BaseEncoder],
         *,
-        n_components: int | None = 8,
+        n_components: int | None = 30,
         remainder: Any = "passthrough",
     ) -> None:
         self.columns = columns
@@ -103,8 +105,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             ValueError: If ``columns`` is empty or names a column that
                 ``X`` does not have, ``n_components`` is not a positive
                 integer or ``None``, ``remainder`` is not valid, or an
-                embedding to reduce has no more rows without ``NaN`` (items
-                that are not missing) than ``n_components``.
+                embedding to reduce has fewer than two rows without ``NaN``
+                (items that are not missing).
         """
         self.fit_transform(X, y)
         return self
@@ -262,8 +264,8 @@ class _Reducer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         """Fits the standardization and the components on complete rows.
 
         Raises:
-            ValueError: If the embedding must be reduced and no row is
-                complete.
+            ValueError: If the embedding must be reduced and fewer than two
+                rows are complete.
         """
         del y  # Unused: the reduction is fitted without the target.
         X = np.asarray(X, dtype=float)
@@ -271,15 +273,23 @@ class _Reducer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         if self.n_components is None or X.shape[1] <= self.n_components:
             return self
         complete = X[~np.isnan(X).any(axis=1)]
-        if len(complete) <= self.n_components:
+        if len(complete) < 2:
             raise ValueError(
-                f"an embedding to reduce to {self.n_components} components"
+                f"an embedding to reduce has {len(complete)} rows without"
+                " NaN (items that are not missing); it needs at least 2"
+            )
+        # The centred rows span at most len(complete) - 1 directions.
+        n_components = min(self.n_components, len(complete) - 1)
+        if n_components < self.n_components:
+            _warnings.warn(
+                f"an embedding reduced to n_components={self.n_components}"
                 f" has {len(complete)} rows without NaN (items that are not"
-                " missing); it needs more rows than components"
+                f" missing), so it keeps {n_components} components",
+                _warnings.LazyWarning,
             )
         self.pca_ = pipeline.make_pipeline(
             preprocessing.StandardScaler(),
-            decomposition.PCA(self.n_components, svd_solver="full"),
+            decomposition.PCA(n_components, svd_solver="full"),
         ).fit(complete)
         return self
 

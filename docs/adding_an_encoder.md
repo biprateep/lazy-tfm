@@ -81,6 +81,38 @@ encoders.get_encoder("length").fit_transform(["a lazy model", None])
 #        [nan, nan]])
 ```
 
+## A pretrained encoder
+
+An encoder that runs a frozen network subclasses
+`lazy.encoders._pretrained.PretrainedEncoder`, which handles the download,
+the device and the network cache. It runs one of several networks, which its
+`model` parameter names, as a backend's `version` does. In place of
+`_encode`, it gives:
+
+- For each network, its pinned weights in `ENCODER_CHECKPOINTS` in
+  `src/lazy/models/_hub.py`, keyed `"<modality>:<model>"`: the repository on
+  the Hugging Face Hub, its commit, the files to fetch, the licence, the size
+  and the number of parameters. The first download warns with this licence,
+  as the models' checkpoints do, and `lazy.download_checkpoint` fetches it
+  ahead of time. The default network is in `DEFAULT_ENCODER_MODELS`.
+- `recipes`, which maps each network to its recipe: the width of the
+  embedding (`width`) and what else differs between its networks, such as the
+  pooling or a prompt. `register` refuses a class whose recipes are not exactly the
+  networks pinned for its modality.
+- `package`, the package that loads the weights, from the `encoders` extra.
+- `model` and `device` keywords; `device` defaults to `"auto"`.
+- `_load(path, device)`, which builds the network from the downloaded files,
+  and `_embed(network, items)`, which runs it on a batch, without gradients.
+  The network loads once per process and device.
+- `_length(item)`, if it pads a batch to its longest item, so that items of
+  similar length share a batch.
+
+`PretrainedEncoder`'s docstring states what the base class does with these:
+the download, the cache of networks and the key of the embedding cache. Its
+tests run its own code on fakes of the upstream loaders
+(`tests/lazy/fakes/encoders.py`), and compare the real weights with golden
+embeddings on request; `tests/lazy/record_golden.py encoders` records them.
+
 ## The cache
 
 With `cache=True`, an encoder files the embedding of each item on disk, in
@@ -97,11 +129,12 @@ An embedding is filed under two keys.
   set its embedding. An encoder that reads files must override it for a path
   given as text too: the base class would key the path, not the content of
   the file.
-- The identity of the encoder, from `_cache_identity`: by default the version
-  of `lazy`, the class and every parameter but `batch_size` and `cache`. An
-  encoder whose output depends on more, such as the revision of its weights,
-  adds it there, and so does one with a parameter that is not a number, text,
-  `None`, or a list or dict of those. Each encoder's folder holds its identity
+- The identity of the encoder: `_identity_head` (by default the version of
+  `lazy`), the class and every parameter but those in `_UNKEYED` (by default
+  `batch_size` and `cache`). An encoder whose output depends on more, such as
+  the revision of its weights, adds it to `_identity_head`. One with a
+  parameter that is not a number, text, `None`, or a list or dict of those
+  names it in `_UNKEYED` and keys what it sets in `_identity_head`. Each encoder's folder holds its identity
   as text, in `identity.json`.
 
 A change to an encoder's code that changes its output, with no change of

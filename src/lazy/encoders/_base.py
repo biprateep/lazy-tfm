@@ -108,6 +108,10 @@ class BaseEncoder(
 
     modality: ClassVar[str] = ""
 
+    # The parameters that do not change an embedding, left out of the
+    # identity of the cache.
+    _UNKEYED: ClassVar[tuple[str, ...]] = BASE_PARAMS
+
     # Set by each encoder's __init__; declared for the type checker only.
     batch_size: int
     cache: bool | str | os.PathLike[str]
@@ -146,6 +150,23 @@ class BaseEncoder(
             Finite embeddings, shape (len(items), :meth:`_width`).
         """
 
+    def _length(self, item: Any) -> int:
+        """How long an item is; items of similar length share a batch.
+
+        An encoder that pads each batch to its longest item returns the
+        length it pads, such as the number of characters or of values, so
+        that ``transform`` batches items in order of length. By default
+        every item has the length 0, and the items keep their order.
+
+        Args:
+            item: One item, not missing.
+
+        Returns:
+            Its length, in any unit that grows with its padded size.
+        """
+        del item  # Unused: by default, the order of the column.
+        return 0
+
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an item, which keys its embedding in the cache.
 
@@ -183,10 +204,8 @@ class BaseEncoder(
     def _cache_identity(self) -> str:
         """What sets the encoder's output, which names its cache folder.
 
-        By default it holds the version of lazy, the class and every
-        parameter but ``batch_size`` and ``cache``. An encoder whose output
-        depends on more (the revision of its weights, say), or on fewer
-        parameters (not on its device), overrides it.
+        It holds :meth:`_identity_head`, the class and every parameter but
+        those in :attr:`_UNKEYED`.
 
         Returns:
             Text that two encoders share only if their outputs are equal.
@@ -201,18 +220,30 @@ class BaseEncoder(
             raise TypeError(
                 f"{cls.__name__} is defined in a script or a function, so"
                 " its name does not tell it from another class of that"
-                " name: override _cache_identity to use the cache"
+                " name: override _identity_head to use the cache"
             )
         params = {
             name: value
             for name, value in self.get_params(deep=False).items()
-            if name not in BASE_PARAMS
+            if name not in self._UNKEYED
         }
         return json.dumps(
-            [lazy.__version__, cls.__module__, cls.__qualname__, params],
+            [*self._identity_head(), cls.__module__, cls.__qualname__, params],
             sort_keys=True,
             default=self._unkeyed_parameter,
         )
+
+    def _identity_head(self) -> list[str]:
+        """What sets the output beyond the class and its parameters.
+
+        By default the version of lazy, so that a release discards the
+        embeddings of the last one. An encoder whose output depends on
+        more, such as the revision of its weights, overrides it.
+
+        Returns:
+            Text that leads the identity.
+        """
+        return [lazy.__version__]
 
     def _unkeyed_parameter(self, value: object) -> Any:
         """A NumPy scalar as Python's; refuses any other parameter.
@@ -229,7 +260,8 @@ class BaseEncoder(
             return value.item()
         raise TypeError(
             f"{type(self).__name__} cannot cache with a parameter of type"
-            f" {type(value).__name__}: override _cache_identity"
+            f" {type(value).__name__}: override _identity_head, and name it"
+            " in _UNKEYED"
         )
 
     # -- scikit-learn's interface --------------------------------------------
@@ -266,8 +298,9 @@ class BaseEncoder(
     def transform(self, X: Any) -> _typing.FloatArray:  # noqa: GS030 - scikit-learn's X, y.
         """The embedding of each item.
 
-        Items are encoded ``batch_size`` at a time. With ``cache`` set,
-        each embedding is read from, or written to, its own file.
+        Items are encoded ``batch_size`` at a time, in order of
+        :meth:`_length`. With ``cache`` set, each embedding is read from, or
+        written to, its own file.
 
         Args:
             X: One column of items, n of them; see the class docstring.
@@ -290,15 +323,16 @@ class BaseEncoder(
             [i for i, item in enumerate(items) if not _is_missing(item)],
             dtype=np.intp,
         )
-        keys = np.empty(0, dtype=object)
+        keys = np.empty(len(todo), dtype=object)
         if self.cache is not False:
             store = _cache.Store(self.cache, self._cache_identity(), width)
-            keys = np.array(
-                [_cache.digest(self._item_bytes(items[i])) for i in todo],
-                dtype=object,
-            )
+            keys[:] = [_cache.digest(self._item_bytes(items[i])) for i in todo]
             embeddings[todo], found = store.load(keys)
             todo, keys = todo[~found], keys[~found]
+        order = np.argsort(
+            [self._length(items[i]) for i in todo], kind="stable"
+        )
+        todo, keys = todo[order], keys[order]
         for start in range(0, len(todo), self.batch_size):
             batch = todo[start : start + self.batch_size]
             rows = self._checked(

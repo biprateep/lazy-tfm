@@ -53,7 +53,13 @@ def register(name: str, cls: type[base.BaseDensityRegressor]) -> None:
     Raises:
         TypeError: If the class does not support the uniform features; the
             message lists every problem.
+        ValueError: If ``name`` is a modality of the encoders.
     """
+    if name in _hub.DEFAULT_ENCODER_MODELS:
+        raise ValueError(
+            f"{name!r} is a modality of the encoders, whose checkpoints it"
+            " names: register the backend under another name"
+        )
     _conformance.check_static(cls, name)
     ESTIMATORS[name] = cls
 

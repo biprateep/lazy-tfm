@@ -197,11 +197,15 @@ def test_a_single_file_is_trusted_as_it_is(monkeypatch, tmp_path):
     assert calls == [True]
 
 
-@pytest.mark.parametrize("key", list(_hub.CHECKPOINTS))
+PINNED = {**_hub.CHECKPOINTS, **_hub.ENCODER_CHECKPOINTS}
+"""Every pinned checkpoint, the models' and the encoders'."""
+
+
+@pytest.mark.parametrize("key", list(PINNED))
 def test_the_first_download_shows_the_license_and_what_to_cite(
     hub, monkeypatch, tmp_path, key
 ):
-    """``hub`` serves the snapshot checkpoint, TabFM; the rest are files."""
+    """``hub`` serves the snapshots (TabFM, encoders); the rest are files."""
     _single_file_hub(monkeypatch, tmp_path, cached=False)
     spec = _hub.get_checkpoint(key)
     with pytest.warns(lazy.LicenseWarning) as record:
@@ -210,11 +214,23 @@ def test_the_first_download_shows_the_license_and_what_to_cite(
     message = str(warning.message)
     assert spec.license_note in message
     assert f"cite {spec.display_name} as well as LAZY" in message
-    assert f"/models/{spec.backend}.html" in message
+    assert f"/{spec.page or f'models/{spec.backend}.html'}" in message
     assert warning.filename == __file__  # the caller's line, not lazy's
 
 
-@pytest.mark.parametrize("key", list(_hub.CHECKPOINTS))
+@pytest.mark.parametrize("key", list(PINNED))
 def test_commercial_use_agrees_with_the_license_name(key):
-    spec = _hub.CHECKPOINTS[key]
+    spec = PINNED[key]
     assert spec.commercial_use == ("non-commercial" not in spec.license_name)
+
+
+def test_an_encoders_weights_are_found_and_fetched_by_modality(hub):
+    assert (
+        lazy.get_checkpoint("text")
+        is _hub.ENCODER_CHECKPOINTS["text:e5-small-v2"]
+    )
+    assert lazy.get_checkpoint("image:dinov2-large").version == "dinov2-large"
+    with pytest.raises(lazy.UnknownNameError, match="'large' for 'text'"):
+        lazy.get_checkpoint("text", "large")
+    with pytest.warns(lazy.LicenseWarning):
+        assert lazy.download_checkpoint("time") == hub.snapshot

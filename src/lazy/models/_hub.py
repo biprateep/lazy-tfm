@@ -38,7 +38,9 @@ from lazy import _warnings
 
 __all__ = [
     "CHECKPOINTS",
+    "DEFAULT_ENCODER_MODELS",
     "DEFAULT_VERSIONS",
+    "ENCODER_CHECKPOINTS",
     "PROVENANCE_KEYS",
     "Checkpoint",
     "LicenseWarning",
@@ -123,11 +125,11 @@ class Checkpoint:
     """A pinned set of pretrained weights on the Hugging Face Hub.
 
     Attributes:
-        backend: Which backend loads these weights; a name in
-            :data:`lazy.ESTIMATORS`.
+        backend: Which backend loads these weights, a name in
+            :data:`lazy.ESTIMATORS`; for an encoder, its modality.
         version: The model version, in the backbone's own vocabulary --
             ``"v2.5"``, ``"v3"``, ``"v3.5-fast"`` are the strings TabPFN itself
-            uses.
+            uses; for an encoder, the name of its model.
         repo_id: The Hugging Face Hub repository holding the weights.
         package: The distribution providing the backend. Its *installed*
             version is half of "which model was this": the weights are the
@@ -156,6 +158,9 @@ class Checkpoint:
         cpu: Whether it runs at a usable speed on a CPU: ``"yes"``,
             ``"no"``, or up to how many context rows (``"≤1,000 rows"``),
             with any condition in parentheses.
+        page: The page of the documentation that lists the references of
+            the weights, relative to its root; ``""`` for the page of the
+            backend, ``models/<backend>.html``.
 
     The last six fields write the documentation's table of the models
     (docs/models/index.md), so they are kept with the weights they describe.
@@ -177,6 +182,7 @@ class Checkpoint:
     license_name: str = ""
     gpu: str = ""
     cpu: str = ""
+    page: str = ""
 
     @property
     def key(self) -> str:
@@ -235,7 +241,8 @@ class Checkpoint:
                 f"Downloading the {self.display_name} weights. "
                 f"{self.license_note} Using them accepts that license. If "
                 f"you publish results from them, cite {self.display_name} "
-                f"as well as LAZY; {_DOCS}/models/{self.backend}.html lists "
+                f"as well as LAZY; {_DOCS}/"
+                f"{self.page or f'models/{self.backend}.html'} lists "
                 "its references.",
                 LicenseWarning,
             )
@@ -708,8 +715,231 @@ move only deliberately.
 """
 
 
+def _encoder(
+    modality: str,
+    model: str,
+    *,
+    repo_id: str,
+    revision: str,
+    files: tuple[str, ...],
+    size_bytes: int,
+    parameters: int,
+    display_name: str,
+    license_name: str,
+) -> Checkpoint:
+    """The pinned weights of one network of a pretrained encoder.
+
+    Every network here has an open license that permits commercial use. Its
+    download notice points to the encoders page, and its version is the
+    distribution that loads it: chronos-forecasting for time series,
+    transformers otherwise.
+    """
+    return Checkpoint(
+        backend=modality,
+        version=model,
+        repo_id=repo_id,
+        revision=revision,
+        allow_patterns=files,
+        package="chronos-forecasting" if modality == "time" else "transformers",
+        commercial_use=True,
+        license_note=f"{display_name} is released under {license_name}.",
+        display_name=display_name,
+        parameters=parameters,
+        size_bytes=size_bytes,
+        license_name=license_name,
+        page="guide/encoders.html",
+    )
+
+
+_TEXT_FILES = (
+    "config.json",
+    "model.safetensors",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+)
+_IMAGE_FILES = ("config.json", "model.safetensors", "preprocessor_config.json")
+_T5_FILES = ("config.json", "generation_config.json", "model.safetensors")
+
+ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
+    checkpoint.key: checkpoint
+    for checkpoint in (
+        _encoder(
+            "text",
+            "e5-small-v2",
+            repo_id="intfloat/e5-small-v2",
+            revision="ffb93f3bd4047442299a41ebb6fa998a38507c52",
+            files=(*_TEXT_FILES, "vocab.txt"),
+            size_bytes=134_410_262,
+            parameters=33_360_512,
+            display_name="E5-small-v2",
+            license_name="MIT",
+        ),
+        _encoder(
+            "text",
+            "bge-small-en-v1.5",
+            repo_id="BAAI/bge-small-en-v1.5",
+            revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+            files=(*_TEXT_FILES, "vocab.txt"),
+            size_bytes=134_410_442,
+            parameters=33_360_512,
+            display_name="BGE-small-en-v1.5",
+            license_name="MIT",
+        ),
+        _encoder(
+            "text",
+            "all-MiniLM-L6-v2",
+            repo_id="sentence-transformers/all-MiniLM-L6-v2",
+            revision="1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+            files=(*_TEXT_FILES, "vocab.txt"),
+            size_bytes=91_567_205,
+            parameters=22_713_728,
+            display_name="all-MiniLM-L6-v2",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "text",
+            "gte-modernbert-base",
+            repo_id="Alibaba-NLP/gte-modernbert-base",
+            revision="e7f32e3c00f91d699e8c43b53106206bcc72bb22",
+            files=_TEXT_FILES,
+            size_bytes=301_647_541,
+            parameters=149_014_272,
+            display_name="GTE-ModernBERT-base",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "image",
+            "dinov2-with-registers-small",
+            repo_id="facebook/dinov2-with-registers-small",
+            revision="0d9846e56b43a21fa46d7f3f5070f0506a5795a9",
+            files=_IMAGE_FILES,
+            size_bytes=88_257_637,
+            parameters=22_058_112,
+            display_name="DINOv2-small with registers",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "image",
+            "dinov2-large",
+            repo_id="facebook/dinov2-large",
+            revision="47b73eefe95e8d44ec3623f8890bd894b6ea2d6c",
+            files=_IMAGE_FILES,
+            size_bytes=1_217_523_873,
+            parameters=304_368_640,
+            display_name="DINOv2-large",
+            license_name="Apache-2.0",
+        ),
+        # The repository holds the text tower too: the parameters and the
+        # download count both towers, and only the vision tower is loaded.
+        _encoder(
+            "image",
+            "siglip2-base-patch16-224",
+            repo_id="google/siglip2-base-patch16-224",
+            revision="75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+            files=_IMAGE_FILES,
+            size_bytes=1_500_801_551,
+            parameters=375_187_970,
+            display_name="SigLIP 2 base",
+            license_name="Apache-2.0",
+        ),
+        # The same: both towers. The weights are a PyTorch pickle, which
+        # transformers loads with torch.load(weights_only=True).
+        _encoder(
+            "image",
+            "clip-vit-base-patch16",
+            repo_id="openai/clip-vit-base-patch16",
+            revision="57c216476eefef5ab752ec549e440a49ae4ae5f3",
+            files=(
+                "config.json",
+                "pytorch_model.bin",
+                "preprocessor_config.json",
+            ),
+            size_bytes=598_645_443,
+            parameters=149_621_011,
+            display_name="CLIP ViT-B/16",
+            license_name="MIT",
+        ),
+        _encoder(
+            "time",
+            "chronos-t5-tiny",
+            repo_id="amazon/chronos-t5-tiny",
+            revision="29d808298f1a62493e7b9a5e08529d0d930fa189",
+            files=_T5_FILES,
+            size_bytes=33_589_724,
+            parameters=8_394_496,
+            display_name="Chronos-T5-tiny",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "time",
+            "chronos-t5-mini",
+            repo_id="amazon/chronos-t5-mini",
+            revision="bd6a4fde8403b8469acd0abd52852b29dbe61c7b",
+            files=_T5_FILES,
+            size_bytes=81_836_527,
+            parameters=20_456_192,
+            display_name="Chronos-T5-mini",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "time",
+            "chronos-t5-small",
+            repo_id="amazon/chronos-t5-small",
+            revision="a971ba21945c4f1796b17a91fe69214b5f4ad472",
+            files=_T5_FILES,
+            size_bytes=184_633_735,
+            parameters=46_154_240,
+            display_name="Chronos-T5-small",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "time",
+            "chronos-bolt-small",
+            repo_id="amazon/chronos-bolt-small",
+            revision="772f3d25d38aec6d914c8949dab4462e2d46f5d8",
+            files=("config.json", "model.safetensors"),
+            size_bytes=190_889_945,
+            parameters=47_718_016,
+            display_name="Chronos-Bolt-small",
+            license_name="Apache-2.0",
+        ),
+    )
+}
+"""The pinned weights of every pretrained encoder, keyed
+``"<modality>:<model>"``. The models' docs tables do not list them.
+"""
+
+DEFAULT_ENCODER_MODELS: dict[str, str] = {
+    "image": "dinov2-with-registers-small",
+    "text": "e5-small-v2",
+    "time": "chronos-t5-tiny",
+}
+"""The model each modality's pretrained encoder loads when none is asked for.
+"""
+
+
+def tables(name: str) -> tuple[dict[str, Checkpoint], dict[str, str]]:
+    """The checkpoints and the defaults that ``name`` is looked up in.
+
+    Args:
+        name: A backend name, or a modality of the encoders.
+
+    Returns:
+        :data:`ENCODER_CHECKPOINTS` and :data:`DEFAULT_ENCODER_MODELS` for a
+        modality, else :data:`CHECKPOINTS` and :data:`DEFAULT_VERSIONS`.
+    """
+    if name in DEFAULT_ENCODER_MODELS:
+        return ENCODER_CHECKPOINTS, DEFAULT_ENCODER_MODELS
+    return CHECKPOINTS, DEFAULT_VERSIONS
+
+
 def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
     """Returns the pinned checkpoint for a backend, at a version.
+
+    An encoder's weights are found the same way: ``name`` is its modality
+    (``"text"``, ``"image"`` or ``"time"``), the version is its model, and
+    the defaults are :data:`lazy.encoders.DEFAULT_MODELS`.
 
     Args:
         name: A backend name, which takes that backend's default version, or
@@ -734,12 +964,14 @@ def get_checkpoint(name: str, version: str | None = None) -> Checkpoint:
     if ":" in name:
         name, _, spelled = name.partition(":")
         version = version if version is not None else spelled
-    if name not in DEFAULT_VERSIONS:
-        raise unknown_name("backend", name, sorted(DEFAULT_VERSIONS))
+    checkpoints, defaults = tables(name)
+    if name not in defaults:
+        known = sorted([*DEFAULT_VERSIONS, *DEFAULT_ENCODER_MODELS])
+        raise unknown_name("backend", name, known)
     if version is None:
-        version = DEFAULT_VERSIONS[name]
+        version = defaults[name]
     try:
-        return CHECKPOINTS[f"{name}:{version}"]
+        return checkpoints[f"{name}:{version}"]
     except KeyError:
         raise unknown_name(
             "version", version, list_versions(name), name
@@ -761,8 +993,9 @@ def list_versions(name: str) -> list[str]:
         >>> list_versions("tabicl")
         ['v2']
     """
+    checkpoints, _ = tables(name)
     return sorted(
-        spec.version for spec in CHECKPOINTS.values() if spec.backend == name
+        spec.version for spec in checkpoints.values() if spec.backend == name
     )
 
 

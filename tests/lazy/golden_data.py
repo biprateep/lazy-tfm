@@ -172,3 +172,43 @@ def problem() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         ]
     )
     return features[:n_train], z[:n_train], features[n_train:]
+
+
+ENCODERS_PATH = GOLDEN_DIR / "encoders.npz"
+"""The embeddings of :func:`encoder_items` from every pinned encoder model."""
+
+
+def encoder_items() -> dict[str, list[Any]]:
+    """A few fixed items of each modality, by modality."""
+    rng = np.random.default_rng(7)
+    t = np.arange(300)
+    flux = np.exp(-((t[:64, None] - 32) ** 2 + (t[None, :64] - 30) ** 2) / 50)
+    return {
+        "text": [
+            "A spiral galaxy at redshift 0.3",
+            "frozen tabular foundation models",
+            "",
+        ],
+        "image": [rng.integers(0, 256, size=(48, 40, 3), dtype=np.uint8), flux],
+        "time": [
+            np.sin(2 * np.pi * t / 25) + 0.1 * rng.normal(size=300),
+            np.append(rng.normal(size=40).cumsum(), np.nan),
+        ],
+    }
+
+
+def embed(key: str) -> np.ndarray:
+    """The embeddings of one model's items, on a CPU, without the cache.
+
+    Args:
+        key: ``"<modality>:<model>"``, a key of
+            :data:`lazy.encoders.CHECKPOINTS`.
+
+    Returns:
+        The embeddings, shape (n_items, width).
+    """
+    modality, _, model = key.partition(":")
+    encoder = lazy.encoders.get_encoder(
+        modality, model=model, device="cpu", cache=False
+    )
+    return encoder.fit_transform(encoder_items()[modality])
