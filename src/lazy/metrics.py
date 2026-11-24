@@ -76,8 +76,10 @@ Typical usage example::
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import dataclasses
-from typing import Literal, TypeAlias
+import functools
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -109,6 +111,8 @@ NLL_DENSITY_FLOOR = 1e-12
 zero density at the truth (a truth off the grid, an empty bin) then scores
 ``-log(1e-12) ~ 27.6`` rather than infinity.
 """
+DENSITY_SCORES: tuple[str, ...] = ("cde_loss", "crps", "nll")
+"""The scores :func:`density_scorer` accepts, each lower-is-better."""
 AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
 """The two Anderson-Darling cut ranges that DC1 tabulates (AD1, AD2). DC1's
 script also computed (0.1, 0.9), which the paper does not quote.
@@ -1047,6 +1051,70 @@ def _crps_piecewise_linear(
         truth - nodes[-1], 0.0
     )
     return below_before[rows, index] + left + right + after + outside
+
+
+# --------------------------------------------------------------------------
+# scikit-learn scorers
+# --------------------------------------------------------------------------
+
+
+def density_scorer(
+    score: str = "crps", y_grid: grid_lib.GridLike = None
+) -> Callable[[Any, Any, npt.ArrayLike], float]:
+    """A scikit-learn scorer for one score of the predicted densities.
+
+    scikit-learn's own scorers score ``predict``, a point estimate. This
+    one scores the whole distribution, for ``GridSearchCV(scoring=...)``,
+    ``cross_val_score`` or ``permutation_importance``::
+
+        inspection.permutation_importance(
+            model, X, y, scoring=metrics.density_scorer("crps")
+        )
+
+    Each call of the scorer runs the estimator's ``evaluate`` once, so the
+    estimator must have that method: a model or a
+    :class:`~lazy.pipeline.LazyPipeline`, not a scikit-learn ``Pipeline``
+    or a search object around one.
+
+    Args:
+        score: One of :data:`DENSITY_SCORES`: ``"cde_loss"``
+            (:func:`cde_loss`), ``"crps"`` (:func:`crps`) or ``"nll"``
+            (:func:`nll`).
+        y_grid: The grid to score on; ``None`` for the estimator's default.
+            Pass one grid to compare estimators whose default grids differ.
+
+    Returns:
+        A picklable ``scorer(estimator, X, y)`` that returns minus the
+        score, so that higher is better, as scikit-learn expects.
+
+    Raises:
+        ValueError: If ``score`` is not one of :data:`DENSITY_SCORES`, or
+            ``y_grid`` is not a grid.
+    """
+    if score not in DENSITY_SCORES:
+        raise ValueError(f"score must be one of {DENSITY_SCORES}: {score=}")
+    if y_grid is not None and not (
+        isinstance(y_grid, str) and y_grid == grid_lib.NATIVE
+    ):
+        y_grid = grid_lib.as_grid(y_grid)
+    return functools.partial(_negative_score, score=score, y_grid=y_grid)
+
+
+def _negative_score(
+    estimator: Any,
+    X: Any,  # noqa: GS030 - scikit-learn's X, y.
+    y: npt.ArrayLike,
+    *,
+    score: str,
+    y_grid: grid_lib.GridLike,
+) -> float:
+    """Minus one column of ``estimator.evaluate(X, y)``."""
+    if not hasattr(estimator, "evaluate"):
+        raise TypeError(
+            "density_scorer needs an estimator with an evaluate method (a"
+            f" lazy model or a LazyPipeline): got {estimator!r}"
+        )
+    return -float(estimator.evaluate(X, y, y_grid=y_grid)[score].iloc[0])
 
 
 # --------------------------------------------------------------------------
