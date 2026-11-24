@@ -51,6 +51,9 @@ The package is laid out as follows.
     :class:`~lazy.encoders.BaseEncoder`, the contract of the transformers
     that turn items which are not table cells (images, text, time series)
     into table columns, their registry and the cache of their embeddings.
+:mod:`lazy.image`, :mod:`lazy.text`, :mod:`lazy.time`
+    The encoders of each kind of item: summary statistics and simple
+    transforms that need no download.
 :mod:`lazy.interp`
     :func:`~lazy.interp.explain`: which features a model's predicted
     distributions rely on, by Shapley values, leave-one-out or permutation.
@@ -81,7 +84,10 @@ import typing
 
 from lazy import _namespace
 from lazy import encoders
+from lazy import image
 from lazy import interp
+from lazy import text
+from lazy import time
 from lazy._namespace import ImportNameWarning
 from lazy._warnings import LazyWarning
 from lazy.base import BaseDensityRegressor
@@ -159,6 +165,7 @@ __all__ = [
     "encoders",
     "get_checkpoint",
     "get_estimator",
+    "image",
     "interp",
     "is_cached",
     "list_estimators",
@@ -166,6 +173,8 @@ __all__ = [
     "make_pipeline",
     "model_cache_enabled",
     "set_model_cache",
+    "text",
+    "time",
 ]
 
 if typing.TYPE_CHECKING:

@@ -29,6 +29,7 @@ dependencies = [
     "scikit-learn>=1.6",
     "pandas>=2.2.2",
     "matplotlib>=3.8.4",
+    "pillow>=10.1", # reads image files; already arrives via matplotlib
     "huggingface-hub>=0.24",
     "h5py>=3.11", # reads the HSC selection grid behind `fetch_dc1_biased`
     "tqdm>=4.66", # prediction progress bars; already arrives via huggingface-hub

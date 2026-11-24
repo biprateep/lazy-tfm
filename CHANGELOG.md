@@ -36,7 +36,15 @@ change the API.
   columns; `register`, `list_encoders` and `get_encoder` file encoders by
   name. With `cache` set, an encoder files each item's embedding on disk,
   under `embeddings/v1` in the `lazy` data directory, and
-  `clear_embedding_cache` empties it. No encoder ships yet.
+  `clear_embedding_cache` empties it.
+- Classical encoders, which need no download: `lazy.time.Statistics` and
+  `lazy.time.Spectrum` for time series, `lazy.image.Statistics` and
+  `lazy.image.Pixels` for images (arrays, files or Pillow images), and
+  `lazy.text.Statistics` and `lazy.text.Hashing` for text.
+  `lazy.encoders.get_encoder` builds each by name, such as
+  `"time_statistics"`. The user guide has a page on them, "Encoders".
+  `pillow`, which `matplotlib` already installs, is now a declared
+  dependency.
 
 ### Changed
 

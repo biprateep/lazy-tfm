@@ -2,7 +2,8 @@
 
 An encoder turns one item that is not a table cell (an image, a text, a time
 series) into a vector of fixed length, its embedding. A column of $n$ items
-becomes $n$ rows of numeric columns, which the models take as features. An
+becomes $n$ rows of numeric columns, which the models take as features.
+{doc}`guide/encoders` lists the encoders that ship. An
 encoder is a subclass of {class}`~lazy.encoders.BaseEncoder`, which already
 does everything encoders have in common: it reads the column, encodes it in
 batches, gives a missing item a row of `NaN`, checks each answer, files
@@ -30,13 +31,23 @@ A subclass does the following.
 - It sets `modality` to `"image"`, `"text"` or `"time"`.
 - It implements `_width`, the length of an embedding, and `_encode`, which
   returns the finite embeddings of a batch of at most `batch_size` items,
-  shape `(len(items), width)`. No item of a batch is missing.
+  shape `(len(items), width)`. No item of a batch is missing. `fit` calls
+  `_width`, so `_width` is also where an encoder checks its own parameters.
+- It may implement `_names`, a name for each column of an embedding.
+  `get_feature_names_out` puts the modality and the lower-case name of the
+  class before each, as in `time_statistics_mean`. Without `_names` the
+  columns are numbered, as in `image_pixels_0`.
 - Each row of an answer depends on its own item alone, whatever else the
   batch holds, and an encoding changes neither the encoder's parameters nor
   its later answers.
 
 {func}`lazy.encoders.register` refuses a class that falls short of the first
 three points, and `transform` checks the shape and the values of every answer.
+
+An encoder that ships with `lazy` lives in the module of its modality
+(`lazy.image`, `lazy.text` or `lazy.time`), and `lazy/encoders/registry.py`
+registers it under `<modality>_<name>`. `import lazy` imports these modules,
+so an encoder imports a heavy package, such as PyTorch, inside its methods.
 
 ## A skeleton
 

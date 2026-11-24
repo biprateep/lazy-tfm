@@ -315,3 +315,19 @@ def test_a_class_that_breaks_the_contract_is_not_registered(registry):
     assert "abstract methods are not implemented: ['_encode', '_width']" in (
         _conformance.problems(encoders.BaseEncoder)
     )
+
+
+class _Misnamed(_Counts):
+    """Names one column of its two."""
+
+    def _names(self):
+        return ["length"]
+
+
+def test_columns_are_named_by_modality_class_and_name_or_number():
+    assert list(_Counts().fit(TEXTS).get_feature_names_out()) == [
+        "text__counts_0",
+        "text__counts_1",
+    ]
+    with pytest.raises(ValueError, match="gave 1 names for 2 columns"):
+        _Misnamed().fit(TEXTS).get_feature_names_out()
