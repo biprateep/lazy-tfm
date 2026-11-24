@@ -11,9 +11,10 @@ first use, so that running it warms the cache before going offline. A backend
 whose extra is not installed is skipped, and one already complete is left
 alone, so the command is safe to run again.
 
-``lazy models`` lists the pinned checkpoints and whether each is cached, with
-no network. ``lazy download NAME[:VERSION]`` fetches the weights of each
-checkpoint named, as :func:`lazy.download_checkpoint` does.
+``lazy models`` lists the pinned checkpoints, the models' and the encoders', and
+whether each is cached, with no network. ``lazy download NAME[:VERSION]``
+fetches the weights of each checkpoint named, as
+:func:`lazy.download_checkpoint` does.
 
 Typical usage example:
 
@@ -114,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _models() -> int:
-    """Prints a table of every pinned checkpoint.
+    """Prints a table of every pinned checkpoint, models' then encoders'.
 
     The columns are the default version, the cache status and whether the
     license allows commercial use.
@@ -123,15 +124,14 @@ def _models() -> int:
         0.
     """
     rows = [("MODEL", "VERSION", "DEFAULT", "CACHED", "COMMERCIAL")]
-    for name in registry.list_estimators():
+    for name in [*registry.list_estimators(), *_hub.DEFAULT_ENCODER_MODELS]:
+        default = _hub.tables(name)[1].get(name)
         for version in _hub.list_versions(name):
             rows.append(
                 (
                     name,
                     version,
-                    "yes"
-                    if _hub.DEFAULT_VERSIONS.get(name) == version
-                    else "no",
+                    "yes" if default == version else "no",
                     "yes" if _hub.is_cached(name, version) else "no",
                     "yes"
                     if _hub.get_checkpoint(name, version).commercial_use

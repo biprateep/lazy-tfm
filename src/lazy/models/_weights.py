@@ -145,8 +145,9 @@ def key(
     """The key a loaded network is filed under.
 
     Args:
-        backend: The backend's name, as in :data:`lazy.ESTIMATORS`.
-        version: The model version.
+        backend: The backend's name, as in :data:`lazy.ESTIMATORS`, or an
+            encoder's modality.
+        version: The model version, or an encoder's model.
         checkpoint: The checkpoint file or snapshot directory loaded.
         device: The device the network ends up on.
         precision: The dtype the weights end up in, or whatever setting
@@ -157,7 +158,7 @@ def key(
     Returns:
         A hashable key; its revision is the one pinned for that version.
     """
-    spec = _hub.CHECKPOINTS.get(f"{backend}:{version}")
+    spec = _hub.tables(backend)[0].get(f"{backend}:{version}")
     revision = None if spec is None else spec.revision
     return (
         backend,

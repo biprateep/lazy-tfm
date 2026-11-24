@@ -293,3 +293,9 @@ def test_is_cached_is_false_for_a_known_checkpoint_that_is_not_cached(
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert not lazy.is_cached("tabpfn")
+
+
+def test_a_backend_cannot_take_the_name_of_a_modality():
+    with pytest.raises(ValueError, match="'text' is a modality"):
+        lazy.models.registry.register("text", lazy.models.TabICLQuantile)
+    assert "text" not in lazy.ESTIMATORS

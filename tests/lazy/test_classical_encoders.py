@@ -10,6 +10,7 @@ from sklearn import base as sklearn_base
 
 import lazy
 from lazy import encoders
+from lazy.encoders import _pretrained
 
 RNG = np.random.default_rng(0)
 ITEMS = {
@@ -21,7 +22,14 @@ ITEMS = {
 }
 
 
-@pytest.mark.parametrize("name", encoders.list_encoders())
+CLASSICAL = [
+    name
+    for name, cls in encoders.ENCODERS.items()
+    if not issubclass(cls, _pretrained.PretrainedEncoder)
+]
+
+
+@pytest.mark.parametrize("name", CLASSICAL)
 def test_every_registered_encoder_meets_the_contract(name, tmp_path):
     encoder = encoders.get_encoder(name)
     items = ITEMS[encoder.modality]

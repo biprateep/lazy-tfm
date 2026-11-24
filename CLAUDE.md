@@ -23,12 +23,12 @@ lazy asks the user to do as little as possible. `docs/guide/philosophy.md` state
   - `models/` holds the backends (`tabpfn.py`, `tabicl.py`, `tabfm.py`, `limix.py`, `kumo.py`), the layer they share (`_ensemble.py`, `ContextEnsembleEstimator`), `LazyModel` (`lazy_model.py`, a backend chosen by name), `LazyEnsembleModel` (`ensemble.py`), the registry, and the pinned checkpoints and default versions (`_hub.py`).
   - `pipeline.py` holds `LazyPipeline`, a scikit-learn pipeline with the density methods of the model at its end.
   - `encoders/` holds `BaseEncoder`, the contract of the transformers that turn items which are not table cells into table columns (`_base.py`), their registry, the cache of their embeddings (`_cache.py`) and `Tabularizer`, which encodes the columns of items of a table (`tabularizer.py`).
-  - `time.py`, `image.py` and `text.py` hold the encoders of each kind of item. The classical ones are fixed computations that need no download.
+  - `time.py`, `image.py` and `text.py` hold the encoders of each kind of item: a pretrained one, which runs one of several networks pinned to a commit on the Hugging Face Hub (`encoders/_pretrained.py` holds their contract; `models/_hub.py` pins the weights), and classical ones, fixed computations that need no download.
   - `interp.py` holds `explain`, the entry point for interpretability: attributions of a predicted distribution to the features.
   - `grid.py`, `distributions.py` and `metrics.py` hold the output grids, the native distributions and the scores.
   - `datasets.py` is the data API: `load_dataset` and `list_datasets` load every benchmark (OpenML datasets, DC1 from Zenodo, generated data), and every benchmark loads through them. It also holds the DC1 photometry tools. `selection.py` and `plotting/` hold the photometric-redshift selection function and figures.
   - `_cli.py` is the `lazy` command.
-- `tests/lazy/`: the test suite. `fakes/` stands in for each backend's upstream package. `golden/` holds densities recorded on a CPU from the real checkpoints by `record_golden.py`.
+- `tests/lazy/`: the test suite. `fakes/` stands in for each backend's upstream package. `golden/` holds densities, and encoder embeddings, recorded on a CPU from the real checkpoints by `record_golden.py`.
 - `docs/`: the Sphinx site in MyST Markdown, built by Read the Docs. `docs/tutorials/*.py` are py:percent sources; the executed notebooks live on the orphan branch `tutorials`. `docs/conf.py` writes the model tables and the tutorial gallery at build time.
 - `CHANGELOG.md`: user-visible changes, in Keep a Changelog format.
 

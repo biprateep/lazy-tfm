@@ -5,11 +5,13 @@
 
 Runs on CPU and needs every backend's checkpoint in the local cache. Only
 run it to deliberately move the reference; the golden test compares against
-the files it writes.
+the files it writes. ``encoders`` records the embeddings of every pinned
+encoder model instead, which needs the ``encoders`` extra.
 
 Typical usage example:
 
   python tests/lazy/record_golden.py tabpfn tabicl
+  python tests/lazy/record_golden.py encoders
 """
 
 import argparse
@@ -27,18 +29,22 @@ import numpy as np
 def main(argv: Sequence[str] | None = None) -> int:
     """Records the requested backends (all, by default) and returns 0."""
     parser = argparse.ArgumentParser(description=__doc__)
+    every = [*sorted(golden_data.RECORDED_PARAMS), "encoders"]
     parser.add_argument(
         "backends",
         nargs="*",
-        choices=sorted(golden_data.RECORDED_PARAMS),
-        help="the backends to record; every one when none is named",
+        choices=every,
+        help="the backends to record, or encoders; all when none is named",
     )
     args = parser.parse_args(argv)
     _, _, X_test = golden_data.problem()
     golden_data.GOLDEN_DIR.mkdir(exist_ok=True)
     with golden_data.pinned_threads():
         recorded = _recording()
-        for name in args.backends or sorted(golden_data.RECORDED_PARAMS):
+        for name in args.backends or every:
+            if name == "encoders":
+                _record_encoders(recorded)
+                continue
             model = golden_data.fit(name)
             pdfs = model.predict_proba(X_test, golden_data.GRID)
             path = golden_data.path(name)
@@ -52,6 +58,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(f"{name}: {pdfs.shape} -> {path}")
     return 0
+
+
+def _record_encoders(recorded: dict[str, object]) -> None:
+    """Records the embeddings of every pinned encoder model, in one file.
+
+    Args:
+        recorded: What :func:`_recording` returned.
+    """
+    import lazy  # noqa: PLC0415 - imported by golden_data in any case.
+
+    keys = sorted(lazy.encoders.CHECKPOINTS)
+    embeddings = {key: golden_data.embed(key) for key in keys}
+    models = {
+        key: lazy.encoders.CHECKPOINTS[key].provenance(device="cpu")
+        for key in keys
+    }
+    np.savez_compressed(
+        golden_data.ENCODERS_PATH,
+        **{key.replace(":", "__"): rows for key, rows in embeddings.items()},
+        provenance=json.dumps({**recorded, "models": models}, default=str),
+    )
+    for key, rows in embeddings.items():
+        print(f"{key}: {rows.shape} -> {golden_data.ENCODERS_PATH}")
 
 
 def _recording() -> dict[str, object]:

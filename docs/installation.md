@@ -11,6 +11,7 @@ pip install 'lazy-tfm[tabicl]'    # + the TabICLv2 backend
 pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend's dependencies
 pip install 'lazy-tfm[kumo]'      # + the Kumo Tabular backend's dependencies
+pip install 'lazy-tfm[encoders]'  # + the pretrained encoders of images, text and time series
 pip install 'lazy-tfm[qp]'        # + qp interoperability (to_qp / from_qp, for RAIL)
 pip install 'lazy-tfm[all]'       # + everything above
 ```

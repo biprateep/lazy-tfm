@@ -108,6 +108,23 @@ def test_a_row_does_not_depend_on_its_batch():
     assert [len(batch) for batch in encoder.batches_] == [5]
 
 
+class _Sorted(_Counts):
+    """Batches its texts in order of length."""
+
+    def _length(self, item):
+        return len(item)
+
+
+def test_items_are_batched_in_order_of_length_and_rows_stay_in_place():
+    encoder = _Sorted(batch_size=2).fit(TEXTS)
+    np.testing.assert_array_equal(encoder.transform(TEXTS), _encoded(TEXTS)[0])
+    assert encoder.batches_ == [
+        ["", "lazy"],
+        ["context", "frozen weights"],
+        ["a tabular model"],
+    ]
+
+
 def test_the_input_is_not_modified():
     frame = pd.DataFrame({"text": [*TEXTS, None]})
     before = frame.copy()
@@ -227,7 +244,7 @@ def test_the_default_cache_is_under_data_home_and_can_be_cleared(
 
 def test_a_parameter_the_identity_cannot_hold_refuses_the_cache(cache):
     encoder = _Counts(cache=cache, letter=np.zeros(2000)).fit(TEXTS)
-    with pytest.raises(TypeError, match="override _cache_identity"):
+    with pytest.raises(TypeError, match="override _identity_head"):
         encoder.transform(TEXTS)
 
 
@@ -250,7 +267,7 @@ def test_a_bad_parameter_is_refused_at_fit_by_name(params):
 def test_a_class_of_a_script_or_a_function_must_name_itself(cache, monkeypatch):
     monkeypatch.setattr(_Counts, "__module__", "__main__")
     encoder = _Counts(cache=cache).fit(TEXTS)
-    with pytest.raises(TypeError, match="override _cache_identity"):
+    with pytest.raises(TypeError, match="override _identity_head"):
         encoder.transform(TEXTS)
 
 

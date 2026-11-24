@@ -303,16 +303,18 @@ _write_gallery()
 # -- Tables of the models ------------------------------------------------------
 # docs/models/index.md and docs/guide/interface.md include the tables below,
 # which this writes at import from lazy.CHECKPOINTS and the registry: one row
-# per pinned checkpoint in the first, from the fields that describe it, and
-# one per backend in the second, from its class's method_note and its
-# checkpoints' size notes. A new backend or version therefore needs no edit
-# here. The overview lists LazyModel's default first and the rest by the size
-# of their default checkpoint; the guide follows INTERFACE_ORDER, the order
-# its prose takes, and then any other backend alphabetically. The "yes" of a
-# model that runs on a CPU at any size is in bold.
+# per pinned checkpoint in the first, from the fields that describe it, and one
+# per backend in the second, from its class's method_note and its checkpoints'
+# size notes. A third, from lazy.encoders.CHECKPOINTS, lists the networks of the
+# pretrained encoders. A new backend or version therefore needs no edit here.
+# The overview lists LazyModel's default first and the rest by the size of their
+# default checkpoint; the guide follows INTERFACE_ORDER, the order its prose
+# takes, and then any other backend alphabetically. The "yes" of a model that
+# runs on a CPU at any size is in bold.
 MODEL_TABLES = {
     "overview": pathlib.Path(__file__).parent / "models" / "_overview.md",
     "interface": pathlib.Path(__file__).parent / "guide" / "_backends.md",
+    "encoders": pathlib.Path(__file__).parent / "guide" / "_encoders.md",
 }
 INTERFACE_ORDER = ["tabpfn", "limix", "tabicl", "tabfm"]
 
@@ -482,6 +484,51 @@ def _interface_table() -> list[str]:
     )
 
 
+def _encoders_table() -> list[str]:
+    """Returns docs/guide/encoders.md's table, one row per encoder network.
+
+    The rows follow the modalities, each default first and the rest by size.
+    """
+    rows = []
+    for modality, default in sorted(lazy.encoders.DEFAULT_MODELS.items()):
+        cls = lazy.encoders.ENCODERS[lazy.encoders.DEFAULT_ENCODERS[modality]]
+        checkpoints = sorted(
+            (
+                lazy.get_checkpoint(modality, m)
+                for m in lazy.list_versions(modality)
+            ),
+            key=lambda c: (c.version != default, c.size_bytes),
+        )
+        for checkpoint in checkpoints:
+            model = checkpoint.version
+            title = f"[{checkpoint.display_name}]"
+            title += f"(https://huggingface.co/{checkpoint.repo_id})"
+            if model == default:
+                title += " (**default**)"
+            rows.append(
+                [
+                    title,
+                    f'`lazy.{modality}.Pretrained(model="{model}")`',
+                    str(cls.recipes[model].width),
+                    _gigabytes(checkpoint.size_bytes),
+                    _parameter_count(checkpoint.parameters),
+                    checkpoint.license_name,
+                ]
+            )
+    return _markdown_table(
+        [
+            "Network",
+            "Encoder",
+            "Columns",
+            "Weights",
+            "Parameters",
+            "License of the weights",
+        ],
+        ["left", "left", "right", "right", "right", "left"],
+        rows,
+    )
+
+
 def _write_model_tables() -> None:
     """Writes the tables of the models, each to its include file.
 
@@ -490,12 +537,13 @@ def _write_model_tables() -> None:
     tables = {
         "overview": _overview_table(),
         "interface": _interface_table(),
+        "encoders": _encoders_table(),
     }
     for key, lines in tables.items():
         text = "\n".join(
             [
-                "<!-- Written by docs/conf.py from lazy.CHECKPOINTS and the "
-                "registry; do not edit. -->",
+                "<!-- Written by docs/conf.py from the pinned checkpoints "
+                "and the registries; do not edit. -->",
                 "",
                 *lines,
                 "",

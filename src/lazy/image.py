@@ -9,9 +9,11 @@ is read as 8-bit values with 1 (grey), 3 (RGB) or 4 (RGBA) channels,
 except an image of one channel of more than 8 bits, which keeps its
 values. Every image of a column has ``n_channels`` channels, and every
 value is finite.
-The encoders here are classical: fixed computations with no weights and no
-download.
 
+:class:`Pretrained`
+    A frozen vision network, chosen by ``model``: the default of the
+    modality ``"image"``. Its weights download on first use; it needs the
+    ``encoders`` extra.
 :class:`Statistics`
     Summary statistics of each channel's values.
 :class:`Pixels`
@@ -25,18 +27,21 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
+import dataclasses
 import itertools
 import os
 import pathlib
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from PIL import Image
 
 from lazy import _typing
 from lazy.encoders import _base
+from lazy.encoders import _pretrained
 
-__all__ = ["STATISTICS", "Pixels", "Statistics"]
+__all__ = ["STATISTICS", "Pixels", "Pretrained", "Statistics"]
 
 STATISTICS: tuple[str, ...] = (
     "mean",
@@ -94,12 +99,7 @@ class _ImageEncoder(_base.BaseEncoder):
                 f" width, {self.n_channels}), as n_channels says; got"
                 f" {pixels.shape}"
             )
-        if not pixels.size or not np.isfinite(pixels).all():
-            raise ValueError(
-                "an image must have pixels, all of them finite; got the"
-                f" shape {pixels.shape}"
-            )
-        return pixels
+        return _finite(pixels)
 
     def _converted(self, image: Image.Image) -> Image.Image:
         """A Pillow image in the mode of ``n_channels``.
@@ -115,7 +115,7 @@ class _ImageEncoder(_base.BaseEncoder):
             raise ValueError(
                 f"an image file has 1, 3 or 4 channels: {self.n_channels=}"
             )
-        if image.mode in ("I", "F") or image.mode.startswith("I;16"):
+        if _is_deep(image):
             if self.n_channels != 1:
                 raise ValueError(
                     f"an image of mode {image.mode} has one channel of more"
@@ -130,13 +130,37 @@ class _ImageEncoder(_base.BaseEncoder):
         A Pillow image is keyed by its pixels as this encoder reads them,
         since its own bytes may leave out a palette.
         """
-        if isinstance(item, (str, os.PathLike)):
-            return b"file:" + pathlib.Path(item).read_bytes()
         if isinstance(item, Image.Image):
-            image = self._converted(item)
-            header = f"pillow:{image.mode}:{image.size}:".encode()
-            return header + image.tobytes()
-        return super()._item_bytes(item)
+            item = self._converted(item)
+        return _image_bytes(item) or super()._item_bytes(item)
+
+
+def _is_deep(image: Image.Image) -> bool:
+    """Whether a Pillow image is one band of more than 8 bits."""
+    return image.mode in ("I", "F") or image.mode.startswith("I;16")
+
+
+def _finite(pixels: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """``pixels``, checked to hold at least one value, all finite.
+
+    Raises:
+        ValueError: If it is empty or a value is not finite.
+    """
+    if not pixels.size or not np.isfinite(pixels).all():
+        raise ValueError(
+            "an image must have pixels, all of them finite; got the shape"
+            f" {pixels.shape}"
+        )
+    return pixels
+
+
+def _image_bytes(item: Any) -> bytes | None:
+    """The content of a file or of a Pillow image; ``None`` for others."""
+    if isinstance(item, (str, os.PathLike)):
+        return b"file:" + pathlib.Path(item).read_bytes()
+    if isinstance(item, Image.Image):
+        return f"pillow:{item.mode}:{item.size}:".encode() + item.tobytes()
+    return None
 
 
 class Statistics(_ImageEncoder):
@@ -270,3 +294,158 @@ def _area_weights(n_in: int, n_out: int) -> _typing.FloatArray:
     pixel = np.arange(n_in)
     overlap = np.minimum(edges[1:], pixel + 1) - np.maximum(edges[:-1], pixel)
     return np.asarray(np.clip(overlap, 0, None) * n_out / n_in)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Recipe:
+    """How one model turns an image into an embedding.
+
+    Attributes:
+        width: The width of the embedding.
+        network: The class of transformers that loads the network.
+        output: The output of the network that is the embedding.
+    """
+
+    width: int
+    network: str = "AutoModel"
+    output: str = "pooler_output"
+
+
+# The stretch of an image that is not 8-bit: the percentiles of each band
+# that map to 0 and 1, and the softening of the asinh that follows.
+_LOW, _HIGH, _SOFTENING = 1.0, 99.0, 20.0
+
+
+class Pretrained(_pretrained.PretrainedEncoder):
+    r"""The embedding of each image, from a frozen vision network.
+
+    ``model`` picks one of the networks of ``recipes``, each pinned to a
+    commit on the Hugging Face Hub with its preprocessing (resizing,
+    cropping, normalization): ``"dinov2-with-registers-small"`` (the
+    default), ``"dinov2-large"``, ``"siglip2-base-patch16-224"`` and
+    ``"clip-vit-base-patch16"``. The embedding is the class token for
+    DINOv2, the attention-pooled tokens for SigLIP 2 and the projected
+    class token for CLIP. :doc:`/guide/encoders` lists the networks and
+    gives the evidence behind the choice.
+
+    The networks read 8-bit RGB. A file, a Pillow image or a ``uint8``
+    array of one, three or four (RGBA, whose alpha is dropped) channels is
+    read as such. An array of another type, or
+    a file of one band of more than 8 bits, such as an image of fluxes, is
+    stretched first, band by band: its 1st and 99th percentiles map to 0
+    and 1, then :math:`\operatorname{asinh}(20 x) /
+    \operatorname{asinh}(20)`, clipped to [0, 1], maps to 0 to 255. The
+    stretch keeps the contrast of an image but not its brightness, which a
+    table column can carry.
+
+    Attributes:
+        model: The network; ``"dinov2-with-registers-small"`` by default.
+        device: ``"auto"``, or a torch device such as ``"cpu"``.
+        batch_size: The most images in one forward pass.
+        cache: Whether, or where, to file the embeddings on disk; see
+            :class:`~lazy.encoders.BaseEncoder`.
+    """
+
+    modality = "image"
+    package = "transformers"
+    recipes = {
+        "dinov2-with-registers-small": _Recipe(384),
+        "dinov2-large": _Recipe(1024),
+        "siglip2-base-patch16-224": _Recipe(768, "SiglipVisionModel"),
+        "clip-vit-base-patch16": _Recipe(
+            512, "CLIPVisionModelWithProjection", "image_embeds"
+        ),
+    }
+
+    def __init__(  # noqa: D107 - arguments documented on the class.
+        self,
+        *,
+        model: str = "dinov2-with-registers-small",
+        device: str = "auto",
+        batch_size: int = 64,
+        cache: bool | str | os.PathLike[str] = True,
+    ) -> None:
+        self.model = model
+        self.device = device
+        self.batch_size = batch_size
+        self.cache = cache
+
+    def _load(self, path: os.PathLike[str], device: str) -> Any:
+        """The preprocessor and the network, on ``device``."""
+        import transformers  # noqa: PLC0415 - an optional, heavy extra.
+
+        network = getattr(transformers, self._recipe().network)
+        # Pillow's resampling, pinned: with torchvision installed the
+        # default would be torchvision's, whose pixels differ.
+        processor = transformers.AutoImageProcessor.from_pretrained(
+            path, backend="pil"
+        )
+        # A checkpoint of two towers lists the text tower's weights as
+        # unexpected when the vision tower alone loads; that is intended.
+        verbosity = transformers.logging.get_verbosity()
+        transformers.logging.set_verbosity_error()
+        try:
+            model = network.from_pretrained(path, **_pretrained.PINNED)
+        finally:
+            transformers.logging.set_verbosity(verbosity)
+        return processor, model.to(device).eval()
+
+    def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
+        """The embedding of each image, as the recipe names it."""
+        processor, model = network
+        pixels = processor(
+            images=[_rgb(item) for item in items], return_tensors="pt"
+        )["pixel_values"].to(model.device)
+        output = getattr(model(pixel_values=pixels), self._recipe().output)
+        return output.float().cpu().numpy()
+
+    def _item_bytes(self, item: Any) -> bytes:
+        """The content of an image: of the file for a path, else its RGB."""
+        if isinstance(item, Image.Image):
+            item = _rgb(item)
+        return _image_bytes(item) or super()._item_bytes(item)
+
+
+def _rgb(item: Any) -> Image.Image:
+    """One image as 8-bit RGB, for a network.
+
+    Raises:
+        ValueError: If an array has neither 1 nor 3 channels (nor 4, for
+            8-bit RGBA), no pixel, or a value that is not finite.
+    """
+    if isinstance(item, (str, os.PathLike)):
+        with Image.open(item) as image:
+            return _rgb(image)
+    if isinstance(item, Image.Image) and not _is_deep(item):
+        return item.convert("RGB")
+    array = np.asarray(item)
+    if array.ndim == 3 and array.shape[2] == 1:
+        array = array[:, :, 0]
+    if array.ndim == 3 and array.shape[2] == 4 and array.dtype == np.uint8:
+        array = array[:, :, :3]  # RGBA: the alpha goes, as Pillow drops it.
+    if array.ndim not in (2, 3) or array.ndim == 3 and array.shape[2] != 3:
+        raise ValueError(
+            "an image for a pretrained network has the shape (height,"
+            f" width) or (height, width, 3); got {array.shape}"
+        )
+    if array.dtype != np.uint8:
+        array = _stretch(_finite(array.astype(float)))
+    return Image.fromarray(_finite(array)).convert("RGB")
+
+
+def _stretch(pixels: _typing.FloatArray) -> npt.NDArray[np.uint8]:
+    """An image of any range as 8 bits, band by band; see :class:`Pretrained`.
+
+    Args:
+        pixels: Finite values, shape (height, width) or (height, width, 3).
+
+    Returns:
+        The stretched image, of the same shape.
+    """
+    bands = pixels.reshape(*pixels.shape[:2], -1)
+    low, high = np.percentile(bands, (_LOW, _HIGH), axis=(0, 1))
+    # A band of one value has no contrast to stretch: it maps to 0.
+    span = np.where(high > low, high - low, 1.0)
+    scaled = np.arcsinh(_SOFTENING * (bands - low) / span)
+    unit = np.clip(scaled / np.arcsinh(_SOFTENING), 0.0, 1.0)
+    return np.rint(unit * 255).astype(np.uint8).reshape(pixels.shape)

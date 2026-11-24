@@ -31,9 +31,9 @@ ENCODERS: dict[str, type[_base.BaseEncoder]] = {}
 """Short name -> encoder class. Filled only through :func:`register`."""
 
 DEFAULT_ENCODERS: dict[str, str] = {
-    "image": "image_pixels",
-    "text": "text_hashing",
-    "time": "time_statistics",
+    "image": "image_pretrained",
+    "text": "text_pretrained",
+    "time": "time_pretrained",
 }
 """Modality -> the name of its default encoder, which :func:`get_encoder`
 builds for the modality's name."""
@@ -63,9 +63,12 @@ def register(name: str, cls: type[_base.BaseEncoder]) -> None:
 
 
 register("image_pixels", image.Pixels)
+register("image_pretrained", image.Pretrained)
 register("image_statistics", image.Statistics)
 register("text_hashing", text.Hashing)
+register("text_pretrained", text.Pretrained)
 register("text_statistics", text.Statistics)
+register("time_pretrained", time.Pretrained)
 register("time_spectrum", time.Spectrum)
 register("time_statistics", time.Statistics)
 

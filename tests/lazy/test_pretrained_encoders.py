@@ -1,0 +1,274 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Biprateep Dey
+"""The pretrained encoders: their own code on fakes, and golden embeddings.
+
+The fakes (``fakes/encoders.py``) stand in for what each encoder loads
+from ``transformers`` and ``chronos``, so these tests need those packages
+and run in the backends job. The golden test runs the real weights, on
+request.
+"""
+
+from importlib import metadata
+import json
+import sys
+
+from fakes import encoders as fake_encoders
+import golden_data
+import numpy as np
+from PIL import Image
+import pytest
+
+import lazy
+from lazy import encoders
+from lazy.encoders import _pretrained
+
+MODELS = sorted(encoders.CHECKPOINTS)
+"""Every pinned model, as ``"<modality>:<model>"``."""
+
+PRETRAINED = {
+    name: cls
+    for name, cls in encoders.ENCODERS.items()
+    if issubclass(cls, _pretrained.PretrainedEncoder)
+}
+
+
+def _encoder(key, **params):
+    """The encoder of one pinned model, on the CPU, without the cache."""
+    modality, _, model = key.partition(":")
+    params = {"device": "cpu", "cache": False, **params}
+    return encoders.get_encoder(modality, model=model, **params)
+
+
+@pytest.fixture(name="fakes")
+def _install_fakes(monkeypatch, tmp_path):
+    """The fakes in place of the downloads and the upstream loaders.
+
+    Returns:
+        How many times each model's network loaded, by its key.
+    """
+    loads = fake_encoders.install(monkeypatch, tmp_path / "weights")
+    lazy.clear_model_cache()
+    yield loads
+    lazy.clear_model_cache()
+
+
+@pytest.mark.parametrize("key", MODELS)
+def test_a_row_depends_on_its_item_alone_whatever_its_batch(fakes, key):
+    items = golden_data.encoder_items()[key.partition(":")[0]]
+    encoder = _encoder(key, batch_size=2)
+    together = encoder.fit_transform(items)
+    alone = [encoder.transform(items[i : i + 1]) for i in range(len(items))]
+    reversed_ = encoder.transform(items[::-1])[::-1]
+    np.testing.assert_allclose(np.vstack(alone), together, rtol=1e-6)
+    np.testing.assert_allclose(reversed_, together, rtol=1e-6)
+    assert np.abs(together).max() < fake_encoders.PAD / 10
+    assert together.shape == (len(items), len(encoder.get_feature_names_out()))
+
+
+@pytest.mark.parametrize("key", MODELS)
+def test_the_network_loads_once_per_process_and_device(fakes, key):
+    items = golden_data.encoder_items()[key.partition(":")[0]]
+    for _ in range(3):
+        _encoder(key).fit_transform(items)
+    assert fakes[key] == 1
+
+
+def test_the_cache_serves_an_embedding_without_the_network(fakes, tmp_path):
+    items = golden_data.encoder_items()["text"]
+    cache = tmp_path / "embeddings"
+    rows = lazy.text.Pretrained(device="cpu", cache=cache).fit_transform(items)
+    lazy.clear_model_cache()
+    again = lazy.text.Pretrained(device="cpu", cache=cache).fit_transform(items)
+    np.testing.assert_array_equal(again, rows)
+    assert fakes["text:e5-small-v2"] == 1
+
+
+def test_the_cache_is_keyed_by_version_and_weights_not_device():
+    pytest.importorskip("transformers")
+    identity = json.loads(lazy.text.Pretrained()._cache_identity())
+    checkpoint = lazy.get_checkpoint("text")
+    assert identity[:5] == [
+        lazy.__version__,
+        metadata.version("transformers"),
+        metadata.version("torch"),
+        checkpoint.repo_id,
+        checkpoint.revision,
+    ]
+    cpu = lazy.text.Pretrained(device="cpu")
+    assert cpu._cache_identity() == lazy.text.Pretrained()._cache_identity()
+    other = lazy.text.Pretrained(model="bge-small-en-v1.5")
+    assert other._cache_identity() != cpu._cache_identity()
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("e5-small-v2", "mean"),
+        ("bge-small-en-v1.5", "first"),
+        ("all-MiniLM-L6-v2", "mean"),
+    ],
+)
+def test_text_is_pooled_as_its_model_says_and_scaled_to_unit_length(
+    fakes, model, expected
+):
+    texts = ["a lazy model", "x " * 300]
+    rows = _encoder(f"text:{model}").fit_transform(texts)
+    np.testing.assert_allclose(np.linalg.norm(rows, axis=1), 1, rtol=1e-6)
+    prefix = [6] if model == "e5-small-v2" else []  # "query:" is a word.
+    codes = np.array([101, *prefix, 1, 4, 5, 102])
+    states = np.cos(codes[:, None] * np.arange(1, 385))
+    pooled = states.mean(axis=0) if expected == "mean" else states[0]
+    np.testing.assert_allclose(
+        rows[0], pooled / np.linalg.norm(pooled), rtol=1e-5, atol=1e-6
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "patch"), [("chronos-t5-tiny", 1), ("chronos-bolt-small", 16)]
+)
+def test_chronos_pools_the_observed_tokens_of_the_last_values(
+    fakes, model, patch
+):
+    encoder = _encoder(f"time:{model}")
+    context = encoder._recipe().context
+    long = np.arange(5000.0)
+    gappy = [1.0, np.nan, 3.0, np.inf, 5.0]
+    rows = encoder.fit_transform([long, long[-context:], gappy])
+    np.testing.assert_allclose(rows[0], rows[1], rtol=1e-6)
+    np.testing.assert_allclose(rows[2, -2:], [3, np.sqrt(8 / 3)])
+    # The fake's token state is its mean value times a ramp to 1.
+    tokens = [1.0, 3.0, 5.0] if patch == 1 else [3.0]
+    expected = np.mean([*tokens, 3.0])
+    assert rows[2, -3] == pytest.approx(expected)
+    names = encoder.get_feature_names_out()
+    assert list(names[-2:]) == ["time_pretrained_mean", "time_pretrained_scale"]
+    with pytest.raises(ValueError, match="no finite value"):
+        encoder.transform([[np.nan, np.inf]])
+
+
+def test_trailing_padding_of_a_series_is_dropped_before_its_window(fakes):
+    encoder = _encoder("time:chronos-t5-tiny")
+    series = np.arange(300.0)
+    padded = np.concatenate([[np.nan] * 5, series, [np.nan] * 2000])
+    rows = encoder.fit_transform([series, padded])
+    np.testing.assert_allclose(rows[1], rows[0])
+
+
+def test_a_subclass_loads_its_own_network(fakes):
+    class _Again(lazy.text.Pretrained):
+        """Loads the same weights, which must not come from the base's."""
+
+    items = golden_data.encoder_items()["text"]
+    lazy.text.Pretrained(device="cpu", cache=False).fit_transform(items)
+    _Again(device="cpu", cache=False).fit_transform(items)
+    assert fakes["text:e5-small-v2"] == 2
+
+
+def test_an_rgba_array_is_read_as_its_rgb(fakes):
+    rgba = np.random.default_rng(1).integers(0, 256, (6, 5, 4), dtype=np.uint8)
+    encoder = lazy.image.Pretrained(device="cpu", cache=False)
+    rows = encoder.fit_transform([rgba, rgba[:, :, :3]])
+    np.testing.assert_array_equal(rows[0], rows[1])
+
+
+def test_an_image_file_pillow_image_and_array_give_the_same_row(
+    fakes, tmp_path
+):
+    rgb = np.random.default_rng(0).integers(0, 256, (6, 5, 3), dtype=np.uint8)
+    path = tmp_path / "image.png"
+    Image.fromarray(rgb).save(path)
+    encoder = lazy.image.Pretrained(device="cpu", cache=False)
+    with Image.open(path) as image:
+        rows = encoder.fit_transform([rgb, path, str(path), image])
+    np.testing.assert_allclose(rows, rows[:1].repeat(4, axis=0))
+
+
+def test_an_image_that_is_not_8_bit_is_stretched_band_by_band():
+    ramp = np.linspace(-1.0, 3.0, 101)
+    image = np.stack([ramp, 10 * ramp, np.full(101, 5.0)], axis=-1)[None]
+    stretched = np.asarray(lazy.image._rgb(image))[0]
+    low, high = np.percentile(ramp, [1, 99])
+    x = (ramp - low) / (high - low)
+    expected = np.rint(np.clip(np.arcsinh(20 * x) / np.arcsinh(20), 0, 1) * 255)
+    np.testing.assert_array_equal(stretched[:, 0], expected)
+    np.testing.assert_array_equal(stretched[:, 1], expected)  # scale-free
+    np.testing.assert_array_equal(stretched[:, 2], 0)  # no contrast
+    grey = np.full((2, 2), 7, dtype=np.uint8)
+    np.testing.assert_array_equal(np.asarray(lazy.image._rgb(grey)), 7)
+
+
+@pytest.mark.parametrize(
+    ("array", "message"),
+    [
+        (np.zeros((4, 4, 5)), r"or \(height, width, 3\)"),
+        (np.full((4, 4), np.nan), "all of them finite"),
+    ],
+)
+def test_what_a_network_cannot_read_as_rgb_is_refused(array, message):
+    with pytest.raises(ValueError, match=message):
+        lazy.image._rgb(array)
+
+
+@pytest.mark.parametrize("name", sorted(PRETRAINED))
+def test_each_modality_defaults_to_its_pretrained_encoder(name):
+    cls = PRETRAINED[name]
+    default = encoders.get_encoder(cls.modality)
+    assert type(default) is cls
+    assert default.cache is True
+
+
+@pytest.mark.parametrize("name", sorted(PRETRAINED))
+def test_an_unknown_model_is_refused_by_name(name):
+    cls = PRETRAINED[name]
+    with pytest.raises(lazy.UnknownNameError, match="unknown model 'large'"):
+        cls(model="large").fit(golden_data.encoder_items()[cls.modality])
+
+
+@pytest.mark.parametrize("name", sorted(PRETRAINED))
+def test_a_missing_extra_is_named(monkeypatch, name):
+    cls = PRETRAINED[name]
+    monkeypatch.setitem(sys.modules, cls.package, None)
+    with pytest.raises(ImportError, match=r"lazy-tfm\[encoders\]"):
+        cls().fit(golden_data.encoder_items()[cls.modality])
+    with pytest.raises(ImportError, match=rf"lazy\.{cls.modality}\.Pretrained"):
+        cls().fit(golden_data.encoder_items()[cls.modality])
+
+
+class _Unpinned(lazy.text.Pretrained):
+    """Breaks the contract: a model with no pinned weights, and no device."""
+
+    package = ""
+    recipes = {**lazy.text.Pretrained.recipes, "tiny": None}
+
+    def __init__(self, *, model="tiny", batch_size=64, cache=True):
+        super().__init__(model=model, batch_size=batch_size, cache=cache)
+
+
+def test_a_pretrained_encoder_needs_a_package_device_and_pinned_models(
+    monkeypatch,
+):
+    monkeypatch.setattr(encoders.registry, "ENCODERS", {})
+    with pytest.raises(TypeError, match="cannot be registered") as caught:
+        encoders.register("unpinned", _Unpinned)
+    for problem in (
+        "package, which loads the weights, is not declared",
+        "are not the models pinned for 'text'",
+        "lacks the uniform parameter 'device'",
+        "'model' defaults to 'tiny', not 'e5-small-v2'",
+    ):
+        assert problem in str(caught.value)
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("key", MODELS)
+def test_the_real_weights_give_the_golden_embeddings(key):
+    with (
+        np.load(golden_data.ENCODERS_PATH) as golden,
+        golden_data.pinned_threads(),
+    ):
+        np.testing.assert_allclose(
+            golden_data.embed(key),
+            golden[key.replace(":", "__")],
+            rtol=1e-4,
+            atol=1e-5,
+        )

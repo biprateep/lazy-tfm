@@ -45,11 +45,28 @@ change the API.
   `"time_statistics"`. The user guide has a page on them, "Encoders".
   `pillow`, which `matplotlib` already installs, is now a declared
   dependency.
+- Pretrained encoders, the defaults of their modalities:
+  `lazy.text.Pretrained`, `lazy.image.Pretrained` and `lazy.time.Pretrained`.
+  Each runs one of several frozen networks, which `model` names: E5-small-v2
+  (the default), BGE-small-en-v1.5, all-MiniLM-L6-v2 and GTE-ModernBERT-base
+  for text; DINOv2-small with registers (the default), DINOv2-large, SigLIP 2
+  base and CLIP ViT-B/16 for images; Chronos-T5-tiny (the default),
+  Chronos-T5-mini, Chronos-T5-small and Chronos-Bolt-small for time series.
+  Published evaluations chose them; the "Encoders" page of the user guide
+  gives the evidence. Each network's weights are pinned to a commit on the
+  Hugging Face Hub in `lazy.encoders.CHECKPOINTS`; they need the new
+  `encoders` extra, download on first use with a `LicenseWarning`, and cache
+  their embeddings by default. `lazy.get_checkpoint`,
+  `lazy.download_checkpoint`, `lazy.list_versions`, `lazy download` and
+  `lazy models` take a modality and a network, such as `"text"` or
+  `"image:dinov2-large"`. `lazy.models.Checkpoint` gains `page`, the docs page
+  that its download notice points to.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
   encoder that a modality, a name or an object gives, reduces each embedding
-  to its first `n_components` principal components (default 8), fitted on
-  the context, and passes the other columns through.
+  to its first `n_components` principal components (default 30, as the
+  published pipelines use), fitted on the context, and passes the other
+  columns through.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
 

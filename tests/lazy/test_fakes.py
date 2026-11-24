@@ -13,6 +13,7 @@ import importlib
 import inspect
 
 import fakes
+from fakes import encoders as fake_encoders
 from fakes import tabicl as fake_tabicl
 from fakes import tabpfn as fake_tabpfn
 import pytest
@@ -24,6 +25,8 @@ STAND_INS = {
     "tabpfn.inference.InferenceEngine": fake_tabpfn.Executor,
     "tabicl.TabICLRegressor": fake_tabicl.Regressor,
     "tabicl._model.tabicl.TabICL": fake_tabicl.Network,
+    "chronos.ChronosPipeline": fake_encoders.Chronos,
+    "chronos.ChronosBoltPipeline": fake_encoders.Chronos,
 }
 """Each fake class, by the dotted name of the upstream class it replaces."""
 
@@ -68,7 +71,7 @@ def test_every_method_of_a_fake_exists_upstream_with_its_parameters(dotted):
 def _seams():
     """Each private lazy name a fake lists, with the fake that lists it."""
     listed = [("fakes", fakes.SHARED_SEAMS)]
-    for backend in lazy.list_estimators():
+    for backend in [*lazy.list_estimators(), "encoders"]:
         module = importlib.import_module(f"fakes.{backend}")
         listed.append((backend, module.LAZY_SEAMS))
     pairs = []
