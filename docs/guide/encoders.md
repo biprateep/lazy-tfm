@@ -2,23 +2,15 @@
 
 A model takes a table of numbers. An *encoder* turns a column of items that
 are not numbers (time series, images, texts) into numeric columns, one row
-per item, which the model takes as features. An encoder is a scikit-learn
-transformer, so it is a step of a
-{class}`~sklearn.compose.ColumnTransformer` in front of the model:
+per item, which the model takes as features. {class}`lazy.Tabularizer` puts
+the encoders in front of the model: it names the encoder of each column of
+items, and passes the numeric columns through.
 
 ```python
-from sklearn import compose
-
 import lazy
 
-features = compose.ColumnTransformer(
-    [
-        ("curve", lazy.time.Statistics(), ["light_curve"]),
-        ("notes", lazy.text.Hashing(n_features=32), ["notes"]),
-    ],
-    remainder="passthrough",  # the numeric columns, as they are
-)
-model = lazy.make_pipeline(features, lazy.LazyModel())
+tab = lazy.Tabularizer({"light_curve": "time", "notes": "text"})
+model = lazy.make_pipeline(tab, lazy.LazyModel())
 model.fit(table, y)
 low, median, high = model.predict_quantiles(new_table, [0.16, 0.5, 0.84]).T
 ```
@@ -43,6 +35,34 @@ and no download. They are baselines, and they work offline.
 
 The count in parentheses is that of the default parameters. The models read
 at most a few hundred features well ({doc}`limits`), so keep the total small.
+
+## The Tabularizer
+
+{class}`lazy.Tabularizer` takes a map from a column to its encoder:
+
+- a modality, `"image"`, `"text"` or `"time"`, for the default encoder of
+  that modality ({data}`lazy.encoders.DEFAULT_ENCODERS`);
+- the name of an encoder, such as `"time_spectrum"`;
+- an encoder, such as `lazy.text.Hashing(n_features=32)`.
+
+An embedding can have many columns, such as the 192 of `image_pixels`. The
+Tabularizer reduces each embedding wider than `n_components` (default 8): it
+standardizes each column of the embedding and keeps the first `n_components`
+principal components. Both are fitted on the rows given to `fit`, the context,
+as the model is. A missing item gives a row of `NaN`, which is left out of the
+fit and stays `NaN`; the context needs more items that are not missing than
+`n_components`. `n_components=None` keeps every column.
+
+The other columns pass through, unless `remainder` says otherwise, and
+`get_feature_names_out` names every output column. A search tunes the
+Tabularizer as any step, for example over `tabularizer__n_components`.
+
+One setting, `n_components`, serves every column. For another reduction, or
+a search over an encoder's own parameters, build a
+{class}`~sklearn.compose.ColumnTransformer` of encoders and any other steps:
+an encoder is a scikit-learn transformer on its own, and
+{func}`~lazy.encoders.get_encoder` builds the default encoder of a modality,
+as in `get_encoder("text")`.
 
 ## Time series
 

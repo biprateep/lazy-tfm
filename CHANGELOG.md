@@ -45,6 +45,13 @@ change the API.
   `"time_statistics"`. The user guide has a page on them, "Encoders".
   `pillow`, which `matplotlib` already installs, is now a declared
   dependency.
+- `lazy.Tabularizer`: the step before a model for a table with columns of
+  images, texts or time series. It encodes each such column with the
+  encoder that a modality, a name or an object gives, reduces each embedding
+  to its first `n_components` principal components (default 8), fitted on
+  the context, and passes the other columns through.
+  `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
+  `"time"`, for its default encoder.
 
 ### Changed
 

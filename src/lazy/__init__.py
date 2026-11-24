@@ -50,7 +50,9 @@ The package is laid out as follows.
 :mod:`lazy.encoders`
     :class:`~lazy.encoders.BaseEncoder`, the contract of the transformers
     that turn items which are not table cells (images, text, time series)
-    into table columns, their registry and the cache of their embeddings.
+    into table columns, their registry, the cache of their embeddings, and
+    :class:`~lazy.encoders.Tabularizer`, which encodes a table's columns of
+    items.
 :mod:`lazy.image`, :mod:`lazy.text`, :mod:`lazy.time`
     The encoders of each kind of item: summary statistics and simple
     transforms that need no download.
@@ -92,6 +94,7 @@ from lazy._namespace import ImportNameWarning
 from lazy._warnings import LazyWarning
 from lazy.base import BaseDensityRegressor
 from lazy.base import POINT_ESTIMATORS
+from lazy.encoders import Tabularizer
 from lazy.grid import as_grid
 from lazy.grid import Grid
 from lazy.models import Checkpoint
@@ -157,6 +160,7 @@ __all__ = [
     "TabFMPerformanceWarning",
     "TabICLQuantile",
     "TabPFNBarDistribution",
+    "Tabularizer",
     "UnknownNameError",
     "__version__",
     "as_grid",
