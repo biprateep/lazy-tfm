@@ -61,6 +61,14 @@ change the API.
   `lazy models` take a modality and a network, such as `"text"` or
   `"image:dinov2-large"`. `lazy.models.Checkpoint` gains `page`, the docs page
   that its download notice points to.
+- MulTaBench's 40 regression datasets, tables with columns of text or
+  images, load by name through `lazy.datasets.load_dataset`, as
+  `"multabench_<name>"`, each pinned to a commit on the Hugging Face Hub.
+  `split=True` gives MulTaBench's own split, chosen by `fold` and `size`. An
+  image column holds the paths of the extracted images, and the new
+  `Dataset.modalities` names the columns of text and images, ready for
+  `lazy.Tabularizer`. They need the new `multabench` extra, which installs
+  pyarrow.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
   encoder that a modality, a name or an object gives, reduces each embedding

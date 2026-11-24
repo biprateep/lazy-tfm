@@ -2075,6 +2075,7 @@ all = [
     { name = "einops" },
     { name = "kditransform" },
     { name = "nvtx" },
+    { name = "pyarrow" },
     { name = "qp-prob" },
     { name = "safetensors" },
     { name = "structured-data-models" },
@@ -2097,6 +2098,9 @@ limix = [
     { name = "kditransform" },
     { name = "nvtx" },
     { name = "torch" },
+]
+multabench = [
+    { name = "pyarrow" },
 ]
 qp = [
     { name = "qp-prob" },
@@ -2142,12 +2146,13 @@ requires-dist = [
     { name = "h5py", specifier = ">=3.11" },
     { name = "huggingface-hub", specifier = ">=0.24" },
     { name = "kditransform", marker = "extra == 'limix'", specifier = ">=1.0" },
-    { name = "lazy-tfm", extras = ["encoders", "kumo", "limix", "qp", "tabfm", "tabicl", "tabpfn"], marker = "extra == 'all'" },
+    { name = "lazy-tfm", extras = ["encoders", "kumo", "limix", "multabench", "qp", "tabfm", "tabicl", "tabpfn"], marker = "extra == 'all'" },
     { name = "matplotlib", specifier = ">=3.8.4" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "nvtx", marker = "extra == 'limix'", specifier = ">=0.2" },
     { name = "pandas", specifier = ">=2.2.2" },
     { name = "pillow", specifier = ">=10.1" },
+    { name = "pyarrow", marker = "extra == 'multabench'", specifier = ">=16" },
     { name = "qp-prob", marker = "extra == 'qp'", specifier = ">=1.1" },
     { name = "safetensors", marker = "extra == 'tabfm'", specifier = ">=0.4.3" },
     { name = "scikit-learn", specifier = ">=1.6" },
@@ -2161,7 +2166,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66" },
     { name = "transformers", marker = "extra == 'encoders'", specifier = ">=5.24" },
 ]
-provides-extras = ["tabfm", "tabicl", "tabpfn", "kumo", "limix", "encoders", "qp", "all"]
+provides-extras = ["tabfm", "tabicl", "tabpfn", "kumo", "limix", "encoders", "multabench", "qp", "all"]
 
 [package.metadata.requires-dev]
 dev = [
