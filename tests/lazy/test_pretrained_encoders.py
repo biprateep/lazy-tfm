@@ -183,6 +183,60 @@ def test_an_image_file_pillow_image_and_array_give_the_same_row(
     np.testing.assert_allclose(rows, rows[:1].repeat(4, axis=0))
 
 
+@pytest.fixture(name="corner")
+def _corner_processor(fakes, monkeypatch):
+    """The fake image processor, reading each image's top-left pixel only."""
+    import torch  # noqa: PLC0415 - the backends job's extra.
+
+    def corner(self, images, return_tensors):
+        pixels = [np.asarray(image, float)[0, 0] for image in images]
+        return {"pixel_values": torch.tensor(np.array(pixels))}
+
+    monkeypatch.setattr(fake_encoders.ImageProcessor, "__call__", corner)
+
+
+def test_each_view_is_embedded_and_the_views_averaged(corner):
+    rng = np.random.default_rng(2)
+    image = rng.integers(0, 256, (5, 4, 3), dtype=np.uint8)
+    plain = lazy.image.Pretrained(device="cpu", cache=False).fit([image])
+    turned = lazy.image.Pretrained(
+        views=["rotate_90"], device="cpu", cache=False
+    )
+    np.testing.assert_array_equal(
+        turned.fit_transform([image]), plain.transform([np.rot90(image)])
+    )
+    d4 = lazy.image.Pretrained(views="d4", device="cpu", cache=False)
+    views = [
+        image
+        if view is None
+        else np.asarray(Image.fromarray(image).transpose(view))
+        for view in lazy.image.VIEWS.values()
+    ]
+    expected = plain.transform(views).mean(axis=0)
+    # The network gives float32, of values up to 1 (spacing 6e-8), and the
+    # views are summed in another order.
+    np.testing.assert_allclose(
+        d4.fit_transform([image])[0], expected, rtol=1e-6, atol=1e-7
+    )
+
+
+@pytest.mark.parametrize(
+    ("views", "message"),
+    [
+        ("rotate_90", "views must be"),
+        ([], "views must be"),
+        (["identity", "identity"], "views must be"),
+        (90, "views must be"),
+        ([["rotate_90"]], "views must be"),
+        (["spin"], "unknown view 'spin'"),
+    ],
+)
+def test_views_that_name_no_distinct_views_are_refused(views, message):
+    encoder = lazy.image.Pretrained(views=views, device="cpu", cache=False)
+    with pytest.raises(ValueError, match=message):
+        encoder.fit([np.zeros((2, 2), dtype=np.uint8)])
+
+
 def test_an_image_that_is_not_8_bit_is_stretched_band_by_band():
     ramp = np.linspace(-1.0, 3.0, 101)
     image = np.stack([ramp, 10 * ramp, np.full(101, 5.0)], axis=-1)[None]

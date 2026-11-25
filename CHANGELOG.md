@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `lazy.image.Pretrained(views=...)`: rotates and flips each image before it
+  is embedded, and averages the embeddings of the views. `"d4"` takes all
+  eight rotations and flips, listed in `lazy.image.VIEWS`; one view gives a
+  member of a pool its own view of the images. The default, `None`, embeds
+  each image as before.
 - `LazyEnsembleModel` accepts a `LazyPipeline` that ends in a model as a
   member, so that one pool combines models that see different views of the
   same table, such as two encoders of a column of items. A pipeline gets the
