@@ -410,6 +410,11 @@ def test_a_category_column_reaches_the_model_as_its_codes():
     assert model.categories_[0] is None
     assert model.categories_[1].tolist() == ["c", "b", "a"]
     np.testing.assert_array_equal(model.fitted_on_["kind"], [1, 2, np.nan, 0])
+    unused = frame.assign(
+        kind=kind.add_categories("d").reorder_categories(["d", "c", "b", "a"])
+    )
+    again = _Seen().fit(unused, np.arange(4.0))
+    pd.testing.assert_frame_equal(again.fitted_on_, model.fitted_on_)
     assert model.fitted_on_["kind"].dtype == np.float64
 
 

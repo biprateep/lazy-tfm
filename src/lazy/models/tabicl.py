@@ -248,6 +248,7 @@ class TabICLQuantile(
     # A quantile head: there is no softmax for a temperature to divide.
     has_softmax = False
     native_outlier_clipping = True
+    native_categorical = False
     # On a CPU, where the conformance tests run, the cache agrees to float32
     # rounding (about 1e-6 of the quantiles' spread), and so does chunking:
     # most chunk sizes give the same bits, but a one-row chunk takes a
@@ -271,6 +272,7 @@ class TabICLQuantile(
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -287,6 +289,7 @@ class TabICLQuantile(
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

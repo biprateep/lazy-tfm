@@ -477,6 +477,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
     native_outlier_clipping = True
+    native_categorical = False
     # Chunking changes the float rounding even on a CPU, and in bfloat16 on
     # CUDA it and the cache change it far more (see kv_cache above).
     exact_chunking = False
@@ -497,6 +498,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -519,6 +521,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

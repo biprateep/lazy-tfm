@@ -161,7 +161,6 @@ class BaseDensityRegressor(
     # Set by each subclass's __init__, which scikit-learn requires to store
     # its parameters verbatim; declared here for the type checker only.
     y_grid: grid_lib.GridLike
-    categorical_features: Any = "from_dtype"
 
     def __sklearn_tags__(self) -> sklearn_base.Tags:
         """scikit-learn's tags: a regressor that accepts NaN features.
@@ -290,7 +289,7 @@ class BaseDensityRegressor(
         self._check_not_empty(frame)
         y = _inputs.check_target(y, len(frame))
         is_categorical = _inputs.categorical_mask(
-            self.categorical_features, frame, named
+            getattr(self, "categorical_features", "from_dtype"), frame, named
         )
         categories = _inputs.fit_categories(frame, is_categorical)
         X = _inputs.numeric_frame(frame, named, categories)

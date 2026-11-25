@@ -201,6 +201,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
     kv_cache_rtol = 1e-4  # Float rounding: the cached rows batch differently.
     # LimiX-2 clips no outliers; outlier_threshold is scaffolded by SoftClip.
     native_outlier_clipping = False
+    native_categorical = False
     recommended_max_context = 20_000
     exact_chunking = False  # Exact up to float rounding, not bit for bit.
     recipes = _RECIPES
@@ -226,6 +227,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -242,6 +244,7 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

@@ -51,6 +51,7 @@ import dataclasses
 import warnings
 
 import numpy as np
+import numpy.typing as npt
 from sklearn import preprocessing
 
 from lazy import _typing
@@ -149,17 +150,26 @@ class ScaffoldTransform:
     Fitted on its member group's context rows only (see the module
     docstring), so a query row's features never depend on the other query
     rows. Missing values (NaN) are ignored
-    when fitting and stay NaN, for the model to handle.
+    when fitting and stay NaN, for the model to handle. Categorical
+    columns, which hold codes, pass through.
 
     Attributes:
         spec: The transform.
         seed: The seed for its randomness (quantile subsampling, noise).
+        categorical: Which columns are categorical, shape (n_features,);
+            ``None`` for none.
     """
 
-    def __init__(self, spec: TransformSpec, seed: int):
+    def __init__(
+        self,
+        spec: TransformSpec,
+        seed: int,
+        categorical: npt.NDArray[np.bool_] | None = None,
+    ):
         """Initializes an unfitted transform."""
         self.spec = spec
         self.seed = seed
+        self.categorical = categorical
         self._transformer: object | None = None
         # Columns the transformer is fitted on and applied to; None for all.
         self._columns: _typing.IntArray | None = None
@@ -173,19 +183,26 @@ class ScaffoldTransform:
         n_rows = len(features)
         base = self.spec.base
         rng = np.random.default_rng(self.seed)
-        if base == "none":
+        if self.categorical is not None and self.categorical.any():
+            self._columns = np.flatnonzero(~self.categorical)
+            features = features[:, self._columns]
+        if base == "none" or features.shape[1] == 0:
             self._transformer = None
         elif base == "power":
             # Yeo-Johnson cannot fit a column with no spread (sklearn fails
             # cryptically on an all-NaN one), so such columns pass through.
-            self._columns = np.flatnonzero(
+            spread = np.flatnonzero(
                 [np.unique(c[~np.isnan(c)]).size > 1 for c in features.T]
             )
+            self._columns = (
+                spread if self._columns is None else self._columns[spread]
+            )
+            features = features[:, spread]
             self._transformer = (
                 preprocessing.PowerTransformer(
                     method="yeo-johnson", standardize=True
-                ).fit(features[:, self._columns])
-                if self._columns.size
+                ).fit(features)
+                if spread.size
                 else None
             )
         elif base == "robust":
@@ -263,8 +280,17 @@ class SoftClip:
         self._lower: _typing.FloatArray | None = None
         self._upper: _typing.FloatArray | None = None
 
-    def fit(self, features: _typing.FloatArray) -> "SoftClip":
+    def fit(
+        self,
+        features: _typing.FloatArray,
+        categorical: npt.NDArray[np.bool_] | None = None,
+    ) -> "SoftClip":
         """Fits the bounds on context features, shape (n_rows, n_features).
+
+        Args:
+            features: The context features.
+            categorical: Which columns are categorical, shape (n_features,),
+                which the clip leaves alone; ``None`` for none.
 
         Returns:
             The fitted clip itself.
@@ -275,7 +301,11 @@ class SoftClip:
         clean = np.where(
             (features < lower) | (features > upper), np.nan, features
         )
-        self._lower, self._upper = self._bounds(clean, ddof)
+        lower, upper = self._bounds(clean, ddof)
+        if categorical is not None:
+            lower = np.where(categorical, -np.inf, lower)
+            upper = np.where(categorical, np.inf, upper)
+        self._lower, self._upper = lower, upper
         return self
 
     def _bounds(

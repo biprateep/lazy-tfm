@@ -145,6 +145,9 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         y_grid: Default output grid, as for
             :class:`~lazy.models.lazy_model.LazyModel`: ``None`` is the
             pooling grid (``native_grid_``).
+        categorical_features: Which columns are categorical, as for every
+            model (:class:`~lazy.base.BaseDensityRegressor`). It decides for
+            every member that takes the parameter, whatever its own value.
         random_state: The seed given to every member whose own
             ``random_state`` is still its default (0); a member given
             another value keeps it.
@@ -186,6 +189,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         pool_bins: int | None = None,
         chunk_size: int = _ensemble.UNIFORM_DEFAULTS["chunk_size"],
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         random_state: int | None = 0,
         device: str = "auto",
     ):
@@ -194,6 +198,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         self.pool_bins = pool_bins
         self.chunk_size = chunk_size
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.random_state = random_state
         self.device = device
 
@@ -292,6 +297,9 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         named = "feature_names_in_" in vars(self)
         context = X if named else X.to_numpy()
         for _, member in members:
+            # The members get the codes of this ensemble's categories.
+            if "categorical_features" in member.get_params(deep=False):
+                member.set_params(categorical_features=self.is_categorical_)
             member.fit(context, y)
         self.estimators_ = [member for _, member in members]
         self.named_estimators_ = sklearn_utils.Bunch(**dict(members))

@@ -104,6 +104,7 @@ class KumoQuantile(
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
+    native_categorical = False
     recommended_max_context = 60_000
     context_limit_note = (
         "was pretrained on tables of up to {limit:,} rows, beyond which its "

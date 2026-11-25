@@ -30,6 +30,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
     display_name = "StandIn"
     extra = "none"
     cpu_friendly = True  # Milliseconds anywhere; never the CPU warning.
+    native_categorical = False
 
     def __init__(
         self,
@@ -41,6 +42,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         bag_size=None,
         kv_cache=True,
         y_grid=None,
+        categorical_features="from_dtype",
         device="auto",
         random_state=0,
         chunk_size=8_192,
@@ -58,6 +60,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

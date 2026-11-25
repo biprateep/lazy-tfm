@@ -273,6 +273,7 @@ class KumoQuantile(
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
+    native_categorical = False
     # NVIDIA's training stopped at tables of 60,000 rows; unlike LimiX's
     # limit, it is not where the model was seen to degrade.
     recommended_max_context = 60_000
@@ -301,6 +302,7 @@ class KumoQuantile(
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -317,6 +319,7 @@ class KumoQuantile(
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size

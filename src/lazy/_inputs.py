@@ -185,9 +185,10 @@ def fit_categories(
 ) -> list[pd.Index | None]:
     """The categories of each categorical column, in the order of its codes.
 
-    A column of pandas' ``category`` type keeps its own categories, in their
-    order; any other categorical column takes its distinct values that are
-    not missing, sorted.
+    A column of pandas' ``category`` type keeps the categories it holds, in
+    the order of its type; any other categorical column takes its distinct
+    values that are not missing, sorted. Codes are therefore 0 to k - 1 for
+    the k categories present, and encoding the codes again changes nothing.
 
     Args:
         frame: The features, as :func:`to_frame` returns them.
@@ -208,7 +209,7 @@ def fit_categories(
             categories.append(None)
             continue
         if isinstance(column.dtype, pd.CategoricalDtype):
-            found = column.cat.categories
+            found = column.cat.remove_unused_categories().cat.categories
         else:
             try:
                 found = pd.Index(column.dropna().unique()).sort_values()

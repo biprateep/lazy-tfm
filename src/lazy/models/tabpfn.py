@@ -457,6 +457,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # target on the whole context (see the module docstring).
     supports_native_bagging = False
     native_outlier_clipping = True
+    native_categorical = False
     # Only the fast checkpoint is quick enough on a CPU, where upstream
     # allows 5,000 context rows.
     cpu_friendly_versions = ("v3.5-fast",)
@@ -483,6 +484,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -500,6 +502,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
