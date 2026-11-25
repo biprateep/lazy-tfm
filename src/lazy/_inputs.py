@@ -26,7 +26,11 @@ strings with other types.
 
 Typical usage example:
 
-  frame, named = _inputs.as_feature_frame(table)
+  frame, named = _inputs.to_frame(table)
+  mask = _inputs.categorical_mask("from_dtype", frame, named)
+  features = _inputs.numeric_frame(
+      frame, named, _inputs.fit_categories(frame, mask)
+  )
   target = _inputs.as_target(table["z"])
 """
 
@@ -42,7 +46,14 @@ from sklearn.utils import validation
 from lazy import _typing
 from lazy import _warnings
 
-__all__ = ["as_feature_frame", "as_target", "check_target"]
+__all__ = [
+    "as_target",
+    "categorical_mask",
+    "check_target",
+    "fit_categories",
+    "numeric_frame",
+    "to_frame",
+]
 
 _COMPLEX = "Complex data not supported"
 _NUMERIC_STRINGS = (
@@ -61,22 +72,21 @@ _COLUMN_VECTOR = (
 )
 
 
-def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
-    """Converts any supported feature table to a float64 DataFrame.
+def to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
+    """Reads any supported feature table as a DataFrame of its own types.
 
     Args:
         features: The features, shape (n_samples, n_features), in any of the
             forms the module docstring lists.
 
     Returns:
-        A tuple (frame, named) -- the features as a float64 DataFrame with a
-        fresh index, and whether its column names came from the input (they
-        are ``x0, x1, ...`` otherwise).
+        A tuple (frame, named) -- the features with a fresh index and their
+        columns' types, and whether the column names came from the input.
 
     Raises:
         TypeError: If the features are a sparse matrix or array.
-        ValueError: If the table is not two-dimensional, has no columns, has
-            a complex or non-numeric column, or holds an infinity.
+        ValueError: If the table is not two-dimensional, has no columns, or
+            has a complex column.
     """
     if sparse.issparse(features):
         raise TypeError(
@@ -92,24 +102,195 @@ def as_feature_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         )
     if frame.dtypes.map(pd.api.types.is_complex_dtype).any():
         raise ValueError(_COMPLEX)
-    try:
-        values = frame.to_numpy(dtype=np.float64, na_value=np.nan)
-    except (TypeError, ValueError) as error:
-        bad = [
-            str(name) for name in frame.columns if not _converts(frame[name])
-        ]
-        raise ValueError(
-            f"every feature column must be numeric; not numeric: {bad}"
-        ) from error
+    return frame, named
+
+
+def categorical_mask(
+    categorical_features: Any, frame: pd.DataFrame, named: bool
+) -> npt.NDArray[np.bool_]:
+    """Which columns are categorical, as ``categorical_features`` says.
+
+    Args:
+        categorical_features: ``"from_dtype"``, for the columns of pandas'
+            ``category`` type; ``None``, for none; or the columns as names
+            (of a table with names), as integer positions, or as a boolean
+            mask with one entry per column.
+        frame: The features, as :func:`to_frame` returns them.
+        named: Whether the column names came from the input.
+
+    Returns:
+        One boolean per column, shape (n_features,).
+
+    Raises:
+        ValueError: If ``categorical_features`` names a column that the
+            table does not have, has a position out of range, or is a mask
+            of the wrong length.
+        TypeError: If ``categorical_features`` is of none of these forms.
+    """
+    n_columns = frame.shape[1]
+    if categorical_features is None:
+        return np.zeros(n_columns, dtype=bool)
+    if isinstance(categorical_features, str):
+        if categorical_features != "from_dtype":
+            raise ValueError(
+                "categorical_features must be 'from_dtype', None, or column"
+                f" names, positions or a mask; got {categorical_features!r}"
+            )
+        return np.array(
+            [isinstance(t, pd.CategoricalDtype) for t in frame.dtypes]
+        )
+    spec = np.asarray(categorical_features)
+    if spec.ndim != 1:
+        raise TypeError(
+            "categorical_features must be 'from_dtype', None, or a list of"
+            " column names, positions or booleans; got"
+            f" {categorical_features!r}"
+        )
+    mask = np.zeros(n_columns, dtype=bool)
+    if spec.size == 0:
+        return mask
+    if spec.dtype == bool:
+        if spec.size != n_columns:
+            raise ValueError(
+                f"categorical_features is a mask of {spec.size} entries, but"
+                f" X has {n_columns} columns"
+            )
+        return spec.copy()
+    if spec.dtype.kind in "iu":
+        if spec.size and (spec.min() < -n_columns or spec.max() >= n_columns):
+            raise ValueError(
+                f"categorical_features has positions {spec.tolist()}, but X"
+                f" has {n_columns} columns"
+            )
+        mask[spec] = True
+        return mask
+    if spec.dtype.kind in "UO" and named:
+        missing = [str(name) for name in spec if name not in frame.columns]
+        if missing:
+            raise ValueError(
+                f"categorical_features names {missing}, which are not"
+                " columns of X"
+            )
+        mask[frame.columns.get_indexer(pd.Index(spec))] = True
+        return mask
+    raise TypeError(
+        "categorical_features must be 'from_dtype', None, or column names"
+        " (of X with column names), positions or a boolean mask; got"
+        f" {categorical_features!r}"
+    )
+
+
+def fit_categories(
+    frame: pd.DataFrame, mask: npt.NDArray[np.bool_]
+) -> list[pd.Index | None]:
+    """The categories of each categorical column, in the order of its codes.
+
+    A column of pandas' ``category`` type keeps its own categories, in their
+    order; any other categorical column takes its distinct values that are
+    not missing, sorted.
+
+    Args:
+        frame: The features, as :func:`to_frame` returns them.
+        mask: Which columns are categorical, shape (n_features,).
+
+    Returns:
+        For each column, its categories, or ``None`` if it is not
+        categorical.
+
+    Raises:
+        ValueError: If a categorical column has no value that is not
+            missing.
+    """
+    categories: list[pd.Index | None] = []
+    for position, is_categorical in enumerate(mask):
+        column = frame.iloc[:, position]
+        if not is_categorical:
+            categories.append(None)
+            continue
+        if isinstance(column.dtype, pd.CategoricalDtype):
+            found = column.cat.categories
+        else:
+            try:
+                found = pd.Index(column.dropna().unique()).sort_values()
+            except TypeError:
+                raise ValueError(
+                    f"categorical column {frame.columns[position]!r} holds"
+                    " values that cannot be ordered, such as text and"
+                    " numbers; give it one type, or pandas' category type"
+                ) from None
+        if found.empty:
+            raise ValueError(
+                f"categorical column {frame.columns[position]!r} has no value"
+                " that is not missing"
+            )
+        categories.append(found)
+    return categories
+
+
+def numeric_frame(
+    frame: pd.DataFrame, named: bool, categories: list[pd.Index | None]
+) -> pd.DataFrame:
+    """The features as float64, each categorical column as its codes.
+
+    A categorical column holds the position of each value in its
+    categories, 0 to n_categories - 1, and NaN for a missing value or one
+    that is not among the categories.
+
+    Args:
+        frame: The features, as :func:`to_frame` returns them.
+        named: Whether the column names came from the input.
+        categories: For each column, its categories, or ``None`` if it is
+            not categorical (:func:`fit_categories`).
+
+    Returns:
+        A float64 DataFrame with a fresh index, named by the input's names
+        or ``x0, x1, ...``.
+
+    Raises:
+        ValueError: If a column that is not categorical is not numeric, or
+            holds an infinity.
+    """
+    values = None
+    if all(found is None for found in categories):
+        try:  # One conversion, column-major, as pandas holds a frame.
+            values = frame.to_numpy(dtype=np.float64, na_value=np.nan)
+        except (TypeError, ValueError):
+            pass  # The loop below names the columns that fail.
+    if values is None:
+        values = np.empty(frame.shape, dtype=np.float64, order="F")
+        problems = []
+        for position, found in enumerate(categories):
+            column = frame.iloc[:, position]
+            if found is not None:
+                codes = found.get_indexer(pd.Index(column))
+                values[:, position] = np.where(codes < 0, np.nan, codes)
+                continue
+            try:
+                values[:, position] = column.to_numpy(
+                    dtype=np.float64, na_value=np.nan
+                )
+            except (TypeError, ValueError):
+                problems.append(
+                    f"'{frame.columns[position]}' ({_kind(column)})"
+                )
+        if problems:
+            raise ValueError(
+                "every feature column must be numeric or categorical; not"
+                f" numeric: {', '.join(problems)}. Mark a column of"
+                " categories with .astype('category') or"
+                " categorical_features; encode a column of text, images or"
+                " time series with lazy.Tabularizer; convert a date to"
+                " numbers, such as days since a reference date"
+            )
     infinite = np.isinf(values).any(axis=0)
     if infinite.any():
-        columns = [str(name) for name in frame.columns[infinite]]
+        names = [str(name) for name in frame.columns[infinite]]
         raise ValueError(
             "X holds infinite values (mark missing values with NaN) in "
-            f"columns {columns}"
+            f"columns {names}"
         )
-    columns = list(frame.columns) if named else _default_names(values.shape[1])
-    return pd.DataFrame(values, columns=columns), named
+    names = list(frame.columns) if named else _default_names(values.shape[1])
+    return pd.DataFrame(values, columns=names)
 
 
 def as_target(target: Any) -> _typing.FloatArray:
@@ -178,7 +359,7 @@ def check_target(
 
 
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
-    """Dispatches on the input's form; see :func:`as_feature_frame`."""
+    """Dispatches on the input's form; see :func:`to_frame`."""
     if isinstance(features, pd.DataFrame):
         frame = features.reset_index(drop=True)
         return frame, _all_strings(frame.columns)
@@ -194,12 +375,12 @@ def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
         try:
             array = array.astype(np.float64)
         except ValueError:
-            pass  # as_feature_frame names the columns that fail.
+            pass  # numeric_frame names the columns that fail.
         else:
             _warnings.warn(_NUMERIC_STRINGS, FutureWarning)
     if mask is not None:
         _reject_complex(array)
-        array = np.where(mask, np.nan, array.astype(np.float64))
+        array = _masked(array, mask)
     if array.ndim == 1:
         raise ValueError(
             f"X must be 2D, got a 1D array of shape {array.shape}. Reshape "
@@ -250,10 +431,22 @@ def _from_structured(array: npt.NDArray[Any]) -> pd.DataFrame:
 def _column_values(column: Any) -> npt.NDArray[Any]:
     """One column's values, units dropped and masked entries as NaN."""
     values, mask = _unmask(column)
-    if mask is None or values.dtype.kind not in "biuf":
-        return values
-    filled = values.astype(np.float64)
-    filled[mask] = np.nan
+    return values if mask is None else _masked(values, mask)
+
+
+def _masked(
+    values: npt.NDArray[Any], mask: npt.NDArray[np.bool_]
+) -> npt.NDArray[Any]:
+    """Values with their masked entries missing: NaN, or None for objects.
+
+    Numbers become float64 and anything else, such as text, objects.
+    """
+    if values.dtype.kind in "biuf":
+        filled = values.astype(np.float64)
+        filled[mask] = np.nan
+        return filled
+    filled = values.astype(object)
+    filled[mask] = None
     return filled
 
 
@@ -287,13 +480,15 @@ def _unmask(
     return data, np.broadcast_to(np.asarray(mask, dtype=bool), data.shape)
 
 
-def _converts(column: pd.Series) -> bool:
-    """Whether a column converts to float64."""
-    try:
-        column.to_numpy(dtype=np.float64, na_value=np.nan)
-    except (TypeError, ValueError):
-        return False
-    return True
+def _kind(column: pd.Series) -> str:
+    """What a column that is not numeric holds, for an error message."""
+    if isinstance(column.dtype, pd.CategoricalDtype):
+        return "categories, not marked as categorical"
+    if pd.api.types.is_datetime64_any_dtype(column) or isinstance(
+        column.dtype, pd.PeriodDtype
+    ):
+        return "dates"
+    return "text or objects"
 
 
 def _all_strings(columns: pd.Index) -> bool:

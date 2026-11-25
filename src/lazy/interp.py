@@ -171,7 +171,11 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
             ``"permutation"`` needs it fitted; the other methods fit clones
-            of it and leave it as it is.
+            of it and leave it as it is. A clone fitted on some of the
+            columns gets, as its ``categorical_features``, those columns'
+            mask; inside a pipeline, whose steps change the columns, the
+            model should mark its categorical columns by their pandas type
+            (``"from_dtype"``).
         X: The rows to explain, shape (n_rows, n_columns), in any form the
             models take. They should not be rows of the context.
         y: Their finite true targets, shape (n_rows,).
@@ -213,7 +217,7 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     """
     method = _check_method(method, X_context, y_context)
     _check_options(method, n_permutations=n_permutations, n_repeats=n_repeats)
-    X, named = _inputs.as_feature_frame(X)
+    X, named = _frame(X)
     if X.empty:
         raise ValueError("X has no rows to explain")
     y = _inputs.check_target(y, len(X))
@@ -232,7 +236,7 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         )
         return Explanation(method, STATISTICS, names, values, full, None)
 
-    context, _ = _inputs.as_feature_frame(X_context)
+    context, _ = _frame(X_context)
     context_targets = _inputs.check_target(
         y_context, len(context), names=("X_context", "y_context")
     )
@@ -383,6 +387,22 @@ def _features(
     return tuple(index), np.array(feature_of)
 
 
+def _frame(features: Any) -> tuple[pd.DataFrame, bool]:
+    """Features as a DataFrame of their own types, named ``x0, ...`` if not.
+
+    Args:
+        features: Features, shape (n, p), in any form a model accepts.
+
+    Returns:
+        A tuple (frame, named), as :func:`lazy._inputs.to_frame` returns it,
+        with placeholder names for a table without names.
+    """
+    frame, named = _inputs.to_frame(features)
+    if not named:
+        frame.columns = [f"x{i}" for i in range(frame.shape[1])]
+    return frame, named
+
+
 def _table(
     frame: pd.DataFrame, named: bool
 ) -> pd.DataFrame | _typing.FloatArray:
@@ -444,7 +464,8 @@ def _refit_values(  # noqa: GS030 - scikit-learn's X, y.
     of the features present, and predicts the same columns of ``X``. No
     model fits on no column at all, so the empty coalition gets one column
     of standard normal noise: its prediction is then the model's estimate of
-    the target's marginal distribution.
+    the target's marginal distribution. A clone that takes
+    ``categorical_features`` gets the mask of the columns present.
 
     Args:
         model: The model to clone.
@@ -462,19 +483,30 @@ def _refit_values(  # noqa: GS030 - scikit-learn's X, y.
     """
     noise_context = pd.DataFrame({"noise": rng.standard_normal(len(X_context))})
     noise_queries = pd.DataFrame({"noise": rng.standard_normal(len(X))})
+    params = model.get_params()
+    is_categorical = (
+        _inputs.categorical_mask(
+            params["categorical_features"], X_context, named
+        )
+        if "categorical_features" in params
+        else None
+    )
 
     def values(coalitions: npt.NDArray[np.bool_]) -> _typing.FloatArray:
         """Every statistic of every row, for each coalition."""
         table = []
         for coalition in coalitions:
-            context, queries = noise_context, noise_queries
+            clone = sklearn_base.clone(model)
+            context, queries, marked = noise_context, noise_queries, None
             if coalition.any():
                 present = coalition[feature_of]
                 context, queries = X_context.loc[:, present], X.loc[:, present]
-            fitted = sklearn_base.clone(model).fit(
-                _table(context, named), y_context
-            )
-            table.append(_statistics(fitted, queries, y, named, grid))
+                if is_categorical is not None:
+                    marked = is_categorical[present]
+            if is_categorical is not None:
+                clone.set_params(categorical_features=marked)
+            fitted = clone.fit(context, y_context)
+            table.append(_statistics(fitted, queries, y, True, grid))
         return np.stack(table)
 
     return values
@@ -589,9 +621,9 @@ def _permutation(  # noqa: GS030 - scikit-learn's X, y.
         columns = feature_of == j
         for _ in range(n_repeats):
             shuffled = X.copy()
-            shuffled.loc[:, columns] = X.loc[
-                rng.permutation(len(X)), columns
-            ].to_numpy()
+            moved = X.loc[:, columns].iloc[rng.permutation(len(X))]
+            # A frame keeps each column's type, a category's included.
+            shuffled.loc[:, columns] = moved.set_axis(X.index)
             values[..., j] += full - _statistics(
                 model, shuffled, y, named, grid
             )

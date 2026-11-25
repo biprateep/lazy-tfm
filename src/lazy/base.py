@@ -111,7 +111,9 @@ class BaseDensityRegressor(
     """A regressor that predicts conditional densities, with a scikit-learn API.
 
     Subclasses must accept a ``y_grid`` parameter and pass it through
-    unchanged; see the module docstring.
+    unchanged; see the module docstring. Lazy's models also take
+    ``categorical_features``; a subclass without it reads pandas'
+    ``category`` columns as categorical.
 
     The ``predict*`` methods return empty results for an ``X`` with no rows
     and issue a ``FutureWarning``; from 0.7.0 they raise ``ValueError``.
@@ -125,6 +127,17 @@ class BaseDensityRegressor(
             :class:`~lazy.grid.Grid`, bin centers, or ``None``.
         grid_: The resolved default output grid, set by :meth:`fit`.
         is_fitted_: ``True`` once :meth:`fit` has run.
+        categorical_features: Which columns are categorical:
+            ``"from_dtype"`` (the default), for the columns of pandas'
+            ``category`` type; ``None``, for none; or column names,
+            positions or a boolean mask. A categorical column reaches the
+            model as the codes 0 to n_categories - 1 of its categories,
+            with NaN for a missing value or a category that ``fit`` did not
+            see. Integer or boolean columns stay numeric unless marked.
+        is_categorical_: Which columns are categorical, a boolean array of
+            shape (``n_features_in_``,).
+        categories_: Each column's categories, in the order of its codes,
+            or ``None`` for a numeric column.
         n_features_in_: Number of feature columns seen by :meth:`fit`.
         feature_names_in_: Their names, an object array of shape
             (``n_features_in_``,).
@@ -148,6 +161,7 @@ class BaseDensityRegressor(
     # Set by each subclass's __init__, which scikit-learn requires to store
     # its parameters verbatim; declared here for the type checker only.
     y_grid: grid_lib.GridLike
+    categorical_features: Any = "from_dtype"
 
     def __sklearn_tags__(self) -> sklearn_base.Tags:
         """scikit-learn's tags: a regressor that accepts NaN features.
@@ -256,7 +270,8 @@ class BaseDensityRegressor(
                 structured or record array, a pandas DataFrame, an astropy
                 Table, or anything with ``to_pandas()``. Missing values are
                 NaN. Column names, when the input has them, are remembered
-                and enforced at predict time.
+                and enforced at predict time. Categorical columns are those
+                ``categorical_features`` names.
             y: Finite target values, shape (n_samples,), with
                 n_samples >= 1.
 
@@ -265,12 +280,23 @@ class BaseDensityRegressor(
 
         Raises:
             ImportError: If the backend's package is not installed.
+            ValueError: If a column is neither numeric nor categorical, a
+                categorical column has no value, or ``categorical_features``
+                names a column that ``X`` does not have.
+            TypeError: If ``categorical_features`` is of no accepted form.
         """
         self._clear_fitted()
-        X, named = _inputs.as_feature_frame(X)
-        self._check_not_empty(X)
-        y = _inputs.check_target(y, len(X))
+        frame, named = _inputs.to_frame(X)
+        self._check_not_empty(frame)
+        y = _inputs.check_target(y, len(frame))
+        is_categorical = _inputs.categorical_mask(
+            self.categorical_features, frame, named
+        )
+        categories = _inputs.fit_categories(frame, is_categorical)
+        X = _inputs.numeric_frame(frame, named, categories)
         try:
+            self.is_categorical_ = is_categorical
+            self.categories_ = categories
             self.n_features_in_ = int(X.shape[1])
             if named:
                 self.feature_names_in_ = np.asarray(X.columns, dtype=object)
@@ -860,6 +886,24 @@ class BaseDensityRegressor(
         default = getattr(self, "grid_", None)
         return default if default is not None else self._default_grid()
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores a pickle, one from before categorical columns included.
+
+        Such a pickle lacks ``categorical_features``, which it gets at its
+        default, and, if fitted, ``is_categorical_`` and ``categories_``,
+        which it gets as every column numeric, as it was fitted.
+
+        Args:
+            state: The pickled ``__dict__``.
+        """
+        if "categorical_features" in self._get_param_names():
+            state.setdefault("categorical_features", "from_dtype")
+        if "n_features_in_" in state and "categories_" not in state:
+            n_features = state["n_features_in_"]
+            state["is_categorical_"] = np.zeros(n_features, dtype=bool)
+            state["categories_"] = [None] * n_features
+        super().__setstate__(state)
+
     def _clear_fitted(self) -> None:
         """Drops every fitted attribute, leaving the estimator unfitted.
 
@@ -882,27 +926,28 @@ class BaseDensityRegressor(
 
         Args:
             X: Features, shape (n_samples, n_features), in any form
-                :func:`lazy._inputs.as_feature_frame` accepts.
+                :func:`lazy._inputs.to_frame` accepts.
 
         Returns:
             The features as a float64 DataFrame with a fresh index, columns
             labeled and ordered as at fit time.
         """
-        frame, named = _inputs.as_feature_frame(X)
+        frame, named = _inputs.to_frame(X)
         if frame.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {frame.shape[1]} features, but "
                 f"{type(self).__name__} is expecting {self.n_features_in_} "
                 "features as input"
             )
-        return self._align_to_fit(frame, named)
+        frame = self._align_to_fit(frame, named)
+        return _inputs.numeric_frame(frame, True, self.categories_)
 
     def _check_queries(self, X: _Features) -> pd.DataFrame:
         """:meth:`_check_features`, warning that zero rows will be refused.
 
         Args:
             X: Features, shape (n_samples, n_features), in any form
-                :func:`lazy._inputs.as_feature_frame` accepts.
+                :func:`lazy._inputs.to_frame` accepts.
 
         Returns:
             The features, as :meth:`_check_features` returns them.

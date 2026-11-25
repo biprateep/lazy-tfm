@@ -31,6 +31,13 @@ class _Echo(base.BaseDensityRegressor):
         return np.exp(-0.5 * ((grid.centers - centre[:, None]) / 0.1) ** 2)
 
 
+def _numbers(features):
+    """Features as a model reads them with no column marked categorical."""
+    frame, named = _inputs.to_frame(features)
+    columns = [None] * frame.shape[1]
+    return _inputs.numeric_frame(frame, named, columns), named
+
+
 @pytest.fixture
 def table():
     rng = np.random.default_rng(3)
@@ -94,7 +101,7 @@ def test_masked_astropy_entries_become_nan():
     masked = astropy_table.Table(
         {"a": np.ma.array([1.0, 2.0, 3.0], mask=[False, True, False])}
     )
-    frame, named = _inputs.as_feature_frame(masked)
+    frame, named = _numbers(masked)
     assert named
     assert np.isnan(frame["a"].iloc[1]) and frame["a"].iloc[2] == 3.0
 
@@ -112,7 +119,7 @@ def _astropy_masked(values, mask, unit=None):
 def test_astropy_masked_features_become_nan(unit):
     values = np.array([[1.0, -99.0], [3.0, 4.0]])
     features = _astropy_masked(values, values == -99.0, unit)
-    frame, named = _inputs.as_feature_frame(features)
+    frame, named = _numbers(features)
     assert not named
     np.testing.assert_array_equal(frame.to_numpy(), [[1.0, np.nan], [3.0, 4.0]])
 
@@ -122,7 +129,7 @@ def test_a_masked_qtable_column_becomes_nan(unit):
     astropy_table = pytest.importorskip("astropy.table")
     values = np.array([1.0, -99.0, 3.0])
     column = _astropy_masked(values, values == -99.0, unit)
-    frame, _ = _inputs.as_feature_frame(astropy_table.QTable({"m": column}))
+    frame, _ = _numbers(astropy_table.QTable({"m": column}))
     np.testing.assert_array_equal(frame["m"], [1.0, np.nan, 3.0])
     np.testing.assert_array_equal(
         _inputs.as_target(astropy_table.QTable({"z": column})["z"]),
@@ -157,7 +164,7 @@ def test_missing_values_pass_through_as_nan(table):
         40,
         lazy.datasets.DC1_GRID.n_bins,
     )
-    converted, _ = _inputs.as_feature_frame(frame)
+    converted, _ = _numbers(frame)
     assert converted["empty"].isna().all()
 
 
@@ -172,14 +179,29 @@ def test_infinities_are_rejected_by_column(table):
 def test_text_columns_are_rejected(table):
     frame, z = table
     frame = frame.assign(name="galaxy")
-    with pytest.raises(ValueError, match=r"not numeric: \['name'\]"):
+    with pytest.raises(ValueError, match=r"not numeric: 'name' \(text"):
         _Echo().fit(frame, z)
+
+
+@pytest.mark.parametrize(
+    ("column", "kind"),
+    [
+        (pd.Series(["a", "b", "a"], dtype="category"), "categories, not"),
+        (pd.period_range("2025-01", periods=3, freq="M"), "dates"),
+    ],
+)
+def test_a_column_that_is_not_numeric_is_refused_with_how_to_fix_it(
+    column, kind
+):
+    frame = pd.DataFrame({"x": [1.0, 2.0, 3.0], "c": column})
+    with pytest.raises(ValueError, match=rf"'c' \({kind}.*astype"):
+        _numbers(frame)
 
 
 def test_multidimensional_fields_are_rejected():
     array = np.zeros(4, dtype=[("flux", np.float64, (3,))])
     with pytest.raises(ValueError, match="multidimensional"):
-        _inputs.as_feature_frame(array)
+        _numbers(array)
 
 
 def test_an_unnamed_table_meets_a_named_fit_with_a_warning(table):
@@ -236,7 +258,7 @@ def test_a_complex_target_is_refused_not_truncated():
 
 def test_sparse_features_are_refused_with_a_dense_alternative():
     with pytest.raises(TypeError, match="sparse X is not supported"):
-        _inputs.as_feature_frame(sparse.csr_matrix(np.eye(3)))
+        _numbers(sparse.csr_matrix(np.eye(3)))
 
 
 @pytest.mark.parametrize("masked", [False, True])
@@ -245,12 +267,12 @@ def test_complex_features_are_refused_not_truncated(masked):
     if masked:
         features = np.ma.masked_array(features, mask=np.eye(3, 2, dtype=bool))
     with pytest.raises(ValueError, match="Complex data not supported"):
-        _inputs.as_feature_frame(features)
+        _numbers(features)
 
 
 def test_a_one_dimensional_x_gets_scikit_learns_reshape_hint():
     with pytest.raises(ValueError, match=r"array\.reshape\(-1, 1\)"):
-        _inputs.as_feature_frame(np.arange(5.0))
+        _numbers(np.arange(5.0))
 
 
 # -- Deprecated lenient coercions, through an ensemble of two members --------
@@ -359,5 +381,134 @@ def test_a_column_vector_target_warns_once_and_fits(ensemble_data):
 
 def test_the_non_numeric_error_names_only_the_failing_columns():
     features = np.array([["1", "a"], ["3", "b"]])
-    with pytest.raises(ValueError, match=r"not numeric: \['1'\]$"):
-        _inputs.as_feature_frame(features)
+    with pytest.raises(
+        ValueError, match=r"not numeric: '1' \(text or objects\)\. "
+    ):
+        _numbers(features)
+
+
+class _Seen(_Echo):
+    """Records the features its model gets, at the fit and at prediction."""
+
+    def __init__(self, *, categorical_features="from_dtype", y_grid=None):
+        self.categorical_features = categorical_features
+        self.y_grid = y_grid
+
+    def _fit(self, X, y):
+        self.fitted_on_ = X.copy()
+
+    def _predict_pdf(self, X, grid):
+        self.queried_ = X.copy()
+        return super()._predict_pdf(X, grid)
+
+
+def test_a_category_column_reaches_the_model_as_its_codes():
+    kind = pd.Categorical(["b", "a", None, "c"], categories=["c", "b", "a"])
+    frame = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0], "kind": kind})
+    model = _Seen().fit(frame, np.arange(4.0))
+    assert model.is_categorical_.tolist() == [False, True]
+    assert model.categories_[0] is None
+    assert model.categories_[1].tolist() == ["c", "b", "a"]
+    np.testing.assert_array_equal(model.fitted_on_["kind"], [1, 2, np.nan, 0])
+    assert model.fitted_on_["kind"].dtype == np.float64
+
+
+def test_codes_at_prediction_follow_the_fit_whatever_the_order():
+    frame = pd.DataFrame({"x": [1.0, 2.0], "kind": pd.Categorical(["a", "b"])})
+    model = _Seen().fit(frame, [0.0, 1.0])
+    queries = pd.DataFrame(
+        {
+            "kind": pd.Categorical(["z", "b", "a"], categories=["z", "b", "a"]),
+            "x": [5.0, 6.0, 7.0],
+        }
+    )
+    model.predict(queries)
+    # Columns follow the fit's order; an unseen category is missing.
+    np.testing.assert_array_equal(model.queried_["kind"], [np.nan, 1, 0])
+    np.testing.assert_array_equal(model.queried_["x"], [5, 6, 7])
+
+
+@pytest.mark.parametrize("marked", [[1], [False, True], ["kind"]])
+def test_a_column_is_marked_by_position_mask_or_name(marked):
+    values = np.array([[1.0, "red"], [2.0, "blue"], [3.0, "red"]], dtype=object)
+    frame = pd.DataFrame(values, columns=["x", "kind"])
+    data = frame if marked == ["kind"] else values
+    model = _Seen(categorical_features=marked).fit(data, [0.0, 1.0, 2.0])
+    assert model.categories_[1].tolist() == ["blue", "red"]
+    np.testing.assert_array_equal(model.fitted_on_.iloc[:, 1], [1, 0, 1])
+
+
+def test_without_marking_a_category_column_is_numeric_or_refused():
+    numbers = pd.DataFrame({"n": pd.Categorical([3, 1, 3])})
+    model = _Seen(categorical_features=None).fit(numbers, [0.0, 1.0, 2.0])
+    np.testing.assert_array_equal(model.fitted_on_["n"], [3, 1, 3])
+    words = pd.DataFrame({"w": pd.Categorical(["a", "b", "a"])})
+    with pytest.raises(ValueError, match="not marked as categorical"):
+        _Seen(categorical_features=None).fit(words, [0.0, 1.0, 2.0])
+
+
+@pytest.mark.parametrize(
+    ("marked", "error", "message"),
+    [
+        ("auto", ValueError, "must be 'from_dtype', None"),
+        ([True], ValueError, "mask of 1 entries, but X has 2"),
+        ([2], ValueError, r"positions \[2\], but X has 2"),
+        (["y"], ValueError, r"names \['y'\], which are not"),
+        ([0.5], TypeError, "must be 'from_dtype', None"),
+    ],
+)
+def test_a_bad_marking_is_refused_by_name(table, marked, error, message):
+    frame, z = table
+    with pytest.raises(error, match=message):
+        _Seen(categorical_features=marked).fit(frame, z)
+
+
+def test_a_categorical_column_without_values_is_refused():
+    frame = pd.DataFrame({"kind": pd.Categorical([None, None])})
+    with pytest.raises(ValueError, match="'kind' has no value"):
+        _Seen().fit(frame, [0.0, 1.0])
+
+
+def test_a_model_pickled_before_categorical_columns_still_predicts(table):
+    frame, z = table
+    model = _Seen().fit(frame, z)
+    state = model.__getstate__()
+    for name in ("categorical_features", "categories_", "is_categorical_"):
+        del state[name]  # As in a pickle from 0.6.
+    old = _Seen.__new__(_Seen)
+    old.__setstate__(state)
+    assert old.get_params()["categorical_features"] == "from_dtype"
+    assert old.categories_ == [None, None]
+    np.testing.assert_array_equal(old.predict(frame), model.predict(frame))
+
+
+def test_a_masked_text_entry_is_a_missing_category():
+    astropy_table = pytest.importorskip("astropy.table")
+    table = astropy_table.Table(
+        {
+            "x": [1.0, 2.0, 3.0],
+            "kind": astropy_table.MaskedColumn(
+                ["a", "b", "a"], mask=[False, True, False]
+            ),
+        }
+    )
+    model = _Seen(categorical_features=["kind"]).fit(table, [0.0, 1.0, 2.0])
+    assert model.categories_[1].tolist() == ["a"]
+    np.testing.assert_array_equal(model.fitted_on_["kind"], [0, np.nan, 0])
+    masked = np.ma.array(
+        [["1", "a"], ["2", "b"]], mask=[[False, False], [False, True]]
+    )
+    model = _Seen(categorical_features=[1]).fit(masked, [0.0, 1.0])
+    np.testing.assert_array_equal(model.fitted_on_.iloc[:, 1], [0, np.nan])
+
+
+def test_an_empty_list_marks_no_column(table):
+    frame, z = table
+    model = _Seen(categorical_features=[]).fit(frame, z)
+    assert not model.is_categorical_.any()
+
+
+def test_values_of_mixed_types_are_refused_by_column_name():
+    frame = pd.DataFrame({"b": ["x", 1, "y"]})
+    with pytest.raises(ValueError, match="'b' holds values that cannot be"):
+        _Seen(categorical_features=["b"]).fit(frame, [0.0, 1.0, 2.0])
