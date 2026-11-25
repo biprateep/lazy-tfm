@@ -29,13 +29,11 @@ Typical usage example:
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import io
 import os
 import pathlib
 import shutil
-import tempfile
 
 import numpy as np
 import numpy.typing as npt
@@ -162,28 +160,13 @@ class Store:
             path: Where the file belongs.
             content: The file's bytes.
         """
-        folder = os.path.dirname(path)
         try:
-            handle, partial = tempfile.mkstemp(dir=folder, suffix=".partial")
-        except FileNotFoundError:  # The folder's first file.
-            os.makedirs(folder, exist_ok=True)
-            handle, partial = tempfile.mkstemp(dir=folder, suffix=".partial")
-        try:
-            with os.fdopen(handle, "wb") as file:
+            with _home.atomic_file(path) as file:
                 file.write(content)
-            # mkstemp makes the file private (0600); give it the mode any
-            # new file would get, so that others can read a shared cache.
-            os.chmod(partial, 0o666 & ~_home.umask())
-            try:
-                os.replace(partial, path)
-            except PermissionError:
-                # Windows refuses to replace a file that another process,
-                # having written it first, holds open; keep that copy.
-                if not os.path.exists(path):
-                    raise
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(partial)
+        except FileNotFoundError:  # The folder's first file.
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with _home.atomic_file(path) as file:
+                file.write(content)
 
 
 def clear_embedding_cache() -> None:

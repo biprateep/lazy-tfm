@@ -38,9 +38,10 @@ datasets.list_datasets()
 | `yacht` | 308 | 6 | `Residuary.resistance` | Residuary resistance of sailing yacht hulls | [OpenML 42370](https://www.openml.org/d/42370) | CC0 |
 | `year` | 515,345 | 90 | `year` | Release years of songs from their audio timbre | [OpenML 44027](https://www.openml.org/d/44027) | CC BY 4.0 |
 | `dc1` | 434,476 | 12 | `redshift` | LSST DESC photo-z Data Challenge 1 galaxy photometry | [Zenodo 10975874](https://zenodo.org/records/10975874) | CC BY 4.0 |
+| `plasticc_ddf` | 32,699 | 11 | `true_z` | PLAsTiCC simulated LSST light curves of extragalactic objects in the Deep Drilling Fields | [Zenodo 2539456](https://zenodo.org/records/2539456) | CC BY 4.0 |
 | `chirp` | 1,000 | 1 | `y` | A noisy chirp with chunks cut out, generated on the spot | Generated | MIT |
 
-Every dataset except DC1 and the chirp comes from
+Every dataset except DC1, PLAsTiCC and the chirp comes from
 [OpenML](https://www.openml.org) and is pinned to its OpenML id, so a later
 upload under the same name never changes what is loaded. DC1 is
 {func}`~lazy.datasets.fetch_dc1` with both of its files concatenated and the
@@ -105,6 +106,55 @@ column then holds the files' names and is left out of `modalities`. Each dataset
 source, which the `license` column links. If you use them, cite MulTaBench:
 Arazi et al. 2026, *MulTaBench: Benchmarking Multimodal Tabular Learning with
 Text and Image*, NeurIPS, arXiv:2605.10616.
+
+## PLAsTiCC
+
+The Photometric LSST Astronomical Time-Series Classification Challenge
+(PLAsTiCC) simulated three years of LSST light curves of transient and
+variable objects. `"plasticc_ddf"` is its test objects in the Deep Drilling
+Fields (DDF), the fields that LSST revisits most often, from the unblinded
+data on [Zenodo 2539456](https://zenodo.org/records/2539456). The first file
+of test light curves holds exactly the 32,926 DDF objects. The 227 galactic
+objects have no redshift, so the dataset keeps the 32,699 extragalactic ones,
+from z = 0.04 to 3.35.
+
+The target is the true redshift, `true_z`. Each row has 11 features:
+
+| Column | What it holds |
+|---|---|
+| `hostgal_photoz`, `hostgal_photoz_err` | The photometric redshift of the host galaxy, and its error |
+| `mwebv` | The Milky Way's reddening E(B-V) towards the object |
+| `ra`, `decl` | The position, in degrees |
+| `flux_u` to `flux_y` | One column per LSST band (`ugrizy`); each cell is a 1-D float64 array of the band's fluxes in order of time |
+
+The six flux columns are time series. A median object has 56 points in each
+band and 70 in `u`. {attr}`Dataset.modalities <lazy.datasets.Dataset.modalities>`
+maps them to `"time"`, so {class}`lazy.Tabularizer` encodes them with
+{mod}`lazy.time` encoders:
+
+```python
+dataset = datasets.load_dataset("plasticc_ddf")
+model = lazy.make_pipeline(
+    lazy.Tabularizer(dataset.modalities), lazy.LazyModel()
+)
+```
+
+The loader drops every column that gives away the answer or is not an
+observation: the other `true_*` columns, the spectroscopic redshift
+`hostgal_specz`, the distance modulus `distmod`, the class `target`, the
+true fluxes `tflux_*`, `ddf_bool`, `libid_cadence` and `object_id`. The
+fluxes' errors and detection flags are left out too. The dataset has no
+train/test split of its own.
+
+The two files total 306 MB. The first load downloads them and parses them,
+which takes about 10 seconds; it caches the parsed table, 89 MB, beside them,
+and later loads read it in under a second. The data are licensed CC BY 4.0. If
+you use them, cite the PLAsTiCC team et al. 2018, *The Photometric LSST
+Astronomical Time-series Classification Challenge (PLAsTiCC): Data set*,
+arXiv:1810.00001, and Kessler et al. 2019, *Models and Simulations for the
+Photometric LSST Astronomical Time Series Classification Challenge
+(PLAsTiCC)*, PASP 131, 094501. Hložek et al. 2023, ApJS 267, 25, report the
+challenge's results.
 
 ## The chirp
 

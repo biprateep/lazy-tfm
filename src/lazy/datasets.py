@@ -54,11 +54,11 @@ through the same code, either via :meth:`Catalog.from_frame` or by calling
 
 For trying a model on something other than photometry, :func:`load_dataset`
 loads a regression dataset by name -- DC1, one of a dozen OpenML datasets
-pinned to their ids, one of MulTaBench's 40 tables with text or images, or
-``"chirp"``, a one-feature toy curve with chunks cut out, generated on the
-spot -- downloading it once and caching it under
-:func:`data_home`, and :func:`list_datasets` lists them without downloading
-anything::
+pinned to their ids, one of MulTaBench's 40 tables with text or images,
+PLAsTiCC's light curves, or ``"chirp"``, a one-feature toy curve with
+chunks cut out, generated on the spot -- downloading it once and caching it
+under :func:`data_home`, and :func:`list_datasets` lists them without
+downloading anything::
 
     X, y = datasets.load_dataset("california_housing", return_X_y=True)
 
@@ -80,7 +80,6 @@ import itertools
 import logging
 import os
 import pathlib
-import tempfile
 import typing
 from typing import Any, Literal, TypeAlias
 import urllib.request
@@ -93,6 +92,7 @@ from sklearn import datasets as sklearn_datasets
 
 from lazy import _home
 from lazy import _multabench
+from lazy import _plasticc
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -143,7 +143,8 @@ FEATURE_MODES: dict[str, str] = {
 }
 """Feature mode -> one-line description, for help text and documentation."""
 
-_ZENODO = "https://zenodo.org/records/10975874/files"
+_DC1_RECORD = 10975874
+_ZENODO = f"https://zenodo.org/records/{_DC1_RECORD}/files"
 _FILES = {"train": "trainz_train.npz", "test": "trainz_test.npz"}
 _CAT_KEYS = {"train": "train_cat", "test": "test_cat"}
 _CDE_KEYS = {"train": "cde_train", "test": "cde_test"}
@@ -165,6 +166,7 @@ _SHA256 = {
     _HSC_FILE: (
         "9621f9e30baeb87c53a2a8e803043f7c598479f93785a3707954e133074328de"
     ),
+    **_plasticc.SHA256,
 }
 # Their sizes in bytes: a cached copy of another size is incomplete or
 # corrupted, a check cheap enough to make on every load, as hashing the
@@ -173,6 +175,7 @@ _SIZES = {
     "trainz_train.npz": 352_071_750,
     "trainz_test.npz": 694_374_957,
     _HSC_FILE: 13_823_712,
+    **_plasticc.SIZES,
 }
 
 # Seconds a download may wait on the server before giving up, and the size of
@@ -721,8 +724,34 @@ def _cached_file(
             f"{dest} is not cached and download_if_missing=False. "
             f"Run {hint} on a machine with network access first."
         )
-    _download(url, dest, _SHA256[filename], size)
+    _download(url, dest, _SHA256[filename])
     return dest
+
+
+def _checked_file(
+    filename: str, url: str, root: str | pathlib.Path | None, name: str
+) -> pathlib.Path:
+    """The cached copy of one remote file of a dataset, checksummed once.
+
+    Args:
+        filename: The published file's name, a key of the checksum table.
+        url: Where it is published.
+        root: The ``data_home`` argument.
+        name: The dataset's name, for the hint of an error.
+
+    Raises:
+        OSError: If the file cannot be fetched, or is not the published one.
+    """
+    path = _cached_file(
+        filename,
+        url,
+        root=root,
+        download_if_missing=True,
+        hint=f"load_dataset({name!r})",
+    )
+    with open(path, "rb") as stream:
+        _check_checksum(stream, filename)
+    return path
 
 
 _CHECKED: set[tuple[int, ...]] = set()
@@ -759,7 +788,7 @@ def _check_checksum(stream: io.BufferedReader, filename: str) -> None:
     if digest.hexdigest() != _SHA256[filename]:
         raise OSError(
             f"{stream.name} is not the published {filename}: its checksum "
-            "differs. Delete it and run fetch_dc1() again to download it."
+            "differs. Delete it, and load it again to download it."
         )
     _CHECKED.add(key)
 
@@ -772,7 +801,7 @@ def _is_complete(path: pathlib.Path, size: int) -> bool:
         return False
 
 
-def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
+def _download(url: str, dest: pathlib.Path, sha256: str) -> None:
     """Fetches ``url`` to ``dest`` atomically, refusing a corrupted download.
 
     The download goes to a temporary file of its own next to ``dest``, so
@@ -784,44 +813,25 @@ def _download(url: str, dest: pathlib.Path, sha256: str, size: int) -> None:
         url: Where the file is published.
         dest: Where it is cached.
         sha256: Its SHA-256 checksum, as hex.
-        size: Its size in bytes.
 
     Raises:
         OSError: If the download fails, stalls for longer than the timeout,
             or does not match its checksum.
     """
     _LOG.info("downloading %s", url)
-    with tempfile.NamedTemporaryFile(
-        dir=dest.parent, prefix=f".{dest.name}.", suffix=".part", delete=False
-    ) as out:
-        tmp = pathlib.Path(out.name)
-    try:
-        digest = hashlib.sha256()
-        with (
-            open(tmp, "wb") as out,
-            urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response,
-        ):
-            while chunk := response.read(_CHUNK_BYTES):
-                out.write(chunk)
-                digest.update(chunk)
+    digest = hashlib.sha256()
+    with (
+        _home.atomic_file(dest) as out,
+        urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response,
+    ):
+        while chunk := response.read(_CHUNK_BYTES):
+            out.write(chunk)
+            digest.update(chunk)
         if digest.hexdigest() != sha256:
             raise OSError(
                 f"checksum mismatch for {url}\n  got  {digest.hexdigest()}\n"
                 f"  want {sha256}"
             )
-        if not _is_complete(dest, size):  # Else another process was first.
-            # mkstemp makes the file private (0600); give it the mode any new
-            # file would get, so that a shared cache is readable by others.
-            os.chmod(tmp, 0o666 & ~_home.umask())
-            try:
-                os.replace(tmp, dest)
-            except PermissionError:
-                # Windows refuses to replace a file that another process,
-                # having finished first, holds open; keep that copy.
-                if not _is_complete(dest, size):
-                    raise
-    finally:
-        tmp.unlink(missing_ok=True)
     _LOG.info("cached %s (%.0f MB)", dest, dest.stat().st_size / 1e6)
 
 
@@ -1456,9 +1466,10 @@ class Dataset:
         license: The license the source states.
         url: The source's page for the dataset.
         citation: The reference to cite when using it, or ``""`` for none.
-        modalities: The columns of text or images, each mapped to
-            ``"text"`` or ``"image"``, as :class:`lazy.Tabularizer` takes
-            them; empty for a dataset of numbers and categories only.
+        modalities: The columns of text, images or time series, each
+            mapped to ``"text"``, ``"image"`` or ``"time"``, as
+            :class:`lazy.Tabularizer` takes them; empty for a dataset of
+            numbers and categories only.
     """
 
     name: str
@@ -1487,7 +1498,8 @@ class _Entry:
     """One row of the dataset registry, checked against its source.
 
     Attributes:
-        data_id: The OpenML dataset id, or None for DC1 and the chirp.
+        data_id: The OpenML dataset id, or None for a dataset from
+            elsewhere.
         target: The target column, OpenML's default target.
         n_rows: The number of rows.
         n_features: The number of feature columns, the target excluded.
@@ -1499,6 +1511,7 @@ class _Entry:
         generated: Whether the data is generated on the spot by
             :func:`_make_chirp` rather than downloaded.
         multabench: The MulTaBench dataset it is, or ``None``.
+        zenodo: The Zenodo record it is published in, or ``None``.
         options: The keywords of :func:`load_dataset` that it takes beyond
             the common ones.
         has_split: Whether it has a train/test split of its own.
@@ -1523,6 +1536,7 @@ class _Entry:
     generated: bool = False
     parser: Literal["auto", "liac-arff"] = "auto"
     multabench: _multabench.Table | None = None
+    zenodo: int | None = None
     options: frozenset[str] = frozenset()
     has_split: bool = False
 
@@ -1533,8 +1547,8 @@ class _Entry:
             return "Generated"
         if self.multabench is not None:
             return f"Hugging Face multabench/{self.multabench.repo}"
-        if self.data_id is None:
-            return "Zenodo 10975874"
+        if self.zenodo is not None:
+            return f"Zenodo {self.zenodo}"
         return f"OpenML {self.data_id}"
 
     @property
@@ -1549,8 +1563,8 @@ class _Entry:
                 "https://huggingface.co/datasets/multabench/"
                 + self.multabench.repo
             )
-        if self.data_id is None:
-            return "https://zenodo.org/records/10975874"
+        if self.zenodo is not None:
+            return f"https://zenodo.org/records/{self.zenodo}"
         return f"https://www.openml.org/d/{self.data_id}"
 
 
@@ -1690,7 +1704,26 @@ _REGISTRY: dict[str, _Entry] = {
         description="LSST DESC photo-z Data Challenge 1 galaxy photometry",
         license="CC BY 4.0",
         citation="Schmidt et al. 2020, MNRAS 499, 1587",
+        zenodo=_DC1_RECORD,
         has_split=True,
+    ),
+    # The extragalactic objects of the first test file, which holds the
+    # Deep Drilling Fields; the 227 galactic ones have no redshift.
+    "plasticc_ddf": _Entry(
+        data_id=None,
+        target=_plasticc.TARGET,
+        n_rows=32_699,
+        n_features=11,
+        description=(
+            "PLAsTiCC simulated LSST light curves of extragalactic objects"
+            " in the Deep Drilling Fields"
+        ),
+        license="CC BY 4.0",
+        citation=(
+            "The PLAsTiCC team et al. 2018, arXiv:1810.00001;"
+            " Kessler et al. 2019, PASP 131, 094501"
+        ),
+        zenodo=_plasticc.RECORD,
     ),
     # The defaults of _make_chirp: 1,000 points, gaps included.
     "chirp": _Entry(
@@ -1841,13 +1874,22 @@ def load_dataset(
     ``data_home()/"multabench"``. They need the ``multabench`` extra, which
     reads their parquet tables. An image column holds the paths of the
     extracted image files, which :mod:`lazy.image` encoders read, and
-    :attr:`Dataset.modalities` names the columns of text and of images;
+    :attr:`Dataset.modalities` names the columns of text, images and time
+    series;
     ``return_X_y`` leaves it out.
 
-    The other datasets but DC1 and the chirp are OpenML datasets pinned to
-    their ids, fetched with :func:`sklearn.datasets.fetch_openml` and cached
-    under ``data_home()/"openml"``; later calls read the cache and need no
-    network.
+    ``"plasticc_ddf"`` is PLAsTiCC's simulated LSST light curves of the
+    extragalactic objects in the Deep Drilling Fields, from Zenodo record
+    2539456, with the target ``true_z``. Each ``flux_<band>`` column, one
+    per band of ``ugrizy``, holds per object a 1-D float64 array of that
+    band's fluxes in order of time, which :mod:`lazy.time` encoders read;
+    :attr:`Dataset.modalities` maps them to ``"time"``. The two files
+    (306 MB) are parsed once, and the parsed table is cached beside them.
+
+    The other datasets but DC1, PLAsTiCC and the chirp are OpenML datasets
+    pinned to their ids, fetched with :func:`sklearn.datasets.fetch_openml`
+    and cached under ``data_home()/"openml"``; later calls read the cache
+    and need no network.
     DC1 is :func:`fetch_dc1`, both files, as the ``"mag-color"`` features.
     Categorical columns with a natural order, such as the grades of
     ``"diamonds"``, come as ordered categoricals, so ``.cat.codes`` turns
@@ -1904,7 +1946,7 @@ def load_dataset(
         ImportError: If a MulTaBench dataset is asked for without pyarrow.
         TypeError: If ``options`` holds a keyword that the dataset does
             not take, or ``images`` is not a bool.
-        OSError: If a download fails.
+        OSError: If a download fails or does not match its checksum.
 
     Examples:
         >>> X, y = load_dataset("yacht", return_X_y=True)  # doctest: +SKIP
@@ -1936,6 +1978,14 @@ def load_dataset(
             (pd.DataFrame({"x": x_train[:, 0]}), y_train),
             (pd.DataFrame({"x": x_test[:, 0]}), y_test),
         ]
+    elif entry.zenodo == _plasticc.RECORD:
+        X, y, modalities = _plasticc.load(
+            _resolve_home(data_home),
+            lambda filename: _checked_file(
+                filename, _plasticc.URL + filename, data_home, name
+            ),
+        )
+        parts = [(X, y)]
     elif entry.data_id is None:
         catalogs = (
             fetch_dc1(data_home=data_home, split=True)
