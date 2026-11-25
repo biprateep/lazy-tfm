@@ -66,7 +66,9 @@ low, median, high = model.predict_quantiles(X_test, [0.16, 0.5, 0.84]).T
 ```
 
 A search names a parameter of the model `<step>__<parameter>`, here
-`lazymodel__n_estimators`.
+`lazymodel__n_estimators`. A step that needs metadata, such as
+`sample_weight`, in `transform` at prediction needs scikit-learn's own
+`Pipeline`.
 
 ## Scorers
 

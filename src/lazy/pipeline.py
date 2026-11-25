@@ -30,6 +30,7 @@ from typing import Any
 import numpy.typing as npt
 import pandas as pd
 from sklearn import pipeline as sklearn_pipeline
+from sklearn.utils import metadata_routing
 from sklearn.utils import metaestimators
 from sklearn.utils import validation
 
@@ -39,6 +40,16 @@ from lazy import grid as grid_lib
 from lazy import metrics
 
 __all__ = ["LazyPipeline", "make_pipeline"]
+
+# The methods of a pipeline that predict; LazyPipeline routes no metadata
+# through them.
+_PREDICTING = (
+    "decision_function",
+    "predict",
+    "predict_log_proba",
+    "predict_proba",
+    "score",
+)
 
 # What the steps accept as features is theirs to say: a table, or the raw
 # items (images, text) that an encoder step turns into one.
@@ -70,10 +81,30 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
     :attr:`name_` and :attr:`provenance_`.
 
     Each of these methods raises :class:`sklearn.exceptions.NotFittedError`
-    before ``fit``. Under scikit-learn's metadata routing they pass no
-    metadata to the earlier steps, so a transformer that requests metadata
-    for ``transform`` needs :class:`sklearn.pipeline.Pipeline`.
+    before ``fit``. Under scikit-learn's metadata routing they take no
+    metadata (see :meth:`get_metadata_routing`).
     """
+
+    def get_metadata_routing(self) -> metadata_routing.MetadataRouter:
+        """scikit-learn's routing, without the methods that predict.
+
+        A search or ``cross_validate`` therefore routes metadata to ``fit``
+        alone.
+
+        Returns:
+            The routing of :class:`sklearn.pipeline.Pipeline`, in which
+            ``predict``, ``predict_proba``, ``score`` and the other methods
+            that predict route no metadata to any step.
+        """
+        inherited = super().get_metadata_routing()
+        router = metadata_routing.MetadataRouter(owner=inherited.owner)
+        for name, pair in inherited:
+            mapping = metadata_routing.MethodMapping()
+            for route in pair.mapping:
+                if route.caller not in _PREDICTING:
+                    mapping.add(caller=route.caller, callee=route.callee)
+            router.add(method_mapping=mapping, **{name: pair.router})
+        return router
 
     @property
     def name_(self) -> str:
