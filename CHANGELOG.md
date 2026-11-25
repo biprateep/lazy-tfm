@@ -81,6 +81,8 @@ change the API.
 
 ### Changed
 
+- The embedding cache of `lazy.encoders` reads a cached embedding about 6
+  times faster and writes one about twice as fast. Its files are unchanged.
 - `lazy.models.registry.register` refuses a backend whose constructor has a
   parameter without a default, since `cls()` could not build it. The five
   backends that ship are unaffected.
