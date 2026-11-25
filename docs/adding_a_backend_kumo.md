@@ -37,9 +37,9 @@ context rows, we expected a query's answer not to depend on the other queries.
 Chunks of several queries give the same answers to float rounding, and bit
 for bit on some CPUs. A query predicted on its own takes a different
 matrix-multiply path and differs by about $10^{-6}$ of the quantiles' spread,
-and the cached and uncached forward passes differ by up to about $10^{-5}$ of
-the spread for a bagged member with missing values whose columns LAZY
-permutes. The backend therefore declares `exact_chunking = False`, and the
+and the cached and uncached forward passes differ by up to about
+$2\times 10^{-5}$ of the spread on an Intel CPU for a bagged member with
+missing values whose columns LAZY permutes. The backend therefore declares `exact_chunking = False`, and the
 conformance suite checks its chunking to that tolerance on a CPU (on a GPU
 under mixed precision, the backends agree only to float16 rounding; see
 {doc}`guide/reproducibility`). The package comes from PyPI with the `kumo`
