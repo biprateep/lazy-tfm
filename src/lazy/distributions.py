@@ -161,6 +161,80 @@ def _closed_bucket(
     return np.where(values == edges[-1], last, index)
 
 
+def _tail_gaps(
+    gaps: _typing.FloatArray,
+) -> tuple[_typing.IntArray, _typing.IntArray]:
+    """The spacing each tail of a quantile row borrows as its width.
+
+    The outermost spacing or, where the outermost values are tied, the
+    nearest non-zero one; for a row of equal values, whose spacings are all
+    zero, the first and the last.
+
+    Args:
+        gaps: The spacings of each row's values, shape (n_rows, n_gaps).
+
+    Returns:
+        A tuple (first, last) of spacing indices, each of shape (n_rows,).
+    """
+    wide = gaps > 0
+    first = np.argmax(wide, axis=1)
+    last = gaps.shape[1] - 1 - np.argmax(wide[:, ::-1], axis=1)
+    return first, last
+
+
+def _quantile_pieces(
+    quants: _typing.FloatArray,
+    locs: _typing.FloatArray,
+    values: _typing.FloatArray,
+) -> tuple[_typing.FloatArray, _typing.IntArray]:
+    """Which piece of each quantile row's density holds each value.
+
+    The pieces of :meth:`QuantileDistribution.pdf`: the segments between
+    adjacent values, the outermost values belonging to the segments they
+    end, and one tail on each side that carries probability, reaching one
+    spacing (:func:`_tail_gaps`) beyond the outermost value, its far end
+    included. A piece's density is its probability over its width.
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels).
+        values: Where to look, one row of values per row, shape (n_rows,
+            n_values).
+
+    Returns:
+        A tuple (mass, gap): the probability of the piece holding each
+        value, 0 beyond the tails; and the index ``k`` of the spacing
+        ``locs[:, k + 1] - locs[:, k]`` that is the piece's width; both of
+        the shape of ``values``.
+    """
+    steps = np.diff(quants)
+    gaps = np.diff(locs, axis=1)
+    rows = np.arange(len(locs))
+    segment = np.array(
+        [
+            _closed_bucket(row, row_values)
+            for row, row_values in zip(locs, values)
+        ],
+        dtype=np.intp,
+    ).reshape(values.shape)
+    mass = np.where((segment >= 0) & (segment < steps.size), 1.0, 0.0)
+    gap = np.clip(segment, 0, steps.size - 1)
+    mass = mass * steps[gap]
+    first, last = _tail_gaps(gaps)
+    below = (gaps[rows, first] * (quants[0] > 0))[:, None]
+    above = (gaps[rows, last] * (quants[-1] < 1))[:, None]
+    lowest, highest = locs[:, :1], locs[:, -1:]
+    in_below = (below > 0) & (values >= lowest - below) & (values < lowest)
+    in_above = (above > 0) & (values > highest) & (values <= highest + above)
+    mass = np.where(
+        in_below, quants[0], np.where(in_above, 1 - quants[-1], mass)
+    )
+    gap = np.where(
+        in_below, first[:, None], np.where(in_above, last[:, None], gap)
+    )
+    return mass, gap
+
+
 def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
     """Probability levels as a 1-D array inside [0, 1]."""
     out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
@@ -764,11 +838,8 @@ class QuantileDistribution(_Base):
         or 1).
         """
         gaps = np.diff(self.locs, axis=1)
-        wide = gaps > 0
         rows = np.arange(self.npdf)
-        first = np.argmax(wide, axis=1)
-        last = gaps.shape[1] - 1 - np.argmax(wide[:, ::-1], axis=1)
-        # A constant row has no wide gap, and argmax lands on a zero one.
+        first, last = _tail_gaps(gaps)
         below = gaps[rows, first] * (self.quants[0] > 0)
         above = gaps[rows, last] * (self.quants[-1] < 1)
         return np.stack([below, above], axis=1)
@@ -847,25 +918,12 @@ class QuantileDistribution(_Base):
         they end, and the ends of the tails to the tails.
         """
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
-        step = np.diff(self.quants)
-        tail_mass = (self.quants[0], 1.0 - self.quants[-1])
-        out = np.zeros((self.npdf, y.size))
-        for row, (below, above) in enumerate(self._tail_widths()):
-            locs = self.locs[row]
-            segment = _closed_bucket(locs, y)
-            inside = (segment >= 0) & (segment < step.size)
-            segment = np.clip(segment, 0, step.size - 1)
-            width = locs[segment + 1] - locs[segment]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                density = np.where(width > 0, step[segment] / width, 0.0)
-            out[row] = np.where(inside, density, 0.0)
-            if below > 0:
-                tail = (y >= locs[0] - below) & (y < locs[0])
-                out[row, tail] = tail_mass[0] / below
-            if above > 0:
-                tail = (y > locs[-1]) & (y <= locs[-1] + above)
-                out[row, tail] = tail_mass[1] / above
-        return out
+        mass, gap = _quantile_pieces(
+            self.quants, self.locs, np.broadcast_to(y, (self.npdf, y.size))
+        )
+        width = np.take_along_axis(np.diff(self.locs, axis=1), gap, axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where((mass > 0) & (width > 0), mass / width, 0.0)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         knot_levels, locs = self._knots()

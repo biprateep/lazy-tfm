@@ -14,6 +14,7 @@ It replaces no private lazy name; ``tabicl.TabICLRegressor`` is upstream's.
 """
 
 import pathlib
+import types
 
 import numpy as np
 import pytest
@@ -46,6 +47,9 @@ class Network:
         self._cache = None
         self.weights = np.zeros(N_WEIGHTS)
         self.num_quantiles = SPREAD.size
+        # Upstream's is a module that makes the quantiles monotone; the
+        # fake's already are.
+        self.quantile_dist = lambda raw: types.SimpleNamespace(quantiles=raw)
 
     def to(self, device):
         del device  # Unused: it stays where it is.
@@ -53,6 +57,36 @@ class Network:
 
     def clear_cache(self):
         self._cache = None
+
+    def train(self):
+        self.training = True
+
+    def eval(self):
+        self.training = False
+
+    def _train_forward(self, X, y_train):
+        """Raw quantiles on torch's graph, from upstream's member views.
+
+        Args:
+            X: The members' context and query rows, shape (n_members,
+                n_rows, n_features).
+            y_train: The members' context targets, shape (n_members,
+                n_context).
+
+        Returns:
+            Quantiles at :data:`SPREAD` about a signal of each query, shape
+            (n_members, n_queries, n_quantiles).
+        """
+        import torch  # noqa: PLC0415 - optional extra.
+
+        assert self.training
+        n_context = y_train.shape[1]
+        context, queries = X[:, :n_context], X[:, n_context:]
+        signal = torch.tanh(
+            queries.mean(dim=-1) - context.mean(dim=(1, 2))[:, None]
+        )
+        spread = torch.as_tensor(SPREAD, dtype=X.dtype)
+        return signal[..., None] + spread
 
     def cached_context(self):
         """The context a cached call answers from: the network's own."""

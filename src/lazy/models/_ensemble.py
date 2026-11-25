@@ -512,7 +512,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         y: _typing.FloatArray,
         query: Any,
         group: _members.MemberGroup,
-    ) -> _differentiable.TorchHistogram:
+    ) -> _differentiable.TorchHistogram | _differentiable.TorchQuantiles:
         """Predicts one group's densities on torch's autograd graph.
 
         Optional: a backend that implements it supports
@@ -545,7 +545,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _differentiable_density(
         self, query: Any, X: Any, y: npt.ArrayLike
-    ) -> _differentiable.TorchMixture:
+    ) -> _differentiable.TorchMixture | _differentiable.TorchQuantiles:
         """The model's densities for ``query``, on torch's autograd graph.
 
         Every group runs on ``X`` and ``y`` through
@@ -599,7 +599,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 raise ValueError(
                     f"{name} must be finite: {name} has NaN or inf"
                 )
-        parts = []
+        # Histograms, or quantiles under "quantile_average".
+        parts: list[Any] = []
         for handle, group in zip(
             self.handles_, self.member_groups_, strict=True
         ):
@@ -613,7 +614,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                     group,
                 )
             )
-        return _differentiable.TorchMixture(tuple(parts), self._group_weights())
+        weights = self._group_weights()
+        if self.member_combination == "quantile_average":
+            return _differentiable.TorchQuantiles.average(parts, weights)
+        return _differentiable.TorchMixture(tuple(parts), weights)
 
     def _check_differentiable(self) -> None:
         """Refuses a fit whose prediction is not differentiable.
@@ -621,15 +625,15 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         Raises:
             ValueError: If the fit ran a feature transform other than the
                 model's own ``"none"``, a clip, a categorical column, native
-                bagging, a constant target, or pools its members other than
-                as a mixture.
+                bagging, a constant target, or pools its members by a trimmed
+                average.
         """
         none = self.native_transforms.get("none")
         if hasattr(self, "constant_target_"):
             problem = "a target that is not constant"
         elif (
             any(t is not None for t in self.transformers_)
-            or any(c is not None for c in self.clippers_)
+            or self.outlier_threshold_ is not None
             or any(
                 g.native_transforms is None
                 or any(token != none for token in g.native_transforms)
@@ -641,8 +645,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             problem = "no categorical column"
         elif any(g.member_rows is not None for g in self.member_groups_):
             problem = "no member bagged natively"
-        elif self.member_combination != "mixture":
-            problem = "members pooled as a mixture"
+        elif self.member_combination == "quantile_trimmed_average":
+            problem = "members pooled without a trim"
         else:
             return
         raise ValueError(
