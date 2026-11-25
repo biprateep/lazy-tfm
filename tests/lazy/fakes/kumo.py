@@ -47,6 +47,9 @@ def _network_class(sdm, torch):
         def __init__(self):
             super().__init__(task="regression")
             self.weight = torch.nn.Parameter(torch.zeros(1))
+            # Per forward pass, the processed names of the columns the
+            # network is told are categorical.
+            self.categorical = []
 
         @classmethod
         def default_recipe(cls):
@@ -61,6 +64,9 @@ def _network_class(sdm, torch):
             return super().forward(x_context, y_context, x_query, **kwargs)
 
         def _record(self, x, y, generator):
+            if isinstance(x, sdm.TableTensor):
+                codes = x.categorical.code.to(x.numerical.dtype)
+                x = torch.cat([x.numerical, codes], dim=-1)
             self.recorder.add(
                 generator.initial_seed(),
                 rows=fakes.row_ids(x.cpu().numpy()),
@@ -81,7 +87,12 @@ def _network_class(sdm, torch):
             **kwargs,
         ):
             del y_context, related_context_tables, related_query_tables
-            del generator, categorical_mask, kwargs  # Unused.
+            del generator, kwargs  # Unused.
+            names = (x_query if x_context is None else x_context).columns[
+                sdm.Stype.numerical
+            ]
+            marked = zip(names, categorical_mask.tolist(), strict=True)
+            self.categorical.append({name for name, cat in marked if cat})
             if x_context is not None:
                 context = x_context.numerical
                 if cache is not None and cache.is_recording:

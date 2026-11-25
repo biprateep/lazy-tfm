@@ -104,7 +104,7 @@ class KumoQuantile(
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
-    native_categorical = False
+    native_categorical = True
     recommended_max_context = 60_000
     context_limit_note = (
         "was pretrained on tables of up to {limit:,} rows, beyond which its "
@@ -131,7 +131,11 @@ stores them verbatim, as in the skeleton on {doc}`adding_a_backend`, with
 Upstream's recipe is written out in the module rather than taken from the
 installed package (`AUTO_TRANSFORMS`, `AUTO_OUTLIER_THRESHOLD`,
 `AUTO_TRIM_FRACTION` and `_PINNED_RECIPE`, assembled by `_recipe`), so that an
-upgrade of `sdm` cannot change what `transforms="auto"` runs. `_RECIPES`, the
+upgrade of `sdm` cannot change what `transforms="auto"` runs. It includes
+upstream's categorical branch, which a group whose view has categorical
+columns (`_categorical_columns`) runs: those columns reach upstream as an
+`sdm.TableTensor` whose categorical block holds their codes, and a numeric
+group gets a plain tensor. `_RECIPES`, the
 class's `recipes`, holds these settings for every version, and
 `outlier_threshold_key` names the one that `outlier_threshold="auto"` resolves
 to. The recipe maps
@@ -140,7 +144,7 @@ Latin-square shuffle is present only when `feature_shuffle=True`, and the
 two-pass clip only when `outlier_threshold` resolves to a number. Its output
 step sorts each member's quantiles and does not average them, since the
 average is LAZY's. A test compares the text of the pinned recipe with
-upstream's numerical branch, step by step, so that a copy that drifts from
+upstream's features recipe, step by step, so that a copy that drifts from
 upstream fails.
 
 ### Fitting a group

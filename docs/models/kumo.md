@@ -61,7 +61,7 @@ default recipe, next to LAZY's.
 | Softmax temperature | none (the output is quantiles) | none (`softmax_temperature="auto"`) |
 | Outlier clipping | two-pass soft clip at 4 standard deviations | the same (`outlier_threshold="auto"`) |
 | Combining the members | mean of the quantiles, dropping the highest and lowest 20% of members at each level | the same, over every member (a plain mean under an explicit `transforms`) |
-| Categorical columns | encoded by the recipe when the input marks them | off: every column is numeric |
+| Categorical columns | encoded by the recipe when the input marks them | the same, for the columns `categorical_features` marks (pandas `category` columns by default) |
 | Key/value cache | off in a single call, on with `fit` and `predict` | on (`kv_cache=True`) |
 | Mixed precision | float16 autocast on a GPU | the same on a CUDA GPU, float32 on an Apple GPU (`mixed_precision=True`) |
 | Random seed | none (42 in NVIDIA's benchmarks) | `random_state=0` |
@@ -84,7 +84,11 @@ embeds a missing value itself. LAZY keeps all of these.
 We write NVIDIA's recipe out in `lazy.models.kumo` instead of reading it from
 the installed package, so an upgrade of `sdm` cannot change what
 `transforms="auto"` runs. We use 8 members for every size, the same seed (0)
-as every other model, and we treat every column as numeric. We also
+as every other model. We hand Kumo a categorical column as its codes, with
+the categories valued by their codes, so that NVIDIA's ordering of the
+categories by value follows LAZY's order of `categories_`: the same order for
+a column that is not of pandas' `category` type, or whose categories are
+sorted, as pandas sorts them by default. We also
 standardize the target in double precision before Kumo standardizes it again
 (a bag whose targets are all equal is left unscaled), since a narrow spread
 about a large offset can be rounded away in single precision. The members' quantiles are
