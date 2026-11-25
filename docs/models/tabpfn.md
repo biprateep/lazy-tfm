@@ -58,7 +58,7 @@ it from the installed `tabpfn` package.
 | Softmax temperature | 1.0 for v3.5 and v3.5-fast, 0.9 before | the same (`softmax_temperature="auto"`) |
 | Outlier clipping | soft clip at 12 standard deviations for v3.5, none before | the same (`outlier_threshold="auto"`) |
 | Target transforms | none for half the members, a safe power transform for the other half | the same |
-| Categorical columns | detected automatically | off: every column is numeric |
+| Categorical columns | declared, or detected automatically | declared only (`categorical_features`), encoded by TabPFN |
 | Key/value cache | off; int8 when on | on, at full precision (`kv_cache=True`) |
 | Precision | autocast on a GPU, sometimes bfloat16 on a CPU | autocast on a CUDA GPU, float32 on a CPU or an Apple GPU |
 | Random seed | 0 | `random_state=0` |
@@ -86,8 +86,9 @@ other models, so a few settings differ from the creators'. We run exactly
 checkpoint asks for four, and we never raise the count for wide tables as
 TabPFN does, so that a member count means the same thing for every model. We
 also turn off TabPFN's automatic detection of categorical columns (which
-treats a numeric column with few distinct values as categorical), so every
-column is numeric, as in every other model. We cache the context's keys and
+treats a numeric column with few distinct values as categorical): a column is
+categorical only when `categorical_features` marks it, and TabPFN then
+encodes it with its version's own encoding. We cache the context's keys and
 values at full precision, which makes repeated predictions faster and changes
 them only by rounding, and we always compute in float32 on a CPU.
 LAZY's density is also constant within each bucket, while TabPFN gives its two

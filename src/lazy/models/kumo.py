@@ -30,14 +30,23 @@ and the quantiles are a plain mean over every member.
 What upstream always does to the features, under any ``transforms``: columns
 constant in the context are dropped, every column is z-scored on the context
 and clipped at 100 standard deviations, each member flips the sign of a
-random half of the columns, and at most 500 columns are kept. The target is
-z-scored and its sign flipped at random per member, and the answers are
-mapped back. The random sign flips of the columns and of the target are part
-of how the network is run rather than of the recipe, so they stay under an
-explicit ``transforms``. A fit draws them and the column shuffles on a CPU
+random half of the numerical columns, and at most 500 columns are kept. The
+target is z-scored and its sign flipped at random per member, and the answers
+are mapped back. The random sign flips of the columns and of the target are
+part of how the network is run rather than of the recipe, so they stay under
+an explicit ``transforms``. A fit draws them and the column shuffles on a CPU
 generator and moves them to the device (:mod:`lazy.models._kumo_draws`), so
 they are the same on every device. Kumo has no imputation step: missing
 values reach the network, which embeds them itself.
+
+The categorical columns (``categorical_features``) reach upstream as a user's
+own categorical columns do, and take its categorical route: their categories
+are ordered by value, which for lazy's codes is the order of
+``categories_``; a column of more than 50 categories in the context gains a
+numerical column of the log count of each row's category there; and the
+codes, -1 for a missing or unseen category, are placed after the numerical
+columns and go through the numerical pipeline, without the sign flips. The
+network is told which columns they are, and embeds them as categories.
 """
 
 from __future__ import annotations
@@ -140,14 +149,21 @@ _PINNED_RECIPE: dict[str, Any] = {
     # FlipSign's probability of negating a column, or the target.
     "flip_probability": 0.5,
     "max_columns": 500,
+    # AlignCategories: the order of a categorical column's categories, and
+    # the count below which a category of the context is dropped.
+    "category_order": "value",
+    "category_min_frequency": 1,
+    # AddCategoryCounts adds a count column to a column of more categories.
+    "count_min_cardinality": 50,
     # Members per forward pass: upstream's default, one at a time.
     "estimator_batch_size": 1,
     # The precision NVIDIA's benchmarks and model card run on a GPU.
     "autocast_dtype": "float16",
 }
 """The rest of the recipe, and how upstream is run, pinned. ``max_columns``,
-``z_clip`` and ``flip_probability`` act under any ``transforms``;
-``robust_soft_clip`` and ``rank_gaussian_knots`` belong to the auto transforms.
+``z_clip``, ``flip_probability`` and the categorical settings act under any
+``transforms``; ``robust_soft_clip`` and ``rank_gaussian_knots`` belong to the
+auto transforms.
 """
 
 _N_QUANTILES = 999
@@ -273,6 +289,7 @@ class KumoQuantile(
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
+    native_categorical = True
     # NVIDIA's training stopped at tables of 60,000 rows; unlike LimiX's
     # limit, it is not where the model was seen to degrade.
     recommended_max_context = 60_000
@@ -301,6 +318,7 @@ class KumoQuantile(
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -317,6 +335,7 @@ class KumoQuantile(
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
@@ -429,6 +448,7 @@ class KumoQuantile(
         # is standardized on its own rows, a bagged member on its bag.
         offset, scale = _quantile_head.target_scaling(y)
         tokens = _group_tokens(group)
+        categorical = self._categorical_columns(group)
         handle = _KumoGroup(
             n_members=group.n_members,
             seed=group.seed,
@@ -443,6 +463,7 @@ class KumoQuantile(
             offset=offset,
             scale=scale,
             cpu_draws=True,
+            categorical=categorical if categorical.any() else None,
         )
         # The context is kept under either cache setting, so that a pickle,
         # which leaves the cache out, can record it again.
@@ -465,10 +486,8 @@ class KumoQuantile(
             RuntimeError: If the group kept no context, which _fit_group
                 always sets.
         """
-        if handle.context is None:
-            raise RuntimeError("the group kept no context to record from")
         network = self._network()
-        x, target = self._tensors(*handle.context)
+        x, target = self._context(handle)
         with _lending(network), self._autocast():
             network.fit(
                 x=x,
@@ -489,11 +508,10 @@ class KumoQuantile(
             with _locks.network_lock(self):
                 self._record_missing(handle)
         network = self._network()
-        (queries,) = self._tensors(X)
+        queries = self._features(X, handle.categorical)
         with self._autocast():
             if handle.cache is None:
-                assert handle.context is not None  # Set by _fit_group.
-                x, target = self._tensors(*handle.context)
+                x, target = self._context(handle)
                 out = network(
                     x_context=x,
                     y_context=target,
@@ -576,6 +594,66 @@ class KumoQuantile(
             )
             for array in arrays
         )
+
+    def _features(
+        self, X: _Array, categorical: npt.NDArray[np.bool_] | None
+    ) -> Any:
+        """Features as upstream reads them, with their categorical columns.
+
+        Without categorical columns, the tensor of :meth:`_tensors`, which
+        upstream reads as numerical. With them, an ``sdm.TableTensor`` whose
+        categorical columns hold their codes, -1 for NaN, as categories
+        valued by their codes, so that upstream's alignment by value keeps
+        lazy's order. Each table names its own categories, so that a chunk
+        of queries is read alone.
+
+        Args:
+            X: The features, shape (n_rows, n_columns).
+            categorical: Which columns are categorical, shape (n_columns,),
+                or None for none.
+
+        Returns:
+            A ``torch.Tensor`` or an ``sdm.TableTensor`` on the device.
+        """
+        if categorical is None:
+            return self._tensors(X)[0]
+        import torch  # noqa: PLC0415 - torch comes with the extra.
+
+        sdm = self._import_backend()
+        codes = np.nan_to_num(X[:, categorical], nan=-1).astype(np.int64)
+        names = np.arange(X.shape[1]).astype(str)
+        return sdm.TableTensor(
+            columns={
+                sdm.Stype.numerical: names[~categorical].tolist(),
+                sdm.Stype.categorical: names[categorical].tolist(),
+            },
+            numerical=self._tensors(X[:, ~categorical])[0],
+            categorical=sdm.CategoricalTensor(
+                torch.tensor(codes, device=self.device_),
+                categories=[
+                    torch.arange(n, device=self.device_)
+                    for n in codes.max(axis=0, initial=-1) + 1
+                ],
+            ),
+        )
+
+    def _context(self, handle: _KumoGroup) -> tuple[Any, Any]:
+        """A group's context features and targets, as upstream reads them.
+
+        Args:
+            handle: The group, with its context.
+
+        Returns:
+            The features (:meth:`_features`) and the targets, a column.
+
+        Raises:
+            RuntimeError: If the group kept no context, which _fit_group
+                always sets.
+        """
+        if handle.context is None:
+            raise RuntimeError("the group kept no context to record from")
+        X, target = handle.context
+        return self._features(X, handle.categorical), self._tensors(target)[0]
 
     def _generator(self, handle: _KumoGroup) -> Any:
         """The ``torch.Generator`` that draws a group's recipe, seeded."""
@@ -666,6 +744,8 @@ class _KumoGroup:
         cpu_draws: Whether the recipe draws on a CPU generator, the same
             on every device. A group unpickled from a lazy release before
             0.6 lacks it and draws on the model's device, as it did then.
+        categorical: Which columns of the group's view are categorical,
+            shape (n_view_columns,), or None for none.
     """
 
     n_members: int
@@ -678,6 +758,7 @@ class _KumoGroup:
     cache: Any = None
     context: tuple[_typing.FloatArray, _Array] | None = None
     cpu_draws: bool = False
+    categorical: npt.NDArray[np.bool_] | None = None
 
     def provenance(self) -> dict[str, Any]:
         """What ran, for ``provenance_``."""
@@ -737,6 +818,9 @@ def _recipe(
 ) -> Any:
     """Upstream's regression recipe for a group, from the pinned settings.
 
+    Categorical columns take upstream's categorical route, and the numerical
+    columns its numerical one; each runs the members' transforms.
+
     Args:
         sp: The ``sdm.processing`` module.
         tokens: The distinct transforms the group's members cycle through,
@@ -750,12 +834,25 @@ def _recipe(
     import torch  # noqa: PLC0415 - torch comes with the extra.
 
     pinned = _PINNED_RECIPE
+    # A route runs only on a table that has columns of its type, so a
+    # numeric table never meets the categorical one.
     features = [
         sp.StypeDispatch(
             numerical=[
                 _numerical(sp, tokens, outlier_threshold),
                 _kumo_draws.FlipSign(pinned["flip_probability"]),
-            ]
+            ],
+            categorical=[
+                sp.AlignCategories(
+                    sort_by=pinned["category_order"],
+                    min_frequency=pinned["category_min_frequency"],
+                ),
+                sp.AddCategoryCounts(
+                    min_cardinality=pinned["count_min_cardinality"]
+                ),
+                sp.ToNumerical(),
+                _numerical(sp, tokens, outlier_threshold),
+            ],
         )
     ]
     if feature_shuffle:

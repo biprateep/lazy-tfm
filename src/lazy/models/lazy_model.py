@@ -148,6 +148,9 @@ class LazyModel(base.BaseDensityRegressor):
 
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         estimator = self._build()
+        # The backend gets this wrapper's codes, and which columns hold them.
+        if "categorical_features" in estimator.get_params(deep=False):
+            estimator.set_params(categorical_features=self.is_categorical_)
         # Unnamed features reach the backend unnamed, so that its fitted
         # attributes (and hence this wrapper's) keep scikit-learn's meaning.
         named = "feature_names_in_" in vars(self)

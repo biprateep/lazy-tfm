@@ -83,11 +83,39 @@ change the API.
   such as `notes__pc0`, and a column that passes through keeps its type.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
+- Categorical columns. Every model takes `categorical_features`, as
+  scikit-learn's `HistGradientBoostingRegressor` does: `"from_dtype"`, the
+  default, marks the columns of pandas' `category` type that are not
+  ordered, and column names, positions or a boolean mask mark others. A
+  column of pandas' ordered `category` type that is not marked is read as
+  the codes of its categories, numbers in their order. A fitted model records
+  `is_categorical_` and `categories_`, and a category that the context did
+  not hold is read as missing. TabPFN, TabFM and Kumo Tabular encode the
+  marked columns as they were trained to; TabICL and LimiX-2 read their
+  codes as numbers, and declare so in the new backend attribute
+  `native_categorical`. A table with a column of text categories, which
+  every model refused, now fits. `lazy.interp` keeps each column's type
+  through its refits.
+- TabPFN's `provenance_` records `MAX_UNIQUE_FOR_CATEGORICAL_FEATURES` in
+  its `inference_config`: 30 up to v3 and 1,000,000 on v3.5, as each
+  checkpoint stores it. Up to v3, a categorical column with more categories
+  is read as numbers.
 
 ### Changed
 
 - The embedding cache of `lazy.encoders` reads a cached embedding about 6
   times faster and writes one about twice as fast. Its files are unchanged.
+- A pandas `category` column whose categories are numbers was read as those
+  numbers. If it is not ordered, it is now categorical, as
+  `categorical_features="from_dtype"` says; pass `categorical_features=None`
+  for the earlier reading. If it is ordered, it is now read as the codes of
+  its categories, 0 to k - 1. Either changes the predictions for such a
+  table.
+- The error for a column that is neither numeric nor categorical names the
+  kind of column and says how to convert it.
+- Under an explicit `transforms`, TabPFN's `provenance_` records its
+  version's own encoding of categories as each preprocessor's
+  `categorical_name`, not `"numeric"`. Numeric tables predict as before.
 - `lazy.models.registry.register` refuses a backend whose constructor has a
   parameter without a default, since `cls()` could not build it. The five
   backends that ship are unaffected.

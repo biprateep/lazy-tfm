@@ -4,8 +4,9 @@
 
 Upstream's classifier fits its preprocessing as it would; only the forward
 pass is faked, on both inference paths (the streamed one and
-``predict_proba``). Records, for every classifier run, the rows of its view
-and the scaling each of its standardizations was refitted with, and in
+``predict_proba``). Records, for every classifier run, the rows of its view,
+the scaling each of its standardizations was refitted with, the columns it
+reads as categorical and its encoding of the queries, and in
 ``loads`` the checkpoint each backbone load was handed. Needs the tabfm
 package.
 
@@ -54,6 +55,10 @@ class _Logits:
             n_members=classifier.n_estimators,
             mean=[p.standard_scaler_.mean_ for p in pipelines],
             features=np.asarray(generator.X_),
+            cat_features=generator.cat_features_,
+            query=generator.unique_filter_.transform(
+                classifier.X_encoder_.transform(targets["query"])
+            ),
         )
         signal = fakes.response(targets["query"], generator.X_)
         n_classes = classifier.n_classes_

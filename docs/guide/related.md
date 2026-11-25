@@ -56,7 +56,8 @@ The packages do things that LAZY does not. TabPFN
 (`FinetunedTabPFNRegressor`), TabICL (`FinetunedTabICLRegressor`) and
 `structured-data-models` fine-tune the weights on a dataset, and LAZY does not
 (see [Can I fine-tune?](faq.md#can-i-fine-tune)). TabPFN, TabICL and TabFM
-also classify, and several packages encode categorical columns, which LAZY treats as numbers (see
+also classify. LimiX-2's package encodes the categorical columns it detects,
+which LAZY gives LimiX-2 as numbers (see
 [Categorical columns](limits.md#categorical-columns)). The FAQ lists the
 settings in which LAZY differs from TabPFN's own (see [How does this differ
 from calling TabPFN

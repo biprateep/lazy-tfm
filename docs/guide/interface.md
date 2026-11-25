@@ -41,6 +41,7 @@ differs between backends, because the checkpoints do.
 | `bag_size`            | Context rows per member: an int is a count (`1` is one row), a float a fraction in (0, 1] (`1.0` is all rows), `None` all rows.      | `None`    |
 | `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
 | `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centers, `"native"`, or `None` for the native grid.                 | `None`    |
+| `categorical_features` | Which columns are categorical: `"from_dtype"` for pandas' `category` columns that are not ordered, `None` for none, or column names, positions or a boolean mask. | `"from_dtype"` |
 | `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
 | `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding. | `8192`    |
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
@@ -53,8 +54,9 @@ differs between backends, because the checkpoints do.
 
 The `softmax_temperature`, `mixed_precision` and `outlier_threshold` actually
 used are recorded in `provenance_`, together with the rest of the recipe (see
-{doc}`reproducibility`). Every column is treated as numeric on every model, so
-none guesses that a column with few distinct values is a category.
+{doc}`reproducibility`). A column is categorical only when
+`categorical_features` marks it, so no model guesses that a column with few
+distinct values is a category.
 {doc}`scaling` describes `kv_cache`, `chunk_size` and `bag_size`, which affect
 the cost of a prediction.
 
@@ -202,9 +204,21 @@ Missing values are marked with `NaN`; the masked entries of an astropy
 table or masked array also become `NaN`. Each model handles them in its own
 way: TabPFN and LimiX add missing-value indicators, TabICL and TabFM impute
 them inside their preprocessing, and Kumo Tabular passes them to its network,
-which embeds them itself. Infinities, complex values, non-numeric columns
-and sparse matrices are rejected, so a categorical column has to be encoded
-as numbers before it is passed (see {doc}`limits`). An array or list of
+which embeds them itself.
+
+A categorical column reaches the model as the codes of its categories, 0 to
+k - 1, where its categories are those the context holds, in the order of its
+pandas type, or sorted for a column marked another way. A missing value, or a
+category that the context did not hold, is missing. A model that encodes
+categories itself (TabPFN, TabFM, Kumo Tabular) is told which columns they
+are; TabICL and LimiX-2 read the codes as numbers (see
+[Categorical columns](limits.md#categorical-columns)). A column of pandas'
+ordered `category` type, such as a quality from poor to good, is not
+categorical unless marked: its codes reach every model as numbers, in the
+order of its categories. Infinities, complex
+values, sparse matrices and columns that are neither numeric nor categorical,
+such as text, are rejected; a column of text goes through
+{class}`~lazy.Tabularizer` (see {doc}`encoders`). An array or list of
 strings (`str` or `bytes` dtype) that hold numbers is still converted, with a
 `FutureWarning`; from 0.7.0 it raises `ValueError`, as in scikit-learn, which
 accepts a DataFrame column or an object array of such strings. The target is

@@ -21,6 +21,7 @@ import sys
 import types
 import warnings
 
+import fakes
 import numpy as np
 import pandas as pd
 import pytest
@@ -299,10 +300,11 @@ class TestTabFM:
         bins = tabfm._bin_labels(edges, z)
         assert np.all(np.diff(edges)[bins] > 0)
         _stub_classifier(est, monkeypatch)
-        handle = {"X": tabfm._frame(z[:, None]), "y": z}
+        numeric = np.array([False])
+        handle = {"X": tabfm._frame(z[:, None], numeric), "y": z}
         handle["group"] = types.SimpleNamespace(seed=0, member_rows=None)
         probs, edges = est._hierarchy(
-            None, handle, tabfm._frame(z[:7, None]), 0.0
+            None, handle, tabfm._frame(z[:7, None], numeric), 0.0
         )
         assert probs.shape == (7, 100)
         np.testing.assert_allclose(probs.sum(axis=1), 1.0)
@@ -630,6 +632,67 @@ class TestTabFM:
             upstream.OutlierRemover(threshold=4.0).fit(X).transform(X),
             _transforms.SoftClip(4.0).fit(X).transform(X),
         )
+
+    @pytest.mark.parametrize(
+        ("params", "n_categorical"),
+        [
+            ({}, 1),
+            ({"kv_cache": False}, 1),
+            ({"bag_size": 30}, 1),
+            ({"transforms": ("quantile+original",)}, 2),
+            ({"numeric": True}, 0),
+        ],
+    )
+    def test_a_categorical_column_reaches_tabfm_as_categorical(
+        self, monkeypatch, params, n_categorical
+    ):
+        """Every classifier, member view and query reads the codes alike.
+
+        Upstream moves categorical columns first and codes them by their
+        first appearance, a category seen once and a missing one as -1.
+        """
+        generator = np.random.default_rng(1)
+        kind = generator.choice(["a", "b", "c"], 40).astype(object)
+        kind[3] = None
+        frame = pd.DataFrame(
+            {"x": generator.normal(size=40), "kind": pd.Categorical(kind)}
+        )
+        z = generator.uniform(0.2, 1.8, 40)
+        if params.pop("numeric", False):
+            frame["kind"] = frame["kind"].cat.codes.astype(float)
+        recorder = fakes.Recorder()
+        cls = fakes.install("tabfm", monkeypatch, recorder)
+        settings = {
+            **fakes.settings("tabfm"),
+            "device": "cpu",
+            "progress": False,
+            **params,
+        }
+        cls(**settings).fit(frame, z).predict_distribution(frame.iloc[:5])
+        calls = recorder.calls["tabfm"]
+        assert calls
+        for call in calls:
+            np.testing.assert_array_equal(
+                call.cat_features, np.arange(n_categorical)
+            )
+            codes = call.features[:, :n_categorical]
+            assert np.isin(codes, [-1.0, 0.0, 1.0, 2.0]).all()
+        whole = [c for c in calls if len(c.features) == len(frame)]
+        if n_categorical and whole:
+            # The coarse level's context is every row, in order.
+            np.testing.assert_array_equal(
+                whole[0].features[3, :n_categorical], -1.0
+            )
+        for call in whole:
+            np.testing.assert_allclose(call.query, call.features[:5])
+
+    def test_tabfm_codes_a_category_seen_once_as_unknown(self):
+        """No classifier argument reaches it, so lazy documents 2."""
+        upstream = pytest.importorskip("tabfm.src.classifier_and_regressor")
+        parameters = inspect.signature(
+            upstream.TransformToNumerical.__init__
+        ).parameters
+        assert parameters["min_cat_frequency"].default == 2
 
 
 def _classifier_kwargs(est, monkeypatch, group=None):

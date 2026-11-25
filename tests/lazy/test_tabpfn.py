@@ -18,6 +18,7 @@ import warnings
 import fakes
 from fakes import tabpfn as fake_tabpfn
 import numpy as np
+import pandas as pd
 import pytest
 import threads
 
@@ -534,6 +535,75 @@ def test_no_column_is_taken_for_a_category():
     assert settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] == 1
 
 
+def _with_a_category(n_rows=40, n_categories=3):
+    """Two numeric columns around a categorical one, and a target."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "a": rng.normal(size=n_rows),
+            "kind": pd.Categorical(np.arange(n_rows) % n_categories),
+            "b": rng.normal(size=n_rows),
+        }
+    )
+    return frame, frame["a"].to_numpy() + (frame["kind"].cat.codes == 0)
+
+
+@pytest.mark.parametrize(
+    ("transforms", "expected"),
+    [
+        ("auto", [1]),
+        ("none", [1]),
+        # Scaffolded with its original: the codes are in both halves.
+        ("quantile+original", [1, 4]),
+    ],
+)
+def test_a_categorical_columns_position_reaches_upstream(
+    monkeypatch, transforms, expected
+):
+    X, y = _with_a_category()
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2, transforms=transforms, device="cpu", progress=False
+    ).fit(X, y)
+    for regressor in est.handles_:
+        assert regressor.kwargs["categorical_features_indices"] == expected
+
+
+def test_a_bagged_member_is_told_where_its_view_holds_the_codes(monkeypatch):
+    """A bagged member's columns are permuted by lazy, not by upstream."""
+    X, y = _with_a_category()
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2, bag_size=30, device="cpu", progress=False
+    ).fit(X, y)
+    for group, regressor in zip(est.member_groups_, est.handles_, strict=True):
+        (position,) = np.flatnonzero(group.permutation == 1)
+        codes = X["kind"].cat.codes.to_numpy(dtype=float)[group.rows]
+        np.testing.assert_array_equal(regressor.context_[:, position], codes)
+        assert regressor.kwargs["categorical_features_indices"] == [position]
+
+
+def test_a_numeric_fit_declares_no_column_to_upstream(monkeypatch):
+    """None, as before categorical columns, so its outputs do not move."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 3))
+    est = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=1, device="cpu", progress=False
+    ).fit(X, X[:, 0])
+    assert est.regressor_.kwargs["categorical_features_indices"] is None
+
+
+@pytest.mark.checkpoint
+def test_a_marked_column_reaches_tabpfn_as_a_category():
+    """v3.5 takes 40 categories as one, where upstream's default caps 30."""
+    modalities = pytest.importorskip("tabpfn.preprocessing.datamodel")
+    X, y = _with_a_category(n_rows=120, n_categories=40)
+    est = _fit(X, y, version="v3.5")
+    config = est.regressor_.inference_config_
+    assert config.MAX_UNIQUE_FOR_CATEGORICAL_FEATURES == 1_000_000
+    schema = est.regressor_.inferred_feature_schema_
+    categorical = modalities.FeatureModality.CATEGORICAL
+    assert schema.indices_for(categorical) == [1]
+
+
 @pytest.mark.checkpoint
 @pytest.mark.parametrize("version", ["v2", "v3.5"])
 def test_a_three_valued_column_stays_numeric(small, version):
@@ -577,22 +647,22 @@ def test_the_cpu_runs_in_float32(small, mixed_precision):
 
 
 @pytest.mark.parametrize(
-    ("version", "limit"),
+    ("version", "limit", "encoding"),
     [
-        ("v2", 500),
-        ("v2.5", 500),
-        ("v2.6", 680),
-        ("v3", 500),
-        ("v3.5", 768),
-        ("v3.5-fast", 768),
+        ("v2", 500, "ordinal_very_common_categories_shuffled"),
+        ("v2.5", 500, "ordinal_very_common_categories_shuffled"),
+        ("v2.6", 680, "ordinal_very_common_categories_shuffled"),
+        ("v3", 500, "ordinal_very_common_categories_shuffled"),
+        ("v3.5", 768, "ordinal_shuffled"),
+        ("v3.5-fast", 768, "ordinal_shuffled"),
     ],
 )
-def test_an_explicit_recipe_runs_without_the_extras(version, limit):
-    """The named transform, the version's feature limit, nothing optional."""
+def test_an_explicit_recipe_runs_without_the_extras(version, limit, encoding):
+    """The named transform, the version's limit and encoding, no extras."""
     settings = _settings(version, _group("none"), None)
     (config,) = settings["PREPROCESS_TRANSFORMS"]
     assert config["name"] == "none"
-    assert config["categorical_name"] == "numeric"
+    assert config["categorical_name"] == encoding
     assert config["global_transformer_name"] is None
     assert config["append_original"] is False
     assert config["max_features_per_estimator"] == limit

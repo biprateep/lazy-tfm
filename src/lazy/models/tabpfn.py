@@ -28,8 +28,9 @@ onto its soft clip, ``OUTLIER_REMOVAL_STD``,
 ``inference_precision``. No setting is left to TabPFN: each version's own
 recipe is written out below (:data:`_RECIPES`) and handed over in full,
 so neither the checkpoint's stored config nor the installed tabpfn package
-decides what runs, and every column is numeric (upstream would take a column
-with fewer than four distinct values for a category).
+decides what runs. A column is categorical only when lazy marks it so
+(``categorical_features``), never by upstream's guess (a column with fewer
+than four distinct values), and TabPFN encodes it as the recipe says.
 
 ``bag_size`` runs one regressor per member, fitted on that member's bag
 alone. TabPFN's own row subsampling (``SUBSAMPLE_SAMPLES``) would fit each
@@ -117,6 +118,7 @@ _SHARED_RECIPE: dict[str, Any] = {
     "SAMPLE_SUBSAMPLING_METHOD": "auto",
     "FIX_NAN_BORDERS_AFTER_TARGET_TRANSFORM": True,
     "PASSTHROUGH_INF": False,
+    "MAX_UNIQUE_FOR_CATEGORICAL_FEATURES": 30,
 }
 """Settings every version's own recipe shares."""
 
@@ -206,6 +208,7 @@ _RECIPES: dict[str, dict[str, Any]] = {
         "PREPROCESS_TRANSFORMS": (
             _preprocessor("none", "ordinal_shuffled", False, 768, None),
         ),
+        "MAX_UNIQUE_FOR_CATEGORICAL_FEATURES": 1_000_000,
         "SOFTMAX_TEMPERATURE": 1.0,
         "OUTLIER_REMOVAL_STD": 12.0,
         "POLYNOMIAL_FEATURES": "no",
@@ -216,13 +219,15 @@ _RECIPES: dict[str, dict[str, Any]] = {
     },
 }
 """Each version's own recipe (``transforms="auto"``): every ``InferenceConfig``
-field that changes a regression prediction on numeric features, as the
-checkpoint stores it (v2.6 and later) or, for v2 and v2.5, which predate stored
-configs, as tabpfn 9.0.0's ``InferenceConfig.get_default`` writes it. Copied
-here so that a tabpfn upgrade cannot change what ``"auto"`` runs.
+field that changes a regression prediction on numeric or categorical columns,
+as the checkpoint stores it (v2.6 and later) or, for v2 and v2.5, which predate
+stored configs, as tabpfn 9.0.0's ``InferenceConfig.get_default`` writes it.
+Copied here so that a tabpfn upgrade cannot change what ``"auto"`` runs.
 ``OUTLIER_REMOVAL_STD`` is the resolved value (upstream's ``"auto"`` is None for
 a regressor), and ``SOFTMAX_TEMPERATURE`` the checkpoint's calibrated one; both
-are what ``"auto"`` resolves to, and are handed over as such.
+are what ``"auto"`` resolves to, and are handed over as such. A categorical
+column with more distinct values than ``MAX_UNIQUE_FOR_CATEGORICAL_FEATURES``
+(a missing value counts as one) is read as numbers.
 """
 # The fast variant is the same recipe on a smaller checkpoint.
 _RECIPES["v3.5-fast"] = _RECIPES["v3.5"]
@@ -262,15 +267,22 @@ def _upstream_settings(
     }
     if group.native_transforms is not None:
         # An explicit recipe: the named transforms and none of the extras,
-        # with the version's own limit on features per member. Upstream
-        # gives each listed config an equal share of the members, repeats
-        # included, so one cycle of the plan keeps its weights.
+        # with the version's own limit on features per member and its own
+        # encoding of categories (its first that does not read them as
+        # numbers). Upstream gives each listed config an equal share of the
+        # members, repeats included, so one cycle of the plan keeps its
+        # weights.
+        preprocessors = settings["PREPROCESS_TRANSFORMS"]
         limit = max(
-            config["max_features_per_estimator"]
-            for config in settings["PREPROCESS_TRANSFORMS"]
+            config["max_features_per_estimator"] for config in preprocessors
+        )
+        encoding = next(
+            config["categorical_name"]
+            for config in preprocessors
+            if config["categorical_name"] != "numeric"
         )
         settings["PREPROCESS_TRANSFORMS"] = tuple(
-            _preprocessor(name, "numeric", original, limit, None)
+            _preprocessor(name, encoding, original, limit, None)
             for name, original in _shortest_period(group.native_transforms)
         )
         settings["FINGERPRINT_FEATURE"] = False
@@ -282,11 +294,10 @@ def _upstream_settings(
         )
         settings["PREPROCESS_TRANSFORMS"] = (preprocessor,)
         settings["REGRESSION_Y_PREPROCESS_TRANSFORMS"] = (target,)
-    # Every column is numeric: upstream would otherwise take one with fewer
-    # than four distinct values in over 100 rows for a category and encode
-    # it. A column needs one value to count as numeric (none declared
-    # categorical, so no other threshold applies), and one with fewer is
-    # constant, which upstream drops anyway.
+    # No column is guessed to be a category: upstream would otherwise take
+    # an undeclared one with fewer than four distinct values in over 100
+    # rows for one and encode it. A column needs one value to count as
+    # numeric, and one with fewer is constant, which upstream drops anyway.
     settings["MIN_UNIQUE_FOR_NUMERICAL_FEATURES"] = 1
     settings["OUTLIER_REMOVAL_STD"] = outlier_threshold
     if not group.feature_shuffle:
@@ -378,7 +389,12 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             they append, the fingerprint feature, polynomial features on
             v2.6, the target transforms, and on v3.5 a 12-sigma soft clip.
             An explicit value has no fingerprint or polynomial features, no
-            SVD and the identity target transform. TabPFN runs only ``none``
+            SVD and the identity target transform, and encodes categorical
+            columns as the recipe's first preprocessor that encodes them
+            does (ordinal codes, shuffled per member; on v2 to v3 only for
+            columns whose rarest category has at least ten rows and that
+            have fewer distinct values than a tenth of the rows). TabPFN
+            runs only ``none``
             natively (its other transforms are not the package's) and lazy
             applies the rest. What runs whatever the recipe: the removal of
             constant columns and TabPFN's internal standardization.
@@ -397,6 +413,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ValueError.
         y_grid: Default output grid; the native grid is the bar
             distribution's own buckets, in full.
+        categorical_features: TabPFN encodes the columns marked categorical
+            itself, as each preprocessor of the recipe says, and leaves
+            them out of its soft clip. Up to v3, a marked column with more
+            than 30 distinct values (a missing value counts as one) is read
+            as numbers, as the checkpoints configure it.
         device: Where to run.
         random_state: The ensemble's seed.
         softmax_temperature: Temperature on the bucket logits. ``"auto"`` is
@@ -457,6 +478,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # target on the whole context (see the module docstring).
     supports_native_bagging = False
     native_outlier_clipping = True
+    native_categorical = True
     # Only the fast checkpoint is quick enough on a CPU, where upstream
     # allows 5,000 context rows.
     cpu_friendly_versions = ("v3.5-fast",)
@@ -483,6 +505,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
         y_grid: grid_lib.GridLike = None,
+        categorical_features: Any = "from_dtype",
         device: str = "auto",
         random_state: int | None = 0,
         chunk_size: int = 8_192,
@@ -500,6 +523,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid
+        self.categorical_features = categorical_features
         self.device = device
         self.random_state = random_state
         self.chunk_size = chunk_size
@@ -574,7 +598,10 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             model_path=self._model_specs(tabpfn),
             device=self.device_,
             random_state=group.seed,
-            categorical_features_indices=None,
+            categorical_features_indices=(
+                np.flatnonzero(self._categorical_columns(group)).tolist()
+                or None
+            ),
             softmax_temperature=self._temperature(),
             average_before_softmax=False,
             tuning_config=None,

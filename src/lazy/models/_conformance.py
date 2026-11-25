@@ -142,6 +142,7 @@ def _declaration_problems(
         "chunks_queries",
         "has_softmax",
         "native_outlier_clipping",
+        "native_categorical",
         "cpu_friendly",
     ):
         if not isinstance(getattr(cls, flag), bool):

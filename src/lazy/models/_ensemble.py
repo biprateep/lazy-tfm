@@ -43,6 +43,7 @@ import types
 from typing import Any, ClassVar, Literal, TypeGuard
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from lazy import _typing
@@ -80,6 +81,7 @@ UNIFORM_PARAMS: tuple[str, ...] = (
     "bag_size",
     "kv_cache",
     "y_grid",
+    "categorical_features",
     "device",
     "random_state",
     "chunk_size",
@@ -98,6 +100,7 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
     "bag_size": None,
     "kv_cache": True,
     "y_grid": None,
+    "categorical_features": "from_dtype",
     "device": "auto",
     "random_state": 0,
     "chunk_size": 8_192,
@@ -282,6 +285,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         has_softmax: Whether the model's output passes through a softmax,
             so that ``softmax_temperature`` means something; a model without
             one accepts only ``"auto"``.
+        native_categorical: Whether the model encodes categorical columns
+            itself, given which they are (:meth:`_categorical_columns`); if
+            not, it reads their codes as numbers. Each backend declares it.
         native_outlier_clipping: Whether the model applies the soft outlier
             clip itself, given a threshold; if not, the base class applies
             it to the features before the model sees them.
@@ -324,6 +330,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     chunks_queries: ClassVar[bool] = True
     has_softmax: ClassVar[bool] = True
     native_outlier_clipping: ClassVar[bool] = False
+    native_categorical: ClassVar[bool | None] = None
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
     cpu_note: ClassVar[str] = ""
@@ -758,7 +765,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 None
                 if group.scaffold is None
                 else _transforms.ScaffoldTransform(
-                    group.scaffold, group.seed
+                    group.scaffold, group.seed, self.is_categorical_
                 ).fit(context)
             )
             self.transformers_.append(transformer)
@@ -769,7 +776,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                     if transformer is None
                     else transformer.transform(context)
                 )
-                clipper = _transforms.SoftClip(threshold).fit(transformed)
+                clipper = _transforms.SoftClip(threshold).fit(
+                    transformed, self._transformed_categorical(group)
+                )
             self.clippers_.append(clipper)
             prepared = self._prepare(context, group, transformer, clipper)
             self._log(
@@ -1003,16 +1012,64 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             features = transformer.transform(features)
         if clipper is not None:
             features = clipper.transform(features)
-        if group.permutation is not None:
-            permutation = group.permutation
-            if features.shape[1] != permutation.size:
-                # "+original" doubled the columns; permute both halves alike.
-                halves = features.shape[1] // permutation.size
-                permutation = np.concatenate(
-                    [permutation + k * permutation.size for k in range(halves)]
-                )
-            features = features[:, permutation]
-        return features
+        if group.permutation is None:
+            return features
+        return features[:, self._view_columns(group, features.shape[1])]
+
+    def _view_columns(
+        self, group: _members.MemberGroup, n_columns: int
+    ) -> _typing.IntArray:
+        """The column of the transformed features behind each of a view's.
+
+        Args:
+            group: The member group.
+            n_columns: The columns of its transformed features: the
+                features', or twice as many under ``"+original"``.
+
+        Returns:
+            The group's permutation, applied to both halves alike under
+            ``"+original"``; the identity without one. Shape (n_columns,).
+        """
+        if group.permutation is None:
+            return np.arange(n_columns)
+        size = group.permutation.size
+        return np.concatenate(
+            [group.permutation + k * size for k in range(n_columns // size)]
+        )
+
+    def _transformed_categorical(
+        self, group: _members.MemberGroup
+    ) -> npt.NDArray[np.bool_]:
+        """Which of a group's transformed columns are categorical.
+
+        Args:
+            group: The member group.
+
+        Returns:
+            The mask of the features, doubled under ``"+original"``, shape
+            (n_transformed_columns,).
+        """
+        original = group.scaffold is not None and group.scaffold.original
+        return np.tile(self.is_categorical_, 2 if original else 1)
+
+    def _categorical_columns(
+        self, group: _members.MemberGroup
+    ) -> npt.NDArray[np.bool_]:
+        """Which columns of a group's view are categorical, in its order.
+
+        A backend passes this to its model's own handling of categories in
+        :meth:`_fit_group`, where the view is the features it gets.
+
+        Args:
+            group: The member group.
+
+        Returns:
+            One boolean per column of the view, shape (n_view_columns,):
+            the mask of the features, doubled under ``"+original"`` and
+            permuted as the view is.
+        """
+        mask = self._transformed_categorical(group)
+        return mask[self._view_columns(group, mask.size)]
 
     def _predict_chunk(
         self, features: _typing.FloatArray

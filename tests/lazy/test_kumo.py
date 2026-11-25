@@ -26,8 +26,8 @@ from lazy.models import _device
 from lazy.models import _hub
 from lazy.models import kumo
 
-# The categorical branch of upstream's recipe: lazy hands Kumo numeric
-# columns only, so its recipe has none.
+# The categorical branch of upstream's target recipe, which classifies: a
+# regression target is numerical.
 _CATEGORICAL = re.compile(r"\n( +)categorical=.*?\n\1\),", flags=re.DOTALL)
 
 
@@ -50,11 +50,11 @@ def _find(module, kind):
     return [m for m in module.modules() if type(m).__name__ == kind]
 
 
-def test_the_pinned_features_and_target_are_upstreams_numeric_branch():
+def test_the_pinned_features_and_target_are_upstreams_regression_recipe():
     upstream, pinned = _upstream_recipe(), _auto_recipe()
-    for role in ("features", "target"):
-        expected = _CATEGORICAL.sub("", repr(getattr(upstream, role)))
-        assert repr(getattr(pinned, role)) == expected
+    assert repr(pinned.features) == repr(upstream.features)
+    expected = _CATEGORICAL.sub("", repr(upstream.target))
+    assert repr(pinned.target) == expected
     ((upstream_select,), (pinned_select,)) = (
         _find(upstream.features, "SelectColumns"),
         _find(pinned.features, "SelectColumns"),
@@ -427,6 +427,43 @@ def test_missing_values_reach_the_network_and_give_finite_quantiles(
     X_test[::3, 2] = np.nan
     model = fakes.Backend("kumo", monkeypatch)(n_estimators=4).fit(X, y)
     assert np.isfinite(model.predict_distribution(X_test).locs).all()
+
+
+@pytest.mark.parametrize("kv_cache", [True, False])
+def test_a_categorical_column_reaches_the_network_as_one(
+    monkeypatch, data, kv_cache
+):
+    pd = pytest.importorskip("pandas")
+    X, y, X_test = data
+    rng = np.random.default_rng(1)
+    kind = pd.Categorical(rng.choice(list("abc"), len(X) + len(X_test)))
+    frame = pd.DataFrame(np.vstack([X, X_test])).assign(kind=kind)
+    frame.loc[::7, "kind"] = None
+    frame.columns = frame.columns.astype(str)
+    model = fakes.Backend("kumo", monkeypatch)(
+        n_estimators=4, kv_cache=kv_cache
+    )
+    model.fit(frame[: len(X)], y)
+    network = model._network()
+    fitted = len(network.categorical)
+    model.predict_distribution(frame[len(X) :])
+    # The view's fourth column, which upstream moves after the numerical
+    # ones, at prediction and at a fit that records the cache.
+    assert bool(fitted) == kv_cache
+    assert len(network.categorical) > fitted
+    assert all(names == {"3"} for names in network.categorical)
+
+
+def test_a_numeric_fit_hands_upstream_plain_tensors(monkeypatch, data):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = data
+    model = fakes.Backend("kumo", monkeypatch)(n_estimators=2).fit(X, y)
+    model.predict_distribution(X_test)
+    (handle,) = model.handles_
+    assert handle.categorical is None
+    x, _ = model._context(handle)
+    assert type(x) is torch.Tensor
+    assert not any(model._network().categorical)
 
 
 def test_the_deprecated_repository_build_still_names_the_commit():

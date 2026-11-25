@@ -113,11 +113,17 @@ which its native grid (`native_grid_`) shows.
 
 ## Categorical columns
 
-Every model treats every column as numeric and rejects a column that is not.
-A categorical feature must therefore be encoded as numbers before it is passed
-(e.g., ordinal codes or one-hot columns), and the model then treats an ordinal
-code as an ordered quantity. None of the models guesses that a numeric column
-with few distinct values is a category, as some of them do upstream.
+A column is categorical only when `categorical_features` marks it: by
+default, a column of pandas' `category` type that is not ordered (see
+{doc}`interface`). An ordered one is read as the codes of its categories, as
+numbers in their order. None of
+the models guesses that a numeric column with few distinct values is a
+category, as some of them do upstream. TabPFN, TabFM and Kumo Tabular encode
+a categorical column as they were trained to. TabICL and LimiX-2 read its
+codes, 0 to k - 1 in the order of its categories, as an ordered quantity.
+TabPFN up to v3 reads a categorical column of more than 30 categories as
+numbers, as its checkpoints are configured to. TabFM reads a category that
+appears only once in the context as missing.
 
 ## Biased training sets
 
