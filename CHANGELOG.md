@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `load_dataset("plasticc_ddf")`: PLAsTiCC's simulated LSST light curves of
+  the 32,699 extragalactic objects in the Deep Drilling Fields, with the true
+  redshift as the target. Each band's fluxes are a column of time series,
+  which `Dataset.modalities` maps to `"time"` for `lazy.Tabularizer`. The
+  parsed table is cached, so only the first load parses the files.
 - `lazy.LazyPipeline` and `lazy.make_pipeline`: a scikit-learn `Pipeline`
   whose last step is a model and which has every prediction method of the
   model. It has

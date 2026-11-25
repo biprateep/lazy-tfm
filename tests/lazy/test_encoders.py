@@ -220,7 +220,7 @@ def test_a_damaged_cache_file_counts_as_missing(cache, damage):
     again = sklearn_base.clone(encoder).fit(TEXTS[:1])
     np.testing.assert_array_equal(again.transform(TEXTS[:1]), first)
     assert again.batches_ == [TEXTS[:1]]
-    assert not list(cache.rglob("*.partial"))
+    assert not list(cache.rglob("*.part"))
 
 
 def test_arrays_are_cached_by_content_shape_and_type(cache):

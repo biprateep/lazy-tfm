@@ -2,9 +2,13 @@
 # Copyright (c) 2025 Biprateep Dey
 """The cache directory, kept apart so importing it loads nothing heavy."""
 
+from collections.abc import Iterator
+import contextlib
 import os
 import pathlib
 import sys
+import tempfile
+from typing import BinaryIO
 
 
 def data_home(data_home: str | pathlib.Path | None = None) -> pathlib.Path:
@@ -60,3 +64,43 @@ def umask() -> int:
     mask = os.umask(0o022)
     os.umask(mask)
     return mask
+
+
+@contextlib.contextmanager
+def atomic_file(path: str | os.PathLike[str]) -> Iterator[BinaryIO]:
+    """A file to write whole, which then replaces ``path`` in one move.
+
+    The file is written beside ``path`` under a name of its own, so that
+    processes writing the same file into a shared cache never write to, or
+    delete, one another's. Once the block ends, the file gets the mode any
+    new file would get and moves into place; if the block raises, it is
+    deleted. On Windows, which refuses to replace a file that another
+    process holds open, a copy already in place is kept.
+
+    Args:
+        path: Where the file belongs; its folder must exist.
+
+    Yields:
+        The file, open for writing in binary mode.
+
+    Raises:
+        FileNotFoundError: If the folder of ``path`` does not exist.
+    """
+    folder, name = os.path.split(os.fspath(path))
+    handle, partial = tempfile.mkstemp(
+        dir=folder or None, prefix=f".{name}.", suffix=".part"
+    )
+    try:
+        with os.fdopen(handle, "wb") as file:
+            yield file
+        # mkstemp makes the file private (0600); give it the mode any new
+        # file would get, so that others can read a shared cache.
+        os.chmod(partial, 0o666 & ~umask())
+        try:
+            os.replace(partial, path)
+        except PermissionError:
+            if not os.path.exists(path):
+                raise
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(partial)
