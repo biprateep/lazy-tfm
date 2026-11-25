@@ -103,3 +103,92 @@ class TorchMixture:
         terms = torch.stack([part.log_prob(y) for part in self.parts])
         log_weights = torch.log(torch.as_tensor(self.weights))
         return torch.logsumexp(terms + log_weights[:, None], dim=0)
+
+
+@dataclasses.dataclass(frozen=True)
+class TorchQuantiles:
+    """Values at fixed quantile levels, as a torch tensor.
+
+    Its density is :meth:`lazy.distributions.QuantileDistribution.pdf`'s,
+    on the graph.
+
+    Attributes:
+        levels: The cumulative probabilities, increasing inside [0, 1],
+            shape (n_levels,).
+        locs: The value at each level for each row, a float64 torch tensor
+            of shape (n_rows, n_levels) that may carry gradients; made
+            non-decreasing on construction, as the numpy class makes them.
+    """
+
+    levels: _typing.FloatArray
+    locs: Any
+
+    def __post_init__(self) -> None:
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        object.__setattr__(
+            self, "locs", torch.cummax(self.locs.double(), dim=1).values
+        )
+
+    @classmethod
+    def average(
+        cls, parts: list[TorchQuantiles], weights: _typing.FloatArray
+    ) -> TorchQuantiles:
+        """The weighted average of quantile functions.
+
+        Args:
+            parts: Densities at the same levels, with the same rows.
+            weights: Their weights, summing to 1, shape (n_parts,).
+
+        Returns:
+            The average, as
+            :meth:`lazy.distributions.QuantileDistribution.average` gives.
+
+        Raises:
+            ValueError: If the parts' levels differ.
+        """
+        if any(not np.array_equal(p.levels, parts[0].levels) for p in parts):
+            raise ValueError("every part must share the same levels")
+        locs = sum(
+            float(w) * part.locs for part, w in zip(parts, weights, strict=True)
+        )
+        return cls(parts[0].levels, locs)
+
+    def log_prob(self, y: Any) -> Any:
+        """The log-density of each row at its own value.
+
+        Args:
+            y: One value per row, shape (n_rows,), a torch tensor or array.
+
+        Returns:
+            The log-densities, a float64 torch tensor on the CPU, of shape
+            (n_rows,).
+
+        Raises:
+            ValueError: If ``y`` does not have one value per row.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        locs = self.locs.cpu()
+        values = torch.as_tensor(y).detach().cpu().double().numpy()
+        if values.shape != (locs.shape[0],):
+            raise ValueError(
+                f"y must have one value per row, shape ({locs.shape[0]},); "
+                f"got {values.shape}"
+            )
+        # The piece holding each value carries no gradient; its width does.
+        mass, gap = distributions._quantile_pieces(  # noqa: SLF001 - QuantileDistribution.pdf's rule.
+            np.asarray(self.levels, dtype=np.float64),
+            locs.detach().numpy(),
+            values[:, None],
+        )
+        mass, gap = mass[:, 0], torch.as_tensor(gap[:, 0])
+        rows = torch.arange(len(values))
+        width = locs[rows, gap + 1] - locs[rows, gap]
+        valid = torch.as_tensor(mass > 0) & (width > 0)
+        log_mass = torch.log(torch.as_tensor(mass))
+        return torch.where(
+            valid,
+            log_mass - torch.log(torch.where(valid, width, 1.0)),
+            -math.inf,
+        )

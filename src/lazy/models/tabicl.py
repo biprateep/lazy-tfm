@@ -47,10 +47,12 @@ import math
 from typing import Any
 
 import numpy as np
+from sklearn import preprocessing
 
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _locks
 from lazy.models import _members
@@ -318,17 +320,12 @@ class TabICLQuantile(
         y: _typing.FloatArray,
         group: _members.MemberGroup,
     ) -> _RegressorGroup:
-        # TabICL works in float32, which cannot resolve a narrow spread about
-        # a large offset; standardizing in float64 first keeps it. Each
-        # group is standardized on its own rows, a bagged member on its bag.
-        offset, scale = _quantile_head.target_scaling(y)
-        handle = self._fit_members(
-            # The features stay float64: upstream fits its scaling and power
-            # transform in float64, and casts to float32 only for the model.
-            X,
-            ((y - offset) / scale).astype(np.float32),
-            group,
-        )
+        # Each group is standardized on its own rows, a bagged member on its
+        # bag.
+        y, offset, scale = _standardized(y)
+        # The features stay float64: upstream fits its scaling and power
+        # transform in float64, and casts to float32 only for the model.
+        handle = self._fit_members(X, y, group)
         return dataclasses.replace(handle, offset=offset, scale=scale)
 
     def _fit_members(
@@ -532,10 +529,6 @@ class TabICLQuantile(
     def _predict_group(
         self, handle: _RegressorGroup, X: _typing.FloatArray
     ) -> distributions.QuantileDistribution:
-        offset, scale = handle.offset, handle.scale
-        total = sum(handle.weights)
-        # Upstream averages its members' quantiles; across regressors, each
-        # average counts for the members it stands for.
         answers = []
         for regressor in handle.regressors:
             self._attach_network(regressor)
@@ -546,11 +539,7 @@ class TabICLQuantile(
                         dtype=np.float64,
                     )
                 )
-        quantiles = sum(
-            (weight / total) * answer
-            for answer, weight in zip(answers, handle.weights, strict=True)
-        )
-        quantiles = np.asarray(quantiles) * scale + offset
+        quantiles = np.asarray(_pooled(answers, handle))
         if quantiles.shape[1] != self.n_quantiles_:
             raise RuntimeError(
                 f"{self.display_name} returned {quantiles.shape[1]} quantiles "
@@ -558,6 +547,64 @@ class TabICLQuantile(
             )
         return distributions.QuantileDistribution(
             quantile_levels(self.n_quantiles_), quantiles
+        )
+
+    def _forward_group(
+        self,
+        handle: _RegressorGroup,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> _differentiable.TorchQuantiles:
+        del group  # Unused: the handle holds the group's regressors.
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        # As _fit_group, then as upstream's own StandardScaler of the target.
+        y, offset, scale = _standardized(y)
+        y_scaler = preprocessing.StandardScaler().fit(y[:, None])
+        y_train = torch.as_tensor(
+            y_scaler.transform(y[:, None])[:, 0],
+            dtype=torch.float32,
+            device=self.device_,
+        )
+        # Upstream's inverse scaling and its average over members are in
+        # float32, and so are these.
+        scale32 = np.float32(y_scaler.scale_[0])
+        mean32 = np.float32(y_scaler.mean_[0])
+        answers = []
+        for regressor in handle.regressors:
+            self._attach_network(regressor)
+            members = _members_features(regressor, X, query).to(self.device_)
+            with _lending(regressor):
+                # The training forward keeps the graph, and gives the
+                # inference forward's quantiles exactly: the network has no
+                # dropout. Its modules take their gradient-free path in
+                # evaluation mode.
+                # Mixed precision autocasts as upstream's predict does.
+                model = regressor.model_
+                model.train()
+                try:
+                    with torch.autocast(
+                        torch.device(self.device_).type,
+                        enabled=self.mixed_precision_,
+                    ):
+                        out = model.quantile_dist(
+                            model._train_forward(  # noqa: SLF001 - upstream's.
+                                members, y_train.expand(len(members), -1)
+                            )
+                        ).quantiles
+                finally:
+                    model.eval()
+            # On the CPU for float64, which an Apple GPU lacks.
+            answers.append(
+                (out.float() * scale32 + mean32).mean(0).cpu().double()
+            )
+        return _differentiable.TorchQuantiles(
+            quantile_levels(self.n_quantiles_),
+            _pooled(
+                answers, dataclasses.replace(handle, offset=offset, scale=scale)
+            ),
         )
 
     def _recipe(self) -> dict[str, Any]:
@@ -763,6 +810,87 @@ def _load_network(
     """
     load(regressor)
     return regressor.model_, regressor.model_config_, regressor.model_path_
+
+
+def _standardized(
+    y: _typing.FloatArray,
+) -> tuple[_typing.FloatArray, float, float]:
+    """A group's targets standardized in float64, then cast for upstream.
+
+    TabICL works in float32, which cannot resolve a narrow spread about a
+    large offset; standardizing in float64 first keeps it.
+
+    Args:
+        y: The group's context targets, shape (n_rows,).
+
+    Returns:
+        A tuple (standardized, offset, scale): the targets as float32, and
+        the mean and standard deviation they were standardized by
+        (:func:`~lazy.models._quantile_head.target_scaling`).
+    """
+    offset, scale = _quantile_head.target_scaling(y)
+    return ((y - offset) / scale).astype(np.float32), offset, scale
+
+
+def _pooled(answers: list[Any], handle: _RegressorGroup) -> Any:
+    """The group's regressors' quantiles, averaged, in the target's units.
+
+    Upstream averages its members' quantiles; across regressors, each
+    average counts for the members it stands for.
+
+    Args:
+        answers: Each regressor's averaged quantiles in standardized units,
+            numpy arrays or torch tensors, shape (n_queries, n_quantiles).
+        handle: The group, with each regressor's member count and the
+            target's offset and scale.
+
+    Returns:
+        The pooled quantiles, of the type of ``answers``.
+    """
+    total = sum(handle.weights)
+    pooled = sum(
+        (weight / total) * answer
+        for answer, weight in zip(answers, handle.weights, strict=True)
+    )
+    return pooled * handle.scale + handle.offset
+
+
+def _members_features(regressor: Any, X: Any, query: Any) -> Any:
+    """Upstream's ensemble view of the context and the queries, in torch.
+
+    What ``EnsembleGenerator.transform(query, mode="both")`` gives under
+    ``norm_methods=["none"]`` with no clip, on the graph: the columns kept
+    at fit, standardized on the context and clipped to [-100, 100] as
+    upstream's ``CustomStandardScaler`` does, then each member's column
+    shuffle. Upstream's imputer leaves finite features as they are.
+
+    Args:
+        regressor: A ``TabICLRegressor`` fitted on ``X``.
+        X: Context features, a torch tensor of shape (n_rows, n_features).
+        query: Query features, a torch tensor of shape (n_queries,
+            n_features).
+
+    Returns:
+        The members' features, float32 on the CPU, shape (n_members, n_rows
+        + n_queries, n_kept).
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    generator = regressor.ensemble_generator_
+    keep = torch.as_tensor(generator.unique_filter_.features_to_keep_)
+    # On the CPU for float64, which an Apple GPU lacks.
+    context = X.cpu()[:, keep].double()
+    query = query.cpu()[:, keep].double()
+    mean = context.mean(dim=0)
+    # The square root of a zero variance has no gradient: a column constant
+    # in this context, which fit kept, scales by epsilon alone.
+    var = context.var(dim=0, correction=0)
+    std = torch.where(var > 0, torch.where(var > 0, var, 1.0).sqrt(), 0.0)
+    std = std + 1e-6
+    both = ((torch.cat([context, query]) - mean) / std).clamp(-100, 100)
+    return torch.stack(
+        [both[:, shuffle] for shuffle in generator.feature_shuffles_["none"]]
+    ).float()
 
 
 @contextlib.contextmanager

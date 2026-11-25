@@ -77,3 +77,55 @@ def test_a_context_of_another_size_is_refused():
     tensor = torch.tensor(X)
     with pytest.raises(ValueError, match="n_context_"):
         model._differentiable_density(tensor, tensor[:10], X[:10, 0])
+
+
+def test_torch_quantiles_have_the_log_density_of_their_numpy_twin():
+    levels = np.array([0.1, 0.3, 0.5, 0.9])
+    # Rows: plain; a tie inside; a tie at each end, so a tail takes the
+    # nearest non-zero spacing; values out of order, made monotone.
+    locs = np.array(
+        [
+            [0.0, 1.0, 2.0, 4.0],
+            [0.0, 1.0, 1.0, 4.0],
+            [1.0, 1.0, 2.0, 2.0],
+            [0.0, 2.0, 1.0, 4.0],
+        ]
+    )
+    twin = distributions.QuantileDistribution(levels, locs)
+    quantiles = _differentiable.TorchQuantiles(
+        levels, torch.tensor(locs, dtype=torch.float64)
+    )
+    for y in (
+        [-0.5, -0.9, 0.5, 2.5],
+        [1.0, 1.0, 2.0, 6.5],
+        [4.5, 5.0, 2.9, -2.1],
+    ):
+        with np.errstate(divide="ignore"):  # A density of 0 logs to -inf.
+            expected = np.log(np.diag(twin.pdf(y)))
+        np.testing.assert_allclose(quantiles.log_prob(y).numpy(), expected)
+
+
+def test_torch_quantiles_average_as_their_numpy_twins():
+    levels = np.array([0.25, 0.5, 0.75])
+    parts = [np.array([[0.0, 1.0, 2.0]]), np.array([[1.0, 3.0, 4.0]])]
+    expected = distributions.QuantileDistribution.average(
+        [distributions.QuantileDistribution(levels, p) for p in parts],
+        [0.25, 0.75],
+    )
+    average = _differentiable.TorchQuantiles.average(
+        [
+            _differentiable.TorchQuantiles(levels, torch.tensor(p))
+            for p in parts
+        ],
+        np.array([0.25, 0.75]),
+    )
+    np.testing.assert_allclose(average.locs.numpy(), expected.locs)
+
+
+def test_torch_quantiles_at_other_levels_are_not_averaged():
+    parts = [
+        _differentiable.TorchQuantiles(levels, torch.zeros(1, 2))
+        for levels in (np.array([0.25, 0.75]), np.array([0.2, 0.8]))
+    ]
+    with pytest.raises(ValueError, match="same levels"):
+        _differentiable.TorchQuantiles.average(parts, np.array([0.5, 0.5]))

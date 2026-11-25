@@ -782,3 +782,10 @@ def test_variance_does_not_cancel_far_from_zero(offset):
     ):
         assert near.std()[0] > 0.008
         np.testing.assert_allclose(far.var(), near.var(), rtol=1e-4)
+
+
+def test_a_quantile_distribution_of_no_rows_has_no_densities():
+    dist = distributions.QuantileDistribution(
+        [0.25, 0.5, 0.75], np.zeros((0, 3))
+    )
+    assert dist.pdf([0.0, 1.0]).shape == (0, 2)

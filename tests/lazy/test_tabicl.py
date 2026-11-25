@@ -314,3 +314,99 @@ def test_missing_values_reach_the_fake_as_they_reach_upstream(
     X_test[::3, 0] = np.nan
     model = fakes.Backend("tabicl", monkeypatch)().fit(X, y)
     assert np.isfinite(model.predict_distribution(X_test).locs).all()
+
+
+# -- the differentiable forward pass -----------------------------------------
+
+
+def test_a_clip_upstream_applies_is_refused(monkeypatch, data):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = data
+    model = fakes.install("tabicl", monkeypatch)(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=4.0,
+    ).fit(X, y)
+    with pytest.raises(ValueError, match="no feature transform or clip"):
+        model._differentiable_density(torch.tensor(X_test), torch.tensor(X), y)
+
+
+def test_a_column_constant_in_the_context_has_finite_gradients(
+    monkeypatch, data
+):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = data
+    model = _fit_plain(monkeypatch, X, y)
+    context = torch.tensor(X)
+    context[:, 0] = 1.0
+    context.requires_grad_()
+    density = model._differentiable_density(torch.tensor(X_test), context, y)
+    density.locs.sum().backward()
+    assert context.grad.isfinite().all()
+
+
+def _fit_plain(monkeypatch, X, y, **params):
+    """The fake TabICL, fitted without a transform or a clip."""
+    return fakes.install("tabicl", monkeypatch)(
+        **{"n_estimators": 2, "device": "cpu", "progress": False, **params},
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X, y)
+
+
+def test_the_members_features_are_upstreams_ensemble_view(monkeypatch, data):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = data
+    model = _fit_plain(monkeypatch, X, y, n_estimators=3)
+    regressor = model.handles_[0].regressors[0]
+    expected = regressor.ensemble_generator_.transform(
+        regressor.X_encoder_.transform(X_test), mode="both"
+    )["none"][0]
+    features = tabicl._members_features(
+        regressor, torch.tensor(X), torch.tensor(X_test)
+    )
+    np.testing.assert_array_equal(features.numpy(), expected.astype(np.float32))
+
+
+@pytest.mark.parametrize("params", [{}, {"bag_size": 40, "n_estimators": 3}])
+def test_the_differentiable_pass_has_gradients(monkeypatch, data, params):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = data
+    model = _fit_plain(monkeypatch, X, y, **params)
+    query = torch.tensor(X_test, requires_grad=True)
+    context = torch.tensor(X, requires_grad=True)
+    density = model._differentiable_density(query, context, y)
+    assert density.locs.shape == (len(X_test), fake_tabicl.SPREAD.size)
+    # The fake's quantiles shift as a whole, so its log-density at a fixed
+    # value is flat: the quantiles carry the gradient.
+    density.locs.sum().backward()
+    assert query.grad.abs().sum() > 0 and context.grad.abs().sum() > 0
+    assert not model.handles_[0].regressors[0].model_.training
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("params", [{}, {"bag_size": 60, "n_estimators": 3}])
+def test_the_differentiable_pass_matches_predict_on_the_checkpoint(params):
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(120, 3))
+    y = 2.0 + X[:, 0] + 0.1 * rng.normal(size=120)
+    model = lazy.TabICLQuantile(
+        **{"n_estimators": 4, "device": "cpu", "progress": False, **params},
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X[:100], y[:100])
+    expected = model.predict_distribution(X[100:])
+    query = torch.tensor(X[100:], requires_grad=True)
+    density = model._differentiable_density(
+        query, torch.tensor(X[:100]), y[:100]
+    )
+    locs = density.locs.detach().numpy()
+    # Upstream's cache and its shared column embeddings round in float32,
+    # to about 2e-6 of the spread.
+    np.testing.assert_allclose(locs, expected.locs, atol=2e-5 * y.std())
+    log_density = density.log_prob(y[100:])
+    log_density.sum().backward()
+    assert query.grad.isfinite().all()
