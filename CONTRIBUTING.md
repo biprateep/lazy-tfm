@@ -103,6 +103,15 @@ The stand-ins' own work is the same on both sides, so a ratio understates
 lazy's own speed-up. To see how much the ratio varies on your machine, compare
 the checkout with itself: `--against HEAD`.
 
+Two more scripts measure what the models predict, not how fast, and need a
+backend's extra; a GPU runs them in reasonable time. `benchmarks/encoders.py`
+compares a model on the tabular columns alone with the same model behind
+`lazy.Tabularizer`, with the classical and the pretrained encoders, on
+MulTaBench and PLAsTiCC. `benchmarks/categorical.py` compares a backend's own
+handling of categorical columns with their codes read as numbers. Each prints
+the commit, machine, GPU and versions first, and writes a row of scores per
+dataset and setting; its docstring gives the command.
+
 ## How changes are reviewed
 
 Changes reach `main` through pull requests; a fix of a few lines of prose or
