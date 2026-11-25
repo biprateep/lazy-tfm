@@ -148,6 +148,13 @@ class BaseDensityRegressor(
 
     backend: str | None = None
 
+    # Whether fit and the predict methods hand _fit and _predict_* the
+    # features as float64, categorical columns as their codes. A model
+    # whose members check their own features sets it False, and gets them
+    # as to_frame reads them, so that items (images, text) reach a member
+    # that encodes them.
+    _numeric_features: ClassVar[bool] = True
+
     # ``y_grid`` is a call-time option, not per-sample metadata, so
     # scikit-learn's metadata routing never passes it on: a router would
     # split a grid as long as the data between folds.
@@ -295,7 +302,11 @@ class BaseDensityRegressor(
             getattr(self, "categorical_features", "from_dtype"), frame, named
         )
         categories = _inputs.fit_categories(frame, is_categorical)
-        X = _inputs.numeric_frame(frame, named, categories)
+        X = (
+            _inputs.numeric_frame(frame, named, categories)
+            if self._numeric_features
+            else frame
+        )
         try:
             self.is_categorical_ = is_categorical
             self.categories_ = categories
@@ -931,8 +942,9 @@ class BaseDensityRegressor(
                 :func:`lazy._inputs.to_frame` accepts.
 
         Returns:
-            The features as a float64 DataFrame with a fresh index, columns
-            labeled and ordered as at fit time.
+            The features as a DataFrame with a fresh index, columns labeled
+            and ordered as at fit time: float64, categorical columns as
+            their codes, unless the model reads its features as given.
         """
         frame, named = _inputs.to_frame(X)
         if frame.shape[1] != self.n_features_in_:
@@ -942,6 +954,8 @@ class BaseDensityRegressor(
                 "features as input"
             )
         frame = self._align_to_fit(frame, named)
+        if not self._numeric_features:
+            return frame
         return _inputs.numeric_frame(frame, True, self.categories_)
 
     def _check_queries(self, X: _Features) -> pd.DataFrame:

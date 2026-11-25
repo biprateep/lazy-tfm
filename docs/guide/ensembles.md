@@ -33,6 +33,32 @@ member given another value keeps it. The fitted members are in `estimators_`
 and `named_estimators_`, and `provenance_` holds each member's own provenance
 together with the pooling, the weights and the pooling grid.
 
+## Members that see different views
+
+A member can also be a {class}`~lazy.pipeline.LazyPipeline` that ends in a
+model, so that members see different views of the same table, such as two
+encoders of the same column of items (see {doc}`encoders`):
+
+```python
+classical = {"notes": "text_hashing", "cutout": "image_statistics"}
+pretrained = {"notes": "text", "cutout": "image"}
+model = lazy.LazyEnsembleModel(
+    [
+        lazy.make_pipeline(lazy.Tabularizer(classical), lazy.LazyModel()),
+        lazy.make_pipeline(lazy.Tabularizer(pretrained), lazy.LazyModel()),
+    ]
+)
+model.fit(X_train, y_train)  # the raw table, items included
+```
+
+A pipeline gets the table as it was given, while every other member gets it
+as numbers, as before, so a pool that mixes them fails on a column of items
+before any member fits. A pipeline is named after the model at its end, and labeled with its
+steps (`tabularizer+tabpfn:v3.5`). The ensemble's `random_state` and `device`
+reach only that model, and its `categorical_features` does not reach it: the
+model marks the columns its steps make, by their type. A pipeline's entry in
+`provenance_` holds the names of its steps and its model's provenance.
+
 ## Three ways to pool
 
 All three pools weight the members equally, and the weights are recorded in

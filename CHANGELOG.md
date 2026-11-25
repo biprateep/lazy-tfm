@@ -9,6 +9,14 @@ change the API.
 
 ### Added
 
+- `LazyEnsembleModel` accepts a `LazyPipeline` that ends in a model as a
+  member, so that one pool combines models that see different views of the
+  same table, such as two encoders of a column of items. A pipeline gets the
+  table as the ensemble received it, items included; every other member gets
+  numbers as before.
+- `LazyPipeline.name_` and `LazyPipeline.provenance_`: the step names
+  joined to the model's `name_` (`"tabularizer+tabpfn:v3.5"`), and the step
+  names with the model's `provenance_`.
 - `max_features`, a parameter of every backend: each ensemble member sees
   its own random subset of the feature columns, the random-subspace method
   of scikit-learn's `BaggingRegressor`. An int is a count and a float a
