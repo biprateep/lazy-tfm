@@ -78,6 +78,7 @@ UNIFORM_PARAMS: tuple[str, ...] = (
     "n_estimators",
     "transforms",
     "feature_shuffle",
+    "max_features",
     "bag_size",
     "kv_cache",
     "y_grid",
@@ -97,6 +98,7 @@ UNIFORM_DEFAULTS: dict[str, Any] = {
     "n_estimators": 8,
     "transforms": _transforms.AUTO,
     "feature_shuffle": True,
+    "max_features": None,
     "bag_size": None,
     "kv_cache": True,
     "y_grid": None,
@@ -126,6 +128,7 @@ REQUIRED_PROVENANCE: tuple[str, ...] = (
     "feature_shuffle",
     "random_state",
     "bag_rows",
+    "feature_columns",
     "kv_cache",
     "chunk_size",
     "softmax_temperature",
@@ -345,6 +348,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     n_estimators: int
     transforms: str | tuple[str, ...]
     feature_shuffle: bool
+    max_features: int | float | None
     bag_size: int | float | None
     kv_cache: bool | str
     device: str
@@ -733,7 +737,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         self.outlier_threshold_ = self._resolve_outlier_threshold(specs)
         n_rows, n_features = X.shape
         self.n_context_ = int(n_rows)
-        self.bag_rows_ = _members.resolve_bag_size(self.bag_size, n_rows)
+        self.bag_rows_ = _members.resolve_count(
+            self.bag_size, n_rows, "bag_size"
+        )
+        n_kept = _members.resolve_count(
+            self.max_features, n_features, "max_features"
+        )
         self.bagging_ = self.bag_rows_ < n_rows
         self._warn_if_bags_too_small()
         self._warn_if_context_too_large(n_rows)
@@ -749,6 +758,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             random_state=self.random_state_,
             supports_native_bagging=self.supports_native_bagging,
             auto_tokens=self.auto_tokens,
+            n_kept=n_kept,
         )
         features = X.to_numpy(dtype=np.float64)
         self.transformers_: list[_transforms.ScaffoldTransform | None] = []
@@ -761,20 +771,23 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         for group in self.member_groups_:
             rows = slice(None) if group.rows is None else group.rows
             context = features[rows]
+            columns = _subset(context, group)
             transformer = (
                 None
                 if group.scaffold is None
                 else _transforms.ScaffoldTransform(
-                    group.scaffold, group.seed, self.is_categorical_
-                ).fit(context)
+                    group.scaffold,
+                    group.seed,
+                    _subset(self.is_categorical_, group),
+                ).fit(columns)
             )
             self.transformers_.append(transformer)
             clipper = None
             if scaffold_clip and threshold is not None:
                 transformed = (
-                    context
+                    columns
                     if transformer is None
-                    else transformer.transform(context)
+                    else transformer.transform(columns)
                 )
                 clipper = _transforms.SoftClip(threshold).fit(
                     transformed, self._transformed_categorical(group)
@@ -845,7 +858,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 f"feature_shuffle must be a bool: {self.feature_shuffle=}"
             )
         _transforms.parse(self.transforms)
-        _members.resolve_bag_size(self.bag_size, 1)
+        _members.resolve_count(self.bag_size, 1, "bag_size")
+        _members.resolve_count(self.max_features, 1, "max_features")
         if self.random_state is not None and not is_integer(self.random_state):
             raise ValueError(
                 f"random_state must be an int or None: {self.random_state=}"
@@ -978,6 +992,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _recipe(self) -> dict[str, Any]:
         """What the ensemble was, for ``provenance_``."""
+        first = self.member_groups_[0]
         members: list[_members.MemberSpec] = []
         for group in self.member_groups_:
             members.extend(group.members)
@@ -988,6 +1003,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 for m in sorted(members, key=lambda m: m.index)
             ],
             "feature_shuffle": self.feature_shuffle,
+            "feature_columns": (
+                None if first.columns is None else int(first.columns.size)
+            ),
             "random_state": self.random_state_,
             "bag_rows": self.bag_rows_ if self.bagging_ else None,
             "kv_cache": self.kv_cache_,
@@ -1007,7 +1025,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         transformer: _transforms.ScaffoldTransform | None,
         clipper: _transforms.SoftClip | None = None,
     ) -> _typing.FloatArray:
-        """A group's view of some features: transformed, clipped, permuted."""
+        """A group's view of some features: subset, transformed and permuted.
+
+        The group's columns are taken first, then transformed, clipped and
+        permuted.
+        """
+        features = _subset(features, group)
         if transformer is not None:
             features = transformer.transform(features)
         if clipper is not None:
@@ -1023,8 +1046,9 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
         Args:
             group: The member group.
-            n_columns: The columns of its transformed features: the
-                features', or twice as many under ``"+original"``.
+            n_columns: The columns of its transformed features: those it
+                keeps (``max_features``), or twice as many under
+                ``"+original"``.
 
         Returns:
             The group's permutation, applied to both halves alike under
@@ -1050,7 +1074,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             (n_transformed_columns,).
         """
         original = group.scaffold is not None and group.scaffold.original
-        return np.tile(self.is_categorical_, 2 if original else 1)
+        mask = _subset(self.is_categorical_, group)
+        return np.tile(mask, 2 if original else 1)
 
     def _categorical_columns(
         self, group: _members.MemberGroup
@@ -1431,9 +1456,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         Args:
             state: The pickled ``__dict__``.
 
+        A pickle made before a uniform parameter existed gets its default.
+
         Raises:
             ValueError: If the model's explicit device cannot run it here.
         """
+        # A pickle from before a uniform parameter existed gets its default.
+        for name, default in UNIFORM_DEFAULTS.items():
+            state.setdefault(name, default)
         super().__setstate__(state)
         if "handles_" in state:
             self._caches_pending = True
@@ -1534,6 +1564,23 @@ def _resolve_seed(random_state: int | None) -> int:
     if random_state is None:
         return int(np.random.SeedSequence().entropy % 2**31)  # type: ignore[operator]  # entropy is an int when drawn
     return int(random_state)
+
+
+def _subset(
+    array: npt.NDArray[Any], group: _members.MemberGroup
+) -> npt.NDArray[Any]:
+    """The columns of ``array`` (its last axis) that a group keeps.
+
+    Args:
+        array: Features, shape (n_rows, n_features), or one value per
+            feature, shape (n_features,).
+        group: The member group; its ``columns`` (``max_features``), or
+            None for all of them.
+
+    Returns:
+        ``array`` itself without a subset, else its kept columns in order.
+    """
+    return array if group.columns is None else array[..., group.columns]
 
 
 def _is_positive_real(value: object) -> bool:

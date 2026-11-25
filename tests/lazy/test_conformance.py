@@ -391,17 +391,17 @@ def test_bags_are_drawn_as_the_paper_drew_them():
 
 
 def test_bag_sizes_resolve_as_counts_or_fractions():
-    assert _members.resolve_bag_size(None, 100) == 100
-    assert _members.resolve_bag_size(30, 100) == 30
-    assert _members.resolve_bag_size(300, 100) == 100
-    assert _members.resolve_bag_size(0.25, 100) == 25
+    assert _members.resolve_count(None, 100, "bag_size") == 100
+    assert _members.resolve_count(30, 100, "bag_size") == 30
+    assert _members.resolve_count(300, 100, "bag_size") == 100
+    assert _members.resolve_count(0.25, 100, "bag_size") == 25
 
 
 def test_numpy_numbers_are_accepted_as_bag_sizes():
-    assert _members.resolve_bag_size(np.int64(30), 100) == 30
-    assert _members.resolve_bag_size(np.float32(0.25), 100) == 25
+    assert _members.resolve_count(np.int64(30), 100, "bag_size") == 30
+    assert _members.resolve_count(np.float32(0.25), 100, "bag_size") == 25
     with pytest.raises(ValueError, match="bag_size"):
-        _members.resolve_bag_size(np.True_, 100)
+        _members.resolve_count(np.True_, 100, "bag_size")
 
 
 def test_numpy_integers_are_accepted_as_counts_and_seeds(cls, data):

@@ -153,6 +153,29 @@ def test_fewer_members_than_a_block_keep_the_recipes_mix(bag_size, data):
     assert tokens == ["auto_quantile", "auto_quantile", "auto_power"]
 
 
+def test_a_member_keeps_its_subset_in_order_and_shuffles_it_natively(
+    monkeypatch, data
+):
+    """LimiX's shuffler, not lazy's permutation, orders a subset's columns."""
+    X, z, X_test = data
+    backend = fakes.Backend("limix", monkeypatch)
+    views = []
+    fit_group = backend.cls._fit_group
+
+    def recording(self, X, y, group):
+        views.append(X.copy())
+        return fit_group(self, X, y, group)
+
+    monkeypatch.setattr(backend.cls, "_fit_group", recording)
+    model = backend(n_estimators=3, max_features=2)
+    model.fit(X, z)
+    for view, group in zip(views, model.member_groups_, strict=True):
+        assert group.columns.size == 2
+        assert group.permutation is None and group.feature_shuffle
+        np.testing.assert_array_equal(view, X[:, group.columns])
+    assert model.predict_proba(X_test).shape[0] == len(X_test)
+
+
 @pytest.mark.checkpoint
 def test_a_bagged_member_shuffles_every_column_as_upstream(data):
     """As the paper's bagged runs: upstream's shuffler, on all its output."""

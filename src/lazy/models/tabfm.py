@@ -350,7 +350,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             subsampling.
         feature_shuffle: TabFM's ``feat_shuffle_method="random"``, else
             ``"none"``. Without it every member sees every column in the
-            original order, however wide the table.
+            original order, however wide the table, unless ``max_features``
+            gives it a subset. A member with a subset runs on its own, with
+            lazy's permutation and without the recipe's 500-column cap:
+            ``max_features`` sets its width.
         bag_size: Context rows per member. Member ``i`` sees lazy's bag
             ``i``, as on every model: its coarse-level member that bag, its
             member of fine level ``j`` the rows of the bag in coarse bin
@@ -503,6 +506,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         n_estimators: int = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
+        max_features: int | float | None = None,
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
@@ -526,6 +530,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self.n_estimators = n_estimators
         self.transforms = transforms
         self.feature_shuffle = feature_shuffle
+        self.max_features = max_features
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid

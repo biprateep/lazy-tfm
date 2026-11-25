@@ -9,6 +9,14 @@ change the API.
 
 ### Added
 
+- `max_features`, a parameter of every backend: each ensemble member sees
+  its own random subset of the feature columns, the random-subspace method
+  of scikit-learn's `BaggingRegressor`. An int is a count and a float a
+  fraction in (0, 1], rounded to the nearest count as `bag_size` is; the
+  default, `None`, keeps every column, so no prediction changes. A member
+  with a subset runs alone, its transform fitted on its own columns, and
+  its categorical columns follow it. `provenance_` records the number of
+  columns each member keeps as `feature_columns`, `None` for all of them.
 - `load_dataset("plasticc_ddf")`: PLAsTiCC's simulated LSST light curves of
   the 32,699 extragalactic objects in the Deep Drilling Fields, with the true
   redshift as the target. Each band's fluxes are a column of time series,
@@ -132,6 +140,12 @@ change the API.
   with the default, `prior_shift=None`, are unchanged. A correction that
   every backend shares is planned in
   [#300](https://github.com/biprateep/lazy-tfm/issues/300).
+
+### Fixed
+
+- A model pickled before a backend parameter existed takes its default when
+  loaded, so `get_params` and `clone` work on it.
+- A negative `random_state` works with `bag_size`, where numpy refused it.
 
 ## [0.6.2] - 2026-11-15
 
