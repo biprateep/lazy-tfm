@@ -56,7 +56,9 @@ as numbers, as before, so a pool that mixes them fails on a column of items
 before any member fits. A pipeline is named after the model at its end, and labeled with its
 steps (`tabularizer+tabpfn:v3.5`). The ensemble's `random_state` and `device`
 reach only that model, and its `categorical_features` does not reach it: the
-model marks the columns its steps make, by their type. A pipeline's entry in
+model marks the columns its steps make, by their type. The views of an image
+that a pretrained encoder can embed are another way to make members differ
+(see {doc}`encoders`). A pipeline's entry in
 `provenance_` holds the names of its steps and its model's provenance.
 
 ## Three ways to pool

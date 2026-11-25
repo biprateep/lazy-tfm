@@ -128,6 +128,39 @@ images with general networks use. It keeps an image's contrast but not its
 brightness or its colour, so a flux or a colour that matters belongs in a
 table column of its own. A network reads one band (grey) or three.
 
+### Rotated and flipped views
+
+`views` rotates and flips each image before the network reads it, and averages
+the embeddings of the views. Each view is one more forward pass. The views are
+the eight rotations and flips of a square, named in {data}`lazy.image.VIEWS`
+after Pillow's transposes. With $g$ a view, $f$ the network and $V$ the views,
+the embedding of an image $x$ is
+
+$$
+e(x) = \frac{1}{|V|} \sum_{g \in V} f(g\,x).
+$$
+
+`views="d4"` takes all eight, so the embedding of every rotation or flip of an
+image is the same, up to float rounding; the networks themselves are not
+invariant. One view, such
+as `views=["rotate_90"]`, gives one member of a pool its own view of the
+images:
+
+```python
+views = ["identity", "rotate_90", "rotate_180", "rotate_270"]
+model = lazy.LazyEnsembleModel(
+    [
+        lazy.make_pipeline(
+            lazy.Tabularizer({"cutout": lazy.image.Pretrained(views=[view])}),
+            lazy.LazyModel(),
+        )
+        for view in views
+    ]
+)
+```
+
+The default, `None`, embeds the image as it is.
+
 ### Citing
 
 If you use a pretrained encoder, cite its network as well as LAZY:

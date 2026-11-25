@@ -27,10 +27,12 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
+from collections.abc import Sequence
 import dataclasses
 import itertools
 import os
 import pathlib
+import types
 from typing import Any
 
 import numpy as np
@@ -40,8 +42,9 @@ from PIL import Image
 from lazy import _typing
 from lazy.encoders import _base
 from lazy.encoders import _pretrained
+from lazy.models import _hub
 
-__all__ = ["STATISTICS", "Pixels", "Pretrained", "Statistics"]
+__all__ = ["STATISTICS", "VIEWS", "Pixels", "Pretrained", "Statistics"]
 
 STATISTICS: tuple[str, ...] = (
     "mean",
@@ -54,6 +57,24 @@ STATISTICS: tuple[str, ...] = (
     "gradient",
 )
 """The columns that :class:`Statistics` gives for each channel, in order."""
+
+VIEWS: types.MappingProxyType[str, Image.Transpose | None] = (
+    types.MappingProxyType(
+        {
+            "identity": None,
+            "rotate_90": Image.Transpose.ROTATE_90,
+            "rotate_180": Image.Transpose.ROTATE_180,
+            "rotate_270": Image.Transpose.ROTATE_270,
+            "flip_left_right": Image.Transpose.FLIP_LEFT_RIGHT,
+            "flip_top_bottom": Image.Transpose.FLIP_TOP_BOTTOM,
+            "transpose": Image.Transpose.TRANSPOSE,
+            "transverse": Image.Transpose.TRANSVERSE,
+        }
+    )
+)
+"""The views of an image that :class:`Pretrained` embeds, by Pillow's names:
+the eight rotations and flips of a square (the dihedral group D4), the
+rotations counterclockwise. ``"d4"`` names all of them. Read-only."""
 
 _QUARTILES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
@@ -340,6 +361,10 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     Attributes:
         model: The network; ``"dinov2-with-registers-small"`` by default.
+        views: The rotations and flips of each image whose embeddings are
+            averaged, at one forward pass each: ``None`` (the default) for
+            the image as it is, ``"d4"`` for all eight of :data:`VIEWS`, or
+            a list of their names. :doc:`/guide/encoders` shows their use.
         device: ``"auto"``, or a torch device such as ``"cpu"``.
         batch_size: The most images in one forward pass.
         cache: Whether, or where, to file the embeddings on disk; see
@@ -361,14 +386,40 @@ class Pretrained(_pretrained.PretrainedEncoder):
         self,
         *,
         model: str = "dinov2-with-registers-small",
+        views: str | Sequence[str] | None = None,
         device: str = "auto",
         batch_size: int = 64,
         cache: bool | str | os.PathLike[str] = True,
     ) -> None:
         self.model = model
+        self.views = views
         self.device = device
         self.batch_size = batch_size
         self.cache = cache
+
+    def fit(self, X: Any, y: Any = None) -> Pretrained:  # noqa: GS030 - scikit-learn's X, y.
+        """Checks ``views``, then the rest, as every pretrained encoder does.
+
+        Args:
+            X: One column of images.
+            y: Ignored; scikit-learn passes it.
+
+        Returns:
+            The encoder itself.
+
+        Raises:
+            UnknownNameError: If ``model`` is not one of ``recipes``, or a
+                view is not one of :data:`VIEWS`.
+            ValueError: If ``views`` is not ``None``, ``"d4"`` or a list or
+                tuple of distinct names, or ``device`` or another parameter
+                is not valid.
+            ImportError: If the ``encoders`` extra is not installed.
+            RuntimeError: If ``device`` names an accelerator that is not
+                there.
+        """
+        _transposes(self.views)
+        super().fit(X, y)
+        return self
 
     def _load(self, path: os.PathLike[str], device: str) -> Any:
         """The preprocessor and the network, on ``device``."""
@@ -391,19 +442,61 @@ class Pretrained(_pretrained.PretrainedEncoder):
         return processor, model.to(device).eval()
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
-        """The embedding of each image, as the recipe names it."""
+        """The mean embedding of each image's views, as the recipe names it."""
         processor, model = network
-        pixels = processor(
-            images=[_rgb(item) for item in items], return_tensors="pt"
-        )["pixel_values"].to(model.device)
-        output = getattr(model(pixel_values=pixels), self._recipe().output)
-        return output.float().cpu().numpy()
+        images = [_rgb(item) for item in items]
+        transposes = _transposes(self.views)
+        output = self._recipe().output
+        # Summed on the device, so that the next view's preprocessing
+        # overlaps this view's forward pass.
+        total: Any = 0  # A torch tensor after the first view.
+        for transpose in transposes:
+            # Not `if transpose`: FLIP_LEFT_RIGHT is 0.
+            shown = [
+                image if transpose is None else image.transpose(transpose)
+                for image in images
+            ]
+            pixels = processor(images=shown, return_tensors="pt")[
+                "pixel_values"
+            ].to(model.device)
+            total = total + getattr(model(pixel_values=pixels), output).float()
+        return (total / len(transposes)).cpu().numpy()
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an image: of the file for a path, else its RGB."""
         if isinstance(item, Image.Image):
             item = _rgb(item)
         return _image_bytes(item) or super()._item_bytes(item)
+
+
+def _transposes(
+    views: str | Sequence[str] | None,
+) -> list[Image.Transpose | None]:
+    """The Pillow transposes that ``views`` names, in order.
+
+    Raises:
+        ValueError: If ``views`` is not ``None``, ``"d4"`` or a non-empty
+            list of distinct names of :data:`VIEWS`.
+    """
+    if views is None:
+        return [None]
+    if isinstance(views, str) and views == "d4":
+        return list(VIEWS.values())
+    if (
+        isinstance(views, str)
+        or not isinstance(views, Sequence)
+        or not views
+        or not all(isinstance(view, str) for view in views)
+        or len(set(views)) != len(views)
+    ):
+        raise ValueError(
+            "views must be None, 'd4' or a list or tuple of distinct names of"
+            f" {list(VIEWS)}: {views=}"
+        )
+    for view in views:
+        if view not in VIEWS:
+            raise _hub.unknown_name("view", view, list(VIEWS), argument="views")
+    return [VIEWS[view] for view in views]
 
 
 def _rgb(item: Any) -> Image.Image:

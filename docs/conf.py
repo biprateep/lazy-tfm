@@ -599,6 +599,8 @@ nitpick_ignore_regex = [
     ("py:class", r"Ancil|FeatureMode|Member|Normalization|Pooling"),
     # Not in matplotlib's inventory.
     ("py:class", r"matplotlib\.typing\.RcKeyType"),
+    # Pillow publishes no inventory that the docs load.
+    ("py:class", r"PIL\..*"),
 ]
 
 # -- Copy button: strip console prompts from copied commands -----------------
