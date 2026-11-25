@@ -15,6 +15,7 @@ the model in a pipeline::
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
+import functools
 from typing import Any
 
 import numpy as np
@@ -36,7 +37,6 @@ __all__ = ["Tabularizer"]
 
 _FITTED = (
     "transformer_",
-    "column_labels_",
     "n_features_in_",
     "feature_names_in_",
 )
@@ -54,6 +54,11 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     warning. A row of ``NaN``, from a missing item, stays a row of ``NaN`` and
     is left out of that fit. The other columns pass through, or are dropped, as
     ``remainder`` says.
+
+    The output is a DataFrame with the index of ``X`` and the names of
+    :meth:`get_feature_names_out`. The encoded columns are float64, and a
+    column that passes through keeps its type. ``set_output``, for example
+    with ``transform="polars"``, converts it to another container.
 
     The encoders are frozen. The standardization and the principal
     components are fitted on the rows given to ``fit``, the context, and
@@ -111,7 +116,7 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self.fit_transform(X, y)
         return self
 
-    def fit_transform(self, X: Any, y: Any = None) -> npt.NDArray[Any]:  # noqa: GS030 - scikit-learn's X, y.
+    def fit_transform(self, X: Any, y: Any = None) -> pd.DataFrame:  # noqa: GS030 - scikit-learn's X, y.
         """Fits as :meth:`fit` does, and returns the table it encoded.
 
         Args:
@@ -152,28 +157,31 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             )
             for i, (column, spec) in enumerate(self.columns.items())
         ]
-        transformer = compose.ColumnTransformer(
-            steps, remainder=self.remainder, sparse_threshold=0
-        )
-        table = transformer.fit_transform(X)
-        self.transformer_ = transformer
-        self.column_labels_ = {
+        labels = {
             f"column{i}": str(column) for i, column in enumerate(self.columns)
         }
+        transformer = compose.ColumnTransformer(
+            steps,
+            remainder=self.remainder,
+            sparse_threshold=0,
+            verbose_feature_names_out=functools.partial(_name, labels),
+        ).set_output(transform="pandas")
+        table = transformer.fit_transform(X)
+        self.transformer_ = transformer
         self.n_features_in_ = transformer.n_features_in_
         if hasattr(transformer, "feature_names_in_"):
             self.feature_names_in_ = transformer.feature_names_in_
         return table
 
-    def transform(self, X: Any) -> npt.NDArray[Any]:  # noqa: GS030 - scikit-learn's X, y.
+    def transform(self, X: Any) -> pd.DataFrame:  # noqa: GS030 - scikit-learn's X, y.
         """The encoded and reduced columns, then the columns kept.
 
         Args:
             X: A table with the columns of the one given to ``fit``.
 
         Returns:
-            The table as an array, shape (n_rows, n_features_out), in the
-            order of :meth:`get_feature_names_out`.
+            The table, shape (n_rows, n_features_out), with the index of
+            ``X`` and the columns of :meth:`get_feature_names_out`.
 
         Raises:
             sklearn.exceptions.NotFittedError: If it is not fitted.
@@ -200,11 +208,20 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         """
         del input_features  # Unused: the fitted table names the columns.
         validation.check_is_fitted(self, "transformer_")
-        names = []
-        for name in self.transformer_.get_feature_names_out():
-            step, _, feature = name.partition("__")
-            names.append(f"{self.column_labels_.get(step, step)}__{feature}")
-        return np.array(names, dtype=object)
+        return self.transformer_.get_feature_names_out()
+
+
+def _name(labels: Mapping[str, str], step: str, feature: str) -> str:
+    """The output name of a feature: its column's label, ``__``, its name.
+
+    A module function, not a closure, so a fitted Tabularizer pickles.
+
+    Args:
+        labels: The column's label by the name of its step.
+        step: The name of the step, or ``"remainder"``.
+        feature: The name of the feature within the step.
+    """
+    return f"{labels.get(step, step)}__{feature}"
 
 
 def _position(X: Any, column: Hashable) -> Hashable:  # noqa: GS030 - scikit-learn's X, y.
@@ -260,7 +277,7 @@ class _Reducer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     def __init__(self, n_components: int | None) -> None:
         self.n_components = n_components
 
-    def fit(self, X: _typing.FloatArray, y: Any = None) -> _Reducer:  # noqa: GS030 - scikit-learn's X, y.
+    def fit(self, X: pd.DataFrame, y: Any = None) -> _Reducer:  # noqa: GS030 - scikit-learn's X, y.
         """Fits the standardization and the components on complete rows.
 
         Raises:
@@ -268,11 +285,12 @@ class _Reducer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 rows are complete.
         """
         del y  # Unused: the reduction is fitted without the target.
-        X = np.asarray(X, dtype=float)
-        self.n_features_in_ = X.shape[1]
-        if self.n_components is None or X.shape[1] <= self.n_components:
+        values = validation.validate_data(
+            self, X, dtype=float, ensure_all_finite="allow-nan"
+        )
+        if self.n_components is None or values.shape[1] <= self.n_components:
             return self
-        complete = X[~np.isnan(X).any(axis=1)]
+        complete = values[~np.isnan(values).any(axis=1)]
         if len(complete) < 2:
             raise ValueError(
                 f"an embedding to reduce has {len(complete)} rows without"
@@ -293,25 +311,28 @@ class _Reducer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         ).fit(complete)
         return self
 
-    def transform(self, X: _typing.FloatArray) -> _typing.FloatArray:  # noqa: GS030 - scikit-learn's X, y.
+    def transform(self, X: pd.DataFrame) -> _typing.FloatArray:  # noqa: GS030 - scikit-learn's X, y.
         """The components of each complete row; ``NaN`` for the others."""
         validation.check_is_fitted(self, "n_features_in_")
-        X = np.asarray(X, dtype=float)
+        values = validation.validate_data(
+            self, X, dtype=float, ensure_all_finite="allow-nan", reset=False
+        )
         if not hasattr(self, "pca_"):
-            return X
-        complete = ~np.isnan(X).any(axis=1)
-        reduced = np.full((len(X), self._width()), np.nan)
+            return values
+        complete = ~np.isnan(values).any(axis=1)
+        reduced = np.full((len(values), self._width()), np.nan)
         if complete.any():
-            reduced[complete] = self.pca_.transform(X[complete])
+            reduced[complete] = self.pca_.transform(values[complete])
         return reduced
 
     def get_feature_names_out(
         self, input_features: npt.ArrayLike | None = None
     ) -> npt.NDArray[np.object_]:
-        """The encoder's names, which a pipeline passes, or ``pc0`` onwards."""
+        """The encoder's names, or ``pc0`` onwards."""
+        del input_features  # Unused: the names come from the fit.
         validation.check_is_fitted(self, "n_features_in_")
         if not hasattr(self, "pca_"):
-            return np.asarray(input_features, dtype=object)
+            return self.feature_names_in_
         return np.array([f"pc{i}" for i in range(self._width())], dtype=object)
 
     def _width(self) -> int:

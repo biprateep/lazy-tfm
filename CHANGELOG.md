@@ -74,7 +74,8 @@ change the API.
   encoder that a modality, a name or an object gives, reduces each embedding
   to its first `n_components` principal components (default 30, as the
   published pipelines use), fitted on the context, and passes the other
-  columns through.
+  columns through. It returns a DataFrame whose columns carry their names,
+  such as `notes__pc0`, and a column that passes through keeps its type.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
 

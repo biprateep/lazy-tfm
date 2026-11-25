@@ -3,6 +3,7 @@
 """The Tabularizer: columns of items to encoded, reduced columns."""
 
 import itertools
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -53,9 +54,20 @@ def test_each_column_is_encoded_reduced_and_named(table):
     pairs = itertools.product(("curve", "notes", "cutout"), range(3))
     expected = [f"{column}__pc{i}" for column, i in pairs]
     assert list(tab.get_feature_names_out()) == [*expected, "remainder__number"]
-    out = tab.transform(table)
-    assert out.shape == (N_ROWS, 10)
-    np.testing.assert_array_equal(out[:, -1], table["number"])
+    out = tab.transform(table.set_axis(range(100, 100 + N_ROWS)))
+    assert list(out.columns) == list(tab.get_feature_names_out())
+    assert out.index.tolist() == list(range(100, 100 + N_ROWS))
+    np.testing.assert_array_equal(out["remainder__number"], table["number"])
+
+
+def test_a_column_passed_through_keeps_its_type(table):
+    kinds = pd.Categorical(["a", "b"] * (N_ROWS // 2))
+    typed = table.assign(kind=kinds, count=np.arange(N_ROWS))
+    out = lazy.Tabularizer({"notes": "text_hashing"}, n_components=2).fit(typed)
+    out = out.transform(typed)
+    assert out["notes__pc0"].dtype == np.float64
+    assert out["remainder__kind"].dtype == kinds.dtype
+    assert out["remainder__count"].dtype == np.int64
 
 
 def test_a_reduced_embedding_is_the_principal_components_of_its_scaled_rows(
@@ -69,7 +81,7 @@ def test_a_reduced_embedding_is_the_principal_components_of_its_scaled_rows(
         preprocessing.StandardScaler(),
         decomposition.PCA(4, svd_solver="full"),
     ).fit_transform(embedding)
-    np.testing.assert_allclose(tab.transform(table)[:, :4], expected)
+    np.testing.assert_allclose(tab.transform(table), expected)
 
 
 def test_a_narrow_embedding_keeps_its_columns_and_names(table):
@@ -92,8 +104,8 @@ def test_a_missing_item_stays_missing_and_is_left_out_of_the_fit(table):
         {"notes": "text_hashing"}, n_components=3, remainder="drop"
     ).fit(gappy)
     out = tab.transform(gappy)
-    assert np.isnan(out[[2, 7], :3]).all()
-    assert not np.isnan(np.delete(out, [2, 7], axis=0)).any()
+    assert out.loc[[2, 7]].isna().all(axis=None)
+    assert not out.drop(index=[2, 7]).isna().any(axis=None)
     complete = gappy.drop(index=[2, 7])
     alone = lazy.Tabularizer(
         {"notes": "text_hashing"}, n_components=3, remainder="drop"
@@ -136,6 +148,7 @@ def test_a_model_behind_it_predicts_and_a_search_tunes_it(table):
         standins.HistogramStandIn(n_estimators=2, progress=False),
     )
     model.fit(table, y)
+    assert model[-1].feature_names_in_[0] == "curve__pc0"
     assert model.predict_quantiles(table, [0.5]).shape == (N_ROWS, 1)
     search = model_selection.GridSearchCV(
         model, {"tabularizer__n_components": [1, 2]}, cv=2
@@ -196,7 +209,7 @@ def test_a_short_context_keeps_fewer_components_and_says_so(table):
     with pytest.warns(lazy.LazyWarning, match="so it keeps 4 components"):
         out = tab.fit_transform(few)
     assert out.shape == (N_ROWS, 4)
-    assert not np.isnan(out[:5]).any()
+    assert not out[:5].isna().any(axis=None)
     with pytest.raises(ValueError, match="has 1 rows without NaN"):
         tab.fit(table.assign(notes=[*table["notes"][:1], *[None] * 39]))
 
@@ -241,3 +254,10 @@ def test_each_modality_names_a_registered_encoder_of_its_own():
     assert set(encoders.DEFAULT_ENCODERS) == set(encoders.MODALITIES)
     for modality in encoders.MODALITIES:
         assert encoders.get_encoder(modality).modality == modality
+
+
+def test_a_fitted_tabularizer_pickles(table):
+    tab = lazy.Tabularizer({"curve": "time_statistics"}, n_components=2)
+    tab.fit(table)
+    again = pickle.loads(pickle.dumps(tab))
+    pd.testing.assert_frame_equal(again.transform(table), tab.transform(table))
