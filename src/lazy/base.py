@@ -129,15 +129,18 @@ class BaseDensityRegressor(
         is_fitted_: ``True`` once :meth:`fit` has run.
         categorical_features: Which columns are categorical:
             ``"from_dtype"`` (the default), for the columns of pandas'
-            ``category`` type; ``None``, for none; or column names,
-            positions or a boolean mask. A categorical column reaches the
-            model as the codes 0 to n_categories - 1 of its categories,
-            with NaN for a missing value or a category that ``fit`` did not
-            see. Integer or boolean columns stay numeric unless marked.
+            ``category`` type that are not ordered; ``None``, for none; or
+            column names, positions or a boolean mask. A categorical column
+            reaches the model as the codes 0 to n_categories - 1 of its
+            categories, with NaN for a missing value or a category that
+            ``fit`` did not see. A column of pandas' ordered ``category``
+            type that is not marked reaches it as the same codes, read as
+            numbers in the order of its categories. Integer or boolean
+            columns stay numeric unless marked.
         is_categorical_: Which columns are categorical, a boolean array of
             shape (``n_features_in_``,).
         categories_: Each column's categories, in the order of its codes,
-            or ``None`` for a numeric column.
+            for a column read as codes, or ``None`` for one read as it is.
         n_features_in_: Number of feature columns seen by :meth:`fit`.
         feature_names_in_: Their names, an object array of shape
             (``n_features_in_``,).

@@ -41,7 +41,7 @@ differs between backends, because the checkpoints do.
 | `bag_size`            | Context rows per member: an int is a count (`1` is one row), a float a fraction in (0, 1] (`1.0` is all rows), `None` all rows.      | `None`    |
 | `kv_cache`            | Process the context once and reuse it for every query chunk; `False` processes it again for each chunk. Worth its memory when there are many more queries than context rows. | `True`    |
 | `y_grid`              | Default output grid: a {class}`~lazy.grid.Grid`, an array of bin centers, `"native"`, or `None` for the native grid.                 | `None`    |
-| `categorical_features` | Which columns are categorical: `"from_dtype"` for pandas' `category` columns, `None` for none, or column names, positions or a boolean mask. | `"from_dtype"` |
+| `categorical_features` | Which columns are categorical: `"from_dtype"` for pandas' `category` columns that are not ordered, `None` for none, or column names, positions or a boolean mask. | `"from_dtype"` |
 | `random_state`        | The ensemble's seed; `None` draws one at `fit` and records it as `random_state_` and in `provenance_`.                               | `0`       |
 | `chunk_size`          | Query rows per forward pass, to bound memory; `0` for one pass. A row's answer does not depend on the other rows in its chunk, beyond float rounding. | `8192`    |
 | `softmax_temperature` | Divides the output logits, so lower sharpens and higher broadens; `"auto"` is the checkpoint's calibrated value, and a positive number overrides it. A model without a softmax accepts only `"auto"`. | `"auto"`  |
@@ -212,7 +212,10 @@ pandas type, or sorted for a column marked another way. A missing value, or a
 category that the context did not hold, is missing. A model that encodes
 categories itself (TabPFN, TabFM, Kumo Tabular) is told which columns they
 are; TabICL and LimiX-2 read the codes as numbers (see
-[Categorical columns](limits.md#categorical-columns)). Infinities, complex
+[Categorical columns](limits.md#categorical-columns)). A column of pandas'
+ordered `category` type, such as a quality from poor to good, is not
+categorical unless marked: its codes reach every model as numbers, in the
+order of its categories. Infinities, complex
 values, sparse matrices and columns that are neither numeric nor categorical,
 such as text, are rejected; a column of text goes through
 {class}`~lazy.Tabularizer` (see {doc}`encoders`). An array or list of

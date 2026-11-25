@@ -85,8 +85,10 @@ change the API.
   `"time"`, for its default encoder.
 - Categorical columns. Every model takes `categorical_features`, as
   scikit-learn's `HistGradientBoostingRegressor` does: `"from_dtype"`, the
-  default, marks the columns of pandas' `category` type, and column names,
-  positions or a boolean mask mark others. A fitted model records
+  default, marks the columns of pandas' `category` type that are not
+  ordered, and column names, positions or a boolean mask mark others. A
+  column of pandas' ordered `category` type that is not marked is read as
+  the codes of its categories, numbers in their order. A fitted model records
   `is_categorical_` and `categories_`, and a category that the context did
   not hold is read as missing. TabPFN, TabFM and Kumo Tabular encode the
   marked columns as they were trained to; TabICL and LimiX-2 read their
@@ -104,9 +106,11 @@ change the API.
 - The embedding cache of `lazy.encoders` reads a cached embedding about 6
   times faster and writes one about twice as fast. Its files are unchanged.
 - A pandas `category` column whose categories are numbers was read as those
-  numbers; it is now categorical, as `categorical_features="from_dtype"`
-  says, which changes the predictions for such a table. Pass
-  `categorical_features=None` for the earlier reading.
+  numbers. If it is not ordered, it is now categorical, as
+  `categorical_features="from_dtype"` says; pass `categorical_features=None`
+  for the earlier reading. If it is ordered, it is now read as the codes of
+  its categories, 0 to k - 1. Either changes the predictions for such a
+  table.
 - The error for a column that is neither numeric nor categorical names the
   kind of column and says how to convert it.
 - Under an explicit `transforms`, TabPFN's `provenance_` records its

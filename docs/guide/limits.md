@@ -114,7 +114,9 @@ which its native grid (`native_grid_`) shows.
 ## Categorical columns
 
 A column is categorical only when `categorical_features` marks it: by
-default, a column of pandas' `category` type (see {doc}`interface`). None of
+default, a column of pandas' `category` type that is not ordered (see
+{doc}`interface`). An ordered one is read as the codes of its categories, as
+numbers in their order. None of
 the models guesses that a numeric column with few distinct values is a
 category, as some of them do upstream. TabPFN, TabFM and Kumo Tabular encode
 a categorical column as they were trained to. TabICL and LimiX-2 read its

@@ -517,3 +517,17 @@ def test_values_of_mixed_types_are_refused_by_column_name():
     frame = pd.DataFrame({"b": ["x", 1, "y"]})
     with pytest.raises(ValueError, match="'b' holds values that cannot be"):
         _Seen(categorical_features=["b"]).fit(frame, [0.0, 1.0, 2.0])
+
+
+def test_an_ordered_category_column_is_read_as_numbers_in_its_order():
+    grade = pd.Categorical(
+        ["good", "poor", None, "fair"],
+        categories=["poor", "fair", "good"],
+        ordered=True,
+    )
+    frame = pd.DataFrame({"grade": grade})
+    model = _Seen().fit(frame, np.arange(4.0))
+    assert not model.is_categorical_.any()
+    np.testing.assert_array_equal(model.fitted_on_["grade"], [2, 0, np.nan, 1])
+    marked = _Seen(categorical_features=["grade"]).fit(frame, np.arange(4.0))
+    assert marked.is_categorical_.all()

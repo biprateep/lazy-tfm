@@ -112,7 +112,8 @@ def categorical_mask(
 
     Args:
         categorical_features: ``"from_dtype"``, for the columns of pandas'
-            ``category`` type; ``None``, for none; or the columns as names
+            ``category`` type that are not ordered; ``None``, for none; or
+            the columns as names
             (of a table with names), as integer positions, or as a boolean
             mask with one entry per column.
         frame: The features, as :func:`to_frame` returns them.
@@ -137,7 +138,10 @@ def categorical_mask(
                 f" names, positions or a mask; got {categorical_features!r}"
             )
         return np.array(
-            [isinstance(t, pd.CategoricalDtype) for t in frame.dtypes]
+            [
+                isinstance(t, pd.CategoricalDtype) and not t.ordered
+                for t in frame.dtypes
+            ]
         )
     spec = np.asarray(categorical_features)
     if spec.ndim != 1:
@@ -183,20 +187,22 @@ def categorical_mask(
 def fit_categories(
     frame: pd.DataFrame, mask: npt.NDArray[np.bool_]
 ) -> list[pd.Index | None]:
-    """The categories of each categorical column, in the order of its codes.
+    """The categories of each column read as codes, in the order of its codes.
 
-    A column of pandas' ``category`` type keeps the categories it holds, in
-    the order of its type; any other categorical column takes its distinct
-    values that are not missing, sorted. Codes are therefore 0 to k - 1 for
-    the k categories present, and encoding the codes again changes nothing.
+    A column is read as codes when it is categorical, or when it is of
+    pandas' ordered ``category`` type, whose codes are then numbers in the
+    order of its categories. A column of pandas' ``category`` type keeps the
+    categories it holds, in the order of its type; any other categorical
+    column takes its distinct values that are not missing, sorted. Codes are
+    therefore 0 to k - 1 for the k categories present, and encoding the
+    codes again changes nothing.
 
     Args:
         frame: The features, as :func:`to_frame` returns them.
         mask: Which columns are categorical, shape (n_features,).
 
     Returns:
-        For each column, its categories, or ``None`` if it is not
-        categorical.
+        For each column, its categories, or ``None`` if it is read as it is.
 
     Raises:
         ValueError: If a categorical column has no value that is not
@@ -205,7 +211,8 @@ def fit_categories(
     categories: list[pd.Index | None] = []
     for position, is_categorical in enumerate(mask):
         column = frame.iloc[:, position]
-        if not is_categorical:
+        ordered = getattr(column.dtype, "ordered", False) is True
+        if not (is_categorical or ordered):
             categories.append(None)
             continue
         if isinstance(column.dtype, pd.CategoricalDtype):
