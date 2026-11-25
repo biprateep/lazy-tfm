@@ -574,20 +574,28 @@ def test_one_row_chunks_change_the_answer_by_rounding_alone(kv_cache):
 
 @pytest.mark.checkpoint
 @pytest.mark.parametrize(
-    ("params", "rtol"),
+    ("params", "rtol", "atol"),
     [
-        ({}, 1e-5),
-        ({"chunk_size": 1}, None),
+        ({}, 1e-5, 2e-5),
+        ({"chunk_size": 1}, None, 2e-5),
         # Each bag's columns permuted by lazy, with missing values.
-        ({"n_estimators": 5, "bag_size": 80}, None),
-        ({"n_estimators": 5, "bag_size": 80, "feature_shuffle": False}, 1e-5),
+        ({"n_estimators": 5, "bag_size": 80}, None, 5e-5),
+        (
+            {"n_estimators": 5, "bag_size": 80, "feature_shuffle": False},
+            1e-5,
+            2e-5,
+        ),
     ],
 )
-def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, rtol):
-    """Within 2e-5 of the quantiles' spread, closer where marked.
+def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, rtol, atol):
+    """Within ``atol`` of the quantiles' spread, closer where marked.
 
-    The marked cases agree bit for bit on some CPUs, and within 1.5e-6
-    relatively on a 4-core x86 one.
+    On a 4-core Intel Xeon at 2.1 GHz the cases differ by 2.44e-6, 1.06e-6,
+    2.14e-5 and 1.07e-6 of the spread, the bagged case with missing values
+    as on GitHub's Xeon Platinum 8573C runners; on GitHub's AMD EPYC 7763
+    runners every case stays under 2e-5. Its bound, 5e-5, leaves twice
+    the Intel figure for other CPUs. The marked cases agree bit for bit on
+    some CPUs, and within 1.5e-6 relatively on a 4-core x86 one.
     """
     pytest.importorskip("sdm")
     rng = np.random.default_rng(3)
@@ -610,4 +618,4 @@ def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, rtol):
     if rtol is not None:
         np.testing.assert_allclose(cached, uncached, rtol=rtol)
     spread = (uncached[:, -1] - uncached[:, 0]).min()
-    np.testing.assert_allclose(cached, uncached, rtol=0, atol=2e-5 * spread)
+    np.testing.assert_allclose(cached, uncached, rtol=0, atol=atol * spread)

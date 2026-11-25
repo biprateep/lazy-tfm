@@ -105,7 +105,8 @@ setup](../guide/scaling.md#measurement-setup)). The cached and uncached predicti
 a CPU. A query predicted on its own takes a
 different matrix-multiply path and differs by up to about $10^{-6}$ of the
 quantiles' spread, and a bagged member with missing values whose columns LAZY
-permutes differs by up to about $10^{-5}$. On a GPU, the cached and
+permutes differs by up to about $2\times 10^{-5}$ of it on an Intel CPU, and
+less on an AMD one. On a GPU, the cached and
 uncached quantiles of the large size differ by at most $5\times 10^{-4}$ in the
 units of the target (0.6% of a row's quantile spread) on the 300 context and 50 test rows of
 the golden problem, which we attribute to float16 rounding (see [Measurement
