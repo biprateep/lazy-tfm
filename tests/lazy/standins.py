@@ -39,6 +39,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         n_estimators=8,
         transforms="auto",
         feature_shuffle=True,
+        max_features=None,
         bag_size=None,
         kv_cache=True,
         y_grid=None,
@@ -57,6 +58,7 @@ class _KNNStandIn(_ensemble.ContextEnsembleEstimator):
         self.n_estimators = n_estimators
         self.transforms = transforms
         self.feature_shuffle = feature_shuffle
+        self.max_features = max_features
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid

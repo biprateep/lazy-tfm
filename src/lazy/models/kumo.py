@@ -211,8 +211,9 @@ class KumoQuantile(
             drops the recipe's 20% trim, so the members' quantiles are a
             plain mean; the random sign flips of the columns and of the
             target stay under any ``transforms``.
-        feature_shuffle: Upstream's Latin-square shuffle. A bagged member,
-            which runs on its own, has its columns permuted by lazy instead.
+        feature_shuffle: Upstream's Latin-square shuffle. A member that
+            runs on its own, bagged or with a subset of the columns
+            (``max_features``), has its columns permuted by lazy instead.
         bag_size: Context rows per member. Scaffolded: each bag runs as an
             ensemble of one, with its preprocessing and target
             standardization fitted on the bag.
@@ -315,6 +316,7 @@ class KumoQuantile(
         n_estimators: int = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
+        max_features: int | float | None = None,
         bag_size: int | float | None = None,
         kv_cache: bool = True,
         y_grid: grid_lib.GridLike = None,
@@ -332,6 +334,7 @@ class KumoQuantile(
         self.n_estimators = n_estimators
         self.transforms = transforms
         self.feature_shuffle = feature_shuffle
+        self.max_features = max_features
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid

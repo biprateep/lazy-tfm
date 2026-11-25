@@ -502,6 +502,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         n_estimators: int = 8,
         transforms: str | tuple[str, ...] = "auto",
         feature_shuffle: bool = True,
+        max_features: int | float | None = None,
         bag_size: int | float | None = None,
         kv_cache: bool | str = True,
         y_grid: grid_lib.GridLike = None,
@@ -520,6 +521,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         self.n_estimators = n_estimators
         self.transforms = transforms
         self.feature_shuffle = feature_shuffle
+        self.max_features = max_features
         self.bag_size = bag_size
         self.kv_cache = kv_cache
         self.y_grid = y_grid

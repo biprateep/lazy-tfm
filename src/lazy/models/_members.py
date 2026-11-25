@@ -25,6 +25,11 @@ The rules, in order:
   member, and every member of a model without row subsampling, is a group
   of its own, restricted to its bag and given an explicit column
   permutation, so that its transform is fitted on its own rows;
+* with ``max_features`` below every column, every member is a group of its
+  own that sees its own random subset of the columns, drawn as the bags
+  are (:func:`draw_bags`) from a seed of their own, transformed on its own
+  and then permuted when columns are shuffled, as a scaffolded bagged
+  member is;
 * a group is seeded by its first member, and member ``i``'s seed is drawn
   from ``SeedSequence([random_state, i])`` (:func:`member_seed`), so that no
   member of one ``random_state`` shares a seed with any member of another.
@@ -57,7 +62,7 @@ __all__ = [
     "feature_permutations",
     "member_seed",
     "plan",
-    "resolve_bag_size",
+    "resolve_count",
 ]
 
 MIN_BAG_ROWS = 10
@@ -91,8 +96,10 @@ class MemberGroup:
             transforms, one per member, or None for its own recipe.
         scaffold: A transform the package applies before the model sees the
             features, or None.
-        permutation: A column permutation the package applies, or None to
-            leave column shuffling to the model.
+        columns: The feature columns the member sees, in increasing order,
+            or None for all of them (``max_features``).
+        permutation: A permutation of those columns that the package
+            applies, or None to leave column shuffling to the model.
         feature_shuffle: Whether the model shuffles columns itself.
         rows: The group's context rows (scaffolded bagging), or None.
         member_rows: Each member's rows, for a model that subsamples rows
@@ -108,6 +115,7 @@ class MemberGroup:
     feature_shuffle: bool
     rows: _typing.IntArray | None = None
     member_rows: tuple[_typing.IntArray, ...] | None = None
+    columns: _typing.IntArray | None = None
 
     @property
     def n_members(self) -> int:
@@ -115,37 +123,34 @@ class MemberGroup:
         return len(self.members)
 
 
-def resolve_bag_size(bag_size: float | None, n_rows: int) -> int:
-    """The number of context rows each member sees.
+def resolve_count(value: float | None, total: int, name: str) -> int:
+    """How many of ``total`` rows or columns each member sees.
 
     Args:
-        bag_size: An integer count (Python or NumPy), a float fraction in
-            (0, 1], or None for all. The type decides: ``1`` is one row,
-            ``1.0`` the whole context.
-        n_rows: The context size.
+        value: An integer count (Python or NumPy), a float fraction in
+            (0, 1], or None for all. The type decides: ``1`` is one,
+            ``1.0`` all of them.
+        total: How many there are.
+        name: The parameter's name, for the error.
 
     Returns:
-        The rows per member, between 1 and ``n_rows``.
+        The count per member, between 1 and ``total``.
 
     Raises:
-        ValueError: If ``bag_size`` is none of those.
+        ValueError: If ``value`` is none of those.
     """
-    if bag_size is None:
-        return n_rows
-    if isinstance(bag_size, bool) or not isinstance(bag_size, numbers.Real):
-        raise ValueError(
-            f"bag_size must be an int, a float or None: {bag_size=}"
-        )
-    if not isinstance(bag_size, numbers.Integral):
-        fraction = float(bag_size)
+    if value is None:
+        return total
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"{name} must be an int, a float or None: {value=}")
+    if not isinstance(value, numbers.Integral):
+        fraction = float(value)
         if not 0.0 < fraction <= 1.0:
-            raise ValueError(
-                f"a float bag_size must lie in (0, 1]: {bag_size=}"
-            )
-        return max(1, min(n_rows, round(fraction * n_rows)))
-    if bag_size < 1:
-        raise ValueError(f"an int bag_size must be positive: {bag_size=}")
-    return min(int(bag_size), n_rows)
+            raise ValueError(f"a float {name} must lie in (0, 1]: {value=}")
+        return max(1, min(total, round(fraction * total)))
+    if value < 1:
+        raise ValueError(f"an int {name} must be positive: {value=}")
+    return min(int(value), total)
 
 
 def member_seed(random_state: int, index: int) -> int:
@@ -175,18 +180,22 @@ def member_seed(random_state: int, index: int) -> int:
 
 
 def draw_bags(
-    n_members: int, bag_rows: int, n_rows: int, seed: int
+    n_members: int,
+    bag_rows: int,
+    n_rows: int,
+    seed: int | np.random.SeedSequence,
 ) -> list[_typing.IntArray]:
     """Each member's sorted context rows, drawn as the paper's LimiX did.
 
     Rows are drawn without replacement within a bag and independently across
-    bags, from one generator seeded ``seed``.
+    bags, from one generator seeded ``seed``. Each member's columns under
+    ``max_features`` are drawn the same way, from a seed of their own.
 
     Args:
         n_members: How many bags.
         bag_rows: Rows per bag.
         n_rows: The context size.
-        seed: The generator's seed.
+        seed: The generator's seed, non-negative.
 
     Returns:
         One sorted index array per member.
@@ -239,6 +248,7 @@ def plan(
     random_state: int,
     supports_native_bagging: bool,
     auto_tokens: Sequence[Any] | None = None,
+    n_kept: int | None = None,
 ) -> tuple[MemberGroup, ...]:
     """Splits an ensemble into the groups the model is called with.
 
@@ -258,6 +268,9 @@ def plan(
         auto_tokens: The model's own default recipe as its tokens, which
             single-member groups cycle through under ``"auto"`` so that
             scaffolded bagging keeps the model's mix of transforms.
+        n_kept: The feature columns each member sees (``max_features``);
+            None, or ``n_features``, for all. Fewer makes every member a
+            group of its own, with its own subset.
 
     Returns:
         The groups, in order.
@@ -266,36 +279,59 @@ def plan(
         None if transforms is None else transforms[i % len(transforms)]
         for i in range(n_estimators)
     ]
+    # numpy's generators take a non-negative seed; a negative random_state
+    # wraps, which leaves every non-negative one as it was.
+    entropy = random_state % 2**64
     bagging = bag_rows < n_rows
     bags = (
-        draw_bags(n_estimators, bag_rows, n_rows, random_state)
-        if bagging
-        else None
+        draw_bags(n_estimators, bag_rows, n_rows, entropy) if bagging else None
     )
     members = [
         MemberSpec(i, spec, None if bags is None else bags[i])
         for i, spec in enumerate(specs)
     ]
-    if not bagging:
+    subsets = (
+        # A stream of their own, so the bags and permutations stay as they
+        # were.
+        draw_bags(
+            n_estimators,
+            n_kept,
+            n_features,
+            np.random.SeedSequence([entropy, n_features, n_kept]),
+        )
+        if n_kept is not None and n_kept < n_features
+        else None
+    )
+    if not bagging and subsets is None:
         return _grouped(
             members, native_transforms, feature_shuffle, random_state
         )
-    alone = [
-        member
-        for member in members
-        if not (
-            supports_native_bagging
-            and _is_native(member.transform, native_transforms)
-        )
-    ]
+    alone = (
+        members
+        if subsets is not None
+        else [
+            member
+            for member in members
+            if not (
+                supports_native_bagging
+                and _is_native(member.transform, native_transforms)
+            )
+        ]
+    )
+    n_view = n_features if subsets is None else subsets[0].size
     permutations = (
-        feature_permutations(n_estimators, n_features, random_state)
+        feature_permutations(n_estimators, n_view, entropy)
         if feature_shuffle and alone
         else None
     )
     groups = list(
         _one_group_per_member(
-            alone, native_transforms, permutations, random_state, auto_tokens
+            alone,
+            native_transforms,
+            permutations,
+            subsets,
+            random_state,
+            auto_tokens,
         )
     )
     alone_indices = {member.index for member in alone}
@@ -395,16 +431,19 @@ def _one_group_per_member(
     members: list[MemberSpec],
     native: Mapping[str, Any],
     permutations: list[_typing.IntArray] | None,
+    subsets: list[_typing.IntArray] | None,
     random_state: int,
     auto_tokens: Sequence[Any] | None,
 ) -> tuple[MemberGroup, ...]:
-    """One group per bagged member, restricted to its rows.
+    """One group per member, restricted to its rows and its columns.
 
     Args:
-        members: The members, each with its bag.
+        members: The members, each with its bag, if any.
         native: Uniform transform name to the model's own token.
-        permutations: Every member's column permutation, indexed by member,
-            or None to leave the columns in order.
+        permutations: Every member's permutation of the columns it sees,
+            indexed by member, or None to leave them in order.
+        subsets: Every member's columns, indexed by member, or None for
+            all.
         random_state: The ensemble's seed.
         auto_tokens: The model's own recipe as tokens, cycled under
             ``"auto"``.
@@ -439,6 +478,7 @@ def _one_group_per_member(
                 ),
                 feature_shuffle=False,
                 rows=member.rows,
+                columns=None if subsets is None else subsets[member.index],
             )
         )
     return tuple(groups)
