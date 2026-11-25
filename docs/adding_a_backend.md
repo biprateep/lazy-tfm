@@ -84,6 +84,10 @@ each member's answer separately. The base class then trims over every member
 of the ensemble at once, so that a bagged ensemble, where every member is a
 group of its own, is trimmed the same way as one that runs in a single call.
 
+A backend may also implement `_forward_group`, its prediction on torch's
+autograd graph, for gradient attributions and adapters; its docstring states
+the contract. TabPFN's builds on upstream's `differentiable_input`.
+
 Every prediction reaches the model through those two methods. The base class
 cuts the queries into chunks, under one progress bar per call, and works
 every prediction method from the distributions that `_distribution_chunks`

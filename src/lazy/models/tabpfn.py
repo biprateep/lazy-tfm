@@ -47,6 +47,7 @@ import copy
 import inspect
 import io
 import itertools
+import math
 import os
 import pathlib
 import pickle
@@ -61,6 +62,7 @@ from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _bucket_head
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _members
 from lazy.models import _progress
@@ -824,6 +826,71 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             handle.predict(X, output_type="full"), handle
         )
         return distributions.HistogramDistribution(borders, masses)
+
+    def _forward_group(
+        self,
+        handle: Any,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> _differentiable.TorchHistogram:
+        # Upstream's differentiable path z-normalizes the features and uses
+        # the ensemble configs of a plain fit of the same seed, so it
+        # matches a group fitted with transforms=("none",), as the base
+        # class requires, unless a plain fit would subsample the features.
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        (config,) = handle.inference_config_.PREPROCESS_TRANSFORMS
+        if X.shape[1] > config.max_features_per_estimator:
+            raise ValueError(
+                "a differentiable forward pass needs at most "
+                f"{config.max_features_per_estimator} features per member, "
+                "which TabPFN would otherwise subsample; group "
+                f"{group.index} has {X.shape[1]}"
+            )
+        # The target is standardized here in float64, as a plain fit does,
+        # since float32 cannot resolve a small spread about a large offset;
+        # upstream's own standardization of it is then the identity.
+        mean, std = float(np.mean(y)), float(np.std(y))
+        if std == 0:
+            raise ValueError(
+                "a differentiable forward pass needs a target that is not "
+                f"constant in any bag; group {group.index}'s is constant"
+            )
+        tabpfn = self._import_backend()
+        regressor = tabpfn.TabPFNRegressor(
+            **{
+                **handle.get_params(),
+                "model_path": self._model_specs(tabpfn),
+                "differentiable_input": True,
+                "fit_mode": "fit_preprocessors",
+            }
+        )
+        device = torch.device(self.device_)
+        regressor.fit_with_differentiable_input(
+            X.to(device, torch.float32),
+            torch.as_tensor(
+                (y - mean) / std, dtype=torch.float32, device=device
+            ),
+        )
+        # use_inference_mode picks upstream's standard path; with
+        # differentiable_input it keeps the graph.
+        _, outputs, _ = regressor.forward(
+            query.to(device, torch.float32), use_inference_mode=True
+        )
+        # The members' probabilities are averaged, as predict does with
+        # average_before_softmax=False.
+        log_masses = torch.logsumexp(
+            torch.stack(outputs).log_softmax(-1), dim=0
+        ) - math.log(len(outputs))
+        znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
+        return _differentiable.TorchHistogram(
+            _bucket_head.bucket_edges(
+                np.asarray(znorm, dtype=np.float64), mean, std
+            ),
+            log_masses,
+        )
 
     def _native_grid(self) -> grid_lib.Grid:
         return _bucket_head.native_grid(map(_bucket_borders, self.handles_))

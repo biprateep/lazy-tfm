@@ -79,7 +79,11 @@ class Regressor:
         self.executor_ = Executor(list(self.models_))
         limit = self.limit or 10**9
         self.inference_config_ = types.SimpleNamespace(
-            MAX_NUMBER_OF_SAMPLES=limit, MAX_CPU_SAMPLES=10**9
+            MAX_NUMBER_OF_SAMPLES=limit,
+            MAX_CPU_SAMPLES=10**9,
+            PREPROCESS_TRANSFORMS=self.kwargs["inference_config"][
+                "PREPROCESS_TRANSFORMS"
+            ],
         )
         validation.validate_dataset_size(
             X,
@@ -105,6 +109,35 @@ class Regressor:
         self.y_train_mean_ = float(np.mean(y))
         self.y_train_std_ = float(np.std(y))
         return self
+
+    def get_params(self):
+        """The constructor's arguments, as scikit-learn's ``get_params``."""
+        return dict(self.kwargs)
+
+    def fit_with_differentiable_input(self, X, y):
+        """Fits on torch tensors, keeping them for :meth:`forward`."""
+        assert self.kwargs["differentiable_input"]
+        self.fit(X.detach().numpy(), y.detach().numpy())
+        self.context_ = X
+        return self
+
+    def forward(self, X, *, use_inference_mode=False):
+        """:meth:`predict`'s logits on torch's graph, one per member.
+
+        Returns:
+            As upstream: the averaged logits (unused here), the members'
+            logits, each of shape (n_queries, n_buckets), and borders.
+        """
+        import torch  # noqa: PLC0415 - optional extra.
+
+        assert use_inference_mode and self.kwargs["differentiable_input"]
+        context = self.context_
+        spread = context.std(correction=0)
+        signal = torch.tanh((X.mean(dim=1) - context.mean()) / spread)
+        centres = torch.linspace(-1.0, 1.0, N_BUCKETS, dtype=X.dtype)
+        logits = -4.0 * (centres - signal[:, None]) ** 2
+        members = [logits] * self.kwargs["n_estimators"]
+        return None, members, None
 
     def to(self, device):
         """Records the device and, as upstream does, reads the precision.

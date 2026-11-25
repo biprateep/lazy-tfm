@@ -751,3 +751,98 @@ def test_tabpfns_other_transforms_are_not_lazys(name, upstream_name, missing):
     theirs = _preprocessors(300)[upstream_name].fit(X).transform(X)
     ours = _lazy(name, X)
     assert not np.allclose(theirs, ours, equal_nan=True)
+
+
+# -- the differentiable forward pass -----------------------------------------
+
+
+def _density_and_reference(model, X, y, X_test, y_test):
+    """The differentiable log-density at ``y_test``, and predict's density."""
+    torch = pytest.importorskip("torch")
+    query = torch.tensor(X_test, dtype=torch.float32, requires_grad=True)
+    context = torch.tensor(X, dtype=torch.float32, requires_grad=True)
+    log_density = model._differentiable_density(query, context, y).log_prob(
+        y_test
+    )
+    reference = np.diag(model.predict_distribution(X_test).pdf(y_test))
+    return log_density, reference, query, context
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{}, {"bag_size": 30, "n_estimators": 3}, {"max_features": 2}],
+)
+def test_the_differentiable_pass_matches_predict_and_has_gradients(
+    monkeypatch, params
+):
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(40, 3))
+    y = X[:, 0] + 0.1 * rng.normal(size=40)
+    model = fakes.install("tabpfn", monkeypatch)(
+        **{"n_estimators": 2, "device": "cpu", "progress": False, **params},
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X, y)
+    X_test, y_test = X[:5] + 0.1, y[:5]
+    log_density, reference, query, context = _density_and_reference(
+        model, X, y, X_test, y_test
+    )
+    # The fake's logits are float32 on both paths.
+    np.testing.assert_allclose(
+        log_density.exp().detach().numpy(), reference, rtol=1e-5
+    )
+    log_density.sum().backward()
+    assert query.grad.abs().sum() > 0 and context.grad.abs().sum() > 0
+
+
+def test_the_recipe_has_no_differentiable_pass(monkeypatch):
+    torch = pytest.importorskip("torch")
+    X = np.random.default_rng(2).normal(size=(30, 2))
+    model = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2, device="cpu", progress=False, outlier_threshold=None
+    ).fit(X, X[:, 0])
+    tensor = torch.tensor(X, dtype=torch.float32)
+    with pytest.raises(ValueError, match=r"transforms=\('none',\)"):
+        model._differentiable_density(tensor, tensor, X[:, 0])
+
+
+def test_a_constant_bag_or_a_missing_value_is_refused(monkeypatch):
+    torch = pytest.importorskip("torch")
+    X = np.random.default_rng(3).normal(size=(30, 2))
+    y = np.where(np.arange(30) < 15, 1.0, X[:, 0])
+    model = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=8,
+        bag_size=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X, y)
+    tensor = torch.tensor(X, dtype=torch.float32)
+    with pytest.raises(ValueError, match="constant in any bag"):
+        model._differentiable_density(tensor, tensor, y)
+    tensor[0, 0] = float("nan")
+    with pytest.raises(ValueError, match="X must be finite"):
+        model._differentiable_density(tensor[1:], tensor, y)
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("offset", [0.0, 1e4])
+def test_the_differentiable_pass_matches_predict_on_the_checkpoint(
+    small, offset
+):
+    """A small spread about a large offset, which float32 cannot resolve."""
+    X, y, X_test = small
+    scale = 0.01 if offset else 1.0
+    y = offset + scale * y
+    model = _fit(X, y, transforms=("none",), outlier_threshold=None)
+    y_test = offset + scale * X_test[:, 0]
+    log_density, reference, query, _ = _density_and_reference(
+        model, X, y, X_test, y_test
+    )
+    # Upstream's two paths differ by float32 rounding of the network.
+    np.testing.assert_allclose(
+        log_density.exp().detach().numpy(), reference, rtol=1e-4
+    )
+    log_density.sum().backward()
+    assert query.grad.isfinite().all()
