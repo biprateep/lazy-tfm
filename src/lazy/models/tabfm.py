@@ -157,10 +157,14 @@ _PINNED_CLASSIFIER_ARGS: dict[str, Any] = {
     "enable_nnls": False,
     "n_feature_crosses": 0,
     "n_svd_features": 0,
-    # Inert, with every column numeric and the steps above off; pinned so that
-    # nothing is left to upstream.
+    # Categorical columns are encoded in order of first appearance in each
+    # classifier's context, and keep their values in every member. Upstream
+    # encodes a category seen once as unknown; its classifier takes no
+    # argument for that, and every build lazy runs on uses 2.
     "permute_categorical": False,
     "cat_encoder_mode": "appearance",
+    # Inert, with the steps above off; pinned so that nothing is left to
+    # upstream.
     "total_svd_pool": None,
     "num_folds_for_cv": 5,
     "nnls_beta": 0.75,
@@ -318,7 +322,10 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
 
     Every ``TabFMClassifier`` argument is set by lazy, none left to the
     installed tabfm. What TabFM still does to the features under any
-    ``transforms``: mean-impute missing values (dropping an all-missing
+    ``transforms``: encode each categorical column by its categories'
+    order of first appearance in the context (a missing category, an
+    unseen one and one seen once all as -1) and move it before the numeric
+    columns, mean-impute missing numeric values (dropping an all-missing
     column), drop constant columns, and standardize each column (clipped
     to +-100); under ``transforms="auto"`` the recipe adds the Yeo-Johnson
     members, the 4-sigma soft clip and, above 500 columns, a random
@@ -350,8 +357,9 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             ``j`` (a coarse bin no bag reaches splits its probability over
             its fine bins as the context's rows fall in them). A member of
             TabFM's own transforms keeps its place in the classifier (its
-            column order, class shift and the logit average), with its
-            standardization, norm method and clip fitted on those rows; a
+            column order, class shift, the logit average and the coding of
+            its categories), with its standardization, norm method and clip
+            fitted on those rows; a
             member with a scaffolded transform is a hierarchy of its own on
             its bag. Members are run one at a time, whatever
             ``member_batch_size`` says, because their contexts differ in
@@ -477,7 +485,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     auto_tokens = AUTO_NORM_METHODS
     supports_native_bagging = True
     native_outlier_clipping = True
-    native_categorical = False
+    native_categorical = True
     # Chunking changes the float rounding even on a CPU, and in bfloat16 on
     # CUDA it and the cache change it far more (see kv_cache above).
     exact_chunking = False
@@ -645,7 +653,11 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         if self.inference_ == "predict_proba":
             self.kv_cache_ = False
         rows = slice(None) if group.rows is None else group.rows
-        return {"X": _frame(X), "y": self.y_context_[rows], "group": group}
+        return {
+            "X": _frame(X, self._categorical_columns(group)),
+            "y": self.y_context_[rows],
+            "group": group,
+        }
 
     def _before_fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         del X  # Unused: the bins come from the targets alone.
@@ -754,7 +766,7 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
         self, handle: Any, X: _typing.FloatArray
     ) -> distributions.Distribution:
         model = self._network()
-        query = _frame(X)
+        query = _frame(X, self._categorical_columns(handle["group"]))
         shifts = self._shifts()
         parts = []
         with _progress.bar(
@@ -1181,8 +1193,9 @@ def _member_views(
     method, column order and class shift, in the place TabFM's shuffle of its
     configurations put them -- and sees only ``member_rows[i]``, on which its
     standardization, norm method and soft clip are refitted, exactly as
-    ``EnsembleGenerator.fit`` fits them on a whole context. The labels keep
-    the classifier's encoding, so every member answers over the same classes.
+    ``EnsembleGenerator.fit`` fits them on a whole context. The labels and
+    the categorical columns keep the classifier's encoding, so every member
+    answers over the same classes and reads a category's code alike.
 
     Args:
         classifier: A fitted ``TabFMClassifier`` of ``len(member_rows)``
@@ -1322,11 +1335,28 @@ def _clip_to_support(
     return np.clip(y, low, high)
 
 
-def _frame(features: _typing.FloatArray) -> pd.DataFrame:
-    """Features as the DataFrame TabFM's preprocessing takes."""
-    return pd.DataFrame(
+def _frame(
+    features: _typing.FloatArray, categorical: npt.NDArray[np.bool_]
+) -> pd.DataFrame:
+    """Features as the DataFrame TabFM's preprocessing takes.
+
+    TabFM reads a column as categorical by its dtype, so each categorical
+    column becomes a pandas category column of its codes (NaN missing).
+
+    Args:
+        features: The features, shape ``(n_rows, n_columns)``.
+        categorical: Which columns are categorical, shape ``(n_columns,)``.
+
+    Returns:
+        The frame, with columns ``x0``, ``x1``, ...
+    """
+    frame = pd.DataFrame(
         features, columns=[f"x{i}" for i in range(features.shape[1])]
     )
+    names = frame.columns[categorical]
+    if names.size:
+        frame[names] = frame[names].astype("category")
+    return frame
 
 
 def _stage(progress: Any, dither: str, level: str, n_context: int) -> None:
