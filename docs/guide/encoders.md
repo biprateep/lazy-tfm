@@ -171,8 +171,11 @@ The default follows the published pipelines (MulTaBench, TabPFN's own text
 features, STRABLE), which all keep 30 components per column. STRABLE measured
 15 as worse than 30, and 60 or 120 as no better and slower.
 
-The other columns pass through, unless `remainder` says otherwise, and
-`get_feature_names_out` names every output column. A search tunes the
+The other columns pass through, unless `remainder` says otherwise. The output
+is a DataFrame with the index of the input, and its columns carry the names of
+`get_feature_names_out`, such as `notes__pc0` or `remainder__price`, so the
+model after it knows each column by name. The encoded columns are float64,
+and a column that passes through keeps its type. A search tunes the
 Tabularizer as any step, for example over `tabularizer__n_components`.
 
 One setting, `n_components`, serves every column. For another reduction, or
