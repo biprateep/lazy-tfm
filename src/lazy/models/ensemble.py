@@ -17,6 +17,16 @@ own native distribution, and pooled on one fine internal grid
 (``native_grid_``) that covers the training targets with a margin on either
 side, at least as finely as the finest member resolves them.
 
+A member may also be a :class:`~lazy.pipeline.LazyPipeline` that ends in a
+model, so that members see different views of the same table: a pipeline
+gets the table as it was given, item columns included, and its steps encode
+it for its model::
+
+    model = LazyEnsembleModel([
+        lazy.make_pipeline(lazy.Tabularizer(classical), LazyModel("tabpfn")),
+        lazy.make_pipeline(lazy.Tabularizer(pretrained), LazyModel("tabpfn")),
+    ])
+
 Every member is a full model, so a pool costs about the sum of its members.
 The pooled model is itself a :class:`~lazy.base.BaseDensityRegressor`, so it
 answers ``predict_proba``, ``predict_quantiles``, ``predict_pit``, ``score``
@@ -38,11 +48,13 @@ from sklearn import base as sklearn_base
 from sklearn import utils as sklearn_utils
 
 from lazy import _arrays
+from lazy import _inputs
 from lazy import _typing
 from lazy import _warnings
 from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy import pipeline
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import lazy_model
@@ -65,8 +77,9 @@ POOLINGS: tuple[str, ...] = ("geometric", "linear", "quantile")
 
 Pooling: TypeAlias = Literal["geometric", "linear", "quantile"]
 
-Member: TypeAlias = str | base.BaseDensityRegressor
-"""What a member may be given as: a backend name, or an estimator."""
+Member: TypeAlias = str | base.BaseDensityRegressor | pipeline.LazyPipeline
+"""What a member may be given as: a backend name, an estimator, or a
+pipeline that ends in one."""
 
 POOL_PADDING = 0.25
 """How far the pooling grid extends past the training targets, as a fraction of
@@ -117,7 +130,8 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
 
     Members are named after their backend (``"tabpfn"``, ``"limix"``, ...),
     with ``_2``, ``_3``, ... appended to repeats, and a member that is not a
-    registered backend after its class, in lower case. ``get_params`` lists
+    registered backend after its class, in lower case. A pipeline is named
+    after the model at its end. ``get_params`` lists
     every member's parameters as ``<name>__<parameter>``, as scikit-learn's
     ``VotingRegressor`` does, so ``clone`` works and a search can tune a
     member: ``GridSearchCV(model, {"tabpfn__n_estimators": [4, 8]})``.
@@ -128,7 +142,11 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             its defaults), configured
             :class:`~lazy.models.lazy_model.LazyModel` instances, or other
             :class:`~lazy.base.BaseDensityRegressor` estimators, such as a
-            concrete backend.
+            concrete backend, or :class:`~lazy.pipeline.LazyPipeline`
+            pipelines that end in one. A pipeline gets the features as
+            ``fit`` and the predict methods receive them; every other
+            member gets them as numbers, each categorical column as the
+            codes of its categories.
         pooling: ``"geometric"``, the normalized product of the members'
             densities each raised to its weight (a log pool); ``"linear"``,
             their mixture; or ``"quantile"``, the average of their quantile
@@ -147,13 +165,15 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             pooling grid (``native_grid_``).
         categorical_features: Which columns are categorical, as for every
             model (:class:`~lazy.base.BaseDensityRegressor`). It decides for
-            every member that takes the parameter, whatever its own value.
+            every member that takes the parameter, whatever its own value,
+            except the model at the end of a pipeline, which sees the
+            columns its steps make.
         random_state: The seed given to every member whose own
             ``random_state`` is still its default (0); a member given
-            another value keeps it.
+            another value keeps it. A pipeline passes it to its model only.
         device: The device given to every member whose own ``device`` is
             still its default (``"auto"``); a member given another value
-            keeps it.
+            keeps it. A pipeline passes it to its model only.
 
     Attributes:
         estimators_: The fitted members, a list, in the order of
@@ -169,7 +189,9 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             the value, which every row then gets as a point mass, without
             pooling.
         provenance_: What answered: each member's own ``provenance_`` by
-            name, and the pooling, weights and pooling grid.
+            name, and the pooling, weights and pooling grid. A pipeline's
+            entry holds the names of its steps and its model's
+            ``provenance_``.
 
     Examples:
         >>> model = LazyEnsembleModel(["tabpfn", "tabfm"])
@@ -180,6 +202,9 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         >>> model.set_params(tabfm__n_estimators=4).models[1]
         LazyModel('tabfm', n_estimators=4)
     """
+
+    # Each member checks its own features, so that a pipeline gets items.
+    _numeric_features = False
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -293,11 +318,13 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             for name, item in _check_models(self.models)
         ]
         _warn_if_small(len(X), len(members))
-        # Unnamed features reach the members unnamed, as in LazyModel.
-        named = "feature_names_in_" in vars(self)
-        context = X if named else X.to_numpy()
-        for _, member in members:
-            # The members get the codes of this ensemble's categories.
+        # Before any member fits, so that a column that only a pipeline can
+        # read fails at once.
+        contexts = self._member_features(X, [m for _, m in members])
+        for (_, member), context in zip(members, contexts, strict=True):
+            # A model reads the columns as this ensemble marks them. A
+            # pipeline takes no such parameter: its model marks the columns
+            # its steps make.
             if "categorical_features" in member.get_params(deep=False):
                 member.set_params(categorical_features=self.is_categorical_)
             member.fit(context, y)
@@ -313,14 +340,12 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         else:
             self.native_grid_ = _pool_grid(
                 self.y_range_,
-                [_member_grid(member) for member in self.estimators_],
+                [_member_grid(_model(member)) for member in self.estimators_],
                 self.pool_bins,
             )
         self.provenance_ = self._provenance(members)
 
-    def _provenance(
-        self, members: list[tuple[str, base.BaseDensityRegressor]]
-    ) -> dict[str, Any]:
+    def _provenance(self, members: list[tuple[str, Any]]) -> dict[str, Any]:
         """What answered, for ``provenance_``."""
         grid = self.native_grid_
         names = [name for name, _ in members]
@@ -400,20 +425,55 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         if constant is not None:
             yield _ensemble.point_masses(constant, len(X))
             return
-        named = "feature_names_in_" in vars(self)
         size = int(self.chunk_size) or len(X)
         for start in range(0, len(X), size):
-            block = X.iloc[start : start + size]
+            queries = self._member_features(
+                X.iloc[start : start + size], self.estimators_
+            )
             # Through each member's public method, which checks the features
-            # against what the member was fitted on.
-            query = block if named else block.to_numpy()
-            # One member at a time, so that each member's distribution is
-            # freed once the pool has added it.
+            # against what the member was fitted on, one member at a time,
+            # so that each member's distribution is freed once the pool has
+            # added it.
             parts = (
                 member.predict_distribution(query)
-                for member in self.estimators_
+                for member, query in zip(self.estimators_, queries, strict=True)
             )
             yield _pool(parts, self.weights_, self.pooling_, self.native_grid_)
+
+    def _member_features(
+        self, X: pd.DataFrame, members: Sequence[Any]
+    ) -> list[pd.DataFrame]:
+        """The features each member gets, in the order of ``members``.
+
+        A pipeline gets the table as given, to encode its items. Every other
+        member gets it as numbers, each categorical column as the codes of
+        this ensemble's categories, so that a member fitted on codes keeps
+        reading codes. Unnamed features reach the members unnamed, as in
+        ``LazyModel``.
+
+        Args:
+            X: The features as this ensemble read them, its columns in the
+                order of ``fit``.
+            members: The members.
+
+        Returns:
+            One table per member; members of one kind share one table.
+
+        Raises:
+            ValueError: If a member that is not a pipeline would get a column
+                that is not numeric or categorical.
+        """
+        named = "feature_names_in_" in vars(self)
+        raw = _labeled(X, named)
+        if all(isinstance(m, pipeline.LazyPipeline) for m in members):
+            return [raw] * len(members)
+        numbers = _labeled(
+            _inputs.numeric_frame(X, named, self.categories_), named
+        )
+        return [
+            raw if isinstance(m, pipeline.LazyPipeline) else numbers
+            for m in members
+        ]
 
 
 def _as_items(models: object) -> list[Any]:
@@ -423,8 +483,21 @@ def _as_items(models: object) -> list[Any]:
     return []
 
 
+def _labeled(X: pd.DataFrame, named: bool) -> pd.DataFrame:
+    """A table as named, or with its columns labeled 0, 1, ..., as unnamed."""
+    return X if named else X.set_axis(range(X.shape[1]), axis=1)
+
+
+def _model(member: Any) -> Any:
+    """A member's model: the member itself, or the end of its pipeline."""
+    while isinstance(member, pipeline.LazyPipeline):
+        member = member[-1]
+    return member
+
+
 def _base_name(item: object) -> str:
     """A member's name before repeats are numbered."""
+    item = _model(item)
     if isinstance(item, str):
         return item
     if isinstance(item, lazy_model.LazyModel):
@@ -461,7 +534,7 @@ def _as_estimator(item: Any) -> Any:
 def _label(item: object) -> str:
     """A member's label in :attr:`LazyEnsembleModel.name_`."""
     estimator = _as_estimator(item)
-    if isinstance(estimator, base.BaseDensityRegressor):
+    if isinstance(_model(estimator), base.BaseDensityRegressor):
         return estimator.name_
     return repr(item)
 
@@ -486,13 +559,15 @@ def _check_models(models: object) -> list[tuple[str, Member]]:
     """Validates ``models``; returns its items with their names.
 
     Raises:
-        TypeError: If an item is neither a name nor a density regressor.
+        TypeError: If an item is neither a name, a density regressor nor a
+            pipeline that ends in one.
         ValueError: If ``models`` is not a non-empty list.
         UnknownNameError: If ``models`` names an unknown backend.
     """
     if not isinstance(models, list | tuple) or not models:
         raise ValueError(
-            "models must be a non-empty list of backend names or estimators: "
+            "models must be a non-empty list of backend names, estimators "
+            "or pipelines: "
             f"{models=}"
         )
     for item in models:
@@ -504,39 +579,40 @@ def _check_models(models: object) -> list[tuple[str, Member]]:
                     registry.list_estimators(),
                     argument="models",
                 )
-        elif not isinstance(item, base.BaseDensityRegressor):
+        elif not isinstance(_model(item), base.BaseDensityRegressor):
             raise TypeError(
-                "models must hold backend names or lazy estimators, not "
+                "models must hold backend names, lazy estimators or "
+                "LazyPipelines that end in one, not "
                 f"{type(item).__name__}: {item!r}"
             )
     return _named_items(models)
 
 
-def _configure(
-    item: Member, random_state: int | None, device: str
-) -> base.BaseDensityRegressor:
+def _configure(item: Member, random_state: int | None, device: str) -> Any:
     """An unfitted copy of a member, with the ensemble's shared settings.
 
     ``random_state`` and ``device`` replace the member's own only where the
     member's value equals its default, which is how a member that was not
     given one is told apart from one that was (``clone`` writes every
-    default out, so whether it was passed explicitly cannot be known).
+    default out, so whether it was passed explicitly cannot be known). In
+    a pipeline, they go to its model only.
 
     Args:
-        item: A backend name or an estimator.
+        item: A backend name, an estimator or a pipeline.
         random_state: The ensemble's seed.
         device: The ensemble's device.
 
     Returns:
-        A new, unfitted estimator.
+        A new, unfitted estimator or pipeline.
     """
     member = (
         lazy_model.LazyModel(item)
         if isinstance(item, str)
         else sklearn_base.clone(item)
     )
-    current = member.get_params(deep=False)
-    defaults = _default_params(member)
+    model = _model(member)
+    current = model.get_params(deep=False)
+    defaults = _default_params(model)
     shared = dict(zip(_SHARED_PARAMS, (random_state, device), strict=True))
     updates = {
         name: value
@@ -545,7 +621,8 @@ def _configure(
         and name in defaults
         and _equal(current[name], defaults[name])
     }
-    return member.set_params(**updates) if updates else member
+    model.set_params(**updates)
+    return member
 
 
 def _default_params(member: base.BaseDensityRegressor) -> dict[str, Any]:

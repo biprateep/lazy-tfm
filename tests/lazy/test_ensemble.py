@@ -599,3 +599,86 @@ def test_tabpfn_fast_and_tabicl_pool_on_a_cpu():
     ]
     # Pooling two good models should not fall below the worse of them.
     assert scores["geometric"] > min(singles)
+
+
+# -- pipelines as members ----------------------------------------------------
+
+
+@pytest.fixture
+def items(data):
+    """A table with a text column, a categorical column and numbers."""
+    X, y = data
+    words = np.array(["red", "green", "blue", "dark", "light"])
+    rng = np.random.default_rng(1)
+    notes = [" ".join(rng.choice(words, 4)) for _ in range(len(y))]
+    frame = pd.DataFrame(X, columns=["a", "b", "c"]).assign(
+        notes=notes,
+        kind=pd.Categorical(np.array(["p", "q", "r"])[np.arange(len(y)) % 3]),
+    )
+    return frame, y
+
+
+def _encoded(n_components):
+    """TabPFN's stand-in behind a classical text encoder."""
+    tab = lazy.Tabularizer({"notes": "text_hashing"}, n_components=n_components)
+    return lazy.make_pipeline(tab, lazy.LazyModel("tabpfn"))
+
+
+def test_pipelines_pool_the_items_each_encodes(standin_backends, items):
+    frame, y = items
+    model = lazy.LazyEnsembleModel([_encoded(2), _encoded(4)])
+    model.fit(frame, y)
+    assert list(model.named_estimators_) == ["tabpfn", "tabpfn_2"]
+    label = model.estimators_[0][-1].name_
+    assert model.name_ == f"geometric(tabularizer+{label}, tabularizer+{label})"
+    widths = [m[-1].n_features_in_ for m in model.estimators_[:2]]
+    assert widths == [2 + 4, 4 + 4]
+    tabpfn = model.provenance_["members"]["tabpfn"]
+    assert tabpfn["steps"] == ["tabularizer"]
+    assert tabpfn["model"] == model.estimators_[0][-1].provenance_
+    assert model.predict_proba(frame.iloc[:5]).shape[0] == 5
+
+
+def test_a_pipeline_that_ends_in_no_density_model_is_refused(items):
+    frame, y = items
+    member = lazy.make_pipeline(
+        lazy.Tabularizer({"notes": "text_hashing"}), "passthrough"
+    )
+    with pytest.raises(TypeError, match="LazyPipelines that end in one"):
+        lazy.LazyEnsembleModel([member]).fit(frame, y)
+
+
+def test_a_pipelines_model_gets_the_shared_settings(standin_backends, items):
+    frame, y = items
+    model = lazy.LazyEnsembleModel([_encoded(2)], random_state=7)
+    model.fit(frame, y)
+    assert model.estimators_[0][-1].random_state == 7
+    assert model.models[0][-1].random_state == 0
+    assert model.get_params()["tabpfn__tabularizer__n_components"] == 2
+
+
+def test_a_pipelines_model_marks_the_columns_its_steps_make(
+    standin_backends, items
+):
+    frame, y = items
+    model = lazy.LazyEnsembleModel([_encoded(2)], categorical_features=["a"])
+    model.fit(frame, y)
+    member = model.estimators_[0][-1]
+    assert member.categorical_features == "from_dtype"
+    assert list(member.is_categorical_) == [False] * 5 + [True]
+
+
+def test_a_model_member_is_fitted_on_codes_beside_a_pipeline(
+    standin_backends, items
+):
+    """As before pipelines, so that a pickled member reads codes."""
+    frame, y = items
+    with pytest.raises(ValueError, match="'notes'"):
+        lazy.LazyEnsembleModel([_encoded(2), "tabpfn"]).fit(frame, y)
+    unencoded = lazy.make_pipeline("passthrough", lazy.LazyModel("tabpfn"))
+    model = lazy.LazyEnsembleModel([unencoded, "tabpfn"])
+    model.fit(frame.drop(columns="notes"), y)
+    np.testing.assert_array_equal(
+        model.estimators_[1].categories_[-1], [0.0, 1.0, 2.0]
+    )
+    assert list(model.estimators_[0][-1].categories_[-1]) == ["p", "q", "r"]

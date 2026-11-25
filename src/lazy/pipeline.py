@@ -65,14 +65,42 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
     on the features that the earlier steps transformed. The last step may
     be any estimator with those methods, another ``LazyPipeline`` included;
     a method that the last step lacks is absent here too, as in
-    scikit-learn. The model's attributes stay on the model:
-    ``pipe[-1].grid_``.
+    scikit-learn. The model's attributes stay on the model,
+    ``pipe[-1].grid_``, except two that describe the whole pipeline:
+    :attr:`name_` and :attr:`provenance_`.
 
     Each of these methods raises :class:`sklearn.exceptions.NotFittedError`
     before ``fit``. Under scikit-learn's metadata routing they pass no
     metadata to the earlier steps, so a transformer that requests metadata
     for ``transform`` needs :class:`sklearn.pipeline.Pipeline`.
     """
+
+    @property
+    def name_(self) -> str:
+        """The step names and the model's ``name_``, joined by ``+``.
+
+        For example ``"tabularizer+tabpfn:v3.5"``.
+        """
+        return "+".join([*self._step_names(), self.steps[-1][1].name_])
+
+    @property
+    def provenance_(self) -> dict[str, Any]:
+        """The step names and the model's ``provenance_``, as a dict.
+
+        Its keys are ``"steps"`` and ``"model"``.
+
+        Raises:
+            AttributeError: If the model has no ``provenance_``, as before
+                ``fit``.
+        """
+        return {
+            "steps": self._step_names(),
+            "model": self.steps[-1][1].provenance_,
+        }
+
+    def _step_names(self) -> list[str]:
+        """The names of the steps before the model."""
+        return [name for name, _ in self.steps[:-1]]
 
     def _features(self, X: _Features) -> _Features:  # noqa: GS030 - scikit-learn's X, y.
         """``X`` as the last step sees it, after every earlier step."""
@@ -234,7 +262,8 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
         Returns:
             The one-row table of
             :meth:`BaseDensityRegressor.evaluate
-            <lazy.base.BaseDensityRegressor.evaluate>`.
+            <lazy.base.BaseDensityRegressor.evaluate>`, labeled with the
+            model's ``name_``.
         """
         return self.steps[-1][1].evaluate(
             self._features(X), y, method, y_grid, scale=scale
