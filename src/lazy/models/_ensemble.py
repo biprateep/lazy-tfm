@@ -45,6 +45,7 @@ from typing import Any, ClassVar, Literal, TypeGuard
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from sklearn.utils import validation
 
 from lazy import _typing
 from lazy import _warnings
@@ -52,6 +53,7 @@ from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _device
+from lazy.models import _differentiable
 from lazy.models import _hub
 from lazy.models import _locks
 from lazy.models import _members
@@ -502,6 +504,157 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             f"{type(self).__name__} combines its members by a trimmed "
             "average, so it must implement _predict_members"
         )
+
+    def _forward_group(
+        self,
+        handle: Any,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> _differentiable.TorchHistogram:
+        """Predicts one group's densities on torch's autograd graph.
+
+        Optional: a backend that implements it supports
+        :meth:`_differentiable_density`. Its answer matches
+        :meth:`_predict_group`'s for the same features, to float rounding,
+        and keeps the gradients of ``X`` and ``query``. It runs no
+        preprocessing that is not differentiable, and refuses a group whose
+        recipe would.
+
+        Args:
+            handle: What :meth:`_fit_group` returned for the group.
+            X: The group's context features, prepared, a torch tensor of
+                shape (n_rows, n_features').
+            y: Their target values, shape (n_rows,).
+            query: Query features, prepared, a torch tensor of shape
+                (n_queries, n_features').
+            group: The members to serve and how.
+
+        Returns:
+            The densities of the queries.
+
+        Raises:
+            NotImplementedError: Unless the backend implements it.
+            ValueError: If the group's recipe is not differentiable.
+        """
+        del handle, X, y, query, group  # Unused: a backend implements this.
+        raise NotImplementedError(
+            f"{type(self).__name__} has no differentiable forward pass"
+        )
+
+    def _differentiable_density(
+        self, query: Any, X: Any, y: npt.ArrayLike
+    ) -> _differentiable.TorchMixture:
+        """The model's densities for ``query``, on torch's autograd graph.
+
+        Every group runs on ``X`` and ``y`` through
+        :meth:`_forward_group`, on its own rows and columns as at ``fit``,
+        and the groups are pooled as :meth:`predict_distribution` pools
+        them. With ``X`` and ``y`` the context of ``fit``, the densities
+        are those of :meth:`predict_distribution`, to float rounding.
+
+        Every group's graph lives until ``backward``, so a large query set
+        goes in chunks, its gradients accumulated: the log-likelihood is a
+        sum over queries.
+
+        Args:
+            query: Query features, a float torch tensor of shape
+                (n_queries, n_features_in_).
+            X: Context features, a float torch tensor of shape
+                (n_context_, n_features_in_), in the order of ``fit``'s.
+            y: Their target values, shape (n_context_,).
+
+        Returns:
+            The pooled densities, whose :meth:`log_prob` keeps the
+            gradients of ``query`` and ``X``.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
+            NotImplementedError: If the backend has no differentiable
+                forward pass.
+            ValueError: If a shape does not match the fit, a feature is not
+                finite, or the fit is not differentiable
+                (:meth:`_check_differentiable`).
+        """
+        validation.check_is_fitted(self)
+        self._check_differentiable()
+        y = np.asarray(y, dtype=np.float64)
+        shapes = (tuple(query.shape[1:]), tuple(X.shape), y.shape)
+        expected = (
+            (self.n_features_in_,),
+            (self.n_context_, self.n_features_in_),
+            (self.n_context_,),
+        )
+        if shapes != expected:
+            raise ValueError(
+                "query, X and y must have the shapes (n, n_features_in_), "
+                "(n_context_, n_features_in_) and (n_context_,) of the fit, "
+                f"{expected}; got {shapes}"
+            )
+        for name, tensor in (("query", query), ("X", X)):
+            # The differentiable preprocessing has no rule for a missing
+            # value, which would make every density NaN.
+            if not bool(tensor.isfinite().all()):
+                raise ValueError(
+                    f"{name} must be finite: {name} has NaN or inf"
+                )
+        parts = []
+        for handle, group in zip(
+            self.handles_, self.member_groups_, strict=True
+        ):
+            rows = slice(None) if group.rows is None else group.rows
+            parts.append(
+                self._forward_group(
+                    handle,
+                    self._prepare(X[rows], group, None),
+                    y[rows],
+                    self._prepare(query, group, None),
+                    group,
+                )
+            )
+        return _differentiable.TorchMixture(tuple(parts), self._group_weights())
+
+    def _check_differentiable(self) -> None:
+        """Refuses a fit whose prediction is not differentiable.
+
+        Raises:
+            ValueError: If the fit ran a feature transform other than the
+                model's own ``"none"``, a clip, a categorical column, native
+                bagging, a constant target, or pools its members other than
+                as a mixture.
+        """
+        none = self.native_transforms.get("none")
+        if hasattr(self, "constant_target_"):
+            problem = "a target that is not constant"
+        elif (
+            any(t is not None for t in self.transformers_)
+            or any(c is not None for c in self.clippers_)
+            or any(
+                g.native_transforms is None
+                or any(token != none for token in g.native_transforms)
+                for g in self.member_groups_
+            )
+        ):
+            problem = "no feature transform or clip"
+        elif self.is_categorical_.any():
+            problem = "no categorical column"
+        elif any(g.member_rows is not None for g in self.member_groups_):
+            problem = "no member bagged natively"
+        elif self.member_combination != "mixture":
+            problem = "members pooled as a mixture"
+        else:
+            return
+        raise ValueError(
+            f"a differentiable forward pass needs {problem}; fit with "
+            "transforms=('none',) and outlier_threshold=None, on numeric "
+            "columns"
+        )
+
+    def _group_weights(self) -> _typing.FloatArray:
+        """Each group's weight in the pool, its share of the members."""
+        weights = np.array([g.n_members for g in self.member_groups_], float)
+        return weights / weights.sum()
 
     @abc.abstractmethod
     def _native_grid(self) -> grid_lib.Grid:
@@ -1187,8 +1340,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Groups' predictions as one, weighted by their members."""
         if len(parts) == 1:
             return parts[0]
-        weights = np.array([g.n_members for g in self.member_groups_], float)
-        weights /= weights.sum()
+        weights = self._group_weights()
         if self.member_combination == "quantile_average":
             quantiles = [
                 part
