@@ -17,8 +17,8 @@ Each ``.npy`` file holds one embedding, shape (width,), and its name is the
 :func:`digest` of the item's content.
 
 A file is written whole and then moved into place, so that several
-processes can share a cache. A file that cannot be read, or that holds
-another width, counts as missing.
+processes can share a cache. A file other than the one ``np.save`` writes
+for a row of the encoder's width, such as a damaged one, counts as missing.
 
 Typical usage example:
 
@@ -29,7 +29,9 @@ Typical usage example:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import os
 import pathlib
 import shutil
@@ -59,8 +61,8 @@ class Store:
     """The embeddings of one encoder, on disk.
 
     Attributes:
-        directory: The encoder's folder, which exists once something is
-            saved.
+        directory: The encoder's folder, as text, which exists once
+            something is saved.
         width: The length of an embedding.
     """
 
@@ -77,10 +79,17 @@ class Store:
             width: The length of an embedding.
         """
         root = _root() if isinstance(cache, bool) else pathlib.Path(cache)
-        self.directory = root.expanduser() / LAYOUT / digest(identity.encode())
+        self.directory = os.fspath(
+            root.expanduser() / LAYOUT / digest(identity.encode())
+        )
         self.width = width
         self._identity = identity
         self._writable = True
+        # The header np.save writes for a row: a hit is then read without
+        # np.load, and a row written in one call.
+        buffer = io.BytesIO()
+        np.save(buffer, np.zeros(width, dtype="<f8"))
+        self._header = buffer.getvalue()[: -8 * width]
 
     def load(
         self, keys: npt.NDArray[np.object_]
@@ -97,17 +106,16 @@ class Store:
         """
         rows = np.full((len(keys), self.width), np.nan)
         found = np.zeros(len(keys), dtype=bool)
+        size = len(self._header) + 8 * self.width
         for i, key in enumerate(keys):
             try:
-                row = np.load(self._path(key), allow_pickle=False)
-            except Exception:  # noqa: BLE001 - whatever is wrong with the file, it holds no embedding.
+                with open(self._path(key), "rb") as file:
+                    data = file.read()
+            except OSError:
                 continue
-            if (
-                isinstance(row, np.ndarray)
-                and row.shape == (self.width,)
-                and row.dtype == np.float64
-            ):
-                rows[i], found[i] = row, True
+            if len(data) == size and data.startswith(self._header):
+                rows[i] = np.frombuffer(data, "<f8", offset=len(self._header))
+                found[i] = True
         return rows, found
 
     def save(
@@ -129,11 +137,12 @@ class Store:
         if not self._writable or not len(keys):
             return
         try:
-            note = self.directory / "identity.json"
-            if not note.exists():
+            note = os.path.join(self.directory, "identity.json")
+            if not os.path.exists(note):
                 self._write(note, self._identity.encode())
             for key, row in zip(keys, rows, strict=True):
-                self._write(self._path(key), row)
+                content = self._header + np.asarray(row, "<f8").tobytes()
+                self._write(self._path(key), content)
         except OSError as error:
             self._writable = False
             _warnings.warn(
@@ -142,28 +151,26 @@ class Store:
                 RuntimeWarning,
             )
 
-    def _path(self, key: str) -> pathlib.Path:
+    def _path(self, key: str) -> str:
         """The file of one embedding; two digits fan the files out."""
-        return self.directory / key[:2] / f"{key[2:]}.npy"
+        return os.path.join(self.directory, key[:2], f"{key[2:]}.npy")
 
-    def _write(
-        self, path: pathlib.Path, content: bytes | _typing.FloatArray
-    ) -> None:
+    def _write(self, path: str, content: bytes) -> None:
         """Writes one file whole, then moves it into place.
 
         Args:
             path: Where the file belongs.
-            content: Text as bytes, or an array to write as ``.npy``.
+            content: The file's bytes.
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle, name = tempfile.mkstemp(dir=path.parent, suffix=".partial")
-        partial = pathlib.Path(name)
+        folder = os.path.dirname(path)
+        try:
+            handle, partial = tempfile.mkstemp(dir=folder, suffix=".partial")
+        except FileNotFoundError:  # The folder's first file.
+            os.makedirs(folder, exist_ok=True)
+            handle, partial = tempfile.mkstemp(dir=folder, suffix=".partial")
         try:
             with os.fdopen(handle, "wb") as file:
-                if isinstance(content, bytes):
-                    file.write(content)
-                else:
-                    np.save(file, content)
+                file.write(content)
             # mkstemp makes the file private (0600); give it the mode any
             # new file would get, so that others can read a shared cache.
             os.chmod(partial, 0o666 & ~_home.umask())
@@ -172,10 +179,11 @@ class Store:
             except PermissionError:
                 # Windows refuses to replace a file that another process,
                 # having written it first, holds open; keep that copy.
-                if not path.exists():
+                if not os.path.exists(path):
                     raise
         finally:
-            partial.unlink(missing_ok=True)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(partial)
 
 
 def clear_embedding_cache() -> None:

@@ -202,12 +202,21 @@ def test_the_cache_keeps_encoders_with_other_outputs_apart(cache):
     )
 
 
-def test_a_damaged_cache_file_counts_as_missing(cache):
+@pytest.mark.parametrize(
+    "damage", ["not an array", "truncated", "another width"]
+)
+def test_a_damaged_cache_file_counts_as_missing(cache, damage):
     first, encoder = _encoded(TEXTS[:1], cache=cache)
     (file,) = cache.rglob("*.npy")
     assert file.parent.parent.parent.name == "v1"
     assert "_Counts" in (file.parent.parent / "identity.json").read_text()
-    file.write_bytes(b"PK\x03\x04 not an array")
+    np.testing.assert_array_equal(np.load(file), first[0])
+    if damage == "not an array":
+        file.write_bytes(b"PK\x03\x04 not an array")
+    elif damage == "truncated":
+        file.write_bytes(file.read_bytes()[:-8])
+    else:
+        np.save(file, np.append(first[0], 1.0))
     again = sklearn_base.clone(encoder).fit(TEXTS[:1])
     np.testing.assert_array_equal(again.transform(TEXTS[:1]), first)
     assert again.batches_ == [TEXTS[:1]]
