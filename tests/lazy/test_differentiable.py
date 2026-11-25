@@ -129,3 +129,19 @@ def test_torch_quantiles_at_other_levels_are_not_averaged():
     ]
     with pytest.raises(ValueError, match="same levels"):
         _differentiable.TorchQuantiles.average(parts, np.array([0.5, 0.5]))
+
+
+def test_torch_quantiles_trim_as_their_numpy_twins():
+    levels = np.array([0.25, 0.5, 0.75])
+    parts = [np.array([[v, v + 1.0, v + 3.0]]) for v in (0.0, 1.0, 9.0, -4.0)]
+    expected = distributions.QuantileDistribution.trimmed_average(
+        [distributions.QuantileDistribution(levels, p) for p in parts], 0.3
+    )
+    trimmed = _differentiable.TorchQuantiles.trimmed_average(
+        [
+            _differentiable.TorchQuantiles(levels, torch.tensor(p))
+            for p in parts
+        ],
+        0.3,
+    )
+    np.testing.assert_allclose(trimmed.locs.numpy(), expected.locs)

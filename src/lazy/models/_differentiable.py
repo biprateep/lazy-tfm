@@ -23,6 +23,45 @@ from lazy import _typing
 from lazy import distributions
 
 
+def frozen(*networks: Any) -> None:
+    """Stops the networks' weights from collecting gradients, for good.
+
+    lazy trains no weight, so a backward pass through a shared network
+    computes no gradient for its weights, and leaves none on them.
+
+    Args:
+        *networks: ``torch.nn.Module`` instances.
+    """
+    for network in networks:
+        network.requires_grad_(False)
+
+
+def standardized(context: Any, query: Any, eps: float) -> tuple[Any, Any]:
+    """Both tables z-scored by the context's columns, on the graph.
+
+    The standard deviation is the population one, plus ``eps``, as the
+    models' own scalers compute it; a column constant in the context is
+    scaled by ``eps`` alone, with a finite gradient, since the square root
+    of a zero variance has none.
+
+    Args:
+        context: Context features, a torch tensor of shape (n_rows,
+            n_features).
+        query: Query features, shape (n_queries, n_features).
+        eps: Added to each standard deviation.
+
+    Returns:
+        A tuple (context, query), standardized.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    mean = context.mean(dim=0)
+    var = context.var(dim=0, correction=0)
+    std = torch.where(var > 0, torch.where(var > 0, var, 1.0).sqrt(), 0.0)
+    std = std + eps
+    return (context - mean) / std, (query - mean) / std
+
+
 @dataclasses.dataclass(frozen=True)
 class TorchHistogram:
     """Probability masses over fixed buckets, as a torch tensor.
@@ -153,6 +192,35 @@ class TorchQuantiles:
             float(w) * part.locs for part, w in zip(parts, weights, strict=True)
         )
         return cls(parts[0].levels, locs)
+
+    @classmethod
+    def trimmed_average(
+        cls, parts: list[TorchQuantiles], trim_fraction: float
+    ) -> TorchQuantiles:
+        """The trimmed mean of quantile functions.
+
+        Args:
+            parts: Densities at the same levels, with the same rows.
+            trim_fraction: The fraction of parts dropped from each tail, in
+                [0, 0.5).
+
+        Returns:
+            The trimmed mean, as
+            :meth:`lazy.distributions.QuantileDistribution.trimmed_average`
+            gives.
+
+        Raises:
+            ValueError: If the parts' levels differ.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        if any(not np.array_equal(p.levels, parts[0].levels) for p in parts):
+            raise ValueError("every part must share the same levels")
+        locs = torch.stack([part.locs for part in parts])
+        cut = int(trim_fraction * len(parts))
+        if cut > 0:
+            locs = torch.sort(locs, dim=0).values[cut : len(parts) - cut]
+        return cls(parts[0].levels, locs.mean(dim=0))
 
     def log_prob(self, y: Any) -> Any:
         """The log-density of each row at its own value.

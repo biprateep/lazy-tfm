@@ -8,6 +8,7 @@ with the one upstream ships, and, with the checkpoint, the backend's answer
 with upstream's own default path.
 """
 
+import dataclasses
 import pathlib
 import pickle
 import re
@@ -656,3 +657,81 @@ def test_the_cache_agrees_as_the_docstring_says_on_a_cpu(params, rtol, atol):
         np.testing.assert_allclose(cached, uncached, rtol=rtol)
     spread = (uncached[:, -1] - uncached[:, 0]).min()
     np.testing.assert_allclose(cached, uncached, rtol=0, atol=atol * spread)
+
+
+# -- the differentiable forward pass -----------------------------------------
+
+
+def _plain_data():
+    """Context features with a constant column, targets and queries."""
+    rng = np.random.default_rng(4)
+    X = rng.normal(size=(50, 4))
+    X[:, 2] = 2.0
+    return X, 3.0 + X[:, 0] + 0.1 * rng.normal(size=50), X[:6] + 0.05
+
+
+@pytest.mark.parametrize(
+    "params", [{}, {"bag_size": 30, "n_estimators": 4}, {"kv_cache": True}]
+)
+def test_the_differentiable_pass_matches_predict_and_has_gradients(
+    monkeypatch, params
+):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = _plain_data()
+    model = fakes.Backend("kumo", monkeypatch)(
+        **{"n_estimators": 3, "kv_cache": False, **params},
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X, y)
+    query = torch.tensor(X_test, requires_grad=True)
+    context = torch.tensor(X, requires_grad=True)
+    density = model._differentiable_density(query, context, y)
+    np.testing.assert_array_equal(
+        density.locs.detach().numpy(), model.predict_distribution(X_test).locs
+    )
+    density.locs.sum().backward()
+    assert query.grad.abs().sum() > 0 and context.grad.abs().sum() > 0
+
+
+def test_a_recipe_step_the_pass_does_not_know_is_refused(monkeypatch):
+    torch = pytest.importorskip("torch")
+    X, y, X_test = _plain_data()
+    model = fakes.Backend("kumo", monkeypatch)(
+        n_estimators=2, transforms=("none",), outlier_threshold=None
+    ).fit(X, y)
+    model.handles_[0].recipe = model._upstream_recipe(
+        dataclasses.replace(model.member_groups_[0], native_transforms=None)
+    )
+    with pytest.raises(ValueError, match="the recipe runs PowerTransform"):
+        model._differentiable_density(torch.tensor(X_test), torch.tensor(X), y)
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("params", [{}, {"bag_size": 60, "n_estimators": 3}])
+def test_the_differentiable_pass_matches_predict_on_the_checkpoint(params):
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(120, 3))
+    y = 2.0 + X[:, 0] + 0.1 * rng.normal(size=120)
+    # Without the cache, predict runs the same arithmetic, exactly.
+    model = lazy.KumoQuantile(
+        **{"n_estimators": 3, "device": "cpu", "progress": False, **params},
+        version="v1-small",
+        kv_cache=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X[:100], y[:100])
+    query = torch.tensor(X[100:], requires_grad=True)
+    density = model._differentiable_density(
+        query, torch.tensor(X[:100]), y[:100]
+    )
+    np.testing.assert_allclose(
+        density.locs.detach().numpy(),
+        model.predict_distribution(X[100:]).locs,
+        rtol=0,
+        atol=1e-12 * y.std(),
+    )
+    density.log_prob(y[100:]).sum().backward()
+    assert query.grad.isfinite().all()
+    # The shared network collects no gradient for its weights.
+    assert all(p.grad is None for p in model._network().parameters())

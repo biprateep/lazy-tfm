@@ -53,7 +53,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 import contextlib
+import copy
 import dataclasses
+import functools
 from importlib import util
 import pathlib
 import platform
@@ -68,6 +70,7 @@ from lazy import _typing
 from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _install
 from lazy.models import _kumo_draws
@@ -445,11 +448,9 @@ class KumoQuantile(
         y: _typing.FloatArray,
         group: _members.MemberGroup,
     ) -> _KumoGroup:
-        # Upstream z-scores the target in its own dtype, and the network
-        # reads it in float32, which cannot resolve a narrow spread about a
-        # large offset; standardizing in float64 first keeps it. Each group
-        # is standardized on its own rows, a bagged member on its bag.
-        offset, scale = _quantile_head.target_scaling(y)
+        # Each group is standardized on its own rows, a bagged member on its
+        # bag.
+        target, offset, scale = _scaled_target(y)
         tokens = _group_tokens(group)
         categorical = self._categorical_columns(group)
         handle = _KumoGroup(
@@ -470,7 +471,7 @@ class KumoQuantile(
         )
         # The context is kept under either cache setting, so that a pickle,
         # which leaves the cache out, can record it again.
-        handle.context = (X, ((y - offset) / scale).astype(np.float32))
+        handle.context = (X, target)
         if self.kv_cache:
             handle.cache = self._record(handle)
         return handle
@@ -548,6 +549,78 @@ class KumoQuantile(
         return distributions.QuantileDistribution.trimmed_average(
             self._predict_members(handle, X), self._member_trim_fraction()
         )
+
+    def _forward_members(
+        self,
+        handle: _KumoGroup,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> list[_differentiable.TorchQuantiles]:
+        del group  # Unused: the handle holds the group's recipe.
+        from sdm.processing import execution  # noqa: PLC0415 - optional.
+        import torch  # noqa: PLC0415 - torch comes with the extra.
+
+        # Upstream's recipe changes its tensors in place, which autograd
+        # cannot follow: it is fitted here without gradients, for its draws,
+        # and each member's features are made again in torch on the graph.
+        # Upstream's own features only fill the members' containers.
+        target, offset, scale = _scaled_target(y)
+        recipe = execution.RecipeExecution(copy.deepcopy(handle.recipe))
+        generator = self._generator(handle)
+        with torch.no_grad():
+            contexts = recipe.fit_transform(
+                x=self._features(X.detach().cpu().numpy(), None),
+                y=self._tensors(target)[0],
+                related_tables=None,
+                num_members=handle.n_members,
+                generator=generator,
+            )
+            queries = recipe.transform(
+                x=self._features(query.detach().cpu().numpy(), None),
+                related_tables=None,
+            )
+        # On the CPU for float64, which an Apple GPU lacks.
+        X, query = X.cpu().double(), query.cpu().double()
+        contexts, queries = list(contexts), list(queries)
+        for k, (context, member_query) in enumerate(
+            zip(contexts, queries, strict=True)
+        ):
+            c, q = _member_features(recipe, k, X, query)
+            contexts[k] = context._replace(
+                x=context.x.replace_blocks(numerical=c.to(self.device_))
+            )
+            queries[k] = member_query._replace(
+                x=member_query.x.replace_blocks(numerical=q.to(self.device_))
+            )
+        network = self._network()
+        _differentiable.frozen(network)
+        with _lending(network), self._autocast():
+            outs = network._forward_members(  # noqa: SLF001 - upstream's.
+                contexts=contexts,
+                queries=queries,
+                estimator_batch_size=_PINNED_RECIPE["estimator_batch_size"],
+                callbacks=(_keep_graph()(),),
+                generator=generator,
+            )
+        # Upstream inverts the target and sorts the quantiles without
+        # autocast.
+        quantiles = recipe.transform_output(
+            list(recipe.inverse_transform_target(outs))
+        ).numerical
+        if quantiles.shape[-1] != self.n_quantiles_:
+            raise RuntimeError(
+                f"{self.display_name} returned {quantiles.shape[-1]} "
+                f"quantiles per row, not {self.n_quantiles_}"
+            )
+        levels = _quantile_head.quantile_levels(self.n_quantiles_)
+        return [
+            _differentiable.TorchQuantiles(
+                levels, member.cpu().double() * scale + offset
+            )
+            for member in quantiles
+        ]
 
     def _upstream_recipe(self, group: _members.MemberGroup) -> Any:
         """The group's recipe, as upstream's preprocessing objects."""
@@ -771,6 +844,112 @@ class _KumoGroup:
             "transforms": list(self.transforms),
             "feat_shuffle_method": self.feat_shuffle_method,
         }
+
+
+def _member_features(
+    recipe: Any, member: int, X: Any, query: Any
+) -> tuple[Any, Any]:
+    """A member's context and query features from a fitted recipe, in torch.
+
+    What upstream's fitted recipe makes of the member's features, on the
+    graph: its steps are read in order, with the member's own draws, and
+    the standardization is computed again from ``X``. Only the steps of the
+    recipe of ``transforms=("none",)`` on numerical columns without a clip
+    are known, each by its exact class.
+
+    Args:
+        recipe: Upstream's ``RecipeExecution``, fitted on ``X``.
+        member: The member's index.
+        X: The group's context features, a float64 torch tensor on the CPU,
+            shape (n_rows, n_features).
+        query: The query features, likewise, shape (n_queries, n_features).
+
+    Returns:
+        A tuple (context, query) of float32 tensors on the CPU.
+
+    Raises:
+        ValueError: If the recipe has a step this function does not know.
+    """
+    from sdm import processing as sp  # noqa: PLC0415 - optional extra.
+
+    def apply(step: Any, context: Any, query: Any) -> tuple[Any, Any]:
+        """One fitted step, or a sequence of them, on both tables."""
+        step = getattr(step, "processor", step)  # An ensemble adapter's.
+        kind = type(step)
+        if kind is sp.Sequential or kind is sp.StypeDispatch:
+            children = (
+                step.processors["numerical"]
+                if kind is sp.StypeDispatch
+                else step
+            ).children()
+            for child in children:
+                context, query = apply(child, context, query)
+            return context, query
+        if kind is sp.Cast:
+            return context.to(step.dtype), query.to(step.dtype)
+        if kind is sp.DropConstantColumns:
+            kept = list(step._kept_indices[member])  # noqa: SLF001 - upstream's.
+            return context[:, kept], query[:, kept]
+        if kind is sp.Standardize and step.eps > 0:
+            return _differentiable.standardized(context, query, step.eps)
+        if kind is sp.Clip:
+            low, high = step.min_value, step.max_value
+            return context.clamp(low, high), query.clamp(low, high)
+        if kind is sp.Choice:
+            options = list(step.options.children())
+            return apply(options[member % len(options)], context, query)
+        if kind is sp.Identity:
+            return context, query
+        if kind is _kumo_draws.FlipSign:
+            sign = step._signs[member][0].cpu().to(context.dtype)  # noqa: SLF001 - upstream's.
+            return context * sign, query * sign
+        if kind is _kumo_draws.ShuffleColumns:
+            order = step._permutations[member].cpu()  # noqa: SLF001 - upstream's.
+            return context[:, order], query[:, order]
+        if kind is sp.SelectColumns and step.method == "first":
+            n = step.max_columns
+            return context[:, :n], query[:, :n]
+        raise ValueError(
+            "a differentiable forward pass needs transforms=('none',) on "
+            f"numerical columns without a clip; the recipe runs {kind.__name__}"
+        )
+
+    for step in recipe.recipe._features.children():  # noqa: SLF001 - upstream's.
+        X, query = apply(step, X, query)
+    return X.float(), query.float()
+
+
+@functools.cache
+def _keep_graph() -> type:
+    """A callback that has upstream's model keep the graph of its inputs."""
+    from sdm.models import callback  # noqa: PLC0415 - optional extra.
+
+    class KeepGraph(callback.Callback):
+        """Asks upstream's model for gradients; changes nothing."""
+
+        requires_grad = True
+
+    return KeepGraph
+
+
+def _scaled_target(
+    y: _typing.FloatArray,
+) -> tuple[_typing.FloatArray, float, float]:
+    """A group's targets standardized in float64, then cast for upstream.
+
+    Upstream z-scores the target in its own dtype, and the network reads it
+    in float32, which cannot resolve a narrow spread about a large offset;
+    standardizing in float64 first keeps it.
+
+    Args:
+        y: The group's context targets, shape (n_rows,).
+
+    Returns:
+        A tuple (standardized, offset, scale): the targets as float32, and
+        the mean and standard deviation they were standardized by.
+    """
+    offset, scale = _quantile_head.target_scaling(y)
+    return ((y - offset) / scale).astype(np.float32), offset, scale
 
 
 @contextlib.contextmanager
