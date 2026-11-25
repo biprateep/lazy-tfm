@@ -6,8 +6,10 @@ import inspect
 
 import numpy as np
 import pytest
+import sklearn
 from sklearn import base as sklearn_base
 from sklearn import linear_model
+from sklearn import model_selection
 from sklearn import preprocessing
 import standins
 
@@ -118,3 +120,40 @@ def test_every_prediction_method_of_a_model_is_forwarded():
         if name.startswith("predict") or name in ("score", "evaluate")
     }
     assert predictions == {*FORWARDED, "predict_distribution", "score"}
+
+
+class _Weighted(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
+    """A transformer that takes sample weights, and records those of fit."""
+
+    def fit(self, X, y=None, sample_weight=None):
+        self.weights_ = sample_weight
+        return self
+
+    def transform(self, X, sample_weight=None):
+        return X
+
+
+# _Weighted's inherited fit_transform passes no metadata to transform.
+@pytest.mark.filterwarnings("ignore:.*fit_transform. does not forward")
+def test_a_search_routes_metadata_to_fit_and_scores_without_it(regression):
+    """The methods that predict take no metadata, and the routing says so."""
+    X, y = regression
+    weights = np.arange(1.0, 61.0)
+    with sklearn.config_context(enable_metadata_routing=True):
+        step = _Weighted().set_fit_request(sample_weight=True)
+        step = step.set_transform_request(sample_weight=True)
+        piped = lazy.make_pipeline(
+            step, standins.HistogramStandIn(n_estimators=2, progress=False)
+        )
+        result = model_selection.cross_validate(
+            piped,
+            X,
+            y,
+            cv=2,
+            params={"sample_weight": weights},
+            return_estimator=True,
+            error_score="raise",
+        )
+    assert np.isfinite(result["test_score"]).all()
+    fold = result["estimator"][0][0].weights_
+    assert len(fold) == 30 and set(fold) <= set(weights)

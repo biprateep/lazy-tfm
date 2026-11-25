@@ -156,6 +156,10 @@ change the API.
 
 ### Fixed
 
+- Under scikit-learn's metadata routing, `LazyPipeline` states that its
+  methods that predict take no metadata. A search or `cross_validate` given
+  metadata for a transformer now routes it to `fit` alone, and scores the
+  pipeline; before, every score was NaN.
 - A model pickled before a backend parameter existed takes its default when
   loaded, so `get_params` and `clone` work on it.
 - A negative `random_state` works with `bag_size`, where numpy refused it.
