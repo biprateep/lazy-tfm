@@ -20,13 +20,10 @@ the mean and the seconds taken, and prints the setup first.
 """
 
 import argparse
-from importlib import metadata
-import os
 import pathlib
-import platform
-import subprocess
 import time
 
+import _common
 import numpy as np
 import pandas as pd
 
@@ -46,51 +43,6 @@ DATASETS = (
 categorical columns are ordered, so every arm reads them as codes."""
 
 
-def _setup(backend: str) -> dict[str, str]:
-    """The commit, machine, threads and versions the run records."""
-    commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    packages = ("lazy-tfm", "torch", "numpy", "pandas", "scikit-learn")
-    versions = {name: _version(name) for name in packages}
-    upstream = lazy.ESTIMATORS[backend].upstream_package
-    versions[upstream] = _version(upstream)
-    import torch  # noqa: PLC0415 - every backend's extra installs it.
-
-    gpu = torch.cuda.get_device_name() if torch.cuda.is_available() else "none"
-    return {
-        "commit": commit,
-        "machine": _cpu(),
-        "gpu": gpu,
-        "cpus": str(os.cpu_count()),
-        "threads": os.environ.get("OMP_NUM_THREADS", "default"),
-        **versions,
-    }
-
-
-def _cpu() -> str:
-    """The processor's model name, where Linux gives one."""
-    try:
-        with open("/proc/cpuinfo", encoding="ascii") as info:
-            for line in info:
-                if line.startswith("model name"):
-                    return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor() or platform.machine()
-
-
-def _version(name: str) -> str:
-    """A package's installed version, or ``"absent"``."""
-    try:
-        return metadata.version(name)
-    except metadata.PackageNotFoundError:
-        return "absent"
-
-
 def _tabular(X: pd.DataFrame, modalities: dict[str, str]) -> pd.DataFrame:
     """The columns of numbers, categories and dates, dates as days."""
     keep = [
@@ -103,11 +55,7 @@ def _tabular(X: pd.DataFrame, modalities: dict[str, str]) -> pd.DataFrame:
             or pd.api.types.is_datetime64_any_dtype(X[column])
         )
     ]
-    X = X[keep].copy()
-    for column in X:
-        if pd.api.types.is_datetime64_any_dtype(X[column]):
-            X[column] = (X[column] - pd.Timestamp(0)).dt.total_seconds() / 86400
-    return X
+    return _common.days(X[keep])
 
 
 def _codes(X: pd.DataFrame) -> pd.DataFrame:
@@ -140,12 +88,6 @@ def _parts(name: str, data_home: str | None) -> tuple:
     return X.iloc[rows[:cut]], y[rows[:cut]], X.iloc[rows[cut:]], y[rows[cut:]]
 
 
-def _sample(X: pd.DataFrame, y: np.ndarray, n: int, seed: int) -> tuple:
-    """At most ``n`` rows, drawn with ``seed``, in their original order."""
-    rows = np.sort(np.random.default_rng(seed).permutation(len(X))[:n])
-    return X.iloc[rows], np.asarray(y, dtype=float)[rows]
-
-
 def main() -> None:
     """Runs every dataset and arm, appending a row to ``--out`` for each."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -157,14 +99,14 @@ def main() -> None:
     parser.add_argument("--data-home", default=None)
     parser.add_argument("datasets", nargs="*", default=DATASETS)
     args = parser.parse_args()
-    print(_setup(args.backend), flush=True)
+    print(_common.setup(args.backend), flush=True)
     params = {"random_state": 0}
     if args.version:
         params["version"] = args.version
     for name in args.datasets:
         X_train, y_train, X_test, y_test = _parts(name, args.data_home)
-        X_train, y_train = _sample(X_train, y_train, args.n_train, 0)
-        X_test, y_test = _sample(X_test, y_test, args.n_test, 1)
+        X_train, y_train = _common.sample(X_train, y_train, args.n_train, 0)
+        X_test, y_test = _common.sample(X_test, y_test, args.n_test, 1)
         unordered = [
             column
             for column in X_train
@@ -183,8 +125,6 @@ def main() -> None:
             start = time.perf_counter()
             model = lazy.LazyModel(args.backend, **params, **extra)
             model.fit(fit_X, y_train)
-            scores = model.evaluate(test_X, y_test, method="mean").iloc[0]
-            mean = model.predict(test_X, method="mean")
             row = {
                 "dataset": name,
                 "backend": args.backend,
@@ -192,9 +132,7 @@ def main() -> None:
                 "arm": arm,
                 "n_categorical": len(unordered),
                 "n_features": X_train.shape[1],
-                "crps": scores["crps"],
-                "nll": scores["nll"],
-                "rmse": float(np.sqrt(np.mean((mean - y_test) ** 2))),
+                **_common.score(model, test_X, y_test),
                 "seconds": time.perf_counter() - start,
             }
             print(row, flush=True)
