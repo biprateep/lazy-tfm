@@ -149,8 +149,8 @@ CDE loss, CRPS or NLL), not density by density.
 Three things make LimiX-2's answer for a row independent of which other
 rows share its chunk. The first is that each member's preprocessing is
 fitted on the context alone (upstream's column filter, categorical detection
-and category encoding also see the queries, and LAZY treats every column as
-numeric). The second is that the feature positional embedding has its own
+and category encoding also see the queries, and LAZY gives LimiX-2 every
+column as numbers). The second is that the feature positional embedding has its own
 random generator (upstream draws it from the global one after advancing it by
 an amount that depends on the chunk's size). The third is the ported cache.
 The answers are statistically, not bitwise, those of upstream's

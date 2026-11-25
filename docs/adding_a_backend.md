@@ -49,7 +49,19 @@ also set fitted attributes of its own (TabPFN records its bucket borders,
 TabFM resolves its bins and its inference path), lower `kv_cache_` to the mode
 that actually ran, and add keys to `provenance_`. It may not change the
 members, their rows or their seeds, which the base class has already planned
-and recorded. What a backend must do around the whole fit goes in
+and recorded.
+
+A categorical column reaches `_fit_group` and `_predict_group` as its codes,
+0 to k - 1, with NaN for a missing category; the scaffolded transforms and the
+soft clip leave it alone. A backend whose model encodes categories itself
+declares `native_categorical = True` and hands the model
+`self._categorical_columns(group)`, which says which columns of the group's
+view hold codes (TabPFN passes their positions as
+`categorical_features_indices`, TabFM gives them a pandas `category` type,
+Kumo Tabular a categorical block). One that declares `False` lets its model
+read the codes as numbers. Every backend declares one or the other.
+
+What a backend must do around the whole fit goes in
 `_before_fit`, which runs once the package is imported and before any
 parameter is validated (TabFM clips the context targets to its bins' support
 there), and `_after_fit`, which runs once the fit has succeeded and
