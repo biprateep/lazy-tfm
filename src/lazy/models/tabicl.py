@@ -583,6 +583,7 @@ class TabICLQuantile(
                 # evaluation mode.
                 # Mixed precision autocasts as upstream's predict does.
                 model = regressor.model_
+                _differentiable.frozen(model)
                 model.train()
                 try:
                     with torch.autocast(
@@ -881,13 +882,8 @@ def _members_features(regressor: Any, X: Any, query: Any) -> Any:
     # On the CPU for float64, which an Apple GPU lacks.
     context = X.cpu()[:, keep].double()
     query = query.cpu()[:, keep].double()
-    mean = context.mean(dim=0)
-    # The square root of a zero variance has no gradient: a column constant
-    # in this context, which fit kept, scales by epsilon alone.
-    var = context.var(dim=0, correction=0)
-    std = torch.where(var > 0, torch.where(var > 0, var, 1.0).sqrt(), 0.0)
-    std = std + 1e-6
-    both = ((torch.cat([context, query]) - mean) / std).clamp(-100, 100)
+    context, query = _differentiable.standardized(context, query, 1e-6)
+    both = torch.cat([context, query]).clamp(-100, 100)
     return torch.stack(
         [both[:, shuffle] for shuffle in generator.feature_shuffles_["none"]]
     ).float()

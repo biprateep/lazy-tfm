@@ -874,6 +874,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
                 (y - mean) / std, dtype=torch.float32, device=device
             ),
         )
+        _differentiable.frozen(*regressor.models_)
         # use_inference_mode picks upstream's standard path; with
         # differentiable_input it keeps the graph.
         _, outputs, _ = regressor.forward(

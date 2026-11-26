@@ -516,7 +516,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Predicts one group's densities on torch's autograd graph.
 
         Optional: a backend that implements it supports
-        :meth:`_differentiable_density`. Its answer matches
+        :meth:`_differentiable_density`, unless it trims over its members,
+        when it implements :meth:`_forward_members` instead. Its answer matches
         :meth:`_predict_group`'s for the same features, to float rounding,
         and keeps the gradients of ``X`` and ``query``. It runs no
         preprocessing that is not differentiable, and refuses a group whose
@@ -543,15 +544,42 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             f"{type(self).__name__} has no differentiable forward pass"
         )
 
+    def _forward_members(
+        self,
+        handle: Any,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> list[_differentiable.TorchQuantiles]:
+        """Predicts each member of one group on torch's autograd graph.
+
+        :meth:`_forward_group` for a model that trims over its members
+        (``member_combination="quantile_trimmed_average"``), as
+        :meth:`_predict_members` is :meth:`_predict_group` for it; the
+        arguments are :meth:`_forward_group`'s.
+
+        Returns:
+            One density per member of the group, in member order.
+
+        Raises:
+            NotImplementedError: Unless the backend implements it.
+        """
+        del handle, X, y, query, group  # Unused: a backend implements this.
+        raise NotImplementedError(
+            f"{type(self).__name__} has no differentiable forward pass"
+        )
+
     def _differentiable_density(
         self, query: Any, X: Any, y: npt.ArrayLike
     ) -> _differentiable.TorchMixture | _differentiable.TorchQuantiles:
         """The model's densities for ``query``, on torch's autograd graph.
 
         Every group runs on ``X`` and ``y`` through
-        :meth:`_forward_group`, on its own rows and columns as at ``fit``,
-        and the groups are pooled as :meth:`predict_distribution` pools
-        them. With ``X`` and ``y`` the context of ``fit``, the densities
+        :meth:`_forward_group`, or each of its members through
+        :meth:`_forward_members` under a trim, on its own rows and columns
+        as at ``fit``, and they are pooled as :meth:`predict_distribution`
+        pools them. With ``X`` and ``y`` the context of ``fit``, the densities
         are those of :meth:`predict_distribution`, to float rounding.
 
         Every group's graph lives until ``backward``, so a large query set
@@ -599,25 +627,39 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 raise ValueError(
                     f"{name} must be finite: {name} has NaN or inf"
                 )
-        # Histograms, or quantiles under "quantile_average".
+        trimmed = self.member_combination == "quantile_trimmed_average"
+        # Histograms, or quantiles under "quantile_average"; each member's
+        # quantiles under a trim, which spans every member, as predicting.
         parts: list[Any] = []
         for handle, group in zip(
             self.handles_, self.member_groups_, strict=True
         ):
             rows = slice(None) if group.rows is None else group.rows
-            parts.append(
-                self._forward_group(
-                    handle,
-                    self._prepare(X[rows], group, None),
-                    y[rows],
-                    self._prepare(query, group, None),
-                    group,
-                )
+            args = (
+                handle,
+                self._prepare(X[rows], group, None),
+                y[rows],
+                self._prepare(query, group, None),
+                group,
             )
-        weights = self._group_weights()
-        if self.member_combination == "quantile_average":
-            return _differentiable.TorchQuantiles.average(parts, weights)
-        return _differentiable.TorchMixture(tuple(parts), weights)
+            if trimmed:
+                members = self._forward_members(*args)
+                if len(members) != group.n_members:
+                    raise RuntimeError(
+                        f"{type(self).__name__}._forward_members returned "
+                        f"{len(members)} members for a group of "
+                        f"{group.n_members}"
+                    )
+                parts.extend(members)
+            else:
+                parts.append(self._forward_group(*args))
+        return self._pooled(
+            parts,
+            _differentiable.TorchQuantiles,
+            lambda parts, weights: _differentiable.TorchMixture(
+                tuple(parts), weights
+            ),
+        )
 
     def _check_differentiable(self) -> None:
         """Refuses a fit whose prediction is not differentiable.
@@ -625,8 +667,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         Raises:
             ValueError: If the fit ran a feature transform other than the
                 model's own ``"none"``, a clip, a categorical column, native
-                bagging, a constant target, or pools its members by a trimmed
-                average.
+                bagging, or a constant target.
         """
         none = self.native_transforms.get("none")
         if hasattr(self, "constant_target_"):
@@ -645,8 +686,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             problem = "no categorical column"
         elif any(g.member_rows is not None for g in self.member_groups_):
             problem = "no member bagged natively"
-        elif self.member_combination == "quantile_trimmed_average":
-            problem = "members pooled without a trim"
         else:
             return
         raise ValueError(
@@ -1344,19 +1383,40 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """Groups' predictions as one, weighted by their members."""
         if len(parts) == 1:
             return parts[0]
+        if self.member_combination == "quantile_average" and not all(
+            isinstance(part, distributions.QuantileDistribution)
+            for part in parts
+        ):
+            raise TypeError("quantile_average needs quantile outputs")
+        return self._pooled(parts, distributions.QuantileDistribution, _mixture)
+
+    def _pooled(
+        self,
+        parts: list[Any],
+        quantiles: type[distributions.QuantileDistribution]
+        | type[_differentiable.TorchQuantiles],
+        mixture: Callable[[list[Any], _typing.FloatArray], Any],
+    ) -> Any:
+        """Parts pooled as ``member_combination`` says, numpy or torch alike.
+
+        Args:
+            parts: Each group's answer, or under a trim each member's.
+            quantiles: The quantile class, with ``average`` and
+                ``trimmed_average``: ``QuantileDistribution`` or
+                ``TorchQuantiles``.
+            mixture: Mixes parts with the groups' weights.
+
+        Returns:
+            The pooled answer.
+        """
+        if self.member_combination == "quantile_trimmed_average":
+            return quantiles.trimmed_average(
+                parts, self._member_trim_fraction()
+            )
         weights = self._group_weights()
         if self.member_combination == "quantile_average":
-            quantiles = [
-                part
-                for part in parts
-                if isinstance(part, distributions.QuantileDistribution)
-            ]
-            if len(quantiles) != len(parts):
-                raise TypeError("quantile_average needs quantile outputs")
-            return distributions.QuantileDistribution.average(
-                quantiles, weights
-            )
-        return _mixture(parts, weights)
+            return quantiles.average(parts, weights)
+        return mixture(parts, weights)
 
     def _distribution_chunks(
         self, X: pd.DataFrame, size: int | None = None

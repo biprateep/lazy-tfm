@@ -58,6 +58,11 @@ class Network:
     def clear_cache(self):
         self._cache = None
 
+    def requires_grad_(self, requires_grad=True):
+        """The fake has no weights to freeze."""
+        del requires_grad  # Unused: no weights.
+        return self
+
     def train(self):
         self.training = True
 
