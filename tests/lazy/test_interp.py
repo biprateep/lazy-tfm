@@ -9,6 +9,7 @@ import fakes
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn import base as sklearn_base
 from sklearn import dummy
 from sklearn import exceptions
 import standins
@@ -480,3 +481,208 @@ def test_integrated_gradients_find_tabpfns_signal():
     # importance is near 2 and the others' near 0 (measured: 1.92 against
     # below 0.002), and a factor of 5 leaves room for a different seed.
     assert importance.loc["x0", "mean"] > 5 * importance["mean"][1:].max()
+
+
+# -- the context rows ---------------------------------------------------------
+
+
+def test_leaving_a_context_row_out_is_what_a_refit_without_it_loses(
+    data, model
+):
+    X_context, y_context, X, y = data
+    X_context, y_context = X_context[:30], y_context[:30]
+    grid = lazy.Grid.linear(-12.0, 12.0, 300)
+    explanation = interp.explain_context(
+        model,
+        X,
+        y,
+        X_context,
+        y_context,
+        method="loo",
+        rows=[17, 4],
+        y_grid=grid,
+    )
+    np.testing.assert_array_equal(explanation.context_rows, [17, 4])
+
+    def crps_and_mean(keep):
+        fitted = model.fit(X_context[keep], y_context[keep])
+        pdfs = fitted.predict_proba(X, grid)
+        crps = -lazy.metrics.per_object_crps(y, grid, pdfs)
+        return np.stack([crps, fitted.predict_distribution(X).mean()])
+
+    full = crps_and_mean(np.ones(30, dtype=bool))
+    np.testing.assert_allclose(
+        explanation.full_values[[0, 2]], full, atol=1e-12
+    )
+    for k, row in enumerate([17, 4]):
+        expected = full - crps_and_mean(np.arange(30) != row)
+        assert np.abs(expected).max() > 0  # The stand-in's neighbours move.
+        np.testing.assert_allclose(
+            explanation.values[[0, 2], :, k], expected, atol=1e-12
+        )
+
+
+def test_a_number_of_rows_draws_the_same_rows_for_the_same_seed(data, model):
+    X_context, y_context, X, y = data
+    X_context, y_context = X_context[:30], y_context[:30]
+    first, second, other = (
+        interp.explain_context(
+            model,
+            X[:5],
+            y[:5],
+            X_context,
+            y_context,
+            method="loo",
+            rows=4,
+            random_state=seed,
+        )
+        for seed in (3, 3, 4)
+    )
+    assert len(np.unique(first.context_rows)) == 4
+    np.testing.assert_array_equal(first.context_rows, second.context_rows)
+    assert not np.array_equal(first.context_rows, other.context_rows)
+    given = interp.explain_context(
+        model,
+        X[:5],
+        y[:5],
+        X_context,
+        y_context,
+        method="loo",
+        rows=first.context_rows,
+    )
+    np.testing.assert_array_equal(given.values, first.values)
+
+
+def test_context_gradients_are_the_derivative_along_the_rows_offset(
+    differentiable,
+):
+    model, X_context, y_context, X, y = differentiable
+    grid = lazy.Grid.linear(-4.0, 4.0, 200)
+    baseline = np.array([0.5, -1.0, 2.0])
+    explanation = interp.explain_context(
+        model, X, y, X_context, y_context, baseline=baseline, y_grid=grid
+    )
+    assert explanation.values.shape == (3, 20, 40)
+    np.testing.assert_array_equal(explanation.context_rows, np.arange(40))
+    np.testing.assert_allclose(
+        explanation.full_values,
+        interp._statistics(model, X, y, True, grid),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    # The sum over a row's features of the derivative times the offset is
+    # the derivative along the offset: central differences of predict's
+    # statistics, refitting with the row moved along it. The fake's float32
+    # logits err by about 1e-7 / step (measured: 1e-5 at this step, values
+    # up to 0.8); a smaller step only raises that.
+    step = 1e-2
+    for row in (0, 13, 39):
+        offset = X_context.iloc[row].to_numpy() - baseline
+        moved = []
+        for sign in (1, -1):
+            context = X_context.copy()
+            context.iloc[row] += sign * step * offset
+            refit = sklearn_base.clone(model).fit(context, y_context)
+            moved.append(interp._statistics(refit, X, y, True, grid))
+        expected = (moved[0] - moved[1]) / (2 * step)
+        np.testing.assert_allclose(
+            explanation.values[..., row], expected, atol=1e-4
+        )
+
+
+def test_top_ranks_context_rows_by_absolute_value():
+    values = np.array([[[0.1, -0.5, 0.3], [0.0, 0.2, -0.1]]])
+    explanation = interp.ContextExplanation(
+        "loo", ("nll",), values, np.array([10, 20, 30]), np.zeros((1, 2))
+    )
+    top = explanation.top(2, "nll")
+    assert list(top.columns) == ["row", "rank", "context_row", "value"]
+    assert top["row"].tolist() == [0, 0, 1, 1]
+    assert top["rank"].tolist() == [1, 2, 1, 2]
+    assert top["context_row"].tolist() == [20, 30, 20, 30]
+    assert top["value"].tolist() == [-0.5, 0.3, 0.2, -0.1]
+    assert len(explanation.top(5, "nll")) == 6
+    with pytest.raises(ValueError, match="statistic must be one of"):
+        explanation.top(1)
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"method": "shapley"}, "method must be one of"),
+        ({"rows": 3}, "rows does not apply"),
+        ({"method": "loo", "baseline": np.zeros(3)}, "baseline does not"),
+        ({"baseline": np.zeros(2)}, "baseline must be finite"),
+        ({"method": "loo", "rows": 0}, "rows == 0, must be >= 1"),
+        ({"method": "loo", "rows": [1, 1]}, "rows repeats rows"),
+        ({"method": "loo", "rows": [200]}, r"rows must be row positions in"),
+        ({"method": "loo", "rows": [0.5]}, "rows must be integer row"),
+        ({"method": "loo", "rows": [[1, 2]]}, "a 1-D array of positions"),
+        ({"method": "loo", "rows": []}, "a 1-D array of positions"),
+        ({"random_state": 5}, "random_state does not apply"),
+    ],
+)
+def test_a_bad_context_argument_is_refused_by_name(
+    data, model, options, message
+):
+    X_context, y_context, X, y = data
+    with pytest.raises(ValueError, match=message):
+        interp.explain_context(model, X, y, X_context, y_context, **options)
+
+
+@pytest.mark.parametrize(
+    ("model", "message", "needs_torch"),
+    [
+        (dummy.DummyRegressor(), "needs a lazy backend", False),
+        (
+            standins.HistogramStandIn(n_estimators=2, progress=False),
+            r"'gradient': .*fit with transforms=\('none',\)",
+            True,
+        ),
+    ],
+    ids=["no-pass", "transformed"],
+)
+def test_context_gradients_refuse_a_model_without_a_differentiable_pass(
+    data, model, message, needs_torch
+):
+    X_context, y_context, X, y = data
+    if needs_torch:  # The pass itself refuses.
+        pytest.importorskip("torch")
+    model.fit(X_context, y_context)
+    with pytest.raises(ValueError, match=message):
+        interp.explain_context(model, X, y, X_context, y_context)
+
+
+def test_context_gradients_refuse_a_context_other_than_the_fits(
+    differentiable,
+):
+    model, X_context, y_context, X, y = differentiable
+    with pytest.raises(ValueError, match="the context the model was fitted"):
+        interp.explain_context(model, X, y, X_context, y_context + 1.0)
+
+
+@pytest.mark.checkpoint
+def test_a_context_outlier_moves_tabpfns_prediction_beside_it_most():
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(65, 3))
+    X[0] = [1.5, -1.0, 0.5]  # The outlier, off the mean of the context.
+    X[60] = X[0] + 0.05  # The explained row beside it.
+    y = 2.0 * X[:, 0] + 0.1 * rng.normal(size=65)
+    y[0] += 10.0
+    model = lazy.TabPFNBarDistribution(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X[:60], y[:60])
+    explanation = interp.explain_context(model, X[60:], y[60:], X[:60], y[:60])
+    assert np.isfinite(explanation.values).all()
+    # The outlier pulls the mean of the row beside it most: 20 times more
+    # than that of any other explained row here (measured: 3.0 against
+    # 0.15). It did so for 18 of 18 data sets measured, by as little as 1.1
+    # times. Its rank among that row's context rows by NLL varies more: in
+    # the top 5 for 5 of seeds 0 to 9, and as low as 13th.
+    outlier = np.abs(explanation.values[2, :, 0])
+    assert outlier[0] > 2 * outlier[1:].max()

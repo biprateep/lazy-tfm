@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
-"""Which features a model's predicted distributions rely on.
+"""Which features and context rows a model's predicted distributions rely on.
 
 :func:`explain` attributes three statistics of each explained row's predicted
 distribution to the features: minus its CRPS and minus its negative log
@@ -18,10 +18,19 @@ gradients of the statistics through a fitted model's differentiable forward
 pass. The "Interpretability" page of the documentation
 (``docs/guide/interpretability.md``) defines each one.
 
+:func:`explain_context` attributes the same statistics to the rows of the
+context, by gradient times input in each context row's features or by
+leaving each context row out::
+
+    explanation = interp.explain_context(
+        model, X_test, y_test, X_train, y_train
+    )
+    explanation.top(5, "nll")  # Each row's 5 most influential context rows.
+
 The values of the CRPS and of the NLL are signed so that a positive value
-means the feature improves the prediction. Explain rows that are not in the
-context: a model recognizes its context rows and predicts their targets
-whatever the features.
+means the feature, or the context row, improves the prediction. Explain rows
+that are not in the context: a model recognizes its context rows and
+predicts their targets whatever the features.
 """
 
 from __future__ import annotations
@@ -47,14 +56,17 @@ from lazy import metrics
 from lazy.models import lazy_model
 
 __all__ = [
+    "CONTEXT_METHODS",
     "DEFAULT_PERMUTATIONS",
     "DEFAULT_REPEATS",
     "DEFAULT_STEPS",
     "EXACT_MAX_FEATURES",
     "METHODS",
     "STATISTICS",
+    "ContextExplanation",
     "Explanation",
     "explain",
+    "explain_context",
 ]
 
 STATISTICS: tuple[str, ...] = ("crps", "nll", "mean")
@@ -71,6 +83,9 @@ METHODS: tuple[str, ...] = (
     "integrated_gradients",
 )
 """The accepted values of ``method``, besides ``"auto"``."""
+
+CONTEXT_METHODS: tuple[str, ...] = ("gradient", "loo")
+"""The accepted values of :func:`explain_context`'s ``method``."""
 
 EXACT_MAX_FEATURES = 10
 """The most features for which ``"shapley"`` is exact by default: 1,024 fits."""
@@ -137,12 +152,8 @@ class Explanation:
         Raises:
             ValueError: If ``statistic`` is not one of ``statistics``.
         """
-        if statistic not in self.statistics:
-            raise ValueError(
-                f"statistic must be one of {self.statistics}: {statistic=}"
-            )
         return pd.DataFrame(
-            self.values[self.statistics.index(statistic)],
+            self.values[_statistic_index(self.statistics, statistic)],
             columns=list(self.feature_names),
         )
 
@@ -163,6 +174,86 @@ class Explanation:
             for name, values in zip(self.statistics, self.values, strict=True)
         }
         return pd.DataFrame(columns, index=list(self.feature_names))
+
+
+@dataclasses.dataclass(frozen=True)
+class ContextExplanation:
+    """The attributions of :func:`explain_context`.
+
+    Attributes:
+        method: The method that ran, one of :data:`CONTEXT_METHODS`.
+        statistics: The statistics attributed, in the order of the first
+            axis of ``values``.
+        values: Each explained context row's attribution, shape
+            (n_statistics, n_rows, n_context_rows_explained). The CRPS is in
+            the target's units, the NLL in nats, and the mean in the
+            target's units.
+        context_rows: The positions in ``X_context`` of the explained
+            context rows, in the order of the last axis of ``values``, shape
+            (n_context_rows_explained,).
+        full_values: Each statistic with the whole context, shape
+            (n_statistics, n_rows).
+    """
+
+    method: str
+    statistics: tuple[str, ...]
+    values: _typing.FloatArray
+    context_rows: _typing.IntArray
+    full_values: _typing.FloatArray
+
+    def top(self, k: int, statistic: str = "crps") -> pd.DataFrame:
+        """Each explained row's most influential context rows.
+
+        The most influential have the largest absolute attribution.
+
+        Args:
+            k: How many context rows to give per explained row; all of them
+                if there are fewer.
+            statistic: One of ``statistics``.
+
+        Returns:
+            A table with one row per explained row and rank, shape
+            (n_rows * k, 4), sorted by both. Its columns are ``row``, the
+            explained row's position in ``X``; ``rank``, from 1 for the most
+            influential; ``context_row``, its position in ``X_context``; and
+            ``value``, its attribution.
+
+        Raises:
+            ValueError: If ``statistic`` is not one of ``statistics``, or
+                ``k`` is below 1.
+            TypeError: If ``k`` is not an integer.
+        """
+        values = self.values[_statistic_index(self.statistics, statistic)]
+        validation.check_scalar(k, "k", numbers.Integral, min_val=1)
+        k = min(int(k), values.shape[1])
+        order = np.argsort(-np.abs(values), axis=1, kind="stable")[:, :k]
+        n_rows = len(values)
+        return pd.DataFrame(
+            {
+                "row": np.repeat(np.arange(n_rows), k),
+                "rank": np.tile(np.arange(1, k + 1), n_rows),
+                "context_row": self.context_rows[order].ravel(),
+                "value": np.take_along_axis(values, order, axis=1).ravel(),
+            }
+        )
+
+
+def _statistic_index(statistics: tuple[str, ...], statistic: str) -> int:
+    """The position of ``statistic`` in ``statistics``.
+
+    Args:
+        statistics: The statistics of an explanation.
+        statistic: The one asked for.
+
+    Returns:
+        Its position.
+
+    Raises:
+        ValueError: If it is not one of ``statistics``.
+    """
+    if statistic not in statistics:
+        raise ValueError(f"statistic must be one of {statistics}: {statistic=}")
+    return statistics.index(statistic)
 
 
 def explain(  # noqa: GS030 - scikit-learn's X, y.
@@ -195,8 +286,9 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     three backward passes through it, one per statistic, for each batch of
     64 rows; ``"integrated_gradients"`` takes ``n_steps`` points on the
     path to each row, so it runs ``n_steps`` times as many batches, and
-    predicts the baseline once. Both also predict the rows once, to check
-    that ``X_context`` is the model's context. Neither refits, and each
+    predicts the baseline once. Both also predict the rows once, a batch
+    at a time, to check that ``X_context`` is the model's context, so that
+    a wrong one fails after the first batch. Neither refits, and each
     pass's autograd graph holds the context and one batch of about 64
     points, or of one row's ``n_steps`` points if there are more.
 
@@ -288,20 +380,9 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         )
         return Explanation(method, STATISTICS, names, values, full, None)
 
-    context, _ = _frame(X_context)
-    context_targets = _inputs.check_target(
-        y_context, len(context), names=("X_context", "y_context")
+    context, context_targets, grid = _context(
+        X_context, y_context, X, y, y_grid
     )
-    if not context.columns.equals(X.columns):
-        raise ValueError(
-            "X_context must have the columns of X:"
-            f" {list(context.columns)} != {list(X.columns)}"
-        )
-    if y_grid is None:
-        targets = np.concatenate([y, context_targets])
-        grid = base.default_grid(float(targets.min()), float(targets.max()))
-    else:
-        grid = grid_lib.as_grid(y_grid)
     if method in _GRADIENT_METHODS:
         baseline = _check_baseline(baseline, X.shape[1])
         n_steps = (
@@ -349,6 +430,183 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     return Explanation(method, STATISTICS, names, values, full, empty)
 
 
+def explain_context(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    X: Any,
+    y: npt.ArrayLike,
+    X_context: Any,
+    y_context: npt.ArrayLike,
+    *,
+    method: str = "gradient",
+    y_grid: grid_lib.Grid | npt.ArrayLike | None = None,
+    baseline: npt.ArrayLike | None = None,
+    rows: int | npt.ArrayLike | None = None,
+    random_state: int | None = None,
+) -> ContextExplanation:
+    """Attributes each row's predicted distribution to the context rows.
+
+    ``"gradient"`` gives context row ``r`` gradient times input in its
+    features, summed over them: the derivative of an explained row's
+    statistic in each feature of ``r``, times that feature's offset from
+    the baseline. It runs the model's differentiable forward pass once for
+    each batch of 64 rows, and one backward pass through it for each
+    statistic of each row, ``3 * n_rows`` in all, each about as costly as
+    the forward pass; it also predicts the rows once, a batch at a time,
+    to check that ``X_context`` is the model's context. The autograd graph
+    holds the
+    context and one batch of rows, and ``values`` holds
+    ``24 * n_rows * n_context`` bytes.
+
+    ``"loo"`` (leave one out) gives context row ``r`` the statistic of a
+    clone of ``model`` fitted on the whole context minus that of a clone
+    fitted without ``r``: ``n_context_rows_explained + 1`` fits, each of
+    which serves all the explained rows.
+    A model that bags its context rows (``bag_size``) draws other bags
+    without ``r``, so its values hold that redraw as well as ``r``'s own
+    effect; fit it without bagging to measure ``r`` alone.
+
+    Args:
+        model: An estimator with ``fit`` and ``predict_distribution``.
+            ``"gradient"`` needs it fitted on ``X_context`` and
+            ``y_context`` with a differentiable forward pass: a backend
+            fitted with ``transforms=("none",)`` and
+            ``outlier_threshold=None``, on numeric columns. ``"loo"`` fits
+            clones of it and leaves it as it is.
+        X: The rows to explain, shape (n_rows, n_columns), in any form the
+            models take. They should not be rows of the context.
+        y: Their finite true targets, shape (n_rows,).
+        X_context: The context, shape (n_context, n_columns), with the
+            columns of ``X``.
+        y_context: Its finite targets, shape (n_context,).
+        method: One of :data:`CONTEXT_METHODS`.
+        y_grid: The grid on which the CRPS and the NLL are computed;
+            ``None`` for :func:`lazy.base.default_grid` over the targets of
+            the rows and of the context.
+        baseline: For ``"gradient"``, the finite row from which each context
+            row's offset is measured, shape (n_columns,); ``None`` for the
+            mean of ``X_context``.
+        rows: For ``"loo"``, the context rows to explain: a number of them,
+            drawn without replacement, or their distinct positions in
+            ``X_context``, shape (n_context_rows_explained,). ``None`` for
+            every row.
+        random_state: For ``"loo"``, the seed of the rows that an integer
+            ``rows`` draws; ``None`` for 0.
+
+    Returns:
+        The attributions.
+
+    Raises:
+        ValueError: If an argument is not as described above, an option is
+            given to the method that does not use it, or the model of
+            ``"gradient"`` has no differentiable forward pass.
+        sklearn.exceptions.NotFittedError: If ``method`` is ``"gradient"``
+            and ``model`` is not fitted.
+    """
+    if method not in CONTEXT_METHODS:
+        raise ValueError(f"method must be one of {CONTEXT_METHODS}: {method=}")
+    _check_options(
+        method, baseline=baseline, rows=rows, random_state=random_state
+    )
+    X, named = _frame(X)
+    if X.empty:
+        raise ValueError("X has no rows to explain")
+    y = _inputs.check_target(y, len(X))
+    context, context_targets, grid = _context(
+        X_context, y_context, X, y, y_grid
+    )
+    if method == "gradient":
+        baseline = _check_baseline(baseline, X.shape[1])
+        chosen = np.arange(len(context))
+        values, full = _context_gradients(
+            model, context, context_targets, X, y, named, grid, baseline
+        )
+    else:
+        chosen = _context_rows(
+            rows, len(context), np.random.default_rng(random_state or 0)
+        )
+        values, full = _leave_one_out(
+            model, context, context_targets, X, y, named, grid, chosen
+        )
+    return ContextExplanation(method, STATISTICS, values, chosen, full)
+
+
+def _context(  # noqa: GS030 - scikit-learn's X, y.
+    X_context: Any,
+    y_context: Any,
+    X: pd.DataFrame,
+    y: _typing.FloatArray,
+    y_grid: grid_lib.Grid | npt.ArrayLike | None,
+) -> tuple[pd.DataFrame, _typing.FloatArray, grid_lib.Grid]:
+    """The context, checked against the rows, and the grid of the scores.
+
+    Args:
+        X_context: The context features, as given.
+        y_context: Their targets, as given.
+        X: The rows to explain, shape (n, n_columns).
+        y: Their true targets, shape (n,).
+        y_grid: The grid as given, or ``None`` for
+            :func:`lazy.base.default_grid` over ``y`` and ``y_context``.
+
+    Returns:
+        A tuple (X_context, y_context, grid): the context as a frame, shape
+        (n_context, n_columns), its targets, shape (n_context,), and the
+        grid.
+
+    Raises:
+        ValueError: If the targets are not finite, their number is not the
+            context's, or the context has other columns than ``X``.
+    """
+    context, _ = _frame(X_context)
+    targets = _inputs.check_target(
+        y_context, len(context), names=("X_context", "y_context")
+    )
+    if not context.columns.equals(X.columns):
+        raise ValueError(
+            "X_context must have the columns of X:"
+            f" {list(context.columns)} != {list(X.columns)}"
+        )
+    if y_grid is not None:
+        return context, targets, grid_lib.as_grid(y_grid)
+    both = np.concatenate([y, targets])
+    grid = base.default_grid(float(both.min()), float(both.max()))
+    return context, targets, grid
+
+
+def _context_rows(
+    rows: int | npt.ArrayLike | None, n_context: int, rng: np.random.Generator
+) -> _typing.IntArray:
+    """The positions of the context rows that ``"loo"`` explains.
+
+    Args:
+        rows: ``rows`` as given.
+        n_context: The number of context rows.
+        rng: The source of the rows that an integer draws.
+
+    Returns:
+        The positions, shape (n_context_rows_explained,): sorted when drawn,
+        in the given order when given.
+
+    Raises:
+        ValueError: If a number of rows is not in [1, n_context], or the
+            positions are not a non-empty 1-D array of distinct integers in
+            [0, n_context).
+    """
+    if rows is None:
+        return np.arange(n_context)
+    if isinstance(rows, numbers.Integral):
+        validation.check_scalar(
+            rows, "rows", numbers.Integral, min_val=1, max_val=n_context
+        )
+        return np.sort(rng.choice(n_context, int(rows), replace=False))
+    shape = np.shape(rows)
+    if len(shape) != 1 or not shape[0]:
+        raise ValueError(
+            "rows must be a number of rows or a 1-D array of positions in"
+            f" X_context, of at least one: got shape {shape}"
+        )
+    return _inputs.check_rows(rows, n_context, name="rows")
+
+
 def _check_method(method: str, X_context: Any, y_context: Any) -> str:  # noqa: GS030 - scikit-learn's X, y.
     """The method to run, with ``"auto"`` resolved.
 
@@ -381,9 +639,9 @@ def _check_options(method: str, **options: Any) -> None:
     """Refuses an option that ``method`` does not use.
 
     Args:
-        method: One of :data:`METHODS`.
-        **options: ``n_permutations``, ``n_repeats``, ``n_steps`` and
-            ``baseline``, as given.
+        method: One of :data:`METHODS` or :data:`CONTEXT_METHODS`.
+        **options: The options of :func:`explain` or of
+            :func:`explain_context`, as given.
 
     Raises:
         ValueError: If an option of another method is not ``None``.
@@ -393,6 +651,7 @@ def _check_options(method: str, **options: Any) -> None:
         "permutation": ("n_repeats",),
         "gradient": ("baseline",),
         "integrated_gradients": ("n_steps", "baseline"),
+        "loo": ("rows", "random_state"),
     }
     for name, value in options.items():
         if value is not None and name not in used.get(method, ()):
@@ -611,11 +870,86 @@ def _refit_values(  # noqa: GS030 - scikit-learn's X, y.
                     marked = is_categorical[present]
             if is_categorical is not None:
                 clone.set_params(categorical_features=marked)
-            fitted = clone.fit(context, y_context)
-            table.append(_statistics(fitted, queries, y, True, grid))
+            table.append(
+                _fit_statistics(
+                    clone, context, y_context, queries, y, True, grid
+                )
+            )
         return np.stack(table)
 
     return values
+
+
+def _fit_statistics(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    X_context: pd.DataFrame,
+    y_context: _typing.FloatArray,
+    X: pd.DataFrame,
+    y: _typing.FloatArray,
+    named: bool,
+    grid: grid_lib.Grid,
+) -> _typing.FloatArray:
+    """Fits ``model`` on a context, and scores every row.
+
+    Args:
+        model: An unfitted model, which is fitted in place.
+        X_context: The context, shape (n_context, p).
+        y_context: Its targets, shape (n_context,).
+        X: Query rows, shape (n, p).
+        y: Their true targets, shape (n,).
+        named: Whether the caller named the columns; see :func:`_table`.
+        grid: The grid on which the CRPS and the NLL are computed.
+
+    Returns:
+        The statistics, in the order of :data:`STATISTICS`, shape (3, n).
+    """
+    model.fit(_table(X_context, named), y_context)
+    return _statistics(model, X, y, named, grid)
+
+
+def _leave_one_out(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    X_context: pd.DataFrame,
+    y_context: _typing.FloatArray,
+    X: pd.DataFrame,
+    y: _typing.FloatArray,
+    named: bool,
+    grid: grid_lib.Grid,
+    chosen: _typing.IntArray,
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+    """What each statistic loses when a clone is fitted without a row.
+
+    Args:
+        model: The model to clone.
+        X_context: The context, shape (n_context, n_columns).
+        y_context: Its targets, shape (n_context,).
+        X: The rows to explain, shape (n, n_columns).
+        y: Their true targets, shape (n,).
+        named: Whether the caller named the columns; see :func:`_table`.
+        grid: The grid on which the CRPS and the NLL are computed.
+        chosen: The positions of the context rows to leave out, shape (m,).
+
+    Returns:
+        A tuple (values, full): each statistic with the whole context minus
+        that without each row, shape (n_statistics, n, m), and the former,
+        shape (n_statistics, n).
+    """
+    full = _fit_statistics(
+        sklearn_base.clone(model), X_context, y_context, X, y, named, grid
+    )
+    values = np.empty((*full.shape, len(chosen)))
+    for index, row in enumerate(chosen):
+        keep = np.delete(np.arange(len(X_context)), row)
+        values[..., index] = full - _fit_statistics(
+            sklearn_base.clone(model),
+            X_context.iloc[keep],
+            y_context[keep],
+            X,
+            y,
+            named,
+            grid,
+        )
+    return values, full
 
 
 def _exact_shapley(
@@ -779,32 +1113,21 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
 
     Raises:
         sklearn.exceptions.NotFittedError: If the model is not fitted.
-        ValueError: If the model has no differentiable forward pass, its
-            fit is not differentiable, a column is not numeric, a feature is
-            missing, or the columns or the baseline are not as described
-            above.
+        ValueError: As :func:`_differentiable` and :func:`_density` raise,
+            if ``X_context`` and ``y_context`` are not the model's
+            context, or if torch's inference mode is on.
     """
-    validation.check_is_fitted(model)
-    if isinstance(model, lazy_model.LazyModel):
-        model = model.estimator_
-    if not hasattr(model, "_differentiable_density"):
-        raise ValueError(
-            f"method={method!r} needs a lazy backend, whose forward pass is"
-            f" differentiable; {type(model).__name__} has none"
-        )
+    model, order, context, queries = _differentiable(
+        model, method, X_context, X, named
+    )
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-    # Where each of the fit's columns is in X, by predict's rule for names.
-    positions = pd.DataFrame([np.arange(X.shape[1])], columns=X.columns)
-    order = model._align_to_fit(positions, named).to_numpy()[0]  # noqa: SLF001 - predict's rule.
-    context = _float_features(X_context, "X_context", method)[:, order]
-    queries = _float_features(X, "X", method)[:, order]
-    origin = context.mean(axis=0) if baseline is None else baseline[order]
     if torch.is_inference_mode_enabled():
         raise ValueError(
             f"method={method!r} takes gradients, which torch's inference"
-            " mode forbids; call explain outside it"
+            " mode forbids; call it outside inference mode"
         )
+    origin = context.mean(axis=0) if baseline is None else baseline[order]
     context_tensor = torch.tensor(context)
     delta = queries - origin
     fractions = np.arange(1, n_steps + 1) / n_steps
@@ -819,13 +1142,13 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
             query = torch.tensor(
                 path.reshape(-1, path.shape[-1]), requires_grad=True
             )
-            try:
-                density = model._differentiable_density(  # noqa: SLF001 - lazy's own backends.
-                    query, context_tensor, y_context
-                )
-            except (ValueError, NotImplementedError) as error:
-                raise ValueError(f"method={method!r}: {error}") from error
+            density = _density(model, method, query, context_tensor, y_context)
             statistics = _scores(density, np.tile(y[rows], n_steps), grid)
+            # The last step, k = m, is the row itself.
+            at_points = torch.stack(statistics).detach().numpy()
+            full[:, rows] = at_points.reshape(len(STATISTICS), n_steps, -1)[
+                :, -1
+            ]
             # The three backward passes share one forward pass's graph,
             # which the last of them frees.
             for index, statistic in enumerate(statistics):
@@ -837,23 +1160,10 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
                 gradients[index, rows] = (
                     gradient.numpy().reshape(path.shape).sum(axis=0)
                 )
-            # The last step, k = m, is the row itself.
-            at_points = torch.stack(statistics).detach().numpy()
-            full[:, rows] = at_points.reshape(len(STATISTICS), n_steps, -1)[
-                :, -1
-            ]
-    # The graph's context is the caller's; predict's is the fit's. Their
-    # means agree to float32 rounding, far inside this tolerance, when they
-    # are the same context.
-    means = model.predict_distribution(_table(X, named)).mean()
-    tolerance = 1e-3 * (np.std(y_context) + np.abs(np.mean(y_context)))
-    if not np.allclose(full[-1], means, rtol=0.0, atol=tolerance):
-        raise ValueError(
-            f"method={method!r} needs X_context and y_context to be the"
-            " context the model was fitted on: its forward pass on them"
-            " predicts means that differ from predict's by up to"
-            f" {np.abs(full[-1] - means).max():.3g}"
-        )
+            # After the backward passes have freed this batch's graph.
+            _check_context(
+                model, method, X.iloc[rows], named, y_context, full[-1, rows]
+            )
     values = (gradients / n_steps * delta)[..., np.argsort(order)]
     if method == "gradient":
         return values, full, None
@@ -862,6 +1172,203 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
     distribution = model.predict_distribution(_table(at_baseline, named))
     base = _scores(distribution[np.zeros(len(y), dtype=int)], y, grid)
     return values, full, np.stack(base)
+
+
+def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    X_context: pd.DataFrame,
+    y_context: _typing.FloatArray,
+    X: pd.DataFrame,
+    y: _typing.FloatArray,
+    named: bool,
+    grid: grid_lib.Grid,
+    baseline: _typing.FloatArray | None,
+) -> tuple[_typing.FloatArray, _typing.FloatArray]:
+    """Gradient times input of every statistic in the context's features.
+
+    Context row ``r`` gets the sum over its columns ``j`` of the
+    statistic's derivative in ``x_rj`` times ``x_rj - b_j``. Every row's
+    statistics depend on the whole context, so each statistic of each row
+    takes a backward pass of its own, all through one forward pass per
+    batch of ``_QUERY_BUDGET`` rows, which keeps one graph in memory.
+
+    Args:
+        model: A model fitted on ``X_context`` and ``y_context``.
+        X_context: Its context, shape (n_context, n_columns).
+        y_context: Its targets, shape (n_context,).
+        X: The rows to explain, shape (n, n_columns).
+        y: Their true targets, shape (n,).
+        named: Whether the caller named the columns; see :func:`_table`.
+        grid: The grid on which the CRPS and the NLL are computed.
+        baseline: The baseline ``b``, checked, shape (n_columns,), or
+            ``None`` for the mean of ``X_context``.
+
+    Returns:
+        A tuple (values, full): each context row's attribution, shape
+        (n_statistics, n, n_context), and the statistics of the rows, shape
+        (n_statistics, n).
+
+    Raises:
+        sklearn.exceptions.NotFittedError: If the model is not fitted.
+        ValueError: As :func:`_differentiable` and :func:`_density` raise,
+            if ``X_context`` and ``y_context`` are not the model's
+            context, or if torch's inference mode is on.
+    """
+    model, order, context, queries = _differentiable(
+        model, "gradient", X_context, X, named
+    )
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    if torch.is_inference_mode_enabled():
+        raise ValueError(
+            "method='gradient' takes gradients, which torch's inference"
+            " mode forbids; call it outside inference mode"
+        )
+    origin = context.mean(axis=0) if baseline is None else baseline[order]
+    offsets = torch.tensor(context - origin)
+    context_tensor = torch.tensor(context, requires_grad=True)
+    values = np.empty((len(STATISTICS), len(queries), len(context)))
+    full = np.empty((len(STATISTICS), len(queries)))
+    # Inside torch.no_grad() too, which would build no graph.
+    with torch.enable_grad():
+        for start in range(0, len(queries), _QUERY_BUDGET):
+            rows = slice(start, start + _QUERY_BUDGET)
+            query = torch.tensor(queries[rows])
+            density = _density(
+                model, "gradient", query, context_tensor, y_context
+            )
+            statistics = torch.stack(_scores(density, y[rows], grid))
+            full[:, rows] = statistics.detach().numpy()
+            # One backward pass per statistic of a row; the last frees the
+            # graph.
+            flat = statistics.reshape(-1)
+            for index, statistic in enumerate(flat):
+                (gradient,) = torch.autograd.grad(
+                    statistic,
+                    context_tensor,
+                    retain_graph=index < len(flat) - 1,
+                )
+                which, row = divmod(index, len(query))
+                values[which, start + row] = (
+                    (gradient * offsets).sum(dim=1).numpy()
+                )
+            # After the backward passes have freed this batch's graph.
+            _check_context(
+                model,
+                "gradient",
+                X.iloc[rows],
+                named,
+                y_context,
+                full[-1, rows],
+            )
+    return values, full
+
+
+def _differentiable(  # noqa: GS030 - scikit-learn's X.
+    model: Any,
+    method: str,
+    X_context: pd.DataFrame,
+    X: pd.DataFrame,
+    named: bool,
+) -> tuple[Any, _typing.IntArray, _typing.FloatArray, _typing.FloatArray]:
+    """The backend whose forward pass a gradient method runs, and its inputs.
+
+    Args:
+        model: A model fitted on ``X_context``.
+        method: The gradient method, for the errors.
+        X_context: Its context, shape (n_context, n_columns).
+        X: The rows to explain, shape (n, n_columns).
+        named: Whether the caller named the columns; see :func:`_table`.
+
+    Returns:
+        A tuple (backend, order, context, queries): the backend; the
+        position in ``X`` of each of the fit's columns, shape (n_columns,);
+        and the context and the rows as floats in the fit's column order,
+        shapes (n_context, n_columns) and (n, n_columns).
+
+    Raises:
+        sklearn.exceptions.NotFittedError: If the model is not fitted.
+        ValueError: If the model has no differentiable forward pass, a
+            column is not numeric, a feature is missing, or the columns do
+            not match the fit's.
+    """
+    validation.check_is_fitted(model)
+    if isinstance(model, lazy_model.LazyModel):
+        model = model.estimator_
+    if not hasattr(model, "_differentiable_density"):
+        raise ValueError(
+            f"method={method!r} needs a lazy backend, whose forward pass is"
+            f" differentiable; {type(model).__name__} has none"
+        )
+    # Where each of the fit's columns is in X, by predict's rule for names.
+    positions = pd.DataFrame([np.arange(X.shape[1])], columns=X.columns)
+    order = model._align_to_fit(positions, named).to_numpy()[0]  # noqa: SLF001 - predict's rule.
+    context = _float_features(X_context, "X_context", method)[:, order]
+    queries = _float_features(X, "X", method)[:, order]
+    return model, order, context, queries
+
+
+def _density(
+    model: Any, method: str, query: Any, context: Any, y_context: Any
+) -> Any:
+    """The backend's differentiable densities, with its refusals named.
+
+    Args:
+        model: A backend fitted on the context.
+        method: The gradient method, for the errors.
+        query: The query points, a torch tensor of shape (n, n_columns).
+        context: The context, a torch tensor of shape
+            (n_context, n_columns).
+        y_context: Its targets, shape (n_context,).
+
+    Returns:
+        What the backend's ``_differentiable_density`` returns.
+
+    Raises:
+        ValueError: If the backend refuses the pass: its fit is not
+            differentiable, or it has no differentiable forward pass.
+    """
+    try:
+        return model._differentiable_density(query, context, y_context)  # noqa: SLF001 - lazy's own backends.
+    except (ValueError, NotImplementedError) as error:
+        raise ValueError(f"method={method!r}: {error}") from error
+
+
+def _check_context(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    method: str,
+    X: pd.DataFrame,
+    named: bool,
+    y_context: _typing.FloatArray,
+    means: _typing.FloatArray,
+) -> None:
+    """Refuses a context other than the one the model was fitted on.
+
+    The forward pass's context is the caller's; predict's is the fit's.
+    Their means agree to float32 rounding, far inside this tolerance, when
+    they are the same context.
+
+    Args:
+        model: The backend.
+        method: The gradient method, for the errors.
+        X: The rows explained, shape (n, n_columns).
+        named: Whether the caller named the columns; see :func:`_table`.
+        y_context: The caller's context targets, shape (n_context,).
+        means: The rows' means from the forward pass on the caller's
+            context, shape (n,).
+
+    Raises:
+        ValueError: If predict's means differ from ``means``.
+    """
+    predicted = model.predict_distribution(_table(X, named)).mean()
+    tolerance = 1e-3 * (np.std(y_context) + np.abs(np.mean(y_context)))
+    if not np.allclose(means, predicted, rtol=0.0, atol=tolerance):
+        raise ValueError(
+            f"method={method!r} needs X_context and y_context to be the"
+            " context the model was fitted on: its forward pass on them"
+            " predicts means that differ from predict's by up to"
+            f" {np.abs(means - predicted).max():.3g}"
+        )
 
 
 def _check_baseline(

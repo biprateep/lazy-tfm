@@ -91,6 +91,7 @@ import pandas as pd
 from sklearn import datasets as sklearn_datasets
 
 from lazy import _home
+from lazy import _inputs
 from lazy import _multabench
 from lazy import _plasticc
 from lazy import _typing
@@ -1109,7 +1110,7 @@ def make_selection_split(
     holdout_rows = (
         np.arange(n)
         if holdout_rows is None
-        else _check_rows(holdout_rows, n, name="holdout_rows")
+        else _inputs.check_rows(holdout_rows, n, name="holdout_rows")
     )
     if n_calibration < 0 or n_train < 1:
         raise ValueError(
@@ -1172,29 +1173,6 @@ def make_selection_split(
         meta=meta,
         catalog=catalog,
     )
-
-
-def _check_rows(rows: npt.ArrayLike, n: int, *, name: str) -> _typing.IntArray:
-    """Returns ``rows`` as int64 positions, each in ``[0, n)`` and unique.
-
-    Raises:
-        ValueError: If they are not integers, are out of range, or repeat.
-    """
-    rows = np.asarray(rows).ravel()
-    if not rows.size:
-        return rows.astype(np.int64)
-    if not np.issubdtype(rows.dtype, np.integer):
-        raise ValueError(
-            f"{name} must be integer row positions, not {rows.dtype}"
-        )
-    if rows.min() < 0 or rows.max() >= n:
-        raise ValueError(
-            f"{name} must be row positions in [0, {n:,}); got "
-            f"{rows.min():,} to {rows.max():,}"
-        )
-    if np.unique(rows).size != rows.size:
-        raise ValueError(f"{name} repeats rows; give each row once")
-    return rows.astype(np.int64)
 
 
 def _solve_holdout(

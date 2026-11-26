@@ -366,6 +366,38 @@ def check_target(
     return values
 
 
+def check_rows(rows: npt.ArrayLike, n: int, *, name: str) -> _typing.IntArray:
+    """Validates positions of rows of a table, flattened.
+
+    Args:
+        rows: The positions, of any shape; none at all is allowed.
+        n: The number of rows of the table.
+        name: The argument's name, for the errors.
+
+    Returns:
+        The positions as int64, flattened, in their order.
+
+    Raises:
+        ValueError: If they are not integers, are out of ``[0, n)``, or
+            repeat.
+    """
+    rows = np.asarray(rows).ravel()
+    if not rows.size:
+        return rows.astype(np.int64)
+    if not np.issubdtype(rows.dtype, np.integer):
+        raise ValueError(
+            f"{name} must be integer row positions, not {rows.dtype}"
+        )
+    if rows.min() < 0 or rows.max() >= n:
+        raise ValueError(
+            f"{name} must be row positions in [0, {n:,}); got "
+            f"{rows.min():,} to {rows.max():,}"
+        )
+    if np.unique(rows).size != rows.size:
+        raise ValueError(f"{name} repeats rows; give each row once")
+    return rows.astype(np.int64)
+
+
 def _to_frame(features: Any) -> tuple[pd.DataFrame, bool]:
     """Dispatches on the input's form; see :func:`to_frame`."""
     if isinstance(features, pd.DataFrame):
