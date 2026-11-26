@@ -512,7 +512,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         y: _typing.FloatArray,
         query: Any,
         group: _members.MemberGroup,
-    ) -> _differentiable.TorchHistogram | _differentiable.TorchQuantiles:
+    ) -> _differentiable.TorchDensity:
         """Predicts one group's densities on torch's autograd graph.
 
         Optional: a backend that implements it supports

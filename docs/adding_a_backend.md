@@ -90,11 +90,13 @@ the contract. TabPFN's builds on upstream's `differentiable_input`; TabICL's
 writes upstream's preprocessing in torch and runs its network's training
 forward, which gives the inference forward's quantiles; LimiX-2's refits
 each member's pipeline on the context passed, which under `"none"` only
-selects and shuffles columns, and runs its network outside inference mode.
-A model that trims over its members implements `_forward_members` instead,
-as it implements `_predict_members`; Kumo Tabular's fits upstream's recipe for its draws and
-makes its features again in torch, since the recipe changes its tensors in
-place.
+selects and shuffles columns, and runs its network outside inference mode;
+TabFM's fits each level's classifier on the detached context, for its column
+orders and class shifts, and runs the backbone on features it makes again in
+torch. A model that trims over its members implements `_forward_members`
+instead, as it implements `_predict_members`; Kumo Tabular's fits upstream's
+recipe for its draws and makes its features again in torch, since the recipe
+changes its tensors in place.
 
 Every prediction reaches the model through those two methods. The base class
 cuts the queries into chunks, under one progress bar per call, and works
