@@ -127,17 +127,17 @@ change the API.
   `"time"`, for its default encoder.
 - Categorical columns. Every model takes `categorical_features`, as
   scikit-learn's `HistGradientBoostingRegressor` does: `"from_dtype"`, the
-  default, marks the columns of pandas' `category` type that are not
-  ordered, and column names, positions or a boolean mask mark others. A
-  column of pandas' ordered `category` type that is not marked is read as
-  the codes of its categories, numbers in their order. A fitted model records
-  `is_categorical_` and `categories_`, and a category that the context did
-  not hold is read as missing. TabPFN, TabFM and Kumo Tabular encode the
-  marked columns as they were trained to; TabICL and LimiX-2 read their
-  codes as numbers, and declare so in the new backend attribute
-  `native_categorical`. A table with a column of text categories, which
-  every model refused, now fits. `lazy.interp` keeps each column's type
-  through its refits.
+  default, marks the columns of pandas' `category` type that are not ordered,
+  and column names, positions or a boolean mask mark others. A column of pandas'
+  ordered `category` type that is not marked is read as the codes of its
+  categories, numbers in their order. A fitted model records `is_categorical_`
+  and `categories_`, and a category that the context did not hold is read as
+  missing. TabPFN and Kumo Tabular encode the marked columns as they were
+  trained to; TabICL, TabFM and LimiX-2 read their codes as numbers, and declare
+  so in the new backend attribute `native_categorical`. TabFM's own encoding
+  scored worse than its codes on 25 of 38 datasets, by a median of 0.44% in
+  CRPS. A table with a column of text categories, which every model refused, now
+  fits. `lazy.interp` keeps each column's type through its refits.
 - TabPFN's `provenance_` records `MAX_UNIQUE_FOR_CATEGORICAL_FEATURES` in
   its `inference_config`: 30 up to v3 and 1,000,000 on v3.5, as each
   checkpoint stores it. Up to v3, a categorical column with more categories

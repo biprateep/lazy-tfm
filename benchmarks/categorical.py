@@ -12,8 +12,8 @@ MulTaBench's own split (fold 0), or a seeded 70/30 split for the others.
 
 Run it from the repository root, with the backend's extra and pyarrow::
 
-    uv run --extra tabfm --extra multabench \
-        python benchmarks/categorical.py --backend tabfm --out tabfm.csv
+    uv run --extra tabpfn --extra multabench \
+        python benchmarks/categorical.py --backend tabpfn --out tabpfn.csv
 
 It writes one row per dataset and arm, with the CRPS, the NLL, the RMSE of
 the mean and the seconds taken, and prints the setup first.
