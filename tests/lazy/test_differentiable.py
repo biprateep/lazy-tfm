@@ -31,6 +31,18 @@ def test_a_torch_histogram_has_the_log_density_of_its_numpy_twin():
         np.testing.assert_allclose(histogram.log_prob(y).numpy(), expected)
 
 
+def test_a_value_in_an_empty_bucket_leaves_finite_gradients():
+    log_masses = torch.log(torch.tensor([[0.5, 0.0, 0.5]])).requires_grad_()
+    histogram = _differentiable.TorchHistogram(
+        np.array([0.0, 1.0, 2.0, 3.0]), log_masses
+    )
+    mixture = _differentiable.TorchMixture((histogram,), np.array([1.0]))
+    log_density = mixture.log_prob([1.5])
+    log_density.sum().backward()
+    assert log_density.item() == -np.inf
+    assert log_masses.grad.isfinite().all()
+
+
 def test_a_torch_mixture_weights_its_parts():
     edges = np.array([0.0, 1.0, 2.0])
     parts = tuple(

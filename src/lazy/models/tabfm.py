@@ -77,6 +77,7 @@ from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _bucket_head
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _icl_stream
@@ -798,6 +799,28 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
             return parts[0]
         return distributions.MixtureDistribution.equal(parts)
 
+    def _forward_group(
+        self,
+        handle: Any,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> _differentiable.TorchDensity:
+        del handle  # Unused: the hierarchy is refitted on X and y.
+        model = self._network()
+        _differentiable.frozen(model)
+        y = np.clip(y, *self.support_)
+        parts = tuple(
+            self._forward_hierarchy(model, group, X, y, query, shift)
+            for shift in self._shifts()
+        )
+        if len(parts) == 1:
+            return parts[0]
+        return _differentiable.TorchMixture(
+            parts, np.full(len(parts), 1 / len(parts))
+        )
+
     def _native_grid(self) -> grid_lib.Grid:
         if self.bin_grid_ is not None:
             return self.bin_grid_
@@ -925,6 +948,163 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
                 f" ({int(rows.sum())} context rows)"
             )
         return np.concatenate(blocks, axis=1), edges
+
+    def _forward_hierarchy(
+        self,
+        model: Any,
+        group: _members.MemberGroup,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        shift: float,
+    ) -> _differentiable.TorchHistogram:
+        """:meth:`_hierarchy` on torch's autograd graph, for one dither.
+
+        Args:
+            model: The loaded TabFM backbone.
+            group: The members to run.
+            X: The group's context features, prepared, a torch tensor of
+                shape (n_rows, n_features').
+            y: Their target values, clipped to ``support_``, shape
+                (n_rows,).
+            query: Query features, prepared, a torch tensor of shape
+                (n_queries, n_features').
+            shift: Edge shift in quantile space, in bins.
+
+        Returns:
+            The bin masses of the queries.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        edges, coarse_edges, fine_edges = self._edges(self.y_context_, shift)
+        coarse = _bin_labels(coarse_edges, y)
+        log_coarse = self._log_class_probabilities(
+            model,
+            group,
+            X,
+            coarse,
+            coarse_edges.size - 1,
+            query,
+            group.seed,
+        )
+        blocks = []
+        for j, level_edges in enumerate(fine_edges):
+            rows = np.flatnonzero(coarse == j)
+            log_fine = self._log_class_probabilities(
+                model,
+                group,
+                X[torch.as_tensor(rows, device=X.device)],
+                _bin_labels(level_edges, y[rows]),
+                level_edges.size - 1,
+                query,
+                group.seed + 1 + j,
+            )
+            blocks.append(log_fine + log_coarse[:, [j]])
+        return _differentiable.TorchHistogram(edges, torch.cat(blocks, dim=1))
+
+    def _log_class_probabilities(
+        self,
+        model: Any,
+        group: _members.MemberGroup,
+        X: Any,
+        labels: _typing.IntArray,
+        n_classes: int,
+        query: Any,
+        seed: int,
+    ) -> Any:
+        """:meth:`_class_probabilities`, as logs, on torch's autograd graph.
+
+        The classifier is fitted on the detached context, for its kept
+        columns, column orders and class shifts; the members' features are
+        then made again from ``X`` and ``query`` on the graph, and run
+        through the backbone as upstream's ``predict_proba`` runs them, all
+        members in one batch. The backbone's activations are recomputed in
+        the backward pass rather than kept, since every level's graph lives
+        until then and each would hold about a gigabyte on a CPU.
+
+        Args:
+            model: The loaded TabFM backbone.
+            group: The members to run.
+            X: The level's context features, a torch tensor of shape
+                (n_rows, n_features').
+            labels: Their classes, shape (n_rows,).
+            n_classes: The level's class count.
+            query: Query features, a torch tensor of shape (n_queries,
+                n_features').
+            seed: The classifier's seed.
+
+        Returns:
+            The log-posteriors, a float64 torch tensor on the CPU, of shape
+            (n_queries, n_classes); a class with no context row has
+            ``-inf``.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+        from torch.utils import checkpoint  # noqa: PLC0415 - as torch.
+
+        full = torch.full(
+            (len(query), n_classes), -math.inf, dtype=torch.float64
+        )
+        present = np.unique(labels)
+        if present.size < 2:
+            full[:, present] = 0.0
+            return full
+        classifier = self._classifier(model, group, seed)
+        classifier.fit(
+            _frame(X.detach().cpu().numpy(), self._categorical_columns(group)),
+            labels,
+        )
+        # Upstream's fitted state, which predict_proba reads too; the
+        # checkpoint test compares the two paths.
+        generator = classifier.ensemble_generator_
+        offsets = _icl_stream.class_shift_offsets(classifier)
+        n_rows, n_present = len(labels), int(classifier.n_classes_)
+        # Each member's shifted classes, and upstream's -100 for the queries.
+        targets = torch.as_tensor(
+            np.pad(
+                _icl_stream.context_tensors(generator)[1],
+                ((0, 0), (0, len(query))),
+                constant_values=-100,
+            ),
+            device=self.device_,
+        )
+        batch = self.member_batch_size
+
+        def forward(context: Any, queries: Any) -> Any:
+            members = _differentiable.standardized_members(
+                context,
+                queries,
+                generator.unique_filter_.features_to_keep_,
+                generator.feature_shuffle_patterns_["none"],
+            ).to(self.device_)
+            # In batches of members, as predict runs them.
+            logits = [
+                model(
+                    members[start : start + batch],
+                    targets[start : start + batch],
+                    torch.full(
+                        (len(members[start : start + batch]),),
+                        n_rows,
+                        device=self.device_,
+                    ),
+                )
+                for start in range(0, len(members), batch)
+            ]
+            return torch.cat(logits)[:, n_rows:, :n_present]
+
+        logits = checkpoint.checkpoint(forward, X, query, use_reentrant=False)
+        # On the CPU for float64, which an Apple GPU lacks.
+        mean = torch.stack(
+            [
+                torch.roll(member, -shift, dims=-1)
+                for member, shift in zip(
+                    logits.cpu().double(), offsets, strict=True
+                )
+            ]
+        ).mean(dim=0)
+        full[:, np.asarray(classifier.classes_, dtype=int)] = torch.log_softmax(
+            mean / self._temperature(), dim=-1
+        )
+        return full
 
     def _shifts(self) -> list[float]:
         """Each dither's edge shift in quantile space, in bins."""

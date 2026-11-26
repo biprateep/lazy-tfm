@@ -860,10 +860,9 @@ def _members_features(regressor: Any, X: Any, query: Any) -> Any:
     """Upstream's ensemble view of the context and the queries, in torch.
 
     What ``EnsembleGenerator.transform(query, mode="both")`` gives under
-    ``norm_methods=["none"]`` with no clip, on the graph: the columns kept
-    at fit, standardized on the context and clipped to [-100, 100] as
-    upstream's ``CustomStandardScaler`` does, then each member's column
-    shuffle. Upstream's imputer leaves finite features as they are.
+    ``norm_methods=["none"]`` with no clip, on the graph
+    (:func:`lazy.models._differentiable.standardized_members`). Upstream's
+    imputer leaves finite features as they are.
 
     Args:
         regressor: A ``TabICLRegressor`` fitted on ``X``.
@@ -875,18 +874,13 @@ def _members_features(regressor: Any, X: Any, query: Any) -> Any:
         The members' features, float32 on the CPU, shape (n_members, n_rows
         + n_queries, n_kept).
     """
-    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
-
     generator = regressor.ensemble_generator_
-    keep = torch.as_tensor(generator.unique_filter_.features_to_keep_)
-    # On the CPU for float64, which an Apple GPU lacks.
-    context = X.cpu()[:, keep].double()
-    query = query.cpu()[:, keep].double()
-    context, query = _differentiable.standardized(context, query, 1e-6)
-    both = torch.cat([context, query]).clamp(-100, 100)
-    return torch.stack(
-        [both[:, shuffle] for shuffle in generator.feature_shuffles_["none"]]
-    ).float()
+    return _differentiable.standardized_members(
+        X,
+        query,
+        generator.unique_filter_.features_to_keep_,
+        generator.feature_shuffles_["none"],
+    )
 
 
 @contextlib.contextmanager

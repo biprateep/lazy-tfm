@@ -78,6 +78,41 @@ def standardized(context: Any, query: Any, eps: float) -> tuple[Any, Any]:
     return (context - mean) / std, (query - mean) / std
 
 
+def standardized_members(
+    context: Any, query: Any, keep: Any, shuffles: list[Any]
+) -> Any:
+    """Each member's view of the features, standardized, on the graph.
+
+    The ``"none"`` view of in-context models whose members standardize
+    finite numeric features and shuffle their columns: the columns kept at
+    fit, standardized on the context with ``eps`` 1e-6 and clipped to
+    [-100, 100], then each member's column order, the context rows before
+    the queries.
+
+    Args:
+        context: Context features, a torch tensor of shape (n_rows,
+            n_features).
+        query: Query features, a torch tensor of shape (n_queries,
+            n_features).
+        keep: Which columns the model kept, bool, shape
+            (n_features,).
+        shuffles: Each member's column order over the kept columns.
+
+    Returns:
+        The members' features, float32 on the CPU, shape (n_members, n_rows
+        + n_queries, n_kept).
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    keep = torch.as_tensor(keep)
+    # On the CPU for float64, which an Apple GPU lacks.
+    context, query = standardized(
+        context.cpu()[:, keep].double(), query.cpu()[:, keep].double(), 1e-6
+    )
+    both = torch.cat([context, query]).clamp(-100, 100)
+    return torch.stack([both[:, shuffle] for shuffle in shuffles]).float()
+
+
 @dataclasses.dataclass(frozen=True)
 class TorchHistogram:
     """Probability masses over fixed buckets, as a torch tensor.
@@ -128,20 +163,21 @@ class TorchHistogram:
         # On the CPU from here, in float64, which an Apple GPU lacks.
         rows = self.log_masses.gather(1, index_t[:, None])[:, 0].cpu().double()
         log_widths = np.log(np.where(widths[index] > 0, widths[index], 1.0))
-        valid = torch.as_tensor(inside & (widths[index] > 0))
+        # An empty bucket's log-mass is -inf, whose gradient would be NaN.
+        valid = torch.as_tensor(inside & (widths[index] > 0)) & rows.isfinite()
         return torch.where(valid, rows - torch.as_tensor(log_widths), -math.inf)
 
 
 @dataclasses.dataclass(frozen=True)
 class TorchMixture:
-    """A weighted mixture of densities, as a model pools its member groups.
+    """A weighted mixture of densities, as a model pools its parts.
 
     Attributes:
         parts: The components, each with :meth:`log_prob`.
         weights: Their weights, summing to 1, shape (n_parts,).
     """
 
-    parts: tuple[TorchHistogram, ...]
+    parts: tuple[TorchDensity, ...]
     weights: _typing.FloatArray
 
     def log_prob(self, y: Any) -> Any:
@@ -276,3 +312,7 @@ class TorchQuantiles:
             log_mass - torch.log(torch.where(valid, width, 1.0)),
             -math.inf,
         )
+
+
+TorchDensity = TorchHistogram | TorchMixture | TorchQuantiles
+"""A density on torch's autograd graph, with :meth:`log_prob`."""
