@@ -265,14 +265,70 @@ def forward(
     device = _device_of(network)
     x = np.concatenate([member.x, x_query]).astype(np.float32)
     with _inference(device, mixed_precision=mixed_precision):
-        output = network(
-            x=torch.from_numpy(x).to(device)[None],
-            y=_tensor(member.y, device)[None],
-            eval_pos=len(member.y),
-            task_type="Regression",
-            feature_positional_embedding_generator=_generator(member.seed),
+        return _numpy(
+            _reg_output(
+                network,
+                torch.from_numpy(x).to(device),
+                _tensor(member.y, device),
+                member.seed,
+            )
         )
-        return _numpy(output["reg_output"][0])
+
+
+def forward_graph(
+    network: Any,
+    x_context: Any,
+    y: _typing.FloatArray,
+    x_query: Any,
+    *,
+    seed: int,
+    mixed_precision: bool,
+) -> Any:
+    """:func:`forward`, on torch's autograd graph.
+
+    Args:
+        network: The loaded network.
+        x_context: Preprocessed context features, a torch tensor of shape
+            (n_rows, n_features).
+        y: The context's standardized targets, shape (n_rows,).
+        x_query: Preprocessed query features, a torch tensor of shape
+            (n_queries, n_features).
+        seed: The member's seed.
+        mixed_precision: Run under autocast (CUDA only).
+
+    Returns:
+        Logits over the network's buckets, a torch tensor of shape
+        (n_queries, n_buckets) that keeps the features' gradients.
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    device = _device_of(network)
+    x = torch.cat([x_context, x_query]).to(device, torch.float32)
+    with _autocast(device, mixed_precision=mixed_precision):
+        return _reg_output(network, x, _tensor(y, device), seed)[0]
+
+
+def _reg_output(network: Any, x: Any, y: Any, seed: int) -> Any:
+    """Upstream's regression output for a context and its queries.
+
+    Args:
+        network: The loaded network.
+        x: The context rows, then the query rows, float32, shape (n_rows +
+            n_queries, n_features).
+        y: The context's standardized targets, float32, shape (n_rows,).
+        seed: The member's seed, for its feature positional embedding.
+
+    Returns:
+        The logits, shape (1, n_queries, n_buckets).
+    """
+    output = network(
+        x=x[None],
+        y=y[None],
+        eval_pos=len(y),
+        task_type="Regression",
+        feature_positional_embedding_generator=_generator(seed),
+    )
+    return output["reg_output"][0]
 
 
 def _encode(
@@ -366,13 +422,18 @@ def _inference(device: Any, *, mixed_precision: bool) -> Any:
 
     stack = contextlib.ExitStack()
     stack.enter_context(torch.inference_mode())
-    stack.enter_context(
-        torch.autocast(
-            device_type=device.type,
-            enabled=mixed_precision and device.type == "cuda",
-        )
-    )
+    stack.enter_context(_autocast(device, mixed_precision=mixed_precision))
     return stack
+
+
+def _autocast(device: Any, *, mixed_precision: bool) -> Any:
+    """Upstream's autocast: on CUDA only, when mixed precision is asked."""
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    return torch.autocast(
+        device_type=device.type,
+        enabled=mixed_precision and device.type == "cuda",
+    )
 
 
 def _generator(seed: int) -> Any:

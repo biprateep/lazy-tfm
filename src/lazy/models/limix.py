@@ -61,6 +61,7 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy.models import _bucket_head
 from lazy.models import _device
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _limix_preprocess
 from lazy.models import _limix_source
@@ -430,6 +431,54 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         masses /= len(handle["members"])
         edges = _bucket_edges(self.borders_, handle["mean"], handle["std"])
         return distributions.HistogramDistribution(edges, masses)
+
+    def _forward_group(
+        self,
+        handle: Any,
+        X: Any,
+        y: _typing.FloatArray,
+        query: Any,
+        group: _members.MemberGroup,
+    ) -> _differentiable.TorchHistogram:
+        # Under "none", a member's view is a selection of the columns, so it
+        # is taken on the graph. Each member's pipeline is refitted on these
+        # features, since the columns it keeps depend on the context.
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        del group  # Unused: each member's pipeline holds its recipe.
+        mean, std = _standardisation(y)
+        edges = _bucket_edges(self.borders_, mean, std)
+        target = (y - mean) / std
+        temperature = self._temperature()
+        network = self._network()
+        _differentiable.frozen(network)
+        context = X.detach().cpu().double().numpy()
+        log_probabilities = []
+        for entry in handle["members"]:
+            fitted = entry["pipeline"]
+            columns = torch.as_tensor(
+                _limix_preprocess.MemberPipeline(
+                    fitted.token, fitted.seeds, shuffle=fitted.shuffle
+                )
+                .fit(context)
+                .columns()
+            )
+            logits = _limix_stream.forward_graph(
+                network,
+                X[:, columns],
+                target,
+                query[:, columns],
+                seed=entry["member"].seed,
+                mixed_precision=self.mixed_precision_,
+            )
+            log_probabilities.append(
+                # On the CPU, in float64, which an Apple GPU lacks.
+                (logits.cpu().double() / temperature).log_softmax(-1)
+            )
+        # The members' probabilities are averaged, as _predict_group does.
+        return _differentiable.TorchHistogram(
+            edges, _differentiable.mean_of_softmaxes(log_probabilities)
+        )
 
     def _native_grid(self) -> grid_lib.Grid:
         # Fit has checked that no group's buckets merge.

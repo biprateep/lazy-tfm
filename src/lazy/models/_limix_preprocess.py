@@ -286,6 +286,26 @@ class MemberPipeline:
         self.n_features_out_ = int(rebalanced.shape[1])
         return self
 
+    def columns(self) -> _typing.IntArray:
+        """The input columns the member reads, in its order.
+
+        Under the ``"none"`` pipeline its view is exactly these columns of
+        the features: the columns kept, then shuffled.
+
+        Returns:
+            Column indices, shape (``n_features_out_``,).
+
+        Raises:
+            ValueError: Unless the pipeline is ``"none"``, whose view is
+                not a selection of columns.
+        """
+        if self.token != "none":
+            raise ValueError(
+                f"pipeline {self.token!r} transforms its columns; only "
+                "'none' selects them"
+            )
+        return np.flatnonzero(self.keep_)[self._shuffler.feature_indices]
+
     def transform(self, features: _typing.FloatArray) -> _typing.FloatArray:
         """Applies the fitted steps to any rows.
 
