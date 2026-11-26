@@ -2,8 +2,13 @@
 # Copyright (c) 2025 Biprateep Dey
 """Predicted densities that keep torch's autograd graph.
 
-Their :meth:`log_prob` takes gradients, for a loss or an attribution, with
-respect to the features the densities came from.
+Their :meth:`log_prob`, :meth:`on_grid` and :meth:`mean` take gradients, for
+a loss or an attribution, with respect to the features the densities came
+from. ``on_grid`` and ``mean`` run the code of their numpy twins in
+:mod:`lazy.distributions`, which is written for any array, so they give what
+the twins give, to float rounding. As there, every search for an index (a
+bucket, a piece of a quantile function) runs in numpy on detached values and
+carries no gradient; the gradients pass through the masses and the values.
 
 Typical usage example:
 
@@ -19,8 +24,11 @@ from typing import Any
 
 import numpy as np
 
+from lazy import _arrays
 from lazy import _typing
 from lazy import distributions
+from lazy import grid as grid_lib
+from lazy import metrics
 
 
 def frozen(*networks: Any) -> None:
@@ -113,8 +121,30 @@ def standardized_members(
     return torch.stack([both[:, shuffle] for shuffle in shuffles]).float()
 
 
+class _OnGrid:
+    """Gives a torch density :meth:`on_grid` from its ``_bin_densities``."""
+
+    def _bin_densities(self, grid: grid_lib.Grid) -> Any:
+        """The mass in each bin of ``grid`` over its width, unnormalized."""
+        raise NotImplementedError
+
+    def on_grid(self, grid: grid_lib.Grid) -> Any:
+        """Densities on ``grid``, as the numpy twin's ``on_grid`` gives them.
+
+        Args:
+            grid: The grid to put the densities on.
+
+        Returns:
+            Normalized densities, a float64 torch tensor on the CPU of
+            shape (n_rows, grid.n_bins).
+        """
+        return metrics._normalized(  # noqa: SLF001 - Grid.normalize's code.
+            grid.centers, grid.histogram_edges, self._bin_densities(grid)
+        )
+
+
 @dataclasses.dataclass(frozen=True)
-class TorchHistogram:
+class TorchHistogram(_OnGrid):
     """Probability masses over fixed buckets, as a torch tensor.
 
     Attributes:
@@ -154,7 +184,6 @@ class TorchHistogram:
                 f"y must have one value per row, shape "
                 f"({self.log_masses.shape[0]},); got {values.shape}"
             )
-        # The bucket carries no gradient, so numpy finds it.
         index = distributions._closed_bucket(self.edges, values)  # noqa: SLF001 - HistogramDistribution.pdf's rule.
         widths = np.diff(self.edges)
         inside = (index >= 0) & (index < widths.size)
@@ -167,9 +196,30 @@ class TorchHistogram:
         valid = torch.as_tensor(inside & (widths[index] > 0)) & rows.isfinite()
         return torch.where(valid, rows - torch.as_tensor(log_widths), -math.inf)
 
+    def _probabilities(self) -> Any:
+        """The masses, each row renormalized, a float64 tensor on the CPU.
+
+        As :attr:`lazy.distributions.HistogramDistribution.probabilities`
+        gives them for ``exp(log_masses)``.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        masses = torch.exp(self.log_masses.cpu().double())
+        return distributions._probabilities(masses, np.diff(self.edges))  # noqa: SLF001 - HistogramDistribution's code.
+
+    def _bin_densities(self, grid: grid_lib.Grid) -> Any:
+        """HistogramDistribution's unnormalized densities on ``grid``."""
+        return distributions._histogram_bin_densities(  # noqa: SLF001 - HistogramDistribution's code.
+            self.edges, self._probabilities(), grid.edges
+        )
+
+    def mean(self) -> Any:
+        """The mean of each row, a float64 tensor on the CPU, (n_rows,)."""
+        return distributions._histogram_mean(self.edges, self._probabilities())  # noqa: SLF001 - HistogramDistribution's code.
+
 
 @dataclasses.dataclass(frozen=True)
-class TorchMixture:
+class TorchMixture(_OnGrid):
     """A weighted mixture of densities, as a model pools its parts.
 
     Attributes:
@@ -195,9 +245,26 @@ class TorchMixture:
         log_weights = torch.log(torch.as_tensor(self.weights))
         return torch.logsumexp(terms + log_weights[:, None], dim=0)
 
+    def _bin_densities(self, grid: grid_lib.Grid) -> Any:
+        """The parts' unnormalized densities on ``grid``, weighted.
+
+        :meth:`on_grid` normalizes their sum, as
+        :meth:`lazy.distributions.MixtureDistribution.on_grid` does.
+        """
+        return _arrays.weighted_total(
+            self.weights,
+            (part._bin_densities(grid) for part in self.parts),  # noqa: SLF001 - one implementation.
+        )
+
+    def mean(self) -> Any:
+        """The mean of each row, a float64 tensor on the CPU, (n_rows,)."""
+        return _arrays.weighted_total(
+            self.weights, (part.mean() for part in self.parts)
+        )
+
 
 @dataclasses.dataclass(frozen=True)
-class TorchQuantiles:
+class TorchQuantiles(_OnGrid):
     """Values at fixed quantile levels, as a torch tensor.
 
     Its density is :meth:`lazy.distributions.QuantileDistribution.pdf`'s,
@@ -296,7 +363,6 @@ class TorchQuantiles:
                 f"y must have one value per row, shape ({locs.shape[0]},); "
                 f"got {values.shape}"
             )
-        # The piece holding each value carries no gradient; its width does.
         mass, gap = distributions._quantile_pieces(  # noqa: SLF001 - QuantileDistribution.pdf's rule.
             np.asarray(self.levels, dtype=np.float64),
             locs.detach().numpy(),
@@ -313,6 +379,21 @@ class TorchQuantiles:
             -math.inf,
         )
 
+    def _bin_densities(self, grid: grid_lib.Grid) -> Any:
+        """QuantileDistribution's unnormalized densities on ``grid``."""
+        return distributions._quantile_bin_densities(  # noqa: SLF001 - QuantileDistribution's code.
+            np.asarray(self.levels, dtype=np.float64),
+            self.locs.cpu(),
+            grid.edges,
+        )
+
+    def mean(self) -> Any:
+        """The mean of each row, a float64 tensor on the CPU, (n_rows,)."""
+        return distributions._quantile_mean(  # noqa: SLF001 - QuantileDistribution's code.
+            np.asarray(self.levels, dtype=np.float64), self.locs.cpu()
+        )
+
 
 TorchDensity = TorchHistogram | TorchMixture | TorchQuantiles
-"""A density on torch's autograd graph, with :meth:`log_prob`."""
+"""A density on torch's autograd graph, with ``log_prob``, ``on_grid`` and
+``mean``."""

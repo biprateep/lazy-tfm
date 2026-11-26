@@ -79,13 +79,16 @@ from __future__ import annotations
 from collections.abc import Callable
 import dataclasses
 import functools
+import operator
 from typing import Any, Literal, TypeAlias
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from scipy import stats
 
+from lazy import _arrays
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -323,39 +326,67 @@ def normalize_grid_pdfs(
         raise ValueError(
             "y_grid must be strictly increasing with at least two points"
         )
-    finite = np.isfinite(density)
-    if not finite.all():
-        density[~finite] = 0.0
-    np.clip(density, 0.0, None, out=density)
-    if bin_edges is not None:
-        widths = _bin_widths(bin_edges, grid.size)
-        mass = _row_masses(density, widths)
-        bad = ~(mass > 0)
-        if bad.any():
-            density[bad] = 1.0
-            mass = _row_masses(density, widths)
-        density /= mass[:, None]
-        return grid, density
-    mass = np.trapezoid(density, grid, axis=1)
-    bad = ~(mass > 0)
-    if bad.any():
-        density[bad] = 1.0
-        mass = np.trapezoid(density, grid, axis=1)
-    density /= mass[:, None]
-    return grid, density
+    return grid, _normalized(grid, bin_edges, density)
 
 
-def _row_masses(
-    density: _typing.FloatArray, widths: _typing.FloatArray
-) -> _typing.FloatArray:
-    """Each row's ``sum(density * widths)``, shape (n,), row by row.
+def _normalized(
+    grid: _typing.FloatArray, bin_edges: npt.ArrayLike | None, density: Any
+) -> Any:
+    """:func:`normalize_grid_pdfs`'s densities, for numpy's or torch's.
 
-    One dot product per row, so a row's mass does not depend on how many
-    rows come with it; ``density @ widths`` is one BLAS matrix-vector
-    product, which rounds a row differently with the row count and would
-    make chunked predictions differ from unchunked ones in the last bit.
+    Args:
+        grid: Strictly increasing bin centers, shape (g,).
+        bin_edges: The edges of a histogram grid, shape (g + 1,), or None
+            for a trapezoid grid.
+        density: Densities at the centers, shape (n, g): a numpy array,
+            which is normalized in place, or a torch tensor.
+
+    Returns:
+        The normalized densities, of ``density``'s kind and shape.
     """
-    return np.matmul(density[:, None, :], widths[:, None])[:, 0, 0]
+    xp = array_api_compat.array_namespace(density)
+    finite = xp.isfinite(density)
+    if not bool(xp.all(finite)):
+        density = _arrays.put(density, ~finite, 0.0)
+    density = _arrays.clip(density, 0.0)
+    mass = _mass(grid, bin_edges, density)
+    bad = ~(mass > 0)
+    if bool(xp.any(bad)):
+        density = _arrays.put(density, bad[:, None], 1.0)
+        mass = _mass(grid, bin_edges, density)
+    return _arrays.update(density, operator.truediv, mass[:, None])
+
+
+def _mass(
+    grid: _typing.FloatArray, bin_edges: npt.ArrayLike | None, density: Any
+) -> Any:
+    """Each row's mass by the grid's convention, shape (n,).
+
+    On a histogram grid, ``sum(density * widths)``, one dot product per
+    row, so a row's mass does not depend on how many rows come with it;
+    ``density @ widths`` is one BLAS matrix-vector product, which rounds a
+    row differently with the row count and would make chunked predictions
+    differ from unchunked ones in the last bit.
+    """
+    if bin_edges is None:
+        return _trapezoid(density, grid)
+    xp = array_api_compat.array_namespace(density)
+    widths = xp.asarray(_bin_widths(bin_edges, grid.size))
+    return (density[:, None, :] @ widths[:, None])[:, 0, 0]
+
+
+def _trapezoid(y: Any, x: _typing.FloatArray) -> Any:
+    """``np.trapezoid(y, x, axis=1)`` by its own formula, for any array.
+
+    Args:
+        y: Values at ``x``, shape (n, g), a numpy array or a torch tensor.
+        x: Strictly increasing points, shape (g,).
+
+    Returns:
+        The integral of each row, of ``y``'s kind and shape (n,).
+    """
+    xp = array_api_compat.array_namespace(y)
+    return xp.sum(xp.asarray(np.diff(x)) * (y[:, 1:] + y[:, :-1]) / 2.0, axis=1)
 
 
 def normalization_error(
@@ -406,14 +437,21 @@ def grid_cdf(
     """
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     grid = np.asarray(y_grid, dtype=float)
-    density = np.asarray(density, dtype=float)
+    return _grid_cdf(grid, bin_edges, np.asarray(density, dtype=float))
+
+
+def _grid_cdf(
+    grid: _typing.FloatArray, bin_edges: npt.ArrayLike | None, density: Any
+) -> Any:
+    """:func:`grid_cdf` of numpy's or torch's densities, of their kind."""
+    xp = array_api_compat.array_namespace(density)
     if bin_edges is not None:
-        mass = density * _bin_widths(bin_edges, grid.size)
-        return np.cumsum(mass, axis=1) - 0.5 * mass
-    increments = 0.5 * (density[:, 1:] + density[:, :-1]) * np.diff(grid)
-    return np.column_stack(
-        (np.zeros(len(density)), np.cumsum(increments, axis=1))
+        mass = density * xp.asarray(_bin_widths(bin_edges, grid.size))
+        return xp.cumulative_sum(mass, axis=1) - 0.5 * mass
+    increments = (
+        0.5 * (density[:, 1:] + density[:, :-1]) * xp.asarray(np.diff(grid))
     )
+    return xp.cumulative_sum(increments, axis=1, include_initial=True)
 
 
 def mode(
@@ -681,11 +719,36 @@ def evaluate_grid_at_truth(
         raise ValueError("y_true must have one value per PDF")
     if not np.isfinite(truth).all():
         raise ValueError("y_true contains non-finite values")
+    return grid, density, *_at_truth(truth, grid, bin_edges, density)
+
+
+def _at_truth(
+    truth: _typing.FloatArray,
+    grid: _typing.FloatArray,
+    bin_edges: npt.ArrayLike | None,
+    density: Any,
+) -> tuple[Any, Any]:
+    """Returns a tuple (pdf_at_truth, pit) of normalized densities.
+
+    As :func:`evaluate_grid_at_truth` gives them, for numpy's or torch's
+    densities.
+
+    Args:
+        truth: Finite true values, shape (n,).
+        grid: Strictly increasing bin centers, shape (g,).
+        bin_edges: The edges of a histogram grid, shape (g + 1,), or None
+            for a trapezoid grid.
+        density: Normalized densities at the centers, shape (n, g).
+
+    Returns:
+        The density at each truth and its PIT value, each of ``density``'s
+        kind and shape (n,).
+    """
     if bin_edges is not None:
-        pdf_at_truth, pit = _histogram_at_truth(truth, bin_edges, density)
-        return grid, density, pdf_at_truth, pit
+        return _histogram_at_truth(truth, bin_edges, density)
+    xp = array_api_compat.array_namespace(density)
     rows = np.arange(truth.size)
-    cdf = grid_cdf(grid, density)
+    cdf = _grid_cdf(grid, None, density)
     right = np.clip(
         np.searchsorted(grid, truth, side="right"), 1, grid.size - 1
     )
@@ -696,16 +759,34 @@ def evaluate_grid_at_truth(
         0,
         grid.size - 1,
     )
-    pdf_at_truth = np.where(
-        (truth < grid[0] - 0.5 * (grid[1] - grid[0]))
-        | (truth > grid[-1] + 0.5 * (grid[-1] - grid[-2])),
-        0.0,
-        density[rows, nearest],
+    off = (truth < grid[0] - 0.5 * (grid[1] - grid[0])) | (
+        truth > grid[-1] + 0.5 * (grid[-1] - grid[-2])
     )
-    pit = cdf[rows, left] + frac * (cdf[rows, right] - cdf[rows, left])
-    pit = np.where(truth <= grid[0], 0.0, np.where(truth >= grid[-1], 1.0, pit))
+    pdf_at_truth = xp.where(xp.asarray(off), 0.0, density[rows, nearest])
+    pit = cdf[rows, left] + xp.asarray(frac) * (
+        cdf[rows, right] - cdf[rows, left]
+    )
+    return pdf_at_truth, _pit(pit, truth <= grid[0], truth >= grid[-1])
+
+
+def _pit(
+    pit: Any, below: npt.NDArray[np.bool_], above: npt.NDArray[np.bool_]
+) -> Any:
+    """PIT values: 0 below the grid, 1 above it, within [0, 1] in between.
+
+    Args:
+        pit: The PIT values interpolated inside the grid, shape (n,), a
+            numpy array the caller made or a torch tensor.
+        below: Where the truth is below the grid, shape (n,).
+        above: Where the truth is above the grid, shape (n,).
+
+    Returns:
+        The PIT values, of ``pit``'s kind and shape (n,).
+    """
+    pit = _arrays.put(pit, above, 1.0)
+    pit = _arrays.put(pit, below, 0.0)
     # A cumulative sum of unit mass can round to just above one.
-    return grid, density, pdf_at_truth, np.clip(pit, 0.0, 1.0)
+    return _arrays.clip(pit, 0.0, 1.0)
 
 
 def cde_loss(
@@ -975,8 +1056,9 @@ def _check_floor(floor: float) -> None:
 def _nll_terms(
     pdf_at_truth: _typing.FloatArray, floor: float
 ) -> _typing.FloatArray:
-    """``-log max(p, floor)`` elementwise."""
-    return -np.log(np.maximum(pdf_at_truth, floor))
+    """``-log max(p, floor)`` elementwise, for numpy's or torch's ``p``."""
+    xp = array_api_compat.array_namespace(pdf_at_truth)
+    return -xp.log(xp.where(pdf_at_truth < floor, floor, pdf_at_truth))
 
 
 def _crps_terms(
@@ -985,12 +1067,18 @@ def _crps_terms(
     density: _typing.FloatArray,
     bin_edges: npt.ArrayLike | None,
 ) -> _typing.FloatArray:
-    """The CRPS of each normalized row, by its grid's convention."""
+    """The CRPS of each normalized row, by its grid's convention.
+
+    For numpy's or torch's densities, of their kind.
+    """
     if bin_edges is None:
-        return _crps_piecewise_linear(truth, grid, grid_cdf(grid, density))
+        return _crps_piecewise_linear(
+            truth, grid, _grid_cdf(grid, None, density)
+        )
+    xp = array_api_compat.array_namespace(density)
     edges = np.asarray(bin_edges, dtype=float)
-    mass = density * _bin_widths(edges, grid.size)
-    cdf = np.column_stack((np.zeros(len(density)), np.cumsum(mass, axis=1)))
+    mass = density * xp.asarray(_bin_widths(edges, grid.size))
+    cdf = xp.cumulative_sum(mass, axis=1, include_initial=True)
     return _crps_piecewise_linear(truth, edges, cdf)
 
 
@@ -1009,19 +1097,20 @@ def _crps_piecewise_linear(
     Args:
         truth: True values, shape (n,).
         nodes: Strictly increasing nodes, shape (m,), m >= 2.
-        cdf: The CDF at the nodes, shape (n, m).
+        cdf: The CDF at the nodes, shape (n, m), a numpy array or a torch
+            tensor.
 
     Returns:
-        The CRPS of each row, shape (n,).
+        The CRPS of each row, of ``cdf``'s kind and shape (n,).
     """
+    xp = array_api_compat.array_namespace(cdf)
     widths = np.diff(nodes)
     lower, upper = cdf[:, :-1], cdf[:, 1:]
-    below = widths * (lower**2 + lower * upper + upper**2) / 3.0
+    below = xp.asarray(widths) * (lower**2 + lower * upper + upper**2) / 3.0
     lower, upper = lower - 1.0, upper - 1.0
-    above = widths * (lower**2 + lower * upper + upper**2) / 3.0
-    zeros = np.zeros((len(cdf), 1))
-    below_before = np.hstack((zeros, np.cumsum(below, axis=1)))
-    above_before = np.hstack((zeros, np.cumsum(above, axis=1)))
+    above = xp.asarray(widths) * (lower**2 + lower * upper + upper**2) / 3.0
+    below_before = xp.cumulative_sum(below, axis=1, include_initial=True)
+    above_before = xp.cumulative_sum(above, axis=1, include_initial=True)
     rows = np.arange(truth.size)
     index = np.clip(
         np.searchsorted(nodes, truth, side="right") - 1, 0, widths.size - 1
@@ -1029,16 +1118,16 @@ def _crps_piecewise_linear(
     start, stop = nodes[index], nodes[index + 1]
     split = np.clip(truth, start, stop)
     cdf_start, cdf_stop = cdf[rows, index], cdf[rows, index + 1]
-    cdf_split = cdf_start + (cdf_stop - cdf_start) * (split - start) / (
-        stop - start
-    )
+    cdf_split = cdf_start + (cdf_stop - cdf_start) * xp.asarray(
+        split - start
+    ) / xp.asarray(stop - start)
     left = (
-        (split - start)
+        xp.asarray(split - start)
         * (cdf_start**2 + cdf_start * cdf_split + cdf_split**2)
         / 3.0
     )
     right = (
-        (stop - split)
+        xp.asarray(stop - split)
         * (
             (cdf_split - 1.0) ** 2
             + (cdf_split - 1.0) * (cdf_stop - 1.0)
@@ -1050,7 +1139,36 @@ def _crps_piecewise_linear(
     outside = np.maximum(nodes[0] - truth, 0.0) + np.maximum(
         truth - nodes[-1], 0.0
     )
-    return below_before[rows, index] + left + right + after + outside
+    return (
+        below_before[rows, index] + left + right + after + xp.asarray(outside)
+    )
+
+
+def _grid_scores(
+    truth: _typing.FloatArray, grid: grid_lib.Grid, density: Any
+) -> tuple[Any, Any]:
+    """The CRPS and NLL terms of densities on a grid, numpy's or torch's.
+
+    What :func:`per_object_metrics` gives for the CRPS and the NLL, with
+    the default floor; on a torch tensor, they keep its autograd graph.
+
+    Args:
+        truth: Finite true values, shape (n,).
+        grid: The grid the densities are on.
+        density: Densities at its centers, shape (n, grid.n_bins);
+            normalized here, in place if it is a numpy array.
+
+    Returns:
+        A tuple (crps_terms, nll_terms), each of ``density``'s kind and
+        shape (n,).
+    """
+    centers, edges = grid.centers, grid.histogram_edges
+    density = _normalized(centers, edges, density)
+    pdf_at_truth, _ = _at_truth(truth, centers, edges, density)
+    return (
+        _crps_terms(truth, centers, density, edges),
+        _nll_terms(pdf_at_truth, NLL_DENSITY_FLOOR),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1536,7 +1654,7 @@ def _integral_of_square(
 ) -> _typing.FloatArray:
     """The integral of p(y)^2 per row, by each grid convention."""
     if bin_edges is None:
-        return np.asarray(np.trapezoid(density**2, grid, axis=1))
+        return _trapezoid(density**2, grid)
     return (density**2) @ _bin_widths(bin_edges, grid.size)
 
 
@@ -1550,22 +1668,20 @@ def _histogram_at_truth(
     The density is that of the bin holding the truth, zero outside the
     edges (the last edge belongs to the last bin, as in ``np.histogram``);
     the PIT is the mass below the truth, linear within its bin. This
-    is the exact scoring of a bar distribution.
+    is the exact scoring of a bar distribution. For numpy's or torch's
+    densities, of their kind.
     """
+    xp = array_api_compat.array_namespace(density)
     edges = np.asarray(bin_edges, dtype=float)
     widths = _bin_widths(edges, density.shape[1])
-    mass = density * widths
-    below = np.cumsum(mass, axis=1) - mass
+    mass = density * xp.asarray(widths)
+    below = xp.cumulative_sum(mass, axis=1) - mass
     rows = np.arange(truth.size)
     index = np.clip(
         np.searchsorted(edges, truth, side="right") - 1, 0, widths.size - 1
     )
     inside = (truth >= edges[0]) & (truth <= edges[-1])
-    pdf_at_truth = np.where(inside, density[rows, index], 0.0)
+    pdf_at_truth = xp.where(xp.asarray(inside), density[rows, index], 0.0)
     fraction = np.clip((truth - edges[index]) / widths[index], 0.0, 1.0)
-    pit = below[rows, index] + mass[rows, index] * fraction
-    pit = np.where(
-        truth < edges[0], 0.0, np.where(truth >= edges[-1], 1.0, pit)
-    )
-    # A cumulative sum of unit mass can round to just above one.
-    return pdf_at_truth, np.clip(pit, 0.0, 1.0)
+    pit = below[rows, index] + mass[rows, index] * xp.asarray(fraction)
+    return pdf_at_truth, _pit(pit, truth < edges[0], truth >= edges[-1])

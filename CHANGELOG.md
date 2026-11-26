@@ -140,6 +140,10 @@ change the API.
 - `lazy.models.registry.register` refuses a backend whose constructor has a
   parameter without a default, since `cls()` could not build it. The five
   backends that ship are unaffected.
+- `array-api-compat` 1.14 or later is a new dependency. The densities on a
+  grid, the means and the grid metrics run one implementation for numpy
+  arrays and torch tensors, so that a gradient can pass through them. Their
+  numpy results are unchanged, bit for bit.
 
 ### Removed
 

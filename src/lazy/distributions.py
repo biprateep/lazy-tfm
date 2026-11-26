@@ -25,6 +25,15 @@ value, ``F_i(y_i)``, without the full ``cdf(values)`` table.
 ``to_qp`` / :func:`from_qp` convert to and from qp ensembles (install
 ``lazy-tfm[qp]``) for RAIL.
 
+The private functions that put a distribution on a grid, and compute its
+mean, take numpy arrays or torch tensors (through ``array_api_compat``), so
+that :mod:`lazy.models._differentiable` runs the same code on torch's
+autograd graph. Gradients pass through the arithmetic on the masses and on
+the quantile values. Every search for an index (a bucket, a knot, a tie)
+runs in numpy on detached values, carries no gradient, and gathers from the
+arrays with the indices it finds. The point masses of tied quantile values
+are steps between fixed levels, so they carry none either.
+
 Typical usage example:
 
   dist = model.predict_distribution(X_test)
@@ -37,8 +46,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 import dataclasses
+import operator
 from typing import Any, TypeAlias
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 
@@ -135,16 +146,15 @@ def _as_row_values(values: npt.ArrayLike, n_rows: int) -> _typing.FloatArray:
     return out
 
 
-def _unit(values: _typing.FloatArray) -> _typing.FloatArray:
-    """Cumulative probabilities clipped to [0, 1].
+def _unit(values: Any) -> Any:
+    """Cumulative probabilities clipped to [0, 1], numpy's or torch's.
 
     A cumulative sum of masses that add to one can round to just above one
     (or a weighted sum of CDFs to just outside [0, 1]); clipping keeps every
     CDF a probability and non-decreasing, so differences between its values
-    are never negative masses. Clips in place: every caller passes an array
-    it has just built.
+    are never negative masses.
     """
-    return np.clip(values, 0.0, 1.0, out=values)
+    return _arrays.clip(values, 0.0, 1.0)
 
 
 def _closed_bucket(
@@ -233,6 +243,370 @@ def _quantile_pieces(
         in_below, first[:, None], np.where(in_above, last[:, None], gap)
     )
     return mass, gap
+
+
+def _tail_widths(quants: _typing.FloatArray, locs: Any) -> tuple[Any, Any]:
+    """How far each quantile row's tails reach: a tuple (below, above).
+
+    One quantile spacing (:func:`_tail_gaps`); zero for a row whose values
+    are all equal and for a tail that carries no probability (a level of 0
+    or 1).
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels), a
+            numpy array or a torch tensor.
+
+    Returns:
+        A tuple (below, above), each of ``locs``'s kind and shape (n_rows,).
+    """
+    gaps = locs[:, 1:] - locs[:, :-1]
+    first, last = _tail_gaps(_arrays.detached(gaps))
+    rows = np.arange(len(first))
+    return (
+        gaps[rows, first] * float(quants[0] > 0),
+        gaps[rows, last] * float(quants[-1] < 1),
+    )
+
+
+def _knots(quants: _typing.FloatArray, locs: Any) -> tuple[Any, Any]:
+    """Returns a tuple (levels, locs): a quantile CDF's knots, tails included.
+
+    The levels gain 0 below and 1 above unless they already reach them,
+    and each row's values gain the ends of its tails.
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels), a
+            numpy array or a torch tensor.
+
+    Returns:
+        The levels, a numpy array of shape (n_knots,), and the values, of
+        ``locs``'s kind and shape (n_rows, n_knots).
+    """
+    xp = array_api_compat.array_namespace(locs)
+    levels = quants
+    below, above = _tail_widths(quants, locs)
+    if levels[0] > 0:
+        levels = np.concatenate([[0.0], levels])
+        locs = xp.concat([(locs[:, 0] - below)[:, None], locs], axis=1)
+    if levels[-1] < 1:
+        levels = np.concatenate([levels, [1.0]])
+        locs = xp.concat([locs, (locs[:, -1] + above)[:, None]], axis=1)
+    return levels, locs
+
+
+def _quantile_cdf(
+    quants: _typing.FloatArray, locs: Any, values: _typing.FloatArray
+) -> Any:
+    """Each quantile row's CDF at its own values; exact.
+
+    ``np.interp`` between the knots of :func:`_knots`; on a torch tensor,
+    np.interp's own formula, which keeps the graph.
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels), a
+            numpy array or a torch tensor.
+        values: Where to evaluate each row, shape (n_rows, n_values).
+
+    Returns:
+        The cumulative probabilities, within [0, 1], of ``locs``'s kind and
+        shape (n_rows, n_values).
+    """
+    xp = array_api_compat.array_namespace(locs)
+    levels, knots = _knots(quants, locs)
+    if array_api_compat.is_numpy_array(knots):
+        # The same values, several times faster: np.interp's C loop finds
+        # each knot from the one before.
+        out = np.empty(values.shape)
+        for row, row_values in enumerate(values):
+            out[row] = np.interp(
+                row_values, knots[row], levels, left=0.0, right=1.0
+            )
+        return _unit(out)
+    fixed = _arrays.detached(knots)
+    index = (
+        np.array(
+            [
+                np.searchsorted(row, row_values, side="right")
+                for row, row_values in zip(fixed, values, strict=True)
+            ],
+            dtype=np.intp,
+        ).reshape(values.shape)
+        - 1
+    )
+    last = levels.size - 1
+    start = np.clip(index, 0, last - 1)
+    rows = np.arange(len(fixed))[:, None]
+    # As np.interp: 0 below the knots, 1 from the last on, and a segment of
+    # no width at its level. On a knot, the formula gives the knot's own
+    # level exactly, and keeps the gradient of the segment above it.
+    exact = (
+        (index < 0)
+        | (index >= last)
+        | (fixed[rows, start + 1] == fixed[rows, start])
+    )
+    level = np.where(
+        index < 0, 0.0, np.where(index >= last, 1.0, levels[start])
+    )
+    low, high = knots[rows, start], knots[rows, start + 1]
+    slope = xp.asarray(np.diff(levels)[start]) / xp.where(
+        xp.asarray(exact), 1.0, high - low
+    )
+    # A copy: torch cannot wrap a read-only (broadcast) numpy array.
+    value = slope * (xp.asarray(values.copy()) - low) + xp.asarray(
+        levels[start]
+    )
+    return _unit(xp.where(xp.asarray(exact), xp.asarray(level), value))
+
+
+def _quantile_atoms(
+    quants: _typing.FloatArray,
+    locs: _typing.FloatArray,
+    values: _typing.FloatArray,
+) -> _typing.FloatArray | None:
+    """Each quantile row's point mass at ``values``, or None for none.
+
+    A tail has no width only in a row of equal values, so every point mass
+    is a tie between values; most rows have none to look for.
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels).
+        values: Where to look, shape (n_values,).
+
+    Returns:
+        The point masses, shape (n_rows, n_values), or None.
+    """
+    if not (locs[:, 1:] == locs[:, :-1]).any():
+        return None
+    levels, knots = _knots(quants, locs)
+    steps = np.diff(levels)
+    tied = (np.diff(knots, axis=1) == 0) & (steps > 0)
+    if not tied.any():
+        return None
+    out = np.zeros((len(locs), values.size))
+    for row, knot in zip(*np.nonzero(tied), strict=True):
+        out[row] += steps[knot] * (values == knots[row, knot])
+    return out
+
+
+def _quantile_bin_densities(
+    quants: _typing.FloatArray, locs: Any, edges: _typing.FloatArray
+) -> Any:
+    """The mass of each quantile row in each bin over its width.
+
+    Args:
+        quants: The levels, increasing, shape (n_levels,).
+        locs: Each row's values, non-decreasing, shape (n_rows, n_levels), a
+            numpy array or a torch tensor.
+        edges: The bin edges, strictly increasing, shape (n_bins + 1,).
+
+    Returns:
+        The unnormalized densities, of ``locs``'s kind and shape (n_rows,
+        n_bins).
+    """
+    xp = array_api_compat.array_namespace(locs)
+    cdf = _quantile_cdf(
+        quants, locs, np.broadcast_to(edges, (len(locs), edges.size))
+    )
+    atoms = _quantile_atoms(quants, _arrays.detached(locs), edges[:-1])
+    if atoms is not None:
+        atoms = xp.asarray(atoms)
+    masses = _masses_from(cdf, atoms)[0]
+    return _arrays.update(masses, operator.truediv, xp.asarray(np.diff(edges)))
+
+
+def _quantile_mean(quants: _typing.FloatArray, locs: Any) -> Any:
+    """The mean of each quantile row, of ``locs``'s kind, shape (n_rows,)."""
+    xp = array_api_compat.array_namespace(locs)
+    levels, knots = _knots(quants, locs)
+    step = np.diff(levels)
+    return xp.sum(
+        xp.asarray(step * 0.5) * (knots[:, :-1] + knots[:, 1:]), axis=1
+    )
+
+
+def _probabilities(masses: Any, widths: _typing.FloatArray) -> Any:
+    """Histogram rows' masses renormalized to sum to one per row.
+
+    An empty row is uniform in probability over the buckets of positive
+    width, so that a zero-width bucket carries none; over every bucket if
+    none has a width.
+
+    Args:
+        masses: Non-negative masses, shape (n_rows, n_buckets), a numpy
+            array or a torch tensor.
+        widths: The bucket widths, shape (n_buckets,).
+
+    Returns:
+        A new array of ``masses``'s kind and shape.
+    """
+    xp = array_api_compat.array_namespace(masses)
+    total = xp.sum(masses, axis=1, keepdims=True)
+    full = total > 0
+    probabilities = masses / xp.where(full, total, 1.0)
+    if bool(xp.all(full)):
+        return probabilities
+    wide = widths > 0
+    weights = wide if wide.any() else np.ones_like(wide)
+    return _arrays.put(probabilities, ~full, weights / weights.sum())
+
+
+def _locate(
+    bins: _typing.FloatArray, values: _typing.FloatArray
+) -> tuple[_typing.IntArray, _typing.FloatArray]:
+    """Returns a tuple (bucket, fraction of it below each value).
+
+    Both have the shape of ``values``; the bucket is clipped to the
+    buckets, the fraction to [0, 1], and a zero-width bucket counts as
+    wholly below.
+    """
+    widths = np.diff(bins)
+    index = np.clip(
+        np.searchsorted(bins, values, side="right") - 1, 0, widths.size - 1
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fraction = np.where(
+            widths[index] > 0, (values - bins[index]) / widths[index], 1.0
+        )
+    return index, np.clip(fraction, 0.0, 1.0, out=fraction)
+
+
+def _histogram_cdf(
+    bins: _typing.FloatArray, probabilities: Any, values: _typing.FloatArray
+) -> Any:
+    """Histogram rows' CDF at ``values``; exact.
+
+    Args:
+        bins: The bucket edges, non-decreasing, shape (n_buckets + 1,).
+        probabilities: Each row's renormalized masses, shape (n_rows,
+            n_buckets), a numpy array or a torch tensor.
+        values: Where to evaluate, shape (n_values,).
+
+    Returns:
+        The cumulative probabilities, of ``probabilities``'s kind and shape
+        (n_rows, n_values).
+    """
+    xp = array_api_compat.array_namespace(probabilities)
+    index, fraction = _locate(bins, values)
+    below = _mass_below(probabilities, slice(None), index)
+    value = _arrays.update(
+        probabilities[:, index], operator.mul, xp.asarray(fraction)
+    )
+    value = _arrays.update(value, operator.add, below)
+    value = _arrays.put(value, values < bins[0], 0.0)
+    return _unit(_arrays.put(value, values >= bins[-1], 1.0))
+
+
+def _mass_below(probabilities: Any, rows: Any, index: Any) -> Any:
+    """Histogram rows' mass in the buckets below ``index``.
+
+    Gathered from the cumulative sum at ``index - 1`` and zeroed at bucket
+    0, without the leading zero column that ``include_initial`` would copy
+    the whole cumulative sum to add.
+
+    Args:
+        probabilities: Each row's renormalized masses, shape (n_rows,
+            n_buckets), a numpy array or a torch tensor.
+        rows: The rows to gather from, paired with ``index``, or
+            ``slice(None)`` for every row at every index.
+        index: The buckets, a numpy integer array.
+
+    Returns:
+        The masses, of ``probabilities``'s kind, shaped as the gather.
+    """
+    xp = array_api_compat.array_namespace(probabilities)
+    below = xp.cumulative_sum(probabilities, axis=1)[rows, index - 1]
+    return _arrays.put(below, index == 0, 0.0)
+
+
+def _histogram_atoms(
+    bins: _typing.FloatArray, probabilities: Any, values: _typing.FloatArray
+) -> Any:
+    """Histogram rows' point masses at ``values``, or None for none.
+
+    Args:
+        bins: The bucket edges, non-decreasing, shape (n_buckets + 1,).
+        probabilities: Each row's renormalized masses, shape (n_rows,
+            n_buckets), a numpy array or a torch tensor.
+        values: Where to look, shape (n_values,).
+
+    Returns:
+        The mass of the zero-width buckets on each value, of
+        ``probabilities``'s kind and shape (n_rows, n_values), or None.
+    """
+    zero = np.diff(bins) == 0
+    if not zero.any():
+        return None
+    xp = array_api_compat.array_namespace(probabilities)
+    at = values[:, None] == bins[:-1][zero]
+    return probabilities[:, zero] @ xp.asarray(at.T, dtype=xp.float64)
+
+
+def _histogram_bin_densities(
+    bins: _typing.FloatArray, probabilities: Any, edges: _typing.FloatArray
+) -> Any:
+    """The mass of each histogram row in each bin over its width.
+
+    On the buckets' own edges, each bin is one bucket: its mass over its
+    width, without the cumulative sums of the CDF, which lose a small bin's
+    precision.
+
+    Args:
+        bins: The bucket edges, non-decreasing, shape (n_buckets + 1,).
+        probabilities: Each row's renormalized masses, shape (n_rows,
+            n_buckets), a numpy array, overwritten on the buckets' own
+            edges, or a torch tensor.
+        edges: The bin edges, strictly increasing, shape (n_bins + 1,).
+
+    Returns:
+        The unnormalized densities, of ``probabilities``'s kind and shape
+        (n_rows, n_bins).
+    """
+    xp = array_api_compat.array_namespace(probabilities)
+    if np.array_equal(edges, bins):
+        masses = probabilities
+    else:
+        cdf = _histogram_cdf(bins, probabilities, edges)
+        atoms = _histogram_atoms(bins, probabilities, edges[:-1])
+        masses = _masses_from(cdf, atoms)[0]
+    return _arrays.update(masses, operator.truediv, xp.asarray(np.diff(edges)))
+
+
+def _histogram_mean(bins: _typing.FloatArray, probabilities: Any) -> Any:
+    """The mean of each histogram row, of ``probabilities``'s kind."""
+    xp = array_api_compat.array_namespace(probabilities)
+    return probabilities @ xp.asarray(0.5 * (bins[:-1] + bins[1:]))
+
+
+def _masses_from(cdf: Any, atoms: Any) -> tuple[Any, Any]:
+    """The mass in each bucket from the CDF at the bucket edges.
+
+    The left limit of the CDF at every edge but the last, so that a point
+    mass on an edge counts in the bucket above it.
+
+    Args:
+        cdf: The CDF at the edges, shape (n_rows, n_buckets + 1), a numpy
+            array, overwritten, or a torch tensor.
+        atoms: The point masses at every edge but the last, of ``cdf``'s
+            kind and shape (n_rows, n_buckets), or None for none.
+
+    Returns:
+        A tuple ``(masses, outside)``: the non-negative masses, shape
+        (n_rows, n_buckets), and the probability below the first edge plus
+        that above the last, shape (n_rows,).
+    """
+    xp = array_api_compat.array_namespace(cdf)
+    if atoms is not None:
+        head = cdf[:, :-1]
+        updated = _arrays.update(head, operator.sub, atoms)
+        if updated is not head:
+            cdf = xp.concat([updated, cdf[:, -1:]], axis=1)
+        cdf = _unit(cdf)
+    masses = _arrays.clip(cdf[:, 1:] - cdf[:, :-1], 0.0)
+    return masses, cdf[:, 0] + (1.0 - cdf[:, -1])
 
 
 def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
@@ -388,18 +762,11 @@ class _Base:
             (n_rows, n_buckets), and the probability below ``edges[0]``
             plus that above ``edges[-1]``, shape (n_rows,).
         """
-        cdf = self.cdf(edges)
-        atoms = self._atoms(edges[:-1])
-        if atoms is not None:
-            cdf[:, :-1] -= atoms
-            _unit(cdf)
-        masses = np.diff(cdf, axis=1)
-        np.maximum(masses, 0.0, out=masses)
-        return masses, cdf[:, 0] + (1.0 - cdf[:, -1])
+        return _masses_from(self.cdf(edges), self._atoms(edges[:-1]))
 
     def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """The mass in each bin of ``grid`` over its width, unnormalized."""
-        return self._bin_densities_and_outside(grid)[0]
+        raise NotImplementedError
 
     def _bin_densities_and_outside(
         self, grid: grid_lib.Grid
@@ -418,8 +785,7 @@ class _Base:
             plus that above ``grid.y_max``, shape (n_rows,).
         """
         masses, outside = self._masses(grid.edges)
-        masses /= grid.widths
-        return masses, outside
+        return _arrays.update(masses, operator.truediv, grid.widths), outside
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -485,15 +851,7 @@ class HistogramDistribution(_Base):
         if none has a width. Each access returns a new array, which the
         caller may modify.
         """
-        total = self.masses.sum(axis=1, keepdims=True)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            probabilities = self.masses / total
-        empty = total[:, 0] <= 0
-        if empty.any():
-            wide = self.widths > 0
-            weights = wide if wide.any() else np.ones_like(wide)
-            probabilities[empty] = weights / weights.sum()
-        return probabilities
+        return _probabilities(self.masses, self.widths)
 
     def __getitem__(self, rows: Any) -> HistogramDistribution:
         return HistogramDistribution(
@@ -521,17 +879,10 @@ class HistogramDistribution(_Base):
         return grid.normalize(self._bin_densities(grid))
 
     def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
-        """The mass in each bin of ``grid`` over its width, unnormalized.
-
-        On the buckets' own edges, each bin is one bucket: its mass over its
-        width, without the cumulative sums of :meth:`cdf`, which lose a
-        small bin's precision.
-        """
-        if np.array_equal(grid.edges, self.bins):
-            densities = self.probabilities
-            densities /= self.widths
-            return densities
-        return super()._bin_densities(grid)
+        """:func:`_histogram_bin_densities` of this distribution."""
+        return _histogram_bin_densities(
+            self.bins, self.probabilities, grid.edges
+        )
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
@@ -556,57 +907,22 @@ class HistogramDistribution(_Base):
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
-        probabilities = self.probabilities
-        cumulative = _cumulative(probabilities)
-        index, fraction = self._locate(y)
-        value = probabilities[:, index]
-        value *= fraction
-        value += cumulative[:, index]
-        value[:, y < self.bins[0]] = 0.0
-        value[:, y >= self.bins[-1]] = 1.0
-        return _unit(value)
+        return _histogram_cdf(self.bins, self.probabilities, y)
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
-        cumulative = _cumulative(probabilities)
-        index, fraction = self._locate(values)
+        index, fraction = _locate(self.bins, values)
         rows = np.arange(self.npdf)
+        below = _mass_below(probabilities, rows, index)
         value = probabilities[rows, index]
         value *= fraction
-        value += cumulative[rows, index]
+        value += below
         value[values < self.bins[0]] = 0.0
         value[values >= self.bins[-1]] = 1.0
         return _unit(value)
 
     def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
-        zero = self.widths == 0
-        if not zero.any():
-            return None
-        at = values[:, None] == self.bins[:-1][zero]
-        return self.probabilities[:, zero] @ at.T
-
-    def _locate(
-        self, values: _typing.FloatArray
-    ) -> tuple[_typing.IntArray, _typing.FloatArray]:
-        """Returns a tuple (bucket, fraction of it below each value).
-
-        Both have the shape of ``values``; the bucket is clipped to the
-        buckets, the fraction to [0, 1], and a zero-width bucket counts as
-        wholly below.
-        """
-        widths = self.widths
-        index = np.clip(
-            np.searchsorted(self.bins, values, side="right") - 1,
-            0,
-            widths.size - 1,
-        )
-        with np.errstate(divide="ignore", invalid="ignore"):
-            fraction = np.where(
-                widths[index] > 0,
-                (values - self.bins[index]) / widths[index],
-                1.0,
-            )
-        return index, np.clip(fraction, 0.0, 1.0, out=fraction)
+        return _histogram_atoms(self.bins, self.probabilities, values)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
         probabilities = self.probabilities
@@ -641,8 +957,7 @@ class HistogramDistribution(_Base):
 
     def mean(self) -> _typing.FloatArray:
         """The mean of each row, shape (n_rows,)."""
-        centres = 0.5 * (self.bins[:-1] + self.bins[1:])
-        return self.probabilities @ centres
+        return _histogram_mean(self.bins, self.probabilities)
 
     def var(self) -> _typing.FloatArray:
         """The variance of each row, shape (n_rows,); buckets are uniform.
@@ -829,38 +1144,6 @@ class QuantileDistribution(_Base):
             locs = np.sort(locs, axis=0)[cut : len(parts) - cut]
         return cls(quants, locs.mean(axis=0), parts[0].ancil)
 
-    def _tail_widths(self) -> _typing.FloatArray:
-        """How far each row's tails reach, shape (n_rows, 2): (below, above).
-
-        One quantile spacing, the outermost or, where the outermost values
-        are tied, the nearest non-zero one; zero for a row whose values are
-        all equal and for a tail that carries no probability (a level of 0
-        or 1).
-        """
-        gaps = np.diff(self.locs, axis=1)
-        rows = np.arange(self.npdf)
-        first, last = _tail_gaps(gaps)
-        below = gaps[rows, first] * (self.quants[0] > 0)
-        above = gaps[rows, last] * (self.quants[-1] < 1)
-        return np.stack([below, above], axis=1)
-
-    def _knots(self) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-        """Returns a tuple (levels, locs): the CDF's knots, tails included.
-
-        The levels gain 0 below and 1 above unless they already reach them,
-        and each row's values gain the ends of its tails; shapes (n_knots,)
-        and (n_rows, n_knots).
-        """
-        levels, locs = self.quants, self.locs
-        below, above = self._tail_widths().T
-        if levels[0] > 0:
-            levels = np.concatenate([[0.0], levels])
-            locs = np.column_stack([locs[:, 0] - below, locs])
-        if levels[-1] < 1:
-            levels = np.concatenate([levels, [1.0]])
-            locs = np.column_stack([locs, locs[:, -1] + above])
-        return levels, locs
-
     def on_grid(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """Densities on ``grid`` as ``predict_proba`` gives them.
 
@@ -876,38 +1159,22 @@ class QuantileDistribution(_Base):
         """
         return grid.normalize(self._bin_densities(grid))
 
+    def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
+        """:func:`_quantile_bin_densities` of this distribution."""
+        return _quantile_bin_densities(self.quants, self.locs, grid.edges)
+
     def _atoms(self, values: _typing.FloatArray) -> _typing.FloatArray | None:
-        # A tail has no width only in a row of equal values, so every point
-        # mass is a tie between values; most rows have none to look for.
-        if not (self.locs[:, 1:] == self.locs[:, :-1]).any():
-            return None
-        levels, locs = self._knots()
-        steps = np.diff(levels)
-        tied = (np.diff(locs, axis=1) == 0) & (steps > 0)
-        if not tied.any():
-            return None
-        out = np.zeros((self.npdf, values.size))
-        for row, knot in zip(*np.nonzero(tied), strict=True):
-            out[row] += steps[knot] * (values == locs[row, knot])
-        return out
+        return _quantile_atoms(self.quants, self.locs, values)
 
     def cdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The CDF at ``values``, shape (n_rows, len(values)); exact."""
         y = np.atleast_1d(np.asarray(values, dtype=np.float64))
-        levels, locs = self._knots()
-        out = np.empty((self.npdf, y.size))
-        for row in range(self.npdf):
-            out[row] = np.interp(y, locs[row], levels, left=0.0, right=1.0)
-        return _unit(out)
+        return _quantile_cdf(
+            self.quants, self.locs, np.broadcast_to(y, (self.npdf, y.size))
+        )
 
     def _cdf_rows(self, values: _typing.FloatArray) -> _typing.FloatArray:
-        levels, locs = self._knots()
-        out = np.empty(self.npdf)
-        for row in range(self.npdf):
-            out[row] = np.interp(
-                values[row], locs[row], levels, left=0.0, right=1.0
-            )
-        return _unit(out)
+        return _quantile_cdf(self.quants, self.locs, values[:, None])[:, 0]
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values)).
@@ -926,7 +1193,7 @@ class QuantileDistribution(_Base):
             return np.where((mass > 0) & (width > 0), mass / width, 0.0)
 
     def _ppf_rows(self, levels: _typing.FloatArray) -> _typing.FloatArray:
-        knot_levels, locs = self._knots()
+        knot_levels, locs = _knots(self.quants, self.locs)
         out = np.empty(levels.shape)
         for row in range(self.npdf):
             out[row] = np.interp(levels[row], knot_levels, locs[row])
@@ -934,9 +1201,7 @@ class QuantileDistribution(_Base):
 
     def mean(self) -> _typing.FloatArray:
         """The mean of each row, shape (n_rows,)."""
-        levels, locs = self._knots()
-        step = np.diff(levels)
-        return (step * 0.5 * (locs[:, :-1] + locs[:, 1:])).sum(axis=1)
+        return _quantile_mean(self.quants, self.locs)
 
     def var(self) -> _typing.FloatArray:
         """The variance of each row, shape (n_rows,).
@@ -944,7 +1209,7 @@ class QuantileDistribution(_Base):
         About each row's mean, not as E[x^2] - mean^2, which cancels when
         the values sit far from zero.
         """
-        levels, locs = self._knots()
+        levels, locs = _knots(self.quants, self.locs)
         locs = locs - self.mean()[:, None]
         low, high = locs[:, :-1], locs[:, 1:]
         step = np.diff(levels)
@@ -965,7 +1230,7 @@ class QuantileDistribution(_Base):
         best = np.argmax(density, axis=1)
         peak = density[rows, best]
         mode = 0.5 * (self.locs[rows, best] + self.locs[rows, best + 1])
-        widths = self._tail_widths()
+        widths = np.stack(_tail_widths(self.quants, self.locs), axis=1)
         masses = np.array([self.quants[0], 1.0 - self.quants[-1]])
         with np.errstate(divide="ignore", invalid="ignore"):
             tails = np.where(widths > 0, masses / widths, -np.inf)
@@ -993,7 +1258,7 @@ class QuantileDistribution(_Base):
             ImportError: If qp is not installed.
         """
         qp = _import_qp()
-        levels, locs = self._knots()
+        levels, locs = _knots(self.quants, self.locs)
         ensemble = qp.Ensemble(qp.quant, data={"quants": levels, "locs": locs})
         if self.ancil is not None:
             ensemble.set_ancil(dict(self.ancil))
@@ -1134,12 +1399,10 @@ class MixtureDistribution(_Base):
 
     def _bin_densities(self, grid: grid_lib.Grid) -> _typing.FloatArray:
         """The components' bin densities, weighted and unnormalized."""
-        total = np.zeros((self.npdf, grid.n_bins))
-        for weight, component in zip(
-            self.weights, self.components, strict=True
-        ):
-            total += weight * component._bin_densities(grid)  # noqa: SLF001 - same module.
-        return total
+        return _arrays.weighted_total(
+            self.weights,
+            (c._bin_densities(grid) for c in self.components),  # noqa: SLF001 - same module.
+        )
 
     def pdf(self, values: npt.ArrayLike) -> _typing.FloatArray:
         """The density at ``values``, shape (n_rows, len(values))."""
@@ -1176,7 +1439,9 @@ class MixtureDistribution(_Base):
 
     def mean(self) -> _typing.FloatArray:
         """The mean of each row, shape (n_rows,)."""
-        return self._weighted(c.mean() for c in self.components)
+        return _arrays.weighted_total(
+            self.weights, (c.mean() for c in self.components)
+        )
 
     def var(self) -> _typing.FloatArray:
         """The variance of each row, shape (n_rows,).
@@ -1204,13 +1469,6 @@ class MixtureDistribution(_Base):
             ImportError: If qp is not installed.
         """
         return self.to_histogram().to_qp()
-
-
-def _cumulative(probabilities: _typing.FloatArray) -> _typing.FloatArray:
-    """The mass below each bucket edge, shape (n_rows, n_buckets + 1)."""
-    cumulative = np.zeros((len(probabilities), probabilities.shape[1] + 1))
-    np.cumsum(probabilities, axis=1, out=cumulative[:, 1:])
-    return cumulative
 
 
 Distribution: TypeAlias = (
