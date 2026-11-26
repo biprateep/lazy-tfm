@@ -154,6 +154,41 @@ def test_chronos_pools_the_observed_tokens_of_the_last_values(
         encoder.transform([[np.nan, np.inf]])
 
 
+def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes):
+    encoder = _encoder("time:timesfm-2.5-200m")
+    context = encoder._recipe().context
+    long = np.arange(20_000.0)
+    # Three patches of 32 values, the first padded on the left. The second
+    # is all missing: filled in, read, and left out of the pooling.
+    gappy = np.arange(70.0) ** 2
+    gappy[6:38] = np.nan
+    gappy[50] = np.inf
+    rows = encoder.fit_transform([long, long[-context:], gappy])
+    np.testing.assert_allclose(rows[0], rows[1], rtol=1e-6)
+    known = np.isfinite(gappy)
+    np.testing.assert_allclose(
+        rows[2, -2:], [gappy[known].mean(), gappy[known].std()]
+    )
+    filled = np.interp(np.arange(70), np.flatnonzero(known), gappy[known])
+    read = (filled - filled.mean()) / filled.std()
+    # The fake's token state is the mean value it read times a ramp to 1.
+    expected = np.mean([read[:6].mean(), read[38:].mean()])
+    assert rows[2, -3] == pytest.approx(expected, rel=1e-5)
+
+
+def test_timesfm_runs_on_transformers_without_chronos(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    monkeypatch.setitem(sys.modules, "chronos", None)
+    timesfm = lazy.time.Pretrained(model="timesfm-2.5-200m", device="cpu")
+    timesfm.fit(golden_data.encoder_items()["time"])
+    identity = json.loads(timesfm._cache_identity())
+    assert identity[1:3] == [
+        metadata.version("transformers"),
+        metadata.version("torch"),
+    ]
+
+
 def test_trailing_padding_of_a_series_is_dropped_before_its_window(fakes):
     encoder = _encoder("time:chronos-t5-tiny")
     series = np.arange(300.0)

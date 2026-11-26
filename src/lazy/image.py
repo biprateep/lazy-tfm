@@ -457,15 +457,9 @@ class Pretrained(_pretrained.PretrainedEncoder):
             preprocess = functools.partial(
                 _centred, size=recipe.size, zoom=recipe.zoom
             )
-        # A checkpoint of two towers lists the text tower's weights as
-        # unexpected when the vision tower alone loads; that is intended.
-        verbosity = transformers.logging.get_verbosity()
-        transformers.logging.set_verbosity_error()
-        try:
-            model = network.from_pretrained(path, **_pretrained.PINNED)
-        finally:
-            transformers.logging.set_verbosity(verbosity)
-        return preprocess, model.to(device).eval()
+        # A checkpoint of two towers holds the text tower's weights too.
+        model = _pretrained.load_quietly(network, path)
+        return preprocess, model.to(device)
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
         """The mean embedding of each image's views, as the recipe names it."""

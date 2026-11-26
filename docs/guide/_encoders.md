@@ -17,3 +17,4 @@
 | [Chronos-T5-small](https://huggingface.co/amazon/chronos-t5-small)                                       | `lazy.time.Pretrained(model="chronos-t5-small")`              |     514 | 0.18 GB |       46 M | Apache-2.0             |
 | [Chronos-Bolt-small](https://huggingface.co/amazon/chronos-bolt-small)                                   | `lazy.time.Pretrained(model="chronos-bolt-small")`            |     514 | 0.19 GB |       48 M | Apache-2.0             |
 | [Chronos-2](https://huggingface.co/amazon/chronos-2)                                                     | `lazy.time.Pretrained(model="chronos-2")`                     |     770 | 0.48 GB |      119 M | Apache-2.0             |
+| [TimesFM-2.5-200M](https://huggingface.co/google/timesfm-2.5-200m-transformers)                          | `lazy.time.Pretrained(model="timesfm-2.5-200m")`              |    1282 | 0.93 GB |      231 M | Apache-2.0             |

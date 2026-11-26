@@ -13,9 +13,9 @@ the cache that the models share (:func:`lazy.clear_model_cache` empties
 it). The packages come from the ``encoders`` extra.
 
 A subclass declares ``recipes`` (model name -> recipe, with the width of
-an embedding as ``width``) and the import name of its ``package``, and
-implements :meth:`PretrainedEncoder._load` and
-:meth:`PretrainedEncoder._embed`.
+an embedding as ``width``) and the import name of its ``package``, which a
+recipe may replace with its own ``package``, and implements
+:meth:`PretrainedEncoder._load` and :meth:`PretrainedEncoder._embed`.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _weights
 
-__all__ = ["EXTRA", "PretrainedEncoder"]
+__all__ = ["EXTRA", "PretrainedEncoder", "load_quietly"]
 
 EXTRA = "encoders"
 """The extra of lazy-tfm that installs the packages of the encoders."""
@@ -168,9 +168,13 @@ class PretrainedEncoder(_base.BaseEncoder):
             ImportError: If the ``encoders`` extra is not installed.
         """
         name = f"lazy.{self.modality}.{type(self).__name__}"
-        for package in (self.package, *self._requires()):
+        for package in (self._package(), *self._requires()):
             _ensemble.import_extra(package, needed_by=name, extra=EXTRA)
         return _ensemble.import_extra("torch", needed_by=name, extra=EXTRA)
+
+    def _package(self) -> str:
+        """The module that loads ``model``: its recipe's, or the class's."""
+        return getattr(self._recipe(), "package", self.package)
 
     def _requires(self) -> tuple[str, ...]:
         """The packages ``model`` runs on besides the loader, by name.
@@ -191,3 +195,27 @@ class PretrainedEncoder(_base.BaseEncoder):
             checkpoint.repo_id,
             checkpoint.revision or "",
         ]
+
+
+def load_quietly(network: Any, path: os.PathLike[str]) -> Any:
+    """Loads a network with :data:`PINNED`, without transformers' report.
+
+    A checkpoint can hold weights that the network does not use, such as
+    the text tower of a model of two towers or a forecast head, which
+    transformers would list as unexpected.
+
+    Args:
+        network: A ``transformers`` class of network, such as ``AutoModel``.
+        path: The snapshot directory of the checkpoint.
+
+    Returns:
+        The network, in evaluation mode.
+    """
+    import transformers  # noqa: PLC0415 - an optional, heavy extra.
+
+    verbosity = transformers.logging.get_verbosity()
+    transformers.logging.set_verbosity_error()
+    try:
+        return network.from_pretrained(path, **PINNED).eval()
+    finally:
+        transformers.logging.set_verbosity(verbosity)
