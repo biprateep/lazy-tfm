@@ -5,7 +5,7 @@
 #     gpuType: T4
 #     provenance: []
 #   gallery:
-#     description: Which features drive a prediction and its uncertainty.
+#     description: Which features and context rows drive a prediction.
 #   jupytext:
 #     formats: ipynb,py:percent
 #     notebook_metadata_filter: accelerator,colab,gallery
@@ -26,44 +26,44 @@
 # [![View on GitHub](https://img.shields.io/badge/View%20on-GitHub-181717?logo=github)](https://github.com/biprateep/lazy-tfm/blob/tutorials/feature_importance.ipynb)
 #
 # A tabular foundation model has no coefficients to read and no tree splits to
-# count, so the question of which features a prediction depends on has to be
-# asked from the outside, by changing the inputs and watching the outputs.
-# Since every model in `lazy` follows the scikit-learn API, the standard
-# model-agnostic tools work on it directly. In this tutorial, we use two of
-# them on a small engineering dataset: scikit-learn's permutation importance,
-# which measures how much a score worsens when a feature is shuffled, and SHAP
-# values, which split each prediction into the contributions of its features.
-# Because the models predict a full distribution, we can ask both questions
-# not only of the predicted value but also of its uncertainty.
+# count. To learn which features a prediction depends on, we change the inputs
+# and watch the outputs. `lazy.interp` does this for a whole predicted
+# distribution, not only for a point estimate. It attributes three statistics
+# of each row's distribution to the features: the CRPS and the negative log
+# likelihood (NLL), which score the distribution against the true target, and
+# the predicted mean.
+#
+# In this tutorial, we use it on a small engineering dataset in four ways:
+# permutation importance, Shapley values by refit, integrated gradients, and
+# attributions to the rows of the context. The
+# [Interpretability](https://lazy-tfm.readthedocs.io/en/latest/guide/interpretability.html)
+# page of the user guide gives the equations of each method.
 
 # %% [markdown]
 # ## Setup
 #
-# On Google Colab, the cell below installs the package with the TabICL backend
-# and the [`shap`](https://shap.readthedocs.io) package. Elsewhere, install
-# them first with `pip install 'lazy-tfm[tabicl]' shap`.
+# On Google Colab, the cell below installs the package with the TabICL
+# backend. Elsewhere, install it first with `pip install 'lazy-tfm[tabicl]'`.
 
 # %%
 import sys
 
 if "google.colab" in sys.modules:
-    # %pip install -q 'lazy-tfm[tabicl]' shap
+    # %pip install -q 'lazy-tfm[tabicl]'
     pass
 
 # %%
 import matplotlib.pyplot as plt  # Plotting
 import numpy as np  # Arrays
 import pandas as pd  # Tables
-import shap  # SHAP values
-from sklearn import inspection  # Permutation importance
 from sklearn import model_selection  # Splits
 
 import lazy  # The topic of this tutorial
 from lazy import datasets
-from lazy import metrics
+from lazy import interp
 from lazy import plotting
 
-SEED = 299792458  # One seed for the split, the model and the explainers
+SEED = 299792458  # One seed for the split, the models and the explanations
 
 plotting.use_style()
 plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
@@ -78,18 +78,19 @@ plt.rcParams["figure.dpi"] = 110  # Readable in a notebook
 # their age in days. It is a convenient test of feature importance, since the
 # physics is well known: concrete gains strength as it cures, with more
 # cement, and with less water for the same cement. We hold out 20% of the rows
-# for testing.
+# for testing, and write the column names with spaces for the figures.
 
 # %%
 data = datasets.load_dataset("concrete")
+X = data.X.rename(columns=lambda name: name.replace("_", " "))
 X_train, X_test, y_train, y_test = model_selection.train_test_split(
-    data.X, data.y, test_size=0.2, random_state=SEED
+    X, data.y, test_size=0.2, random_state=SEED
 )
 print(f"{len(X_train):,} context rows, {len(X_test):,} test rows")
 X_train.head()
 
 # %% [markdown]
-# We use TabICL, which is small and quick on any hardware, since both methods
+# We use TabICL, which is small and quick on any hardware, since the methods
 # below predict the test set many times over. Any other model of
 # `lazy.LazyModel` can be swapped in without changing the rest of the code. As
 # a reminder of how well the model does before we ask why, we report its CRPS
@@ -108,201 +109,272 @@ print(f"68% interval coverage: {coverage:.0%}")
 print(f"Median width of the 68% interval: {np.median(high - low):.1f} MPa")
 
 # %% [markdown]
+# Every method below explains the test rows, not the context rows. A model
+# recognizes its context rows and predicts their targets whatever the
+# features, so every feature would look less important than it is.
+#
 # ## Permutation importance
 #
 # Permutation importance shuffles one feature across the test rows, which
 # breaks its relation to the target while keeping its distribution, and
-# measures how much a score drops as a result. A feature the model does not
-# use loses nothing when shuffled, and the more the model relies on a
-# feature, the larger the drop. The shuffle is repeated a few times to give
-# a spread. Since the model is a scikit-learn estimator,
-# `sklearn.inspection.permutation_importance` takes it as it is.
-#
-# The importance depends on the score we choose. For the predicted value, we
-# use the mean absolute error of the predicted median, and for the full
-# distribution, the CRPS. Neither is one of scikit-learn's built-in scorers
-# (its `"neg_mean_absolute_error"` would score `predict`, which gives the
-# mode), so we write each as a scorer: a function of the fitted model and the
-# data that returns a number where higher is better. Both are in MPa, so the
-# two importances can be compared directly. We compute them on the test rows
-# rather than the context rows, since an in-context model has seen the context
-# rows and would recall their targets, which makes every feature look less
-# important than it is.
+# measures how much each statistic changes as a result. A feature the model
+# does not use loses nothing when shuffled, and the more the model relies on a
+# feature, the larger the loss. The shuffle is repeated `n_repeats` times (5
+# by default), and the losses are averaged. The method keeps the fitted model
+# and its context, so `interp.explain` needs only the rows to explain and
+# their targets.
 
 # %%
-GRID = lazy.Grid.linear(0, 100, 500)  # Strength in MPa, for the CRPS
-
-
-def neg_mae(estimator: lazy.LazyModel, X: pd.DataFrame, y: np.ndarray) -> float:
-    """Minus the mean absolute error of the predicted medians."""
-    median = estimator.predict_quantiles(X, [0.5])[:, 0]
-    return -float(np.mean(np.abs(y - median)))
-
-
-def neg_crps(
-    estimator: lazy.LazyModel, X: pd.DataFrame, y: np.ndarray
-) -> float:
-    """Minus the CRPS of the predicted distributions."""
-    return -metrics.crps(y, GRID, estimator.predict_proba(X, GRID))
-
-
-importances = {}
-for label, scoring in [
-    ("Median (MAE)", neg_mae),
-    ("Distribution (CRPS)", neg_crps),
-]:
-    result = inspection.permutation_importance(
-        model,
-        X_test,
-        y_test,
-        scoring=scoring,
-        n_repeats=10,
-        random_state=SEED,
-    )
-    importances[label] = pd.DataFrame(
-        {"mean": result.importances_mean, "std": result.importances_std},
-        index=X_test.columns,
-    )
+permutation = interp.explain(
+    model,
+    X_test,
+    y_test,
+    method="permutation",
+    random_state=SEED,
+)
+permutation.importance().round(3)
 
 # %% [markdown]
-# The figure shows, for each feature, how much the score worsens when that
-# feature is shuffled, with the error bars giving the spread over the ten
-# shuffles.
+# `importance()` averages each feature's attributions over the test rows. The
+# scores are negated, so a positive value means that the feature improves the
+# prediction: it lowers the CRPS (in MPa) or the NLL (in nats). For the mean,
+# the importance is the absolute change of the predicted mean, averaged over
+# the shuffles and then over the rows, in MPa.
+# `Explanation.plot` draws one statistic's importance as bars, with the most
+# important feature at the top.
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(8.0, 3.6), layout="constrained")
+for ax, statistic in zip(axes, ["crps", "nll"], strict=True):
+    permutation.plot(statistic, ax=ax)
+
+# %% [markdown]
+# Age and cement should dominate, followed by blast furnace slag and water.
+# This matches the physics of concrete: strength grows with curing time and
+# with the cement and slag that bind the mix, and falls with excess water.
+#
+# Permutation importance has a known weakness with correlated features. A
+# shuffled row can pair values that never occur together, such as much fly
+# ash with much cement, so the model is asked about mixes unlike any in its
+# context. The ingredients of concrete are correlated, so these numbers rank
+# the features rather than measure their effects.
+
+# %% [markdown]
+# ## Shapley values by refit
+#
+# Shapley values, from cooperative game theory, give each feature its average
+# gain over every order in which the features can be added to the model
+# ([Lundberg & Lee 2017](https://arxiv.org/abs/1705.07874)). The values of a
+# row add up to the difference between its statistic with every feature and
+# with none.
+#
+# Every removal method must decide what the model predicts without a feature.
+# `interp.explain` removes the feature's column from the context and from the
+# test rows, and fits a clone of the model on the columns that remain. No
+# weights are trained, so each refit costs about one pass over the context and
+# the test rows.
+#
+# Setting a feature to a missing value instead would mean something different
+# on each model, since each fills a missing value in its own way. Removal by
+# refit means the same on every backend, so it is the default: given a
+# context, `explain` computes Shapley values by refit. With eight features, it
+# evaluates all 256 subsets exactly.
+
+# %%
+shapley = interp.explain(
+    model,
+    X_test,
+    y_test,
+    X_train,
+    y_train,
+    method="shapley",
+    random_state=SEED,
+)
+
+# %% [markdown]
+# The figure shows the Shapley importance of each feature for the three
+# statistics. Averaged over rows, the Shapley values of a score measure how
+# much each feature lowers the average loss.
 
 # %% tags=["thumbnail"]
-order = importances["Distribution (CRPS)"]["mean"].sort_values().index
-positions = np.arange(len(order))
-fig, ax = plt.subplots(figsize=(6.4, 4.2))
-for offset, (label, table) in zip([-0.2, 0.2], importances.items()):
-    ax.barh(
-        positions + offset,
-        table.loc[order, "mean"],
-        height=0.4,
-        xerr=table.loc[order, "std"],
-        label=label,
-    )
-ax.set_yticks(positions, [name.replace("_", " ") for name in order])
-ax.set_xlabel("Increase in error when shuffled (MPa)")
-ax.legend(loc="lower right")
-fig.tight_layout()
+fig, axes = plt.subplots(1, 3, figsize=(10.0, 3.6), layout="constrained")
+for ax, statistic in zip(axes, interp.STATISTICS, strict=True):
+    shapley.plot(statistic, ax=ax)
 
 # %% [markdown]
-# Age and cement dominate, followed by blast furnace slag and water, which
-# matches the physics of concrete: strength grows with curing time and with
-# the cement and slag that bind the mix, and falls with excess water. The
-# median and the full distribution rank the features in nearly the same
-# order, with the smaller differences in MPa for the distribution.
-#
-# Permutation importance has a known weakness with correlated features: when
-# two features carry the same information, shuffling either one leaves the
-# other to stand in for it, and both look less important than they are. The
-# ingredients of concrete are correlated (for instance, more fly ash tends to
-# come with less cement), so these numbers rank the features rather than
-# measure their effects.
-
-# %% [markdown]
-# ## SHAP values
-#
-# SHAP values (from SHapley Additive exPlanations; [Lundberg & Lee
-# 2017](https://arxiv.org/abs/1705.07874)) split a single prediction into one
-# contribution per feature, which add up to the difference between that
-# prediction and the average prediction over a set of reference rows (also
-# called the background). They come from the Shapley values of cooperative
-# game theory, which share a payout among players in proportion to what each
-# adds to every possible coalition of the others. The `shap` package works
-# with any function of the features, so we pass it a function that returns,
-# for each row, two numbers taken from the predicted distribution: its median
-# and the width of its central 68% interval. One explainer then gives the
-# contributions to both the predicted value and its uncertainty.
-#
-# The reference rows matter for an in-context model. If we drew them from the
-# context, the model would recognize them and predict their targets with very
-# narrow intervals, so the average width would describe memorized rows rather
-# than new ones. We therefore take the reference rows from the held-out set
-# and explain the other held-out rows. We use the permutation algorithm of
-# `shap`, which needs only predictions, and give it enough evaluations for ten
-# random orders of the features per row.
-
+# The Shapley values should agree with permutation importance on the features
+# that matter most.
+# The mean ranks features only by how they move the predicted value. Both
+# scores also reward a feature that narrows the distribution around the
+# target, and the NLL, which reads the density at the target, weighs this
+# most. So a feature that ranks higher for the NLL than for the mean shapes
+# the uncertainty more than the predicted value. The table puts the three
+# importances side by side, ranked by the NLL.
 
 # %%
-def median_and_width(X: pd.DataFrame) -> np.ndarray:
-    """Each row's predicted median and 68% interval width, shape (n, 2)."""
-    low, median, high = model.predict_quantiles(X, [0.16, 0.5, 0.84]).T
-    return np.column_stack([median, high - low])
+shapley.importance().sort_values("nll", ascending=False).round(3)
 
+# %% [markdown]
+# The values of each row also give the direction of an effect.
+# `table("mean")` holds each test row's contributions to its predicted mean.
+# The figure plots the contribution of age against age.
 
-X_reference, X_explain = model_selection.train_test_split(
-    X_test, train_size=30, random_state=SEED
+# %%
+fig, ax = plt.subplots(figsize=(5.0, 3.6), layout="constrained")
+ax.scatter(X_test["age"], shapley.table("mean")["age"], s=8)
+ax.axhline(0.0, color="k", lw=0.8)
+ax.set_xscale("log")
+ax.set_xlabel("Age (days)")
+ax.set_ylabel("Contribution to the mean (MPa)")
+plt.show()
+
+# %% [markdown]
+# The effect of age should be strongly nonlinear: young samples are predicted
+# weaker and old samples stronger, while most samples, tested at the common
+# curing age of 28 days, sit near zero.
+
+# %% [markdown]
+# ## Integrated gradients
+#
+# The removal methods need only `fit` and `predict`, so they work on any model.
+# Their cost grows with the number of features, since each subset or shuffle
+# is a new prediction of every row. A gradient method instead takes the
+# derivatives of a statistic in the features through the model's
+# differentiable forward pass, with no refit. Integrated gradients
+# ([Sundararajan et al. 2017](https://arxiv.org/abs/1703.01365)) averages the
+# gradient along the straight path from a baseline row to each row, in
+# `n_steps` steps (32 by default), and multiplies it by the row's offset from
+# the baseline. The baseline stands in for no feature at all; by default it is
+# the mean of the context.
+#
+# The values of a row add up to the statistic at the row minus that at the
+# baseline, up to the error of the sum over the steps.
+#
+# The gradient is taken in the columns as the model receives them, so a
+# feature built by a pipeline step, such as an encoder, gets the credit, not
+# the column it came from. The forward pass is differentiable only when
+# nothing between the columns and the network lacks a gradient. TabICL's own
+# recipe applies a power transform to half of its members and clips outliers,
+# so we fit a second model without them: `transforms=("none",)` and
+# `outlier_threshold=None`. TabICL still standardizes every column. We check
+# what the change costs in CRPS.
+
+# %%
+smooth = lazy.LazyModel(
+    "tabicl",
+    transforms=("none",),
+    outlier_threshold=None,
+    random_state=SEED,
+    progress=False,
 )
-explainer = shap.PermutationExplainer(median_and_width, X_reference, seed=SEED)
-explanation = explainer(
-    X_explain, max_evals=10 * 2 * X_test.shape[1] + 1, silent=True
-)
-explanation.feature_names = [name.replace("_", " ") for name in X_test.columns]
-median_shap = explanation[:, :, 0]
-width_shap = explanation[:, :, 1]
-print(
-    f"Average over the reference rows: median {median_shap.base_values[0]:.1f}"
-    f" MPa, 68% width {width_shap.base_values[0]:.1f} MPa"
-)
+smooth.fit(X_train, y_train)
+smooth_crps = smooth.evaluate(X_test, y_test)["crps"].iloc[0]
+print(f"CRPS without transforms or clip: {smooth_crps:.2f} MPa")
 
 # %% [markdown]
-# The beeswarm plot below shows every explained row as one point per feature:
-# its position is the feature's contribution to that row's predicted median,
-# and its color is the feature's value in that row, from low (blue) to high
-# (red). The features are sorted by their mean absolute contribution.
-
-# %%
-shap.plots.beeswarm(median_shap, show=False)
-plt.xlabel("SHAP value: contribution to the predicted median (MPa)")
-plt.tight_layout()
-
-# %% [markdown]
-# The SHAP values agree with permutation importance on which features matter,
-# and add the direction of each effect: old samples and samples rich in
-# cement are predicted stronger, and samples with much water weaker, as
-# expected. They also show that the effect of age is strongly nonlinear: the
-# youngest samples are predicted weaker by up to about 20 MPa and the oldest
-# stronger by 10 to 15 MPa, while most samples, tested at the common curing
-# age of 28 days, sit close to zero.
+# The CRPS should be close to that of the default recipe, so the second model
+# is a fair stand-in for the first.
 #
-# The same plot for the width of the 68% interval shows which features make
-# the model more or less certain of a given row.
+# The gradient methods need the context the model was fitted on, as
+# `X_context` and `y_context`.
 
 # %%
-shap.plots.beeswarm(width_shap, show=False)
-plt.xlabel("SHAP value: contribution to the 68% interval width (MPa)")
-plt.tight_layout()
+gradients = interp.explain(
+    smooth,
+    X_test,
+    y_test,
+    X_train,
+    y_train,
+    method="integrated_gradients",
+)
+gap = gradients.full_values - gradients.base_values - gradients.values.sum(-1)
+mean_gap = np.abs(gap[interp.STATISTICS.index("mean")]).max()
+print(f"Largest error of the sum for the mean: {mean_gap:.3f} MPa")
 
 # %% [markdown]
-# The intervals are wider for the samples with more cement, less water and a
-# greater age, which are also those predicted strongest, so the model's
-# uncertainty grows with the strength it predicts. The uncertainty is also
-# driven by a different mix of features than the prediction itself, which we
-# can see by comparing the mean absolute contribution of each feature to the
-# two quantities: water and coarse aggregate weigh more on the width than on
-# the median, and blast furnace slag less.
+# The error of the sum should be small next to the attributions themselves; a
+# larger `n_steps` lowers it.
+# To compare the methods on the same model, we compute Shapley values of the
+# second model too. The table gives each feature's importance for the
+# predicted mean under the two methods.
 
 # %%
-mean_contribution = pd.DataFrame(
+smooth_shapley = interp.explain(
+    smooth,
+    X_test,
+    y_test,
+    X_train,
+    y_train,
+    method="shapley",
+    random_state=SEED,
+)
+pd.DataFrame(
     {
-        "Median": np.abs(median_shap.values).mean(axis=0),
-        "68% width": np.abs(width_shap.values).mean(axis=0),
-    },
-    index=explanation.feature_names,
-).sort_values("Median", ascending=False)
-mean_contribution.round(2)
+        "Shapley (refit)": smooth_shapley.importance()["mean"],
+        "Integrated gradients": gradients.importance()["mean"],
+    }
+).sort_values("Shapley (refit)", ascending=False).round(2)
+
+# %% [markdown]
+# The two methods should rank the leading features in the same order.
+# They need not agree on the values. Shapley values remove a feature, while
+# integrated gradients moves it from the context mean. `method="gradient"`
+# (gradient times input) is cheaper still: one gradient at the row instead of
+# `n_steps`, which is exact only for a statistic linear in the features.
+
+# %%
+gradients.plot("mean")
+plt.show()
+
+# %% [markdown]
+# ## Which context rows drive a prediction
+#
+# A prediction depends on the context as much as on the features of the row.
+# `interp.explain_context` attributes the same three statistics to the rows of
+# the context. Its default method, `"gradient"`, gives each context row the
+# gradient of the statistic in that row's features, times their offsets from
+# the baseline, summed over the features. It takes three backward passes per
+# explained row, with no refit, and needs the same differentiable fit. We
+# explain three test rows.
+
+# %%
+X_few, y_few = X_test.iloc[:3], y_test[:3]
+context_explanation = interp.explain_context(
+    smooth, X_few, y_few, X_train, y_train
+)
+X_few.assign(strength=y_few).round(1)
+
+# %% [markdown]
+# `top(k, statistic)` lists, for each explained row, the `k` context rows with
+# the largest absolute attribution, by their position in `X_train`. We rank by
+# the predicted mean: a row's attributions to the NLL can be noisy, since the
+# NLL depends on the tails of the distribution. We join the rows to their
+# features and targets.
+
+# %%
+top = context_explanation.top(3, "mean")
+neighbours = X_train.iloc[top["context_row"]].reset_index(drop=True)
+neighbours["strength"] = y_train[top["context_row"]]
+pd.concat([top, neighbours], axis=1).round(2)
+
+# %% [markdown]
+# The most influential context rows of a test row should have a similar age
+# and a similar amount of cement, the two features that matter most.
+# The gradient does not see a context row's target, so a row with a wrong
+# target but typical features can get a small value. `method="loo"` refits the
+# model without each context row instead: it sees the targets and works on any
+# model, at one fit per context row; `rows` limits it to some of them.
 
 # %% [markdown]
 # ## Summary
 #
-# Since `lazy`'s models are scikit-learn estimators, permutation importance
-# takes them as they are, and SHAP takes any of their outputs as a function
-# of the features. The ranking of the features agrees between the two methods
-# and with the physics of concrete, and the full distribution lets us ask
-# which features drive the uncertainty of a prediction as well as its value.
-# Two things are specific to in-context models: importances and reference rows
-# should come from rows outside the context, which the model would otherwise
-# recall, and every method here predicts the same rows many times, which a
-# small model such as TabICL keeps fast. With a larger model, fewer explained
-# rows or fewer SHAP evaluations keep the cost down.
+# `interp.explain` attributes the CRPS, the NLL and the predicted mean of each
+# row to the features, so it shows which features drive the uncertainty of a
+# prediction as well as its value. Permutation importance keeps the fitted
+# model and needs no context. Shapley values by refit, the default when a
+# context is given, remove a feature the same way on every backend.
+# Integrated gradients needs no refit and gives a cheap per-row attribution,
+# but needs a fit with a differentiable forward pass, and attributes to the
+# columns as the model receives them. `interp.explain_context` asks the same
+# question of the context rows. Every method explains rows outside the
+# context, which the model would otherwise recall.

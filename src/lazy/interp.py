@@ -54,7 +54,7 @@ from lazy import _typing
 from lazy import base
 from lazy import grid as grid_lib
 from lazy import metrics
-from lazy.models import lazy_model
+from lazy.models import _differentiable as differentiable
 
 if typing.TYPE_CHECKING:
     from matplotlib import axes as mpl_axes
@@ -1163,11 +1163,7 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
     )
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-    if torch.is_inference_mode_enabled():
-        raise ValueError(
-            f"method={method!r} takes gradients, which torch's inference"
-            " mode forbids; call it outside inference mode"
-        )
+    differentiable.refuse_inference_mode(f"method={method!r}")
     origin = context.mean(axis=0) if baseline is None else baseline[order]
     context_tensor = torch.tensor(context)
     delta = queries - origin
@@ -1183,7 +1179,9 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
             query = torch.tensor(
                 path.reshape(-1, path.shape[-1]), requires_grad=True
             )
-            density = _density(model, method, query, context_tensor, y_context)
+            density = differentiable.density(
+                model, f"method={method!r}", query, context_tensor, y_context
+            )
             statistics = _scores(density, np.tile(y[rows], n_steps), grid)
             # The last step, k = m, is the row itself.
             at_points = torch.stack(statistics).detach().numpy()
@@ -1260,11 +1258,7 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     )
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-    if torch.is_inference_mode_enabled():
-        raise ValueError(
-            "method='gradient' takes gradients, which torch's inference"
-            " mode forbids; call it outside inference mode"
-        )
+    differentiable.refuse_inference_mode("method='gradient'")
     origin = context.mean(axis=0) if baseline is None else baseline[order]
     offsets = torch.tensor(context - origin)
     context_tensor = torch.tensor(context, requires_grad=True)
@@ -1275,8 +1269,8 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
         for start in range(0, len(queries), _QUERY_BUDGET):
             rows = slice(start, start + _QUERY_BUDGET)
             query = torch.tensor(queries[rows])
-            density = _density(
-                model, "gradient", query, context_tensor, y_context
+            density = differentiable.density(
+                model, "method='gradient'", query, context_tensor, y_context
             )
             statistics = torch.stack(_scores(density, y[rows], grid))
             full[:, rows] = statistics.detach().numpy()
@@ -1334,45 +1328,13 @@ def _differentiable(  # noqa: GS030 - scikit-learn's X.
             not match the fit's.
     """
     validation.check_is_fitted(model)
-    if isinstance(model, lazy_model.LazyModel):
-        model = model.estimator_
-    if not hasattr(model, "_differentiable_density"):
-        raise ValueError(
-            f"method={method!r} needs a lazy backend, whose forward pass is"
-            f" differentiable; {type(model).__name__} has none"
-        )
+    model = differentiable.backend(model, f"method={method!r}")
     # Where each of the fit's columns is in X, by predict's rule for names.
     positions = pd.DataFrame([np.arange(X.shape[1])], columns=X.columns)
     order = model._align_to_fit(positions, named).to_numpy()[0]  # noqa: SLF001 - predict's rule.
     context = _float_features(X_context, "X_context", method)[:, order]
     queries = _float_features(X, "X", method)[:, order]
     return model, order, context, queries
-
-
-def _density(
-    model: Any, method: str, query: Any, context: Any, y_context: Any
-) -> Any:
-    """The backend's differentiable densities, with its refusals named.
-
-    Args:
-        model: A backend fitted on the context.
-        method: The gradient method, for the errors.
-        query: The query points, a torch tensor of shape (n, n_columns).
-        context: The context, a torch tensor of shape
-            (n_context, n_columns).
-        y_context: Its targets, shape (n_context,).
-
-    Returns:
-        What the backend's ``_differentiable_density`` returns.
-
-    Raises:
-        ValueError: If the backend refuses the pass: its fit is not
-            differentiable, or it has no differentiable forward pass.
-    """
-    try:
-        return model._differentiable_density(query, context, y_context)  # noqa: SLF001 - lazy's own backends.
-    except (ValueError, NotImplementedError) as error:
-        raise ValueError(f"method={method!r}: {error}") from error
 
 
 def _check_context(  # noqa: GS030 - scikit-learn's X, y.

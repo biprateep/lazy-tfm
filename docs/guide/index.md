@@ -15,6 +15,7 @@ interface
 scikit_learn
 encoders
 interpretability
+adapter
 choosing
 related
 ensembles
