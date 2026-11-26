@@ -47,7 +47,6 @@ import copy
 import inspect
 import io
 import itertools
-import math
 import os
 import pathlib
 import pickle
@@ -882,9 +881,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
         )
         # The members' probabilities are averaged, as predict does with
         # average_before_softmax=False.
-        log_masses = torch.logsumexp(
-            torch.stack(outputs).log_softmax(-1), dim=0
-        ) - math.log(len(outputs))
+        log_masses = _differentiable.mean_of_softmaxes(
+            [output.log_softmax(-1) for output in outputs]
+        )
         znorm = regressor.znorm_space_bardist_.borders.detach().cpu().numpy()
         return _differentiable.TorchHistogram(
             _bucket_head.bucket_edges(

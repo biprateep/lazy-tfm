@@ -576,3 +576,67 @@ def test_a_broken_torch_install_is_not_reworded(monkeypatch, data):
     with pytest.raises(ImportError, match="libtorch_cuda") as caught:
         _model().fit(X, z)
     assert "lazy-tfm" not in str(caught.value)
+
+
+# -- the differentiable forward pass -----------------------------------------
+
+
+def _finite(data):
+    """The data without its missing values, which the pass refuses."""
+    X, z, X_test = data
+    return np.nan_to_num(X), z, np.nan_to_num(X_test)
+
+
+def _fit_plain(model, X, z, **params):
+    """A LimiX model fitted without a transform or a clip."""
+    return model(
+        **{"n_estimators": 2, "device": "cpu", "progress": False, **params},
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X, z)
+
+
+@pytest.mark.parametrize("params", [{}, {"bag_size": 120, "n_estimators": 3}])
+def test_the_differentiable_pass_matches_predict_and_has_gradients(
+    monkeypatch, data, params
+):
+    torch = pytest.importorskip("torch")
+    X, z, X_test = _finite(data)
+    model = _fit_plain(fakes.install("limix", monkeypatch), X, z, **params)
+    query = torch.tensor(X_test, requires_grad=True)
+    context = torch.tensor(X, requires_grad=True)
+    density = model._differentiable_density(query, context, z)
+    log_density = density.log_prob(z[: len(X_test)])
+    expected = np.diag(model.predict_distribution(X_test).pdf(z[: len(X_test)]))
+    # The fake's logits are float32 on both paths.
+    np.testing.assert_allclose(
+        log_density.detach().numpy(), np.log(expected), rtol=1e-5
+    )
+    log_density.sum().backward()
+    assert query.grad.abs().sum() > 0 and context.grad.abs().sum() > 0
+    assert not model._network().requires_grad
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("params", [{}, {"bag_size": 120, "n_estimators": 3}])
+def test_the_differentiable_pass_matches_predict_on_the_checkpoint(
+    data, params
+):
+    torch = pytest.importorskip("torch")
+    X, z, X_test = _finite(data)
+    model = _fit_plain(limix.LimiXBarDistribution, X, z, **params)
+    values = z[: len(X_test)]
+    expected = np.diag(model.predict_distribution(X_test).pdf(values))
+    query = torch.tensor(X_test, requires_grad=True)
+    context = torch.tensor(X, requires_grad=True)
+    density = model._differentiable_density(query, context, z)
+    log_density = density.log_prob(values)
+    # The cache and the uncached pass round differently in float32.
+    np.testing.assert_allclose(
+        np.exp(log_density.detach().numpy()),
+        expected,
+        atol=1e-5 * expected.max(),
+    )
+    log_density.sum().backward()
+    for tensor in (query, context):
+        assert tensor.grad.isfinite().all() and tensor.grad.abs().sum() > 0

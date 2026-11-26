@@ -198,6 +198,29 @@ def test_constant_and_missing_columns_are_dropped(features):
 
 
 @needs_limix
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_the_none_pipelines_view_is_its_columns(features, shuffle):
+    values = features.copy()
+    values[:200, 1] = 3.0  # constant on the context: dropped
+    pipeline = _limix_preprocess.MemberPipeline(
+        "none", (1, 2), shuffle=shuffle
+    ).fit(values[:200])
+    np.testing.assert_array_equal(
+        pipeline.transform(values), values[:, pipeline.columns()]
+    )
+
+
+@needs_limix
+def test_only_the_none_pipeline_gives_its_columns(features):
+    token = next(t for t in _limix_preprocess.PIPELINES if t != "none")
+    pipeline = _limix_preprocess.MemberPipeline(
+        token, (1, 2), shuffle=True
+    ).fit(features[:200])
+    with pytest.raises(ValueError, match="transforms its columns"):
+        pipeline.columns()
+
+
+@needs_limix
 def test_a_context_with_nothing_to_learn_from_is_refused():
     with pytest.raises(ValueError, match="constant or missing"):
         _limix_preprocess.MemberPipeline("none", (1, 2), shuffle=True).fit(

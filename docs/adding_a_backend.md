@@ -88,9 +88,11 @@ A backend may also implement `_forward_group`, its prediction on torch's
 autograd graph, for gradient attributions and adapters; its docstring states
 the contract. TabPFN's builds on upstream's `differentiable_input`; TabICL's
 writes upstream's preprocessing in torch and runs its network's training
-forward, which gives the inference forward's quantiles. A model that trims
-over its members implements `_forward_members` instead, as it implements
-`_predict_members`; Kumo Tabular's fits upstream's recipe for its draws and
+forward, which gives the inference forward's quantiles; LimiX-2's refits
+each member's pipeline on the context passed, which under `"none"` only
+selects and shuffles columns, and runs its network outside inference mode.
+A model that trims over its members implements `_forward_members` instead,
+as it implements `_predict_members`; Kumo Tabular's fits upstream's recipe for its draws and
 makes its features again in torch, since the recipe changes its tensors in
 place.
 

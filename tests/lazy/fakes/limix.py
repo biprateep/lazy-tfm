@@ -28,6 +28,7 @@ LAZY_SEAMS = (
     "lazy.models._limix_stream.cache_bytes",
     "lazy.models._limix_stream.prefill",
     "lazy.models._limix_stream.forward",
+    "lazy.models._limix_stream.forward_graph",
     "lazy.models._limix_stream.decode",
     "lazy.models.limix._cache_dtype",
     "lazy.models.limix._free_device_memory",
@@ -55,6 +56,9 @@ class Pipeline:
 
     def transform(self, features):
         return features
+
+    def columns(self):
+        return np.arange(self.n_features_out_)
 
 
 class Member(_limix_stream.Member):
@@ -89,6 +93,10 @@ class Network:
 
     def __init__(self):
         self._reg_borders = _Tensor(BORDERS.copy())
+        self.requires_grad = True
+
+    def requires_grad_(self, requires_grad):
+        self.requires_grad = requires_grad
 
 
 def _logits(network, member, queries, **kwargs):
@@ -96,6 +104,19 @@ def _logits(network, member, queries, **kwargs):
     del kwargs  # Unused: the cache and the precision change nothing.
     signal = fakes.response(queries, member.x)
     return fakes.bucket_logits(signal, network._reg_borders.values.size - 1)
+
+
+def _logits_graph(network, x_context, y, x_query, *, seed, mixed_precision):
+    """:func:`_logits` on torch's graph, for the same features."""
+    del y, seed, mixed_precision  # Unused, as in _logits.
+    import torch  # noqa: PLC0415 - optional extra.
+
+    spread = x_context.std(correction=0)
+    spread = torch.where(spread > 0, spread, 1.0)
+    signal = torch.tanh((x_query.mean(dim=1) - x_context.mean()) / spread)
+    n_buckets = network._reg_borders.values.size - 1
+    centres = torch.linspace(-1.0, 1.0, n_buckets, dtype=signal.dtype)
+    return (-4.0 * (centres - signal[:, None]) ** 2).float()
 
 
 def _decode(network, member, cache, queries, **kwargs):
@@ -139,6 +160,7 @@ def install(monkeypatch, recorder):
                 lambda net, member, **kw: "cache"
             ),
             "lazy.models._limix_stream.forward": _logits,
+            "lazy.models._limix_stream.forward_graph": _logits_graph,
             "lazy.models._limix_stream.decode": _decode,
             "lazy.models.limix._cache_dtype": lambda net, **kw: None,
             "lazy.models.limix._free_device_memory": lambda net: None,

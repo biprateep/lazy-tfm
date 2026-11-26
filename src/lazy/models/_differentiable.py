@@ -36,6 +36,22 @@ def frozen(*networks: Any) -> None:
         network.requires_grad_(False)
 
 
+def mean_of_softmaxes(log_probabilities: list[Any]) -> Any:
+    """The log of the members' average probabilities, on the graph.
+
+    Args:
+        log_probabilities: Each member's log-probabilities, torch tensors of
+            the same shape, the buckets on the last axis.
+
+    Returns:
+        ``log(mean(exp(...)))`` over the members, of that shape.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    stacked = torch.stack(log_probabilities)
+    return torch.logsumexp(stacked, dim=0) - math.log(len(log_probabilities))
+
+
 def standardized(context: Any, query: Any, eps: float) -> tuple[Any, Any]:
     """Both tables z-scored by the context's columns, on the graph.
 
