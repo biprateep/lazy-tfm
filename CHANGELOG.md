@@ -9,6 +9,13 @@ change the API.
 
 ### Added
 
+- `lazy.interp.explain_context`: attributes each row's predicted distribution
+  to the rows of the context, as a `ContextExplanation`, whose `top(k)` lists
+  each row's `k` most influential context rows. `method="gradient"`, the
+  default, sums gradient times input over each context row's features, in
+  three backward passes per explained row, with no refit;
+  `method="loo"` refits the model without each context row, or without each
+  of the rows that `rows` picks.
 - `lazy.interp.explain(method="gradient")` and
   `method="integrated_gradients"`: attributions from gradients of each
   row's statistics through a fitted model's differentiable forward pass,

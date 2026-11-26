@@ -4,6 +4,8 @@
 distributions rely on. Its removal methods need only `fit` and
 `predict_distribution`, so they work the same on every backend, and on a pool
 of them; its gradient methods need a backend's differentiable forward pass.
+{func}`lazy.interp.explain_context` measures which context rows they rely on
+(see [Context rows](#context-rows)).
 
 ```python
 from lazy import interp
@@ -152,3 +154,62 @@ interp.explain(
 This also lowers the cost, which depends on the number of features and not of
 columns. The gradient methods take the gradient of every column at once, so a
 group's value is the sum of its columns' values, and the cost does not change.
+
+## Context rows
+
+A model's prediction depends on its context as much as on the features of the
+row. {func}`lazy.interp.explain_context` attributes the same three statistics
+to the rows of the context, with the same signs: a positive CRPS or NLL value
+means that the context row improves the prediction.
+
+```python
+explanation = interp.explain_context(model, X_test, y_test, X_train, y_train)
+explanation.top(5, "nll")  # each row's 5 most influential context rows
+```
+
+`explanation.values` has one value per statistic, explained row and context
+row, and `explanation.context_rows` gives the positions of those context rows
+in `X_context`. `explanation.top(k)` lists, for each explained row, the $k$
+context rows with the largest absolute values.
+
+Explain rows that are not in the context here too. A model recognizes its
+context rows, so the prediction of a row of the context rests on its own copy
+there.
+
+### Gradient times input
+
+`method="gradient"`, the default, gives context row $r$ the gradient of the
+statistic $s_i$ of row $i$ in the row's features, times their offsets from the
+baseline $b$, summed over the features:
+
+$$
+\psi_{ir} = \sum_j \frac{\partial s_i}{\partial x^{\mathrm{c}}_{rj}}\,
+\bigl(x^{\mathrm{c}}_{rj} - b_j\bigr),
+$$
+
+where $x^{\mathrm{c}}_{rj}$ is feature $j$ of context row $r$, and $b$ is the
+mean of `X_context` by default or the row that `baseline` gives. It measures
+what moving the context row from the baseline to where it is does to the
+prediction, to first order. It does not see the row's target, so a row whose
+target is wrong but whose features are typical can get a small value.
+
+Every statistic of a row depends on the whole context, so each takes a
+backward pass of its own: the cost is one forward pass per 64 rows and three
+backward passes per row, each about as costly as a forward pass. The model must
+be fitted on `X_context` and `y_context` with a differentiable forward pass,
+as for the gradient methods of `explain`.
+
+### Leave one out
+
+`method="loo"` refits the model without each context row:
+
+$$
+\psi_{ir} = s_i(C) - s_i(C \setminus \{r\}),
+$$
+
+where $C$ is the whole context. It works on any model, sees the targets, and
+costs one fit per context row, plus one. `rows` limits it to some context rows:
+a number of them, drawn with `random_state`, or their positions. A model that
+bags its context rows (`bag_size`) draws other bags without $r$, so its values
+hold that redraw as well as $r$'s own effect; fit it without bagging to
+measure $r$ alone.
