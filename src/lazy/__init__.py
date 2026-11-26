@@ -59,6 +59,10 @@ The package is laid out as follows.
 :mod:`lazy.interp`
     :func:`~lazy.interp.explain`: which features a model's predicted
     distributions rely on, by Shapley values, leave-one-out or permutation.
+:mod:`lazy.experimental`
+    Estimators that a release may change or remove without a deprecation:
+    :class:`~lazy.experimental.ContextAdapter`, which trains a network to
+    map the columns for a frozen model.
 :mod:`lazy.plotting`
     The publication style, and the standard diagnostic figures.
 :mod:`lazy.datasets`
@@ -86,6 +90,7 @@ import typing
 
 from lazy import _namespace
 from lazy import encoders
+from lazy import experimental
 from lazy import image
 from lazy import interp
 from lazy import text
@@ -167,6 +172,7 @@ __all__ = [
     "clear_model_cache",
     "download_checkpoint",
     "encoders",
+    "experimental",
     "get_checkpoint",
     "get_estimator",
     "image",

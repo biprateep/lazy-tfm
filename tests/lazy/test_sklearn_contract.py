@@ -33,6 +33,7 @@ ESTIMATORS = [
     lazy.TabPFNBarDistribution(),
     lazy.LimiXBarDistribution(),
     lazy.KumoQuantile(),
+    lazy.experimental.ContextAdapter(lazy.LazyModel("tabpfn")),
 ]
 CHECKS = [
     estimator_checks.check_no_attributes_set_in_init,
@@ -52,9 +53,11 @@ def test_sklearn_contract(estimator, check):
 
 @pytest.mark.parametrize("estimator", ESTIMATORS, ids=repr)
 def test_every_estimator_is_a_regressor_that_accepts_nan(estimator):
+    """Every one but the adapter, whose fit refuses a missing value."""
     tags = sklearn_utils.get_tags(estimator)
     assert tags.estimator_type == "regressor"
-    assert tags.input_tags.allow_nan
+    adapter = isinstance(estimator, lazy.experimental.ContextAdapter)
+    assert tags.input_tags.allow_nan is not adapter
 
 
 @pytest.mark.parametrize(
