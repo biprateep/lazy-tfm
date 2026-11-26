@@ -51,6 +51,7 @@ from matplotlib import figure as mpl_figure
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 
 from lazy import grid
 from lazy import metrics
@@ -65,6 +66,7 @@ __all__ = [
     "plot_pit_qq",
     "plot_residuals",
     "plot_actual_vs_predicted",
+    "plot_importance",
 ]
 
 _OUTLIER_FLOOR = 0.06
@@ -770,3 +772,29 @@ def diagnostic_panel(
         fig.suptitle(label)
     fig.tight_layout()
     return fig
+
+
+def plot_importance(
+    importance: pd.Series, xlabel: str, *, ax: mpl_axes.Axes | None = None
+) -> mpl_axes.Axes:
+    """Draws features' importances as horizontal bars, the largest on top.
+
+    Args:
+        importance: One importance per feature, indexed by feature name,
+            shape (n_features,), as a column of
+            :meth:`lazy.interp.Explanation.importance`.
+        xlabel: The x-axis label: the statistic and its units.
+        ax: The axes to draw into; a new column-width figure, taller with
+            more features, if None.
+
+    Returns:
+        The axes drawn into.
+    """
+    importance = importance.sort_values(kind="stable")
+    ax = _axes(ax, aspect=max(style.GOLDEN, 0.1 * importance.size))
+    positions = np.arange(importance.size)
+    ax.barh(positions, importance.to_numpy(), color="C0")
+    ax.set_yticks(positions, importance.index)
+    ax.axvline(0.0, color="k", lw=0.8)
+    ax.set_xlabel(xlabel)
+    return ax

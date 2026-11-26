@@ -39,6 +39,7 @@ from collections.abc import Callable, Mapping, Sequence
 import dataclasses
 import math
 import numbers
+import typing
 from typing import Any
 
 import array_api_compat
@@ -54,6 +55,9 @@ from lazy import base
 from lazy import grid as grid_lib
 from lazy import metrics
 from lazy.models import lazy_model
+
+if typing.TYPE_CHECKING:
+    from matplotlib import axes as mpl_axes
 
 __all__ = [
     "CONTEXT_METHODS",
@@ -100,6 +104,13 @@ DEFAULT_STEPS = 32
 """The steps of ``"integrated_gradients"``'s Riemann sum by default."""
 
 _GRADIENT_METHODS = ("gradient", "integrated_gradients")
+
+# The x-axis label of Explanation.plot, for each statistic's importance.
+_IMPORTANCE_LABELS = {
+    "crps": "minus CRPS (target units)",
+    "nll": "minus NLL (nats)",
+    "mean": "|mean| (target units)",
+}
 
 # The query points on one autograd graph at a time, about.
 _QUERY_BUDGET = 64
@@ -174,6 +185,36 @@ class Explanation:
             for name, values in zip(self.statistics, self.values, strict=True)
         }
         return pd.DataFrame(columns, index=list(self.feature_names))
+
+    def plot(
+        self, statistic: str = "crps", *, ax: mpl_axes.Axes | None = None
+    ) -> mpl_axes.Axes:
+        """Draws one statistic's :meth:`importance` as horizontal bars.
+
+        The most important feature is at the top. The plot changes no
+        global state: call :func:`lazy.plotting.use_style` first for the
+        house rcParams.
+
+        Args:
+            statistic: One of ``statistics``.
+            ax: The axes to draw into; a new column-width figure, taller
+                with more features, if None.
+
+        Returns:
+            The axes drawn into.
+
+        Raises:
+            ValueError: If ``statistic`` is not one of ``statistics``.
+        """
+        _statistic_index(self.statistics, statistic)
+        # Matplotlib is slow to import, and ``import lazy`` leaves it out.
+        from lazy import plotting  # noqa: PLC0415 - see above.
+
+        return plotting.plot_importance(
+            self.importance()[statistic],
+            _IMPORTANCE_LABELS[statistic],
+            ax=ax,
+        )
 
 
 @dataclasses.dataclass(frozen=True)

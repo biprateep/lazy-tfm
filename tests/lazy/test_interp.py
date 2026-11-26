@@ -6,6 +6,7 @@ import itertools
 import warnings
 
 import fakes
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -231,8 +232,37 @@ def test_an_unknown_statistic_is_refused():
     explanation = interp.Explanation(
         "loco", ("crps",), ("a",), np.zeros((1, 2, 1)), np.zeros((1, 2)), None
     )
-    with pytest.raises(ValueError, match="statistic must be one of"):
-        explanation.table("nll")
+    for show in (explanation.table, explanation.plot):
+        with pytest.raises(ValueError, match="statistic must be one of"):
+            show("nll")
+
+
+def _bars(ax):
+    """The tick labels and bar lengths of a bar chart, from bottom to top."""
+    labels = [label.get_text() for label in ax.get_yticklabels()]
+    return labels, [bar.get_width() for bar in ax.patches]
+
+
+def test_plot_draws_the_importance_with_the_most_important_on_top():
+    # Rows (1, -3) and (-2, 0) and (0.5, 0.5): mean |values| 2, 1, 0.5.
+    values = np.array([[[1.0, -2.0, 0.5], [-3.0, 0.0, 0.5]]])
+    explanation = interp.Explanation(
+        "loco", ("mean",), ("a", "b", "c"), values, np.zeros((1, 2)), None
+    )
+    ax = explanation.plot("mean")
+    plt.close(ax.figure)
+    assert _bars(ax) == (["c", "b", "a"], [0.5, 1.0, 2.0])
+    assert ax.get_xlabel() == "|mean| (target units)"
+
+
+def test_plot_draws_into_a_given_axes():
+    explanation = interp.Explanation(
+        "loco", ("crps",), ("a",), np.ones((1, 2, 1)), np.zeros((1, 2)), None
+    )
+    figure, ax = plt.subplots()
+    plt.close(figure)
+    assert explanation.plot(ax=ax) is ax
+    assert _bars(ax) == (["a"], [1.0])
 
 
 def test_unnamed_rows_reach_a_model_fitted_on_unnamed_rows(data, model):

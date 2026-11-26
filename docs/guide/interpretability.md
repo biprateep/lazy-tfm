@@ -39,6 +39,13 @@ feature set, which `y_grid` sets ({doc}`distributions` defines the scores).
 For the mean it averages their absolute values, since contributions to a
 prediction cancel over rows.
 
+`explanation.plot()` draws one statistic's importance as horizontal bars, with
+the most important feature at the top, and returns the matplotlib axes:
+
+```python
+ax = explanation.plot("nll")   # a new figure, or plot("nll", ax=ax)
+```
+
 ## Removing a feature
 
 Every removal method compares predictions with and without a feature, so it
