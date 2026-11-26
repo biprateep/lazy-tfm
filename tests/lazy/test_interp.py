@@ -5,9 +5,11 @@
 import itertools
 import warnings
 
+import fakes
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn import dummy
 from sklearn import exceptions
 import standins
 
@@ -201,6 +203,8 @@ def test_the_same_seed_gives_the_same_values(data, model):
         ({"groups": {"noise": ["zero"]}}, "name of a column"),
         ({"n_repeats": 3}, "n_repeats does not apply"),
         ({"method": "loco", "n_permutations": 2}, "does not apply"),
+        ({"method": "gradient", "n_steps": 4}, "n_steps does not apply"),
+        ({"baseline": np.zeros(3)}, "baseline does not apply"),
     ],
 )
 def test_a_bad_argument_is_refused_by_name(data, model, options, message):
@@ -269,3 +273,210 @@ def test_half_a_context_and_no_rows_are_refused(data, model):
         interp.explain(model, X[:0], y[:0], X_context, y_context)
     with pytest.raises(ValueError, match="X_context has 200 rows but y_con"):
         interp.explain(model, X, y, X_context, y_context[:-1])
+
+
+# -- the gradient methods ----------------------------------------------------
+
+
+@pytest.fixture(name="differentiable")
+def _differentiable(monkeypatch):
+    """TabPFN's fake, fitted with a differentiable pass, and 20 rows.
+
+    A batch holds 7 query points, so that "gradient" spans three batches.
+    Returns the model, the context's features and targets, then those of
+    the rows.
+    """
+    pytest.importorskip("torch")
+    monkeypatch.setattr(interp, "_QUERY_BUDGET", 7)
+    rng = np.random.default_rng(1)
+    X = pd.DataFrame(rng.normal(size=(60, 3)), columns=["a", "b", "c"])
+    y = X["a"].to_numpy() + 0.1 * rng.normal(size=60)
+    model = fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X[:40], y[:40])
+    return model, X[:40], y[:40], X[40:], y[40:]
+
+
+def test_integrated_gradients_sum_to_what_the_features_add(
+    differentiable, monkeypatch
+):
+    model, X_context, y_context, X, y = differentiable
+    # A batch of 24 rows at 32 steps, and of 3 rows at 256, the last of 2: a
+    # batch's points mixed up between its rows would break the sum.
+    monkeypatch.setattr(interp, "_QUERY_BUDGET", 768)
+    errors = []
+    for n_steps in (32, 256):
+        explanation = interp.explain(
+            model,
+            X,
+            y,
+            X_context,
+            y_context,
+            method="integrated_gradients",
+            n_steps=n_steps,
+        )
+        gap = explanation.full_values - explanation.base_values
+        errors.append(np.abs(explanation.values.sum(axis=-1) - gap).max())
+    # A right Riemann sum's error falls as 1 / n_steps: by 8 here, while
+    # the fake's float32 logits add about 1e-6.
+    assert errors[1] < errors[0] / 4
+    assert errors[1] < 0.02 * np.abs(gap).max()
+
+
+def test_gradient_times_input_is_the_derivative_times_the_offset(
+    differentiable,
+):
+    model, X_context, y_context, X, y = differentiable
+    grid = lazy.Grid.linear(-4.0, 4.0, 200)
+    baseline = np.array([0.5, -1.0, 2.0])
+    explanation = interp.explain(
+        model,
+        X,
+        y,
+        X_context,
+        y_context,
+        method="gradient",
+        baseline=baseline,
+        y_grid=grid,
+    )
+    # Central differences of the statistics as predict gives them.
+    step = 1e-3
+    expected = np.empty_like(explanation.values)
+    for j, column in enumerate(X.columns):
+        moved = [
+            X.assign(**{column: X[column] + sign * step}) for sign in (1, -1)
+        ]
+        up, down = (interp._statistics(model, m, y, True, grid) for m in moved)
+        expected[..., j] = (
+            (up - down) / (2 * step) * (X[column] - baseline[j]).to_numpy()
+        )
+    # The fake's float32 logits make the differences good to 1e-3.
+    np.testing.assert_allclose(explanation.values, expected, atol=2e-3)
+    np.testing.assert_allclose(
+        explanation.full_values,
+        interp._statistics(model, X, y, True, grid),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    assert explanation.base_values is None
+
+
+def test_a_context_other_than_the_fits_is_refused(differentiable):
+    model, X_context, y_context, X, y = differentiable
+    with pytest.raises(ValueError, match="the context the model was fitted"):
+        interp.explain(
+            model, X, y, X_context, y_context + 1.0, method="gradient"
+        )
+
+
+def test_gradients_are_taken_inside_no_grad(differentiable):
+    torch = pytest.importorskip("torch")
+    model, X_context, y_context, X, y = differentiable
+    options = {"method": "gradient", "y_grid": lazy.Grid.linear(-4, 4, 50)}
+    plain = interp.explain(model, X, y, X_context, y_context, **options)
+    with torch.no_grad():
+        inside = interp.explain(model, X, y, X_context, y_context, **options)
+    np.testing.assert_array_equal(plain.values, inside.values)
+
+
+def test_a_lazy_model_explains_as_its_backend_does(differentiable):
+    model, X_context, y_context, X, y = differentiable
+    wrapped = lazy.LazyModel("tabpfn", **model.get_params())
+    wrapped.fit(X_context, y_context)
+    first, second = (
+        interp.explain(m, X, y, X_context, y_context, method="gradient")
+        for m in (model, wrapped)
+    )
+    np.testing.assert_array_equal(first.values, second.values)
+
+
+def test_reordered_columns_keep_their_gradients(differentiable):
+    model, X_context, y_context, X, y = differentiable
+    order = ["c", "a", "b"]
+    options = {"method": "integrated_gradients", "n_steps": 4}
+    plain = interp.explain(model, X, y, X_context, y_context, **options)
+    moved = interp.explain(
+        model, X[order], y, X_context[order], y_context, **options
+    )
+    assert moved.feature_names == tuple(order)
+    np.testing.assert_allclose(moved.values, plain.values[..., [2, 0, 1]])
+    np.testing.assert_allclose(moved.base_values, plain.base_values)
+
+
+def test_a_group_takes_the_sum_of_its_columns_gradients(differentiable):
+    model, X_context, y_context, X, y = differentiable
+    options = {"method": "gradient", "y_grid": lazy.Grid.linear(-4, 4, 50)}
+    plain = interp.explain(model, X, y, X_context, y_context, **options)
+    grouped = interp.explain(
+        model, X, y, X_context, y_context, groups={"ac": ["a", "c"]}, **options
+    )
+    assert grouped.feature_names == ("ac", "b")
+    np.testing.assert_allclose(
+        grouped.values,
+        np.stack([plain.values[..., [0, 2]].sum(-1), plain.values[..., 1]], -1),
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "message", "needs_torch"),
+    [
+        (dummy.DummyRegressor(), "needs a lazy backend", False),
+        (
+            standins.HistogramStandIn(n_estimators=2, progress=False),
+            r"'gradient': .*fit with transforms=\('none',\)",
+            True,
+        ),
+        (
+            standins.HistogramStandIn(
+                n_estimators=2, progress=False, transforms=("none",)
+            ),
+            "'gradient': .*no differentiable forward pass",
+            True,
+        ),
+    ],
+    ids=["no-pass", "transformed", "no-forward"],
+)
+def test_a_model_without_a_differentiable_pass_is_refused(
+    data, model, message, needs_torch
+):
+    X_context, y_context, X, y = data
+    if needs_torch:  # The pass itself refuses.
+        pytest.importorskip("torch")
+    model.fit(X_context, y_context)
+    with pytest.raises(ValueError, match=message):
+        interp.explain(model, X, y, X_context, y_context, method="gradient")
+
+
+@pytest.mark.checkpoint
+def test_integrated_gradients_find_tabpfns_signal():
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(120, 3))
+    y = 2.0 * X[:, 0] + 0.1 * rng.normal(size=120)
+    model = lazy.TabPFNBarDistribution(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    ).fit(X[:100], y[:100])
+    explanation = interp.explain(
+        model,
+        X[100:],
+        y[100:],
+        X[:100],
+        y[:100],
+        method="integrated_gradients",
+        n_steps=8,
+    )
+    importance = explanation.importance()
+    assert np.isfinite(explanation.values).all()
+    assert importance["mean"].idxmax() == "x0"
+    # y = 2 x0 + noise of 0.1, so the mean moves with x0 alone: x0's
+    # importance is near 2 and the others' near 0 (measured: 1.92 against
+    # below 0.002), and a factor of 5 leaves room for a different seed.
+    assert importance.loc["x0", "mean"] > 5 * importance["mean"][1:].max()
