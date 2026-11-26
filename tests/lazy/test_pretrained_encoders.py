@@ -154,8 +154,9 @@ def test_chronos_pools_the_observed_tokens_of_the_last_values(
         encoder.transform([[np.nan, np.inf]])
 
 
-def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes):
-    encoder = _encoder("time:timesfm-2.5-200m")
+@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
+def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes, model):
+    encoder = _encoder(f"time:{model}")
     context = encoder._recipe().context
     long = np.arange(20_000.0)
     # Three patches of 32 values, the first padded on the left. The second
@@ -171,7 +172,8 @@ def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes):
     )
     filled = np.interp(np.arange(70), np.flatnonzero(known), gappy[known])
     read = (filled - filled.mean()) / filled.std()
-    # The fake's token state is the mean value it read times a ramp to 1.
+    # The fake's token state is the mean value it read times a ramp to 1,
+    # plus the frequency indicator: 0, high frequency, for TimesFM 2.0.
     expected = np.mean([read[:6].mean(), read[38:].mean()])
     assert rows[2, -3] == pytest.approx(expected, rel=1e-5)
 
@@ -404,3 +406,18 @@ def test_the_real_weights_give_the_golden_embeddings(key):
             rtol=1e-4,
             atol=1e-5,
         )
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
+def test_a_timesfm_row_does_not_depend_on_a_longer_series_in_its_batch(model):
+    """TimesFM pads a batch to its longest series, which it masks."""
+    generator = np.random.default_rng(0)
+    short = generator.normal(size=70).cumsum()
+    long = generator.normal(size=1500).cumsum()
+    encoder = lazy.time.Pretrained(model=model, device="cpu", cache=False)
+    with golden_data.pinned_threads():
+        alone = encoder.fit_transform([short])
+        together = encoder.transform([short, long])[:1]
+    # Measured: the rows differ by float32 rounding, at most 4.1e-5.
+    np.testing.assert_allclose(together, alone, rtol=1e-4, atol=1e-4)

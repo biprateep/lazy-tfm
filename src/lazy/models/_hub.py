@@ -952,6 +952,20 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             license_name="Apache-2.0",
             package="chronos-forecasting",
         ),
+        # Weights in transformers' format; the original's torch_model.ckpt
+        # is not downloaded. The file holds the forecast head too (4.9 M
+        # parameters), which is not loaded.
+        _encoder(
+            "time",
+            "timesfm-2.0-500m",
+            repo_id="google/timesfm-2.0-500m-pytorch",
+            revision="dc2443792ce5516872b89b37cf1bc058c3bf0c10",
+            files=("config.json", "model.safetensors"),
+            size_bytes=1_995_407_668,
+            parameters=498_828_960,
+            display_name="TimesFM-2.0-500M",
+            license_name="Apache-2.0",
+        ),
         # The port to transformers of google/timesfm-2.5-200m-pytorch, which
         # Google publishes under Apache-2.0, as the original. The file holds
         # the forecast heads too (33 M parameters), which are not loaded.

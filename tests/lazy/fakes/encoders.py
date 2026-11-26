@@ -161,15 +161,22 @@ class TimesFM(Network):
     """TimesFM's decoder: tokens of ``patch`` values, its padding masked.
 
     A token's state is the mean of its values that are not padding times a
-    ramp to 1; a token of padding alone gets 1e6.
+    ramp to 1, plus the frequency indicator, which TimesFM 2.0 alone reads;
+    a token of padding alone gets 1e6.
     """
 
-    def __init__(self, width, patch):
+    def __init__(self, width, patch, freq):
         super().__init__(width)
         self.patch = patch
+        self.freq = freq
 
-    def __call__(self, past_values, past_values_padding):
+    def __call__(self, past_values, past_values_padding, freq=None):
         import torch  # noqa: PLC0415
+
+        assert (freq is None) == (self.freq is None)
+        if freq is not None:
+            assert freq.shape == (len(past_values), 1)
+            assert freq.dtype == torch.long
 
         tokens = (len(past_values), -1, self.patch)
         values = past_values.double().reshape(tokens)
@@ -177,6 +184,8 @@ class TimesFM(Network):
         means = (values * real).sum(dim=2) / real.sum(dim=2).clamp(min=1)
         ramp = torch.linspace(0, 1, self.width, dtype=torch.float64)
         states = means[..., None] * ramp
+        if freq is not None:
+            states = states + freq[..., None]
         states[~real.any(dim=2)] = PAD
         return types.SimpleNamespace(last_hidden_state=states)
 
@@ -212,7 +221,7 @@ def install(monkeypatch, tmp_path):
         found = recipe(path)
         modality = pathlib.Path(path).parent.name
         if modality == "time":
-            return TimesFM(found.states, found.patch)
+            return TimesFM(found.states, found.patch, found.freq)
         cls = {"text": TextModel, "image": ImageModel}
         return cls[modality](found.width)
 

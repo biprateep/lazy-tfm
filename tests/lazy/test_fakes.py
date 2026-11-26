@@ -28,6 +28,7 @@ STAND_INS = {
     "chronos.ChronosPipeline": fake_encoders.Chronos,
     "chronos.ChronosBoltPipeline": fake_encoders.Chronos,
     "chronos.Chronos2Pipeline": fake_encoders.Chronos2,
+    "transformers.TimesFmModel": fake_encoders.TimesFM,
     "transformers.TimesFm2_5Model": fake_encoders.TimesFM,
 }
 """Each fake class, by the dotted name of the upstream class it replaces."""

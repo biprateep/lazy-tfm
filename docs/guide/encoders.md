@@ -118,13 +118,15 @@ defaults will be confirmed on the MulTaBench benchmark.
   reads one value per token. Chronos-2 has the best zero-shot forecasts of
   the public pretrained networks on GIFT-Eval and fev-bench, as its card
   reports, and reads the last 8,192 values in patches of 16.
-  TimesFM-2.5-200M, from Google, is a network of another family, a decoder
-  trained on other data: GIFT-Eval's pretraining set, Wikipedia page views,
-  Google Trends and synthetic series, as its card lists. It reads the last
-  16,384 values in patches of 32, and a missing value filled in by linear
-  interpolation, as its own forecasts fill it. Its embedding is the mean of
-  its states over the patches that hold an observed value, since it has no
-  summary token. No general network reads observation times or
+  TimesFM, from Google, is a network of another family, a decoder trained on
+  other data: TimesFM-2.5-200M on GIFT-Eval's pretraining set, Wikipedia page
+  views, Google Trends and synthetic series, as its card lists. It reads the
+  last 16,384 values in patches of 32. TimesFM-2.0-500M, its larger
+  predecessor, reads the last 2,048, with the frequency indicator that its
+  card recommends for data up to daily ("high frequency"). Both read a
+  missing value filled in by linear interpolation, as their own forecasts
+  fill it. Their embedding is the mean of their states over the patches that
+  hold an observed value, since they have no summary token. No general network reads observation times or
   uncertainties, so an irregular light curve is read as evenly sampled.
 
 Issue [#344](https://github.com/biprateep/lazy-tfm/issues/344) gives the

@@ -13,8 +13,8 @@ the cache that the models share (:func:`lazy.clear_model_cache` empties
 it). The packages come from the ``encoders`` extra.
 
 A subclass declares ``recipes`` (model name -> recipe, with the width of
-an embedding as ``width``) and the import name of its ``package``, which a
-recipe may replace with its own ``package``, and implements
+an embedding as ``width``) and the import name of its ``package``, which
+:meth:`PretrainedEncoder._package` may vary by model, and implements
 :meth:`PretrainedEncoder._load` and :meth:`PretrainedEncoder._embed`.
 """
 
@@ -35,7 +35,7 @@ from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _weights
 
-__all__ = ["EXTRA", "PretrainedEncoder", "load_quietly"]
+__all__ = ["EXTRA", "PINNED", "PretrainedEncoder", "load_quietly"]
 
 EXTRA = "encoders"
 """The extra of lazy-tfm that installs the packages of the encoders."""
@@ -173,8 +173,8 @@ class PretrainedEncoder(_base.BaseEncoder):
         return _ensemble.import_extra("torch", needed_by=name, extra=EXTRA)
 
     def _package(self) -> str:
-        """The module that loads ``model``: its recipe's, or the class's."""
-        return getattr(self._recipe(), "package", self.package)
+        """The module that loads ``model``; a subclass may vary it by model."""
+        return self.package
 
     def _requires(self) -> tuple[str, ...]:
         """The packages ``model`` runs on besides the loader, by name.
