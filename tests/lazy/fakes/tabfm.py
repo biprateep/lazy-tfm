@@ -7,7 +7,7 @@ it would; only the backbone is faked (:class:`Network`), and both inference
 paths (the streamed one and ``predict_proba``) run it through upstream's own
 ``_predict_proba_internal``. Records, for every classifier run, the rows of
 its view, the scaling each of its standardizations was refitted with, the
-columns it reads as categorical and its encoding of the queries, and in
+columns it reads as categorical, and in
 ``loads`` the checkpoint each backbone load was handed. Needs the tabfm
 package and torch.
 
@@ -105,8 +105,8 @@ class _Logits:
         self.recorder = recorder
         self.internal = internal
 
-    def record(self, classifier, query):
-        """Records a classifier run on the rows ``query``."""
+    def record(self, classifier):
+        """Records a classifier run."""
         generator = classifier.ensemble_generator_
         # One pipeline per norm method; a bagged member's view has one.
         pipelines = list(generator.preprocessors_.values())
@@ -117,14 +117,11 @@ class _Logits:
             mean=[p.standard_scaler_.mean_ for p in pipelines],
             features=np.asarray(generator.X_),
             cat_features=generator.cat_features_,
-            query=generator.unique_filter_.transform(
-                classifier.X_encoder_.transform(query)
-            ),
         )
 
     def __call__(self, classifier, model, targets, **kwargs):
         del model, kwargs  # Unused: the classifier holds the backbone.
-        self.record(classifier, targets["query"])
+        self.record(classifier)
         logits = self.internal(classifier, targets["query"])
         # Averaged in float64, as lazy's streamed path averages.
         return {"query": {"mean_logits": logits.astype(np.float64).mean(0)}}
@@ -161,7 +158,7 @@ def install(monkeypatch, recorder):
         return network()
 
     def internal(classifier, X):
-        logits.record(classifier, X)
+        logits.record(classifier)
         return logits.internal(classifier, X)
 
     monkeypatch.setattr(upstream.tabfm_v1_0_0_pytorch, "load", load)

@@ -212,8 +212,8 @@ A categorical column reaches the model as the codes of its categories, 0 to
 k - 1, where its categories are those the context holds, in the order of its
 pandas type, or sorted for a column marked another way. A missing value, or a
 category that the context did not hold, is missing. A model that encodes
-categories itself (TabPFN, TabFM, Kumo Tabular) is told which columns they
-are; TabICL and LimiX-2 read the codes as numbers (see
+categories itself (TabPFN, Kumo Tabular) is told which columns they are;
+TabICL, TabFM and LimiX-2 read the codes as numbers (see
 [Categorical columns](limits.md#categorical-columns)). A column of pandas'
 ordered `category` type, such as a quality from poor to good, is not
 categorical unless marked: its codes reach every model as numbers, in the

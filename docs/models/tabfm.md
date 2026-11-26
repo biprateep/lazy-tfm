@@ -40,7 +40,7 @@ TabFM that LAZY uses, next to LAZY's.
 | Softmax temperature | 0.9, after averaging the members' logits | the same (`softmax_temperature="auto"`) |
 | Outlier clipping | soft clip at 4 standard deviations | the same (`outlier_threshold="auto"`) |
 | Maximum features | 500 | 500 |
-| Categorical columns | detected by data type and ordinal-encoded | the same, for the columns `categorical_features` marks |
+| Categorical columns | detected by data type and ordinal-encoded | off: every column is numeric, a categorical one as its codes |
 | Key/value cache | off; the context is re-encoded for every batch | on, with LAZY's own cache (`kv_cache=True`) |
 | Precision | bfloat16, on a GPU and on a CPU | bfloat16 on a CUDA GPU, float32 on a CPU or an Apple GPU |
 | Random seed | 42 | `random_state=0` |
@@ -48,14 +48,10 @@ TabFM that LAZY uses, next to LAZY's.
 
 ## Built-in standardizations
 
-Before the network, TabFM codes each categorical column by the order in which
-its categories first appear in the context, with a missing category, an
-unseen one and one seen only once all coded $-1$, and moves the categorical
-columns before the numeric ones, which the network embeds differently. It
-imputes missing numeric values with the column mean, drops constant columns,
-z-scores every column on the context and clips it at 100 standard deviations,
-then applies each member's transform (none, or a power transform) and
-soft-clips outliers at 4 standard deviations. Inside the
+Before the network, TabFM imputes missing numeric values with the column mean,
+drops constant columns, z-scores every column on the context and clips it at
+100 standard deviations, then applies each member's transform (none, or a power
+transform) and soft-clips outliers at 4 standard deviations. Inside the
 network, any remaining missing value is replaced by $-100$; there are no
 missing-value indicators. Since LAZY uses the classifier, the target is never
 standardized: it is only binned, into equal-mass bins of the context targets
