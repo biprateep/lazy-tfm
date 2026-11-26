@@ -4,16 +4,18 @@
 
 :func:`explain` attributes three statistics of each explained row's predicted
 distribution to the features: minus its CRPS and minus its negative log
-likelihood at the true target, and its mean. It needs only ``fit`` and
-``predict_distribution``, so it works on every model::
+likelihood at the true target, and its mean. Its removal methods need only
+``fit`` and ``predict_distribution``, so they work on every model::
 
     explanation = interp.explain(model, X_test, y_test, X_train, y_train)
     explanation.importance()  # One row per feature, one column per statistic.
     explanation.table("nll")  # One row per explained row.
 
 The methods are Shapley values and leave-one-out, which remove a feature by
-refitting the model without its column, and permutation, which keeps the
-fitted model. The "Interpretability" page of the documentation
+refitting the model without its column; permutation, which keeps the fitted
+model; and gradient times input and integrated gradients, which take
+gradients of the statistics through a fitted model's differentiable forward
+pass. The "Interpretability" page of the documentation
 (``docs/guide/interpretability.md``) defines each one.
 
 The values of the CRPS and of the NLL are signed so that a positive value
@@ -30,6 +32,7 @@ import math
 import numbers
 from typing import Any
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -41,10 +44,12 @@ from lazy import _typing
 from lazy import base
 from lazy import grid as grid_lib
 from lazy import metrics
+from lazy.models import lazy_model
 
 __all__ = [
     "DEFAULT_PERMUTATIONS",
     "DEFAULT_REPEATS",
+    "DEFAULT_STEPS",
     "EXACT_MAX_FEATURES",
     "METHODS",
     "STATISTICS",
@@ -58,7 +63,13 @@ negative log likelihood of each row's predicted distribution at its true
 target, and the mean of that distribution.
 """
 
-METHODS: tuple[str, ...] = ("shapley", "loco", "permutation")
+METHODS: tuple[str, ...] = (
+    "shapley",
+    "loco",
+    "permutation",
+    "gradient",
+    "integrated_gradients",
+)
 """The accepted values of ``method``, besides ``"auto"``."""
 
 EXACT_MAX_FEATURES = 10
@@ -69,6 +80,14 @@ DEFAULT_PERMUTATIONS = 32
 
 DEFAULT_REPEATS = 5
 """The shuffles of each feature that ``"permutation"`` averages by default."""
+
+DEFAULT_STEPS = 32
+"""The steps of ``"integrated_gradients"``'s Riemann sum by default."""
+
+_GRADIENT_METHODS = ("gradient", "integrated_gradients")
+
+# The query points on one autograd graph at a time, about.
+_QUERY_BUDGET = 64
 
 # From coalitions, shape (m, p) of bool, to every statistic of every explained
 # row, shape (m, n_statistics, n_rows).
@@ -91,9 +110,11 @@ class Explanation:
         full_values: Each statistic with every feature present, shape
             (n_statistics, n_rows).
         base_values: Each statistic with no feature, shape
-            (n_statistics, n_rows), for ``"shapley"``, whose values sum to
-            ``full_values - base_values`` over the features; ``None`` for
-            the other methods.
+            (n_statistics, n_rows), for ``"shapley"``, and at the baseline
+            for ``"integrated_gradients"``; the values of either sum to
+            ``full_values - base_values`` over the features, for the
+            latter to the error of its Riemann sum. ``None`` for the other
+            methods.
     """
 
     method: str
@@ -156,6 +177,8 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     y_grid: grid_lib.Grid | npt.ArrayLike | None = None,
     n_permutations: int | None = None,
     n_repeats: int | None = None,
+    n_steps: int | None = None,
+    baseline: npt.ArrayLike | None = None,
     random_state: int = 0,
 ) -> Explanation:
     """Attributes each row's predicted distribution to the features.
@@ -168,6 +191,15 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     is every coalition's statistics, ``24 * n_rows`` bytes each: about
     60 kB per explained row at the peak for exact values of 10 features.
 
+    ``"gradient"`` runs the model's differentiable forward pass once, and
+    three backward passes through it, one per statistic, for each batch of
+    64 rows; ``"integrated_gradients"`` takes ``n_steps`` points on the
+    path to each row, so it runs ``n_steps`` times as many batches, and
+    predicts the baseline once. Both also predict the rows once, to check
+    that ``X_context`` is the model's context. Neither refits, and each
+    pass's autograd graph holds the context and one batch of about 64
+    points, or of one row's ``n_steps`` points if there are more.
+
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
             ``"permutation"`` needs it fitted; the other methods fit clones
@@ -179,13 +211,18 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         X: The rows to explain, shape (n_rows, n_columns), in any form the
             models take. They should not be rows of the context.
         y: Their finite true targets, shape (n_rows,).
-        X_context: The context to refit on, shape (n_context, n_columns),
-            with the columns of ``X``; needed by ``"shapley"`` and
-            ``"loco"``.
+        X_context: The context, shape (n_context, n_columns), with the
+            columns of ``X``: the one to refit on for ``"shapley"`` and
+            ``"loco"``, and the one ``model`` was fitted on for the
+            gradient methods.
         y_context: Its finite targets, shape (n_context,).
         method: One of :data:`METHODS`, or ``"auto"``: ``"shapley"`` when a
             context is given, and ``"permutation"`` otherwise.
-            ``"permutation"`` does not use a context.
+            ``"permutation"`` does not use a context. ``"gradient"``
+            (gradient times input) and ``"integrated_gradients"`` need
+            ``model`` fitted with a differentiable forward pass: a backend
+            fitted with ``transforms=("none",)`` and
+            ``outlier_threshold=None``, on numeric columns.
         groups: Columns to treat as one feature each, as
             ``{feature name: column names}``: the columns of an embedding,
             say. A column in no group is a feature of its own. ``None`` for
@@ -201,6 +238,12 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             :data:`DEFAULT_PERMUTATIONS` permutations above.
         n_repeats: For ``"permutation"``, the shuffles of each feature;
             ``None`` for :data:`DEFAULT_REPEATS`.
+        n_steps: For ``"integrated_gradients"``, the steps of the Riemann
+            sum along the path from the baseline to each row; ``None`` for
+            :data:`DEFAULT_STEPS`.
+        baseline: For the gradient methods, the finite row that stands in
+            for no feature at all, shape (n_columns,); ``None`` for the mean
+            of ``X_context``.
         random_state: The seed of the permutations, the shuffles and the
             column of noise that stands in for no feature at all.
 
@@ -208,15 +251,23 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         The attributions.
 
     Raises:
-        ValueError: If an argument is not as described above, or
-            ``n_permutations`` or ``n_repeats`` is given to a method that
-            does not use it.
-        TypeError: If ``n_permutations`` or ``n_repeats`` is not an integer.
+        ValueError: If an argument is not as described above, an option
+            is given to a method that does not use it, or a gradient
+            method's model has no differentiable forward pass.
+        TypeError: If ``n_permutations``, ``n_repeats`` or ``n_steps`` is
+            not an integer.
         sklearn.exceptions.NotFittedError: If ``method`` is
-            ``"permutation"`` and ``model`` is not fitted.
+            ``"permutation"`` or a gradient method and ``model`` is not
+            fitted.
     """
     method = _check_method(method, X_context, y_context)
-    _check_options(method, n_permutations=n_permutations, n_repeats=n_repeats)
+    _check_options(
+        method,
+        n_permutations=n_permutations,
+        n_repeats=n_repeats,
+        n_steps=n_steps,
+        baseline=baseline,
+    )
     X, named = _frame(X)
     if X.empty:
         raise ValueError("X has no rows to explain")
@@ -231,8 +282,9 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
                 "y_grid is needed: the model has no default grid (grid_)"
             )
         grid = model.grid_ if y_grid is None else grid_lib.as_grid(y_grid)
+        n_repeats = _count(n_repeats, "n_repeats", DEFAULT_REPEATS)
         values, full = _permutation(
-            model, X, y, named, feature_of, grid, _count(n_repeats), rng
+            model, X, y, named, feature_of, grid, n_repeats, rng
         )
         return Explanation(method, STATISTICS, names, values, full, None)
 
@@ -250,6 +302,30 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         grid = base.default_grid(float(targets.min()), float(targets.max()))
     else:
         grid = grid_lib.as_grid(y_grid)
+    if method in _GRADIENT_METHODS:
+        baseline = _check_baseline(baseline, X.shape[1])
+        n_steps = (
+            _count(n_steps, "n_steps", DEFAULT_STEPS)
+            if method == "integrated_gradients"
+            else 1
+        )
+        values, full, empty = _gradient_attributions(
+            model,
+            method,
+            context,
+            context_targets,
+            X,
+            y,
+            named,
+            grid,
+            baseline,
+            n_steps,
+        )
+        # A feature's attribution is the sum of its columns'.
+        one_hot = feature_of[:, None] == np.arange(len(names))
+        return Explanation(
+            method, STATISTICS, names, values @ one_hot, full, empty
+        )
     value_function = _refit_values(
         model, context, context_targets, X, y, named, feature_of, grid, rng
     )
@@ -264,8 +340,11 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     if n_permutations is None and n_features <= EXACT_MAX_FEATURES:
         values, full, empty = _exact_shapley(value_function, n_features)
     else:
+        n_permutations = _count(
+            n_permutations, "n_permutations", DEFAULT_PERMUTATIONS, even=True
+        )
         values, full, empty = _sampled_shapley(
-            value_function, n_features, _count(n_permutations, even=True), rng
+            value_function, n_features, n_permutations, rng
         )
     return Explanation(method, STATISTICS, names, values, full, empty)
 
@@ -283,7 +362,7 @@ def _check_method(method: str, X_context: Any, y_context: Any) -> str:  # noqa: 
 
     Raises:
         ValueError: If ``method`` is unknown, only one half of the context
-            is given, or the method refits and there is no context.
+            is given, or the method needs a context and there is none.
     """
     if (X_context is None) != (y_context is None):
         raise ValueError("X_context and y_context must be given together")
@@ -294,35 +373,42 @@ def _check_method(method: str, X_context: Any, y_context: Any) -> str:  # noqa: 
             f"method must be 'auto' or one of {METHODS}: {method=}"
         )
     if method != "permutation" and X_context is None:
-        raise ValueError(
-            f"method={method!r} refits the model, so it needs X_context and"
-            " y_context"
-        )
+        raise ValueError(f"method={method!r} needs X_context and y_context")
     return method
 
 
-def _check_options(method: str, **options: int | None) -> None:
+def _check_options(method: str, **options: Any) -> None:
     """Refuses an option that ``method`` does not use.
 
     Args:
         method: One of :data:`METHODS`.
-        **options: ``n_permutations`` and ``n_repeats``, as given.
+        **options: ``n_permutations``, ``n_repeats``, ``n_steps`` and
+            ``baseline``, as given.
 
     Raises:
         ValueError: If an option of another method is not ``None``.
     """
-    used = {"shapley": "n_permutations", "permutation": "n_repeats"}
+    used = {
+        "shapley": ("n_permutations",),
+        "permutation": ("n_repeats",),
+        "gradient": ("baseline",),
+        "integrated_gradients": ("n_steps", "baseline"),
+    }
     for name, value in options.items():
-        if value is not None and used.get(method) != name:
+        if value is not None and name not in used.get(method, ()):
             raise ValueError(f"{name} does not apply to method={method!r}")
 
 
-def _count(value: int | None, even: bool = False) -> int:
-    """``n_permutations`` (``even``) or ``n_repeats``, checked or defaulted.
+def _count(
+    value: int | None, name: str, default: int, even: bool = False
+) -> int:
+    """A count option, such as ``n_repeats``, checked or defaulted.
 
     Args:
         value: The option as given; ``None`` for its default.
-        even: Whether the option is ``n_permutations``, which must be even.
+        name: The option's name, for the errors.
+        default: Its default.
+        even: Whether it must be even, as ``n_permutations`` must.
 
     Returns:
         The count.
@@ -331,9 +417,8 @@ def _count(value: int | None, even: bool = False) -> int:
         TypeError: If the value is not an integer.
         ValueError: If it is too small, or odd where it must be even.
     """
-    name = "n_permutations" if even else "n_repeats"
     if value is None:
-        return DEFAULT_PERMUTATIONS if even else DEFAULT_REPEATS
+        return default
     validation.check_scalar(value, name, numbers.Integral, min_val=1 + even)
     if even and value % 2:
         raise ValueError(
@@ -441,10 +526,31 @@ def _statistics(
         The statistics, in the order of :data:`STATISTICS`, shape (3, n).
     """
     distribution = model.predict_distribution(_table(X, named))
-    _, _, crps, nll = metrics.per_object_metrics(
-        y, grid, distribution.on_grid(grid)
-    )
-    return np.stack([-crps, -nll, distribution.mean()])
+    return np.stack(_scores(distribution, y, grid))
+
+
+def _scores(
+    distribution: Any, y: _typing.FloatArray, grid: grid_lib.Grid
+) -> tuple[Any, Any, Any]:
+    """The statistics of numpy's or torch's distributions, in order.
+
+    Args:
+        distribution: One distribution per row, with ``on_grid`` and
+            ``mean``: a :mod:`lazy.distributions` one, or a torch density,
+            whose statistics keep its autograd graph.
+        y: Their true targets, shape (n,).
+        grid: The grid on which the CRPS and the NLL are computed.
+
+    Returns:
+        The statistics, in the order of :data:`STATISTICS`, each of the
+        distribution's array kind and shape (n,).
+    """
+    densities = distribution.on_grid(grid)
+    if not array_api_compat.is_torch_array(densities):
+        # A copy, as per_object_metrics takes: _grid_scores normalizes it.
+        densities = np.array(densities, dtype=np.float64)
+    crps, nll = metrics._grid_scores(y, grid, densities)  # noqa: SLF001 - per_object_metrics's code, for torch too.
+    return -crps, -nll, distribution.mean()
 
 
 def _refit_values(  # noqa: GS030 - scikit-learn's X, y.
@@ -628,3 +734,190 @@ def _permutation(  # noqa: GS030 - scikit-learn's X, y.
                 model, shuffled, y, named, grid
             )
     return values / n_repeats, full
+
+
+def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    method: str,
+    X_context: pd.DataFrame,
+    y_context: _typing.FloatArray,
+    X: pd.DataFrame,
+    y: _typing.FloatArray,
+    named: bool,
+    grid: grid_lib.Grid,
+    baseline: _typing.FloatArray | None,
+    n_steps: int,
+) -> tuple[_typing.FloatArray, _typing.FloatArray, _typing.FloatArray | None]:
+    """Gradient times input, or integrated gradients, of every statistic.
+
+    Column ``j`` of row ``x`` gets ``x_j - b_j`` times the mean of the
+    statistic's derivative in ``x_j`` at ``b + (k / m) (x - b)`` for
+    ``k = 1, ..., m``: at ``x`` alone for ``"gradient"``, whose ``m`` is 1.
+    Each point's statistics depend only on its own features, so the
+    gradient of their sum over a batch of points is each point's gradient.
+    A batch holds the ``m`` points of each of about
+    ``_QUERY_BUDGET / m`` rows.
+
+    Args:
+        model: A model fitted on ``X_context`` and ``y_context``.
+        method: ``"gradient"`` or ``"integrated_gradients"``.
+        X_context: Its context, shape (n_context, n_columns).
+        y_context: Its targets, shape (n_context,).
+        X: The rows to explain, shape (n, n_columns).
+        y: Their true targets, shape (n,).
+        named: Whether the caller named the columns; see :func:`_table`.
+        grid: The grid on which the CRPS and the NLL are computed.
+        baseline: The baseline ``b``, checked, shape (n_columns,), or
+            ``None`` for the mean of ``X_context``.
+        n_steps: The steps ``m``; 1 for ``"gradient"``.
+
+    Returns:
+        A tuple (values, full, base): each column's attribution, shape
+        (n_statistics, n, n_columns); the statistics of the rows, shape
+        (n_statistics, n); and, for ``"integrated_gradients"``, those at
+        the baseline, of that shape, or ``None`` for ``"gradient"``.
+
+    Raises:
+        sklearn.exceptions.NotFittedError: If the model is not fitted.
+        ValueError: If the model has no differentiable forward pass, its
+            fit is not differentiable, a column is not numeric, a feature is
+            missing, or the columns or the baseline are not as described
+            above.
+    """
+    validation.check_is_fitted(model)
+    if isinstance(model, lazy_model.LazyModel):
+        model = model.estimator_
+    if not hasattr(model, "_differentiable_density"):
+        raise ValueError(
+            f"method={method!r} needs a lazy backend, whose forward pass is"
+            f" differentiable; {type(model).__name__} has none"
+        )
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    # Where each of the fit's columns is in X, by predict's rule for names.
+    positions = pd.DataFrame([np.arange(X.shape[1])], columns=X.columns)
+    order = model._align_to_fit(positions, named).to_numpy()[0]  # noqa: SLF001 - predict's rule.
+    context = _float_features(X_context, "X_context", method)[:, order]
+    queries = _float_features(X, "X", method)[:, order]
+    origin = context.mean(axis=0) if baseline is None else baseline[order]
+    if torch.is_inference_mode_enabled():
+        raise ValueError(
+            f"method={method!r} takes gradients, which torch's inference"
+            " mode forbids; call explain outside it"
+        )
+    context_tensor = torch.tensor(context)
+    delta = queries - origin
+    fractions = np.arange(1, n_steps + 1) / n_steps
+    chunk = max(1, _QUERY_BUDGET // n_steps)
+    gradients = np.empty((len(STATISTICS), *queries.shape))
+    full = np.empty((len(STATISTICS), len(queries)))
+    # Inside torch.no_grad() too, which would build no graph.
+    with torch.enable_grad():
+        for start in range(0, len(queries), chunk):
+            rows = slice(start, start + chunk)
+            path = origin + fractions[:, None, None] * delta[rows]  # (m, c, p)
+            query = torch.tensor(
+                path.reshape(-1, path.shape[-1]), requires_grad=True
+            )
+            try:
+                density = model._differentiable_density(  # noqa: SLF001 - lazy's own backends.
+                    query, context_tensor, y_context
+                )
+            except (ValueError, NotImplementedError) as error:
+                raise ValueError(f"method={method!r}: {error}") from error
+            statistics = _scores(density, np.tile(y[rows], n_steps), grid)
+            # The three backward passes share one forward pass's graph,
+            # which the last of them frees.
+            for index, statistic in enumerate(statistics):
+                (gradient,) = torch.autograd.grad(
+                    statistic.sum(),
+                    query,
+                    retain_graph=index < len(statistics) - 1,
+                )
+                gradients[index, rows] = (
+                    gradient.numpy().reshape(path.shape).sum(axis=0)
+                )
+            # The last step, k = m, is the row itself.
+            at_points = torch.stack(statistics).detach().numpy()
+            full[:, rows] = at_points.reshape(len(STATISTICS), n_steps, -1)[
+                :, -1
+            ]
+    # The graph's context is the caller's; predict's is the fit's. Their
+    # means agree to float32 rounding, far inside this tolerance, when they
+    # are the same context.
+    means = model.predict_distribution(_table(X, named)).mean()
+    tolerance = 1e-3 * (np.std(y_context) + np.abs(np.mean(y_context)))
+    if not np.allclose(full[-1], means, rtol=0.0, atol=tolerance):
+        raise ValueError(
+            f"method={method!r} needs X_context and y_context to be the"
+            " context the model was fitted on: its forward pass on them"
+            " predicts means that differ from predict's by up to"
+            f" {np.abs(full[-1] - means).max():.3g}"
+        )
+    values = (gradients / n_steps * delta)[..., np.argsort(order)]
+    if method == "gradient":
+        return values, full, None
+    # The baseline is one row; each explained row scores it at its target.
+    at_baseline = pd.DataFrame([origin[np.argsort(order)]], columns=X.columns)
+    distribution = model.predict_distribution(_table(at_baseline, named))
+    base = _scores(distribution[np.zeros(len(y), dtype=int)], y, grid)
+    return values, full, np.stack(base)
+
+
+def _check_baseline(
+    baseline: npt.ArrayLike | None, n_columns: int
+) -> _typing.FloatArray | None:
+    """``baseline`` as a float array, checked; ``None`` stays ``None``.
+
+    Args:
+        baseline: The baseline as given.
+        n_columns: The number of columns of ``X``.
+
+    Returns:
+        The baseline, float64, shape (n_columns,), or ``None``.
+
+    Raises:
+        ValueError: If it is not a finite row of ``n_columns`` numbers.
+    """
+    if baseline is None:
+        return None
+    try:
+        row = np.asarray(baseline, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"baseline must be numbers: {error}") from error
+    if row.shape != (n_columns,) or not np.isfinite(row).all():
+        raise ValueError(
+            f"baseline must be finite, of shape ({n_columns},): got {row}"
+        )
+    return row
+
+
+def _float_features(
+    frame: pd.DataFrame, name: str, method: str
+) -> _typing.FloatArray:
+    """A table's values, which gradients need numeric and present.
+
+    Args:
+        frame: Features, shape (n, p).
+        name: The argument's name, for the errors.
+        method: The gradient method, for the errors.
+
+    Returns:
+        The values, float64, shape (n, p).
+
+    Raises:
+        ValueError: If a column is not numeric, or a value is missing or
+            infinite.
+    """
+    other = frame.select_dtypes(exclude="number").columns
+    if len(other):
+        raise ValueError(
+            f"method={method!r} needs numeric columns; {name} has others:"
+            f" {list(other)}"
+        )
+    values = frame.to_numpy(dtype=np.float64)
+    if not np.isfinite(values).all():
+        raise ValueError(
+            f"method={method!r} needs {name} without missing or infinite values"
+        )
+    return values

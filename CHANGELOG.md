@@ -9,6 +9,15 @@ change the API.
 
 ### Added
 
+- `lazy.interp.explain(method="gradient")` and
+  `method="integrated_gradients"`: attributions from gradients of each
+  row's statistics through a fitted model's differentiable forward pass,
+  with no refit. The first multiplies the gradient by the row's offset from
+  a baseline; the second averages the gradient along the path from the
+  baseline, in `n_steps` steps (32 by default), so that the attributions
+  sum to the statistic at the row minus that at the baseline. `baseline`
+  defaults to the mean of `X_context`. The model must be fitted with
+  `transforms=("none",)` and `outlier_threshold=None`, on numeric columns.
 - `lazy.image.Pretrained(views=...)`: rotates and flips each image before it
   is embedded, and averages the embeddings of the views. `"d4"` takes all
   eight rotations and flips, listed in `lazy.image.VIEWS`; one view gives a

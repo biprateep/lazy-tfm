@@ -1,8 +1,9 @@
 # Interpretability
 
 {func}`lazy.interp.explain` measures which features a model's predicted
-distributions rely on. It needs only `fit` and `predict_distribution`, so it
-works the same on every backend, and on a pool of them.
+distributions rely on. Its removal methods need only `fit` and
+`predict_distribution`, so they work the same on every backend, and on a pool
+of them; its gradient methods need a backend's differentiable forward pass.
 
 ```python
 from lazy import interp
@@ -38,8 +39,8 @@ prediction cancel over rows.
 
 ## Removing a feature
 
-Every method compares predictions with and without a feature, so it must
-decide what the model predicts without it. The models are fitted by storing
+Every removal method compares predictions with and without a feature, so it
+must decide what the model predicts without it. The models are fitted by storing
 their context, which makes the direct answer cheap: remove the feature's
 column from the context and from the queries, and fit a clone of the model on
 the columns that remain. One fit serves all the explained rows. We write
@@ -96,6 +97,46 @@ context is given. A shuffled row can pair values that never occur together,
 so the model is asked about rows unlike any in its context when features are
 correlated.
 
+### Gradients
+
+The two gradient methods keep the fitted model, and take the derivatives of a
+statistic $s$ of row $x$ in its features through the model's forward pass.
+Neither refits; both need the context the model was fitted on, as `X_context`
+and `y_context`. They compare the row with a baseline row $b$, which stands in
+for no feature at all: the mean of `X_context` by default, or the row that
+`baseline` gives.
+
+`method="gradient"` multiplies the gradient at the row by the row's offset
+from the baseline (gradient times input):
+
+$$
+\phi_{ij} = (x_{ij} - b_j)\,\frac{\partial s}{\partial x_j}(x_i).
+$$
+
+It costs one forward pass and one backward pass per statistic. It is exact
+for a statistic that is linear in the features, and only a local view
+otherwise.
+
+`method="integrated_gradients"` averages the gradient along the straight path
+from the baseline to the row, in $m$ steps (`n_steps`, 32 by default):
+
+$$
+\phi_{ij} = (x_{ij} - b_j)\,\frac{1}{m}\sum_{k=1}^{m}
+\frac{\partial s}{\partial x_j}\Bigl(b + \tfrac{k}{m}\,(x_i - b)\Bigr).
+$$
+
+The sum approximates the integral of the gradient along the path, so the
+values of a row sum to what the path adds,
+$\sum_j \phi_{ij} \approx s(x_i) - s(b)$, with an error that falls as $1/m$.
+`explanation.full_values` and `explanation.base_values` hold the two terms.
+The cost is $m$ times that of `"gradient"`.
+
+The forward pass is differentiable only when nothing between the features and
+the model's network is a step that has no gradient. Fit the model with
+`transforms=("none",)` and `outlier_threshold=None`, on numeric columns;
+`explain` refuses any other fit, and any model with no differentiable forward
+pass, such as a pipeline.
+
 ## Groups of columns
 
 `groups` treats several columns as one feature, which is removed, added or
@@ -109,4 +150,5 @@ interp.explain(
 ```
 
 This also lowers the cost, which depends on the number of features and not of
-columns.
+columns. The gradient methods take the gradient of every column at once, so a
+group's value is the sum of its columns' values, and the cost does not change.
