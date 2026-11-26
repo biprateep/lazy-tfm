@@ -165,6 +165,10 @@ change the API.
   grid, the means and the grid metrics run one implementation for numpy
   arrays and torch tensors, so that a gradient can pass through them. Their
   numpy results are unchanged, bit for bit.
+- The "Feature importance" tutorial uses `lazy.interp`: permutation
+  importance, Shapley values by refit, integrated gradients and the context
+  rows behind a prediction, for the CRPS, the NLL and the mean. It no longer
+  needs the `shap` package.
 
 ### Removed
 
