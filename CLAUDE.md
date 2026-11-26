@@ -25,6 +25,7 @@ lazy asks the user to do as little as possible. `docs/guide/philosophy.md` state
   - `encoders/` holds `BaseEncoder`, the contract of the transformers that turn items which are not table cells into table columns (`_base.py`), their registry, the cache of their embeddings (`_cache.py`) and `Tabularizer`, which encodes the columns of items of a table (`tabularizer.py`).
   - `time.py`, `image.py` and `text.py` hold the encoders of each kind of item: a pretrained one, which runs one of several networks pinned to a commit on the Hugging Face Hub (`encoders/_pretrained.py` holds their contract; `models/_hub.py` pins the weights), and classical ones, fixed computations that need no download.
   - `interp.py` holds `explain`, the entry point for interpretability: attributions of a predicted distribution to the features.
+  - `experimental.py` holds what a release may change without a deprecation: `ContextAdapter`, which trains a network that maps the columns for a frozen model, opt-in.
   - `grid.py`, `distributions.py` and `metrics.py` hold the output grids, the native distributions and the scores.
   - `datasets.py` is the data API: `load_dataset` and `list_datasets` load every benchmark (OpenML datasets, DC1 from Zenodo, PLAsTiCC from Zenodo through `_plasticc.py`, MulTaBench from the Hugging Face Hub through `_multabench.py`, generated data), and every benchmark loads through them. It also holds the DC1 photometry tools. `selection.py` and `plotting/` hold the photometric-redshift selection function and figures.
   - `_cli.py` is the `lazy` command.

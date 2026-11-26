@@ -31,6 +31,76 @@ from lazy import grid as grid_lib
 from lazy import metrics
 
 
+def backend(model: Any, label: str) -> Any:
+    """The backend of a fitted lazy model, whose forward pass is differentiable.
+
+    Args:
+        model: A fitted backend, or a ``LazyModel`` that wraps one.
+        label: What needs the pass, for the error, such as
+            ``"method='gradient'"``.
+
+    Returns:
+        The backend.
+
+    Raises:
+        ValueError: If it has no differentiable forward pass.
+    """
+    from lazy.models import lazy_model  # noqa: PLC0415 - avoids a cycle.
+
+    if isinstance(model, lazy_model.LazyModel):
+        model = model.estimator_
+    if not hasattr(model, "_differentiable_density"):
+        raise ValueError(
+            f"{label} needs a lazy backend, whose forward pass is"
+            f" differentiable; {type(model).__name__} has none"
+        )
+    return model
+
+
+def refuse_inference_mode(label: str) -> None:
+    """Refuses to take gradients while torch's inference mode is on.
+
+    Args:
+        label: What takes the gradients, for the error.
+
+    Raises:
+        ValueError: If inference mode is on.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    if torch.is_inference_mode_enabled():
+        raise ValueError(
+            f"{label} takes gradients, which torch's inference mode forbids;"
+            " call it outside inference mode"
+        )
+
+
+def density(
+    model: Any, label: str, query: Any, context: Any, y_context: Any
+) -> Any:
+    """A backend's differentiable densities, with its refusals labelled.
+
+    Args:
+        model: A backend fitted on a context of as many rows as ``context``.
+        label: What needs the pass, for the errors.
+        query: The query features, a torch tensor of shape (n, n_columns).
+        context: The context features, a torch tensor of shape
+            (n_context, n_columns).
+        y_context: Their targets, shape (n_context,).
+
+    Returns:
+        What the backend's ``_differentiable_density`` returns.
+
+    Raises:
+        ValueError: If the backend refuses the pass: its fit is not
+            differentiable, or it has no differentiable forward pass.
+    """
+    try:
+        return model._differentiable_density(query, context, y_context)  # noqa: SLF001 - lazy's own backends.
+    except (ValueError, NotImplementedError) as error:
+        raise ValueError(f"{label}: {error}") from error
+
+
 def frozen(*networks: Any) -> None:
     """Stops the networks' weights from collecting gradients, for good.
 
