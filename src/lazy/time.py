@@ -194,11 +194,17 @@ class _Recipe:
         states: The width of the network's states.
         patch: The number of values in one token.
         context: The most values of a series, its last ones, that it reads.
+        outputs: The tokens that the network puts after the summary token,
+            which the embedding leaves out: Chronos-2's masked output patch.
+        pinned: Whether the loader takes the precision and the attention
+            that transformers is pinned to; Chronos-T5's takes no attention.
     """
 
     states: int
     patch: int
     context: int
+    outputs: int = 0
+    pinned: bool = False
 
     @property
     def width(self) -> int:
@@ -211,11 +217,12 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     ``model`` picks one of the networks of ``recipes``, each pinned to a
     commit on the Hugging Face Hub: ``"chronos-t5-tiny"`` (the default),
-    ``"chronos-t5-mini"``, ``"chronos-t5-small"`` and
-    ``"chronos-bolt-small"``. Chronos-T5 reads one value per token and the
-    last 512 values of a series; Chronos-Bolt reads one patch of 16 values
-    per token and the last 2,048. :doc:`/guide/encoders` lists the networks
-    and gives the evidence behind the choice.
+    ``"chronos-t5-mini"``, ``"chronos-t5-small"``, ``"chronos-bolt-small"``
+    and ``"chronos-2"``. Chronos-T5 reads one value per token and the last
+    512 values of a series; Chronos-Bolt reads one patch of 16 values per
+    token and the last 2,048, and Chronos-2 the last 8,192.
+    :doc:`/guide/encoders` lists the networks and gives the evidence behind
+    the choice.
 
     The embedding is the mean of the network's final states over the
     tokens that hold an observed value and over its summary token, then
@@ -239,6 +246,7 @@ class Pretrained(_pretrained.PretrainedEncoder):
         "chronos-t5-mini": _Recipe(384, 1, 512),
         "chronos-t5-small": _Recipe(512, 1, 512),
         "chronos-bolt-small": _Recipe(512, 16, 2048),
+        "chronos-2": _Recipe(768, 16, 8192, outputs=1, pinned=True),
     }
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -268,8 +276,12 @@ class Pretrained(_pretrained.PretrainedEncoder):
         import chronos  # noqa: PLC0415 - an optional, heavy extra.
         import torch  # noqa: PLC0415 - an optional, heavy extra.
 
+        if self._recipe().pinned:
+            settings = _pretrained.PINNED
+        else:
+            settings = {"torch_dtype": torch.float32}
         return chronos.BaseChronosPipeline.from_pretrained(
-            path, device_map=device, torch_dtype=torch.float32
+            path, device_map=device, **settings
         )
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
@@ -281,13 +293,15 @@ class Pretrained(_pretrained.PretrainedEncoder):
         states, _ = network.embed(
             [torch.as_tensor(values, dtype=torch.float32) for values in series]
         )
-        states = states.float().numpy()
         rows = np.empty((len(series), recipe.width))
         for row, values, state in zip(rows, series, states, strict=True):
+            # Chronos-2 gives each series its own tensor, of one variate.
+            tokens = state.float().numpy().reshape(-1, recipe.states)
             # A batch pads on the left: a series' own tokens and its one
-            # summary token are its last ones.
+            # summary token come last, before the output tokens.
             observed = _tokens(values, recipe.patch)
-            own = state[-len(observed) - 1 :]
+            end = len(tokens) - recipe.outputs
+            own = tokens[end - len(observed) - 1 : end]
             row[:-2] = own[np.append(observed, True)].mean(axis=0)
             row[-2:] = np.nanmean(values), np.nanstd(values)
         return rows

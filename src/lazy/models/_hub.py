@@ -808,6 +808,25 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             display_name="GTE-ModernBERT-base",
             license_name="Apache-2.0",
         ),
+        # The tokenizer and the weights only: the network is loaded without
+        # its language-model head, and sentence-transformers' files are not
+        # read.
+        _encoder(
+            "text",
+            "Qwen3-Embedding-0.6B",
+            repo_id="Qwen/Qwen3-Embedding-0.6B",
+            revision="97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
+            files=(
+                "config.json",
+                "model.safetensors",
+                "tokenizer.json",
+                "tokenizer_config.json",
+            ),
+            size_bytes=1_203_020_554,
+            parameters=595_776_512,
+            display_name="Qwen3-Embedding-0.6B",
+            license_name="Apache-2.0",
+        ),
         _encoder(
             "image",
             "dinov2-with-registers-small",
@@ -860,6 +879,19 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             display_name="CLIP ViT-B/16",
             license_name="MIT",
         ),
+        # A timm network, which transformers wraps. The weights are a PyTorch
+        # pickle, loaded with torch.load(weights_only=True); timm runs them.
+        _encoder(
+            "image",
+            "zoobot-encoder-convnext_nano",
+            repo_id="mwalmsley/zoobot-encoder-convnext_nano",
+            revision="494bae25811233bb6cec2389322b09866bfdbe08",
+            files=("config.json", "pytorch_model.bin"),
+            size_bytes=59_865_437,
+            parameters=14_952_560,
+            display_name="Zoobot ConvNeXt-Nano",
+            license_name="Apache-2.0",
+        ),
         _encoder(
             "time",
             "chronos-t5-tiny",
@@ -902,6 +934,17 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             size_bytes=190_889_945,
             parameters=47_718_016,
             display_name="Chronos-Bolt-small",
+            license_name="Apache-2.0",
+        ),
+        _encoder(
+            "time",
+            "chronos-2",
+            repo_id="amazon/chronos-2",
+            revision="29ec3766d36d6f73f0696f85560a422f50e8498c",
+            files=("config.json", "model.safetensors"),
+            size_bytes=477_931_539,
+            parameters=119_477_664,
+            display_name="Chronos-2",
             license_name="Apache-2.0",
         ),
     )

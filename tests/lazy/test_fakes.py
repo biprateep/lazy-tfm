@@ -27,6 +27,7 @@ STAND_INS = {
     "tabicl._model.tabicl.TabICL": fake_tabicl.Network,
     "chronos.ChronosPipeline": fake_encoders.Chronos,
     "chronos.ChronosBoltPipeline": fake_encoders.Chronos,
+    "chronos.Chronos2Pipeline": fake_encoders.Chronos2,
 }
 """Each fake class, by the dotted name of the upstream class it replaces."""
 

@@ -9,6 +9,13 @@ change the API.
 
 ### Added
 
+- Three more pretrained networks: Qwen3-Embedding-0.6B for text
+  (`lazy.text.Pretrained(model="Qwen3-Embedding-0.6B")`), Zoobot
+  ConvNeXt-Nano for images of galaxies
+  (`lazy.image.Pretrained(model="zoobot-encoder-convnext_nano")`) and
+  Chronos-2 for time series (`lazy.time.Pretrained(model="chronos-2")`). The
+  defaults do not change. The `encoders` extra now installs `timm`, which
+  runs Zoobot's network.
 - `lazy.experimental`, a module that a release may change or remove without a
   deprecation, and in it `ContextAdapter`: an opt-in density regressor that
   trains a small network to map some columns to `n_components` new ones for a

@@ -44,7 +44,7 @@ at most a few hundred features well ({doc}`limits`), so keep the total small.
 ## Pretrained encoders
 
 The pretrained encoders need the `encoders` extra, which installs PyTorch,
-Hugging Face `transformers` and `chronos-forecasting`:
+Hugging Face `transformers`, `chronos-forecasting` and `timm`:
 
 ```console
 pip install 'lazy-tfm[encoders]'
@@ -94,19 +94,32 @@ defaults will be confirmed on the MulTaBench benchmark.
   text encoder of MulTaBench and of the TabPFN-3.5 report, so results compare
   directly with theirs. BGE-small-en-v1.5 scores higher on MTEB at the same
   size, and GTE-ModernBERT-base is the strongest MTEB model near 150 million
-  parameters and reads 8,192 tokens.
+  parameters and reads 8,192 tokens. Qwen3-Embedding-0.6B scores 70.70 on
+  MTEB English v2 and 64.33 on MTEB multilingual (the mean over tasks, as its
+  card reports), the highest of the models under a billion parameters that
+  its card compares. It reads 8,192 tokens, with no instruction, as its card
+  embeds a document: an instruction names a task, which an encoder of a
+  column does not know.
 - **Images.** DINOv2-small with registers matches DINOv3-small, the
   MulTaBench encoder, on ImageNet (87.3 against 87.0 ImageNet-ReaL linear
   accuracy); DINOv3 requires a sign-up to download. SigLIP 2 base is the
   strongest frozen network of its size there. CLIP ViT-B/16 is the strongest
   general network in a study of galaxy redshifts from images (R² 0.43 on HSC
   and 0.47 on JWST, against 0.38 and 0.44 for DINOv3-base). A network trained
-  on galaxies does better still, but each needs its own package.
+  on galaxies does better still. Zoobot ConvNeXt-Nano is one: it learned to
+  answer every Galaxy Zoo question at once, from 820,000 images of galaxies
+  and over 100 million volunteer answers, and is the network that Zoobot's
+  authors suggest starting with. It reads the central square of an image, of
+  1/1.2 of its shorter side, at 224 by 224 pixels, with values in [0, 1] and
+  no other normalization, as Zoobot's own evaluation reads a galaxy.
 - **Time series.** On light curves of variable stars from ZTF, Chronos-T5
   embeddings beat Chronos-Bolt's on every classification metric, though
   features made for light curves beat every pretrained network. Chronos-T5
-  reads one value per token. No general network reads observation times or
-  uncertainties, so an irregular light curve is read as evenly sampled.
+  reads one value per token. Chronos-2 has the best zero-shot forecasts of
+  the public pretrained networks on GIFT-Eval and fev-bench, as its card
+  reports, and reads the last 8,192 values in patches of 16. No general
+  network reads observation times or uncertainties, so an irregular light
+  curve is read as evenly sampled.
 
 Issue [#344](https://github.com/biprateep/lazy-tfm/issues/344) gives the
 sources and the figures.
@@ -173,14 +186,21 @@ If you use a pretrained encoder, cite its network as well as LAZY:
   and Gurevych, I. (2019). Sentence-BERT. EMNLP.
 - GTE-ModernBERT: Li, Z., et al. (2023). Towards General Text Embeddings with
   Multi-stage Contrastive Learning. arXiv:2308.03281.
+- Qwen3-Embedding: Zhang, Y., et al. (2025). Qwen3 Embedding: Advancing Text
+  Embedding and Reranking Through Foundation Models. arXiv:2506.05176.
 - DINOv2: Oquab, M., et al. (2024). DINOv2: Learning Robust Visual Features
   without Supervision. TMLR. Darcet, T., et al. (2024). Vision Transformers
   Need Registers. ICLR.
 - SigLIP 2: Tschannen, M., et al. (2025). SigLIP 2. arXiv:2502.14786.
 - CLIP: Radford, A., et al. (2021). Learning Transferable Visual Models From
   Natural Language Supervision. ICML.
+- Zoobot: Walmsley, M., et al. (2023). Zoobot: Adaptable Deep Learning Models
+  for Galaxy Morphology. JOSS, 8(85), 5312. Walmsley, M., et al. (2024).
+  Scaling Laws for Galaxy Images. arXiv:2404.02973.
 - Chronos: Ansari, A. F., et al. (2024). Chronos: Learning the Language of
   Time Series. TMLR.
+- Chronos-2: Ansari, A. F., et al. (2025). Chronos-2: From Univariate to
+  Universal Forecasting. arXiv:2510.15821.
 
 ## The Tabularizer
 

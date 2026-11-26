@@ -168,15 +168,25 @@ class PretrainedEncoder(_base.BaseEncoder):
             ImportError: If the ``encoders`` extra is not installed.
         """
         name = f"lazy.{self.modality}.{type(self).__name__}"
-        _ensemble.import_extra(self.package, needed_by=name, extra=EXTRA)
+        for package in (self.package, *self._requires()):
+            _ensemble.import_extra(package, needed_by=name, extra=EXTRA)
         return _ensemble.import_extra("torch", needed_by=name, extra=EXTRA)
 
+    def _requires(self) -> tuple[str, ...]:
+        """The packages ``model`` runs on besides the loader, by name.
+
+        A recipe lists them as ``requires``, a name that is both the
+        distribution's and the module's; most need none.
+        """
+        return getattr(self._recipe(), "requires", ())
+
     def _identity_head(self) -> list[str]:
-        """The versions of lazy, its loader and torch; the weights' commit."""
+        """The versions of lazy, its packages and torch; the weights' commit."""
         checkpoint = self._checkpoint()
         return [
             *super()._identity_head(),
             metadata.version(checkpoint.package),
+            *(metadata.version(package) for package in self._requires()),
             metadata.version("torch"),
             checkpoint.repo_id,
             checkpoint.revision or "",

@@ -5,8 +5,9 @@
 
 Runs on CPU and needs every backend's checkpoint in the local cache. Only
 run it to deliberately move the reference; the golden test compares against
-the files it writes. ``encoders`` records the embeddings of every pinned
-encoder model instead, which needs the ``encoders`` extra.
+the files it writes. ``encoders`` records the embeddings of the pinned
+encoder models that the encoders' file lacks instead, which needs the
+``encoders`` extra; delete the file to record them all again.
 
 Typical usage example:
 
@@ -21,6 +22,7 @@ import os
 import platform
 import subprocess
 import sys
+from typing import Any
 
 import golden_data
 import numpy as np
@@ -61,26 +63,56 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _record_encoders(recorded: dict[str, object]) -> None:
-    """Records the embeddings of every pinned encoder model, in one file.
+    """Records the embeddings of the encoder models the file lacks.
+
+    The embeddings already in the file are kept as they are, unless their
+    model is no longer pinned (dropped) or is pinned to another revision
+    (recorded again). The provenance lists every model; a recording that
+    adds to the file is listed under ``"added"``, with the models it
+    recorded.
 
     Args:
         recorded: What :func:`_recording` returned.
     """
     import lazy  # noqa: PLC0415 - imported by golden_data in any case.
 
-    keys = sorted(lazy.encoders.CHECKPOINTS)
-    embeddings = {key: golden_data.embed(key) for key in keys}
-    models = {
-        key: lazy.encoders.CHECKPOINTS[key].provenance(device="cpu")
-        for key in keys
+    path = golden_data.ENCODERS_PATH
+    kept: dict[str, np.ndarray] = {}
+    provenance: dict[str, Any] = {**recorded, "models": {}}
+    if path.exists():
+        with np.load(path) as golden:
+            kept = {name: golden[name] for name in golden.files}
+        provenance = json.loads(str(kept.pop("provenance")))
+    checkpoints = lazy.encoders.CHECKPOINTS
+    # A model no longer pinned is dropped; one pinned to another revision
+    # is recorded again.
+    kept = {
+        name: rows
+        for name, rows in kept.items()
+        if (key := name.replace("__", ":")) in checkpoints
+        and provenance["models"][key]["revision"] == checkpoints[key].revision
     }
+    provenance["models"] = {
+        key: model
+        for key, model in provenance["models"].items()
+        if key.replace(":", "__") in kept
+    }
+    keys = [
+        key for key in sorted(checkpoints) if key.replace(":", "__") not in kept
+    ]
+    embeddings = {key: golden_data.embed(key) for key in keys}
+    for key in keys:
+        provenance["models"][key] = checkpoints[key].provenance(device="cpu")
+    if kept and keys:
+        provenance.setdefault("added", []).append({**recorded, "keys": keys})
     np.savez_compressed(
-        golden_data.ENCODERS_PATH,
+        path,
+        **kept,
         **{key.replace(":", "__"): rows for key, rows in embeddings.items()},
-        provenance=json.dumps({**recorded, "models": models}, default=str),
+        provenance=json.dumps(provenance, default=str),
     )
     for key, rows in embeddings.items():
-        print(f"{key}: {rows.shape} -> {golden_data.ENCODERS_PATH}")
+        print(f"{key}: {rows.shape} -> {path}")
 
 
 def _recording() -> dict[str, object]:
