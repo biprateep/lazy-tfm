@@ -14,6 +14,7 @@ judged by. Both are re-exported here.
 from lazy.plotting.diagnostics import diagnostic_panel
 from lazy.plotting.diagnostics import plot_actual_vs_predicted
 from lazy.plotting.diagnostics import plot_coverage
+from lazy.plotting.diagnostics import plot_importance
 from lazy.plotting.diagnostics import plot_pdfs
 from lazy.plotting.diagnostics import plot_pit
 from lazy.plotting.diagnostics import plot_pit_qq
@@ -54,6 +55,7 @@ __all__ = [
     "plot_pit_qq",
     "plot_residuals",
     "plot_actual_vs_predicted",
+    "plot_importance",
     "register_journal",
     "save",
     "set_palette",

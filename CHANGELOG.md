@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- `lazy.interp.Explanation.plot(statistic="crps", ax=None)`: draws one
+  statistic's `importance()` as a horizontal bar chart, with the most
+  important feature at the top, and returns the matplotlib axes.
+  `lazy.plotting.plot_importance` draws such bars from any series of
+  importances.
 - `lazy.interp.explain_context`: attributes each row's predicted distribution
   to the rows of the context, as a `ContextExplanation`, whose `top(k)` lists
   each row's `k` most influential context rows. `method="gradient"`, the
