@@ -11,6 +11,8 @@ import pytest
 import standins
 
 from lazy import distributions
+from lazy import grid as grid_lib
+from lazy import metrics
 from lazy.models import _differentiable
 
 torch = pytest.importorskip("torch")
@@ -157,3 +159,91 @@ def test_torch_quantiles_trim_as_their_numpy_twins():
         0.3,
     )
     np.testing.assert_allclose(trimmed.locs.numpy(), expected.locs)
+
+
+def _twins():
+    """Torch densities and their numpy twins, from leaves with gradients.
+
+    A histogram with zero-width buckets, inside and at the end; quantiles
+    with ties, a row of equal values and values out of order; a mixture of
+    a histogram with buckets of its own and one on the grid's own edges.
+    """
+    edges = np.array([0.0, 1.0, 1.0, 3.0, 4.0, 4.0])
+    masses = np.array([[0.2, 0.1, 0.4, 0.3, 0.0], [0.1, 0.0, 0.1, 0.7, 0.1]])
+    log_masses = torch.log(torch.tensor(masses)).requires_grad_()
+    probabilities = torch.exp(log_masses).detach().numpy()
+    yield (
+        _differentiable.TorchHistogram(edges, log_masses),
+        distributions.HistogramDistribution(edges, probabilities),
+        [log_masses],
+    )
+    levels = np.array([0.1, 0.3, 0.5, 0.9])
+    locs = np.array(
+        [[0.0, 1.0, 1.0, 4.0], [2.0, 2.0, 2.0, 2.0], [0.5, 2.0, 1.0, 3.5]]
+    )
+    leaf = torch.tensor(locs, requires_grad=True)
+    yield (
+        _differentiable.TorchQuantiles(levels, leaf),
+        distributions.QuantileDistribution(levels, locs),
+        [leaf],
+    )
+    own = np.linspace(-1.0, 5.0, 7)
+    parts = [(edges, masses), (own, np.full((2, 6), 1.0 / 6.0))]
+    leaves = [torch.log(torch.tensor(m)).requires_grad_() for _, m in parts]
+    weights = np.array([0.25, 0.75])
+    yield (
+        _differentiable.TorchMixture(
+            tuple(
+                _differentiable.TorchHistogram(e, leaf)
+                for (e, _), leaf in zip(parts, leaves, strict=True)
+            ),
+            weights,
+        ),
+        distributions.MixtureDistribution(
+            tuple(
+                distributions.HistogramDistribution(
+                    e, torch.exp(leaf).detach().numpy()
+                )
+                for (e, _), leaf in zip(parts, leaves, strict=True)
+            ),
+            weights,
+        ),
+        leaves,
+    )
+
+
+_GRIDS = [
+    grid_lib.Grid.linear(-1.0, 5.0, 6),
+    grid_lib.Grid.linear(-1.0, 5.0, 6, normalization="histogram"),
+    grid_lib.Grid.linear(0.5, 3.0, 9),
+]
+
+
+@pytest.mark.parametrize("grid", _GRIDS, ids=["trapezoid", "own", "inner"])
+def test_torch_densities_have_the_grid_statistics_of_their_numpy_twins(grid):
+    for density, twin, _ in _twins():
+        y = np.linspace(-2.0, 6.0, density.mean().shape[0])
+        on_grid = density.on_grid(grid)
+        crps, nll = metrics._grid_scores(y, grid, on_grid)
+        expected = twin.on_grid(grid)
+        _, _, expected_crps, expected_nll = metrics.per_object_metrics(
+            y, grid, expected
+        )
+        np.testing.assert_allclose(on_grid.detach().numpy(), expected)
+        np.testing.assert_allclose(density.mean().detach().numpy(), twin.mean())
+        np.testing.assert_allclose(crps.detach().numpy(), expected_crps)
+        np.testing.assert_allclose(nll.detach().numpy(), expected_nll)
+
+
+@pytest.mark.parametrize("grid", _GRIDS, ids=["trapezoid", "own", "inner"])
+def test_the_grid_statistics_of_torch_densities_have_gradients(grid):
+    for density, _, leaves in _twins():
+        y = np.linspace(0.7, 2.8, density.mean().shape[0])
+        crps, nll = metrics._grid_scores(y, grid, density.on_grid(grid))
+        for statistic in (crps, nll, density.mean()):
+            gradients = torch.autograd.grad(
+                statistic.sum(), leaves, retain_graph=True, allow_unused=True
+            )
+            flat = torch.cat([g.ravel() for g in gradients if g is not None])
+            assert torch.isfinite(flat).all()
+            assert flat.abs().sum() > 0
