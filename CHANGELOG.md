@@ -9,6 +9,13 @@ change the API.
 
 ### Added
 
+- Three more pretrained networks: Qwen3-Embedding-0.6B for text
+  (`lazy.text.Pretrained(model="Qwen3-Embedding-0.6B")`), Zoobot
+  ConvNeXt-Nano for images of galaxies
+  (`lazy.image.Pretrained(model="zoobot-encoder-convnext_nano")`) and
+  Chronos-2 for time series (`lazy.time.Pretrained(model="chronos-2")`). The
+  defaults do not change. The `encoders` extra now installs `timm`, which
+  runs Zoobot's network.
 - `lazy.interp.Explanation.plot(statistic="crps", ax=None)`: draws one
   statistic's `importance()` as a horizontal bar chart, with the most
   important feature at the top, and returns the matplotlib axes.

@@ -96,11 +96,17 @@ class ImageProcessor:
 
 
 class ImageModel(Network):
-    """An embedding that is a fixed function of the channel means."""
+    """An embedding that is a fixed function of the channel means.
+
+    It reads the means of :class:`ImageProcessor`, or the means of the
+    pixels that lazy itself prepares, in [0, 1], for Zoobot.
+    """
 
     def __call__(self, pixel_values):
         import torch  # noqa: PLC0415
 
+        if pixel_values.ndim == 4:
+            pixel_values = pixel_values.double().mean(dim=(2, 3)) * 255
         waves = torch.arange(1, self.width // 3 + 2, dtype=torch.float64)
         token = torch.sin(pixel_values[:, :, None] * waves / 255)
         token = token.reshape(len(pixel_values), -1)[:, : self.width]
@@ -135,6 +141,21 @@ class Chronos:
         return states, None
 
 
+class Chronos2(Chronos):
+    """Chronos-2's ``embed``: a masked output token after the summary.
+
+    The output token's state is 1e6, and each series' states come as a
+    tensor of one variate.
+    """
+
+    def embed(self, inputs):
+        import torch  # noqa: PLC0415
+
+        states, _ = super().embed(inputs)
+        output = torch.full((len(inputs), 1, self.width), PAD)
+        return list(torch.cat([states, output], dim=1)[:, None]), None
+
+
 def install(monkeypatch, tmp_path):
     """Installs the fakes; returns how often each model's network loads.
 
@@ -166,9 +187,14 @@ def install(monkeypatch, tmp_path):
         cls = {"text": TextModel, "image": ImageModel}
         return cls[pathlib.Path(path).parent.name](recipe(path).width)
 
-    def pipeline(path, device_map, torch_dtype):
+    def pipeline(path, device_map, **settings):
+        import torch  # noqa: PLC0415
+
         found = recipe(path)
-        return Chronos(found.states, found.patch)
+        float32 = {"torch_dtype": torch.float32}
+        assert settings == (_pretrained.PINNED if found.pinned else float32)
+        cls = Chronos2 if found.outputs else Chronos
+        return cls(found.states, found.patch)
 
     fakes.patch(
         monkeypatch,

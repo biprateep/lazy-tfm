@@ -29,6 +29,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Sequence
 import dataclasses
+import functools
 import itertools
 import os
 import pathlib
@@ -325,11 +326,19 @@ class _Recipe:
         width: The width of the embedding.
         network: The class of transformers that loads the network.
         output: The output of the network that is the embedding.
+        size: ``None`` to preprocess as the processor saved with the
+            weights says; else the side, in pixels, of the square that
+            :func:`_centred` cuts and scales.
+        zoom: How much :func:`_centred` magnifies the centre of an image.
+        requires: The packages the network runs on besides transformers.
     """
 
     width: int
     network: str = "AutoModel"
     output: str = "pooler_output"
+    size: int | None = None
+    zoom: float = 1.0
+    requires: tuple[str, ...] = ()
 
 
 # The stretch of an image that is not 8-bit: the percentiles of each band
@@ -343,11 +352,15 @@ class Pretrained(_pretrained.PretrainedEncoder):
     ``model`` picks one of the networks of ``recipes``, each pinned to a
     commit on the Hugging Face Hub with its preprocessing (resizing,
     cropping, normalization): ``"dinov2-with-registers-small"`` (the
-    default), ``"dinov2-large"``, ``"siglip2-base-patch16-224"`` and
-    ``"clip-vit-base-patch16"``. The embedding is the class token for
-    DINOv2, the attention-pooled tokens for SigLIP 2 and the projected
-    class token for CLIP. :doc:`/guide/encoders` lists the networks and
-    gives the evidence behind the choice.
+    default), ``"dinov2-large"``, ``"siglip2-base-patch16-224"``,
+    ``"clip-vit-base-patch16"`` and ``"zoobot-encoder-convnext_nano"``.
+    The embedding is the class token for DINOv2, the attention-pooled
+    tokens for SigLIP 2, the projected class token for CLIP and the pooled
+    features of the last stage for Zoobot, a network trained on galaxy
+    images. Zoobot reads the central square of an image, of 1/1.2 of its
+    shorter side, at 224 by 224 pixels with values in [0, 1].
+    :doc:`/guide/encoders` lists the networks and gives the evidence behind
+    the choice.
 
     The networks read 8-bit RGB. A file, a Pillow image or a ``uint8``
     array of one, three or four (RGBA, whose alpha is dropped) channels is
@@ -379,6 +392,12 @@ class Pretrained(_pretrained.PretrainedEncoder):
         "siglip2-base-patch16-224": _Recipe(768, "SiglipVisionModel"),
         "clip-vit-base-patch16": _Recipe(
             512, "CLIPVisionModelWithProjection", "image_embeds"
+        ),
+        # Zoobot's preprocessing at test time, from galaxy-datasets'
+        # minimal_view_config: no normalization, which its config.json,
+        # copied from ImageNet's ConvNeXt, would wrongly apply.
+        "zoobot-encoder-convnext_nano": _Recipe(
+            640, size=224, zoom=1.2, requires=("timm",)
         ),
     }
 
@@ -422,15 +441,22 @@ class Pretrained(_pretrained.PretrainedEncoder):
         return self
 
     def _load(self, path: os.PathLike[str], device: str) -> Any:
-        """The preprocessor and the network, on ``device``."""
+        """The preprocessing of images to pixels, and the network."""
         import transformers  # noqa: PLC0415 - an optional, heavy extra.
 
-        network = getattr(transformers, self._recipe().network)
-        # Pillow's resampling, pinned: with torchvision installed the
-        # default would be torchvision's, whose pixels differ.
-        processor = transformers.AutoImageProcessor.from_pretrained(
-            path, backend="pil"
-        )
+        recipe = self._recipe()
+        network = getattr(transformers, recipe.network)
+        if recipe.size is None:
+            # Pillow's resampling, pinned: with torchvision installed the
+            # default would be torchvision's, whose pixels differ.
+            processor = transformers.AutoImageProcessor.from_pretrained(
+                path, backend="pil"
+            )
+            preprocess = functools.partial(_processed, processor)
+        else:
+            preprocess = functools.partial(
+                _centred, size=recipe.size, zoom=recipe.zoom
+            )
         # A checkpoint of two towers lists the text tower's weights as
         # unexpected when the vision tower alone loads; that is intended.
         verbosity = transformers.logging.get_verbosity()
@@ -439,14 +465,14 @@ class Pretrained(_pretrained.PretrainedEncoder):
             model = network.from_pretrained(path, **_pretrained.PINNED)
         finally:
             transformers.logging.set_verbosity(verbosity)
-        return processor, model.to(device).eval()
+        return preprocess, model.to(device).eval()
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
         """The mean embedding of each image's views, as the recipe names it."""
-        processor, model = network
+        preprocess, model = network
         images = [_rgb(item) for item in items]
         transposes = _transposes(self.views)
-        output = self._recipe().output
+        recipe = self._recipe()
         # Summed on the device, so that the next view's preprocessing
         # overlaps this view's forward pass.
         total: Any = 0  # A torch tensor after the first view.
@@ -456,10 +482,9 @@ class Pretrained(_pretrained.PretrainedEncoder):
                 image if transpose is None else image.transpose(transpose)
                 for image in images
             ]
-            pixels = processor(images=shown, return_tensors="pt")[
-                "pixel_values"
-            ].to(model.device)
-            total = total + getattr(model(pixel_values=pixels), output).float()
+            pixels = preprocess(shown).to(model.device)
+            result = model(pixel_values=pixels)
+            total = total + getattr(result, recipe.output).float()
         return (total / len(transposes)).cpu().numpy()
 
     def _item_bytes(self, item: Any) -> bytes:
@@ -467,6 +492,48 @@ class Pretrained(_pretrained.PretrainedEncoder):
         if isinstance(item, Image.Image):
             item = _rgb(item)
         return _image_bytes(item) or super()._item_bytes(item)
+
+
+def _processed(processor: Any, images: list[Image.Image]) -> Any:
+    """The pixels that a processor saved with the weights makes of images.
+
+    Args:
+        processor: A transformers image processor.
+        images: RGB images.
+
+    Returns:
+        A torch tensor, shape (len(images), 3, height, width).
+    """
+    return processor(images=images, return_tensors="pt")["pixel_values"]
+
+
+def _centred(images: list[Image.Image], size: int, zoom: float) -> Any:
+    """The centre of each image, magnified, as Zoobot reads a galaxy.
+
+    The square at the centre of an image, of ``1 / zoom`` of its shorter
+    side, is resized to ``size`` by ``size`` pixels (bilinear, which
+    smooths as it shrinks), and its 8-bit values are scaled to [0, 1].
+
+    Args:
+        images: RGB images.
+        size: The side of the square, in pixels.
+        zoom: How much the centre is magnified.
+
+    Returns:
+        A float32 torch tensor, shape (len(images), 3, size, size).
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    squares = []
+    for image in images:
+        width, height = image.size
+        side = min(width, height) / zoom
+        left, top = (width - side) / 2, (height - side) / 2
+        box = (left, top, left + side, top + side)
+        square = image.resize((size, size), Image.Resampling.BILINEAR, box=box)
+        squares.append(np.asarray(square))
+    pixels = np.stack(squares).transpose(0, 3, 1, 2) / 255
+    return torch.as_tensor(pixels, dtype=torch.float32)
 
 
 def _transposes(

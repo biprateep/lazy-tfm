@@ -106,32 +106,40 @@ def test_the_cache_is_keyed_by_version_and_weights_not_device():
         ("e5-small-v2", "mean"),
         ("bge-small-en-v1.5", "first"),
         ("all-MiniLM-L6-v2", "mean"),
+        ("Qwen3-Embedding-0.6B", "last"),
     ],
 )
 def test_text_is_pooled_as_its_model_says_and_scaled_to_unit_length(
     fakes, model, expected
 ):
     texts = ["a lazy model", "x " * 300]
-    rows = _encoder(f"text:{model}").fit_transform(texts)
+    encoder = _encoder(f"text:{model}")
+    rows = encoder.fit_transform(texts)
     np.testing.assert_allclose(np.linalg.norm(rows, axis=1), 1, rtol=1e-6)
     prefix = [6] if model == "e5-small-v2" else []  # "query:" is a word.
     codes = np.array([101, *prefix, 1, 4, 5, 102])
-    states = np.cos(codes[:, None] * np.arange(1, 385))
-    pooled = states.mean(axis=0) if expected == "mean" else states[0]
+    states = np.cos(codes[:, None] * np.arange(1, encoder._width() + 1))
+    # The first text is padded: its last token is not the batch's last.
+    pooled = {
+        "mean": states.mean(axis=0),
+        "first": states[0],
+        "last": states[-1],
+    }[expected]
     np.testing.assert_allclose(
         rows[0], pooled / np.linalg.norm(pooled), rtol=1e-5, atol=1e-6
     )
 
 
 @pytest.mark.parametrize(
-    ("model", "patch"), [("chronos-t5-tiny", 1), ("chronos-bolt-small", 16)]
+    ("model", "patch"),
+    [("chronos-t5-tiny", 1), ("chronos-bolt-small", 16), ("chronos-2", 16)],
 )
 def test_chronos_pools_the_observed_tokens_of_the_last_values(
     fakes, model, patch
 ):
     encoder = _encoder(f"time:{model}")
     context = encoder._recipe().context
-    long = np.arange(5000.0)
+    long = np.arange(10_000.0)
     gappy = [1.0, np.nan, 3.0, np.inf, 5.0]
     rows = encoder.fit_transform([long, long[-context:], gappy])
     np.testing.assert_allclose(rows[0], rows[1], rtol=1e-6)
@@ -237,6 +245,22 @@ def test_views_that_name_no_distinct_views_are_refused(views, message):
         encoder.fit([np.zeros((2, 2), dtype=np.uint8)])
 
 
+def test_zoobot_reads_the_magnified_centre_in_the_unit_interval():
+    pytest.importorskip("torch")
+    # A grey square of 1/1.2 of the side, inside a red frame.
+    image = np.zeros((96, 120, 3), dtype=np.uint8)
+    image[:, :, 0] = 255
+    image[8:88, 20:100] = 51
+    pixels = lazy.image._centred([Image.fromarray(image)], 224, 1.2).numpy()
+    assert pixels.shape == (1, 3, 224, 224)
+    np.testing.assert_allclose(pixels[..., 2:-2, 2:-2], 0.2, rtol=1e-6)
+    # The square ends at the frame: only its outermost pixels, which the
+    # bilinear filter reads across the edge, show the red.
+    red = pixels[0, 0]
+    for edge in (red[0], red[-1], red[:, 0], red[:, -1]):
+        assert (edge > 0.25).all()
+
+
 def test_an_image_that_is_not_8_bit_is_stretched_band_by_band():
     ramp = np.linspace(-1.0, 3.0, 101)
     image = np.stack([ramp, 10 * ramp, np.full(101, 5.0)], axis=-1)[None]
@@ -286,6 +310,25 @@ def test_a_missing_extra_is_named(monkeypatch, name):
         cls().fit(golden_data.encoder_items()[cls.modality])
     with pytest.raises(ImportError, match=rf"lazy\.{cls.modality}\.Pretrained"):
         cls().fit(golden_data.encoder_items()[cls.modality])
+
+
+def test_a_missing_package_of_one_network_is_named_at_fit(monkeypatch):
+    """Zoobot runs on timm as well as transformers."""
+    monkeypatch.setitem(sys.modules, "timm", None)
+    zoobot = lazy.image.Pretrained(model="zoobot-encoder-convnext_nano")
+    with pytest.raises(ImportError, match=r"lazy-tfm\[encoders\]"):
+        zoobot.fit(golden_data.encoder_items()["image"])
+
+
+def test_zoobot_is_cached_by_the_versions_of_transformers_and_timm():
+    pytest.importorskip("timm")
+    zoobot = lazy.image.Pretrained(model="zoobot-encoder-convnext_nano")
+    identity = json.loads(zoobot._cache_identity())
+    assert identity[1:4] == [
+        metadata.version("transformers"),
+        metadata.version("timm"),
+        metadata.version("torch"),
+    ]
 
 
 class _Unpinned(lazy.text.Pretrained):

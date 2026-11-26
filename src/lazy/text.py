@@ -201,8 +201,8 @@ class _Recipe:
 
     Attributes:
         width: The width of the embedding.
-        pooling: ``"mean"`` of the token states, or the state of the first
-            token, ``"cls"``.
+        pooling: ``"mean"`` of the token states, the state of the first
+            token, ``"cls"``, or of the last, ``"last"``.
         prefix: Text put before each item, as the model's card asks.
         max_tokens: The most tokens of a text that the model reads.
     """
@@ -218,12 +218,14 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     ``model`` picks one of the networks of ``recipes``, each pinned to a
     commit on the Hugging Face Hub: ``"e5-small-v2"`` (the default),
-    ``"bge-small-en-v1.5"``, ``"all-MiniLM-L6-v2"`` and
-    ``"gte-modernbert-base"``. The embedding is the network's pooled token
-    states (their mean, or the first token's, as its card says), scaled to
-    unit length, as sentence-transformers computes it. E5 reads each text
-    after the prefix ``"query: "``. :doc:`/guide/encoders` lists the
-    networks and gives the evidence behind the choice.
+    ``"bge-small-en-v1.5"``, ``"all-MiniLM-L6-v2"``,
+    ``"gte-modernbert-base"`` and ``"Qwen3-Embedding-0.6B"``. The embedding
+    is the network's pooled token states (their mean, the first token's or
+    the last token's, as its card says), scaled to unit length, as
+    sentence-transformers computes it. E5 reads each text after the prefix
+    ``"query: "``; Qwen3-Embedding reads it with no instruction, as its card
+    reads a document. :doc:`/guide/encoders` lists the networks and gives
+    the evidence behind the choice.
 
     A text longer than its model reads is cut to its first tokens.
 
@@ -242,6 +244,9 @@ class Pretrained(_pretrained.PretrainedEncoder):
         "bge-small-en-v1.5": _Recipe(384, "cls"),
         "all-MiniLM-L6-v2": _Recipe(384, "mean", max_tokens=256),
         "gte-modernbert-base": _Recipe(768, "cls", max_tokens=8192),
+        # The card's own maximum; its tokenizer ends each text with
+        # <|endoftext|>, whose state is the embedding.
+        "Qwen3-Embedding-0.6B": _Recipe(1024, "last", max_tokens=8192),
     }
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -287,6 +292,13 @@ class Pretrained(_pretrained.PretrainedEncoder):
         states = model(**tokens).last_hidden_state
         if recipe.pooling == "cls":
             pooled = states[:, 0]
+        elif recipe.pooling == "last":
+            # The last position the mask keeps, on either side of padding.
+            mask = tokens["attention_mask"]
+            positions = torch.arange(mask.shape[1], device=mask.device)
+            last = (mask * positions).argmax(dim=1)
+            rows = torch.arange(len(states), device=mask.device)
+            pooled = states[rows, last]
         else:
             mask = tokens["attention_mask"].unsqueeze(-1).to(states.dtype)
             pooled = (states * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
