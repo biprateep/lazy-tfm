@@ -642,7 +642,7 @@ def test_top_ranks_context_rows_by_absolute_value():
         ({"method": "shapley"}, "method must be one of"),
         ({"rows": 3}, "rows does not apply"),
         ({"method": "loo", "baseline": np.zeros(3)}, "baseline does not"),
-        ({"baseline": np.zeros(2)}, "baseline must be finite"),
+        ({"baseline": np.zeros((2, 2))}, "baseline must be finite"),
         ({"method": "loo", "rows": 0}, "rows == 0, must be >= 1"),
         ({"method": "loo", "rows": [1, 1]}, "rows repeats rows"),
         ({"method": "loo", "rows": [200]}, r"rows must be row positions in"),
@@ -716,3 +716,30 @@ def test_a_context_outlier_moves_tabpfns_prediction_beside_it_most():
     # the top 5 for 5 of seeds 0 to 9, and as low as 13th.
     outlier = np.abs(explanation.values[2, :, 0])
     assert outlier[0] > 2 * outlier[1:].max()
+
+
+def test_the_error_of_the_sum_is_zero_for_exact_shapley_values(data, model):
+    X_context, y_context, X, y = data
+    exact = interp.explain(model, X, y, X_context, y_context)
+    assert exact.sum_error.shape == exact.full_values.shape
+    np.testing.assert_allclose(exact.sum_error, 0.0, atol=1e-12)
+    removed = interp.explain(model, X, y, X_context, y_context, method="loco")
+    assert removed.sum_error is None
+
+
+def test_top_shows_each_context_rows_features_when_given_the_context():
+    explanation = interp.ContextExplanation(
+        "loo",
+        ("crps",),
+        np.array([[[0.1, -0.9], [0.5, 0.2]]]),
+        np.array([3, 1]),
+        np.zeros((1, 2)),
+    )
+    context = pd.DataFrame({"a": [0.0, 1.0, 2.0, 3.0], "b": list("wxyz")})
+    top = explanation.top(1, "crps", context)
+    assert top["context_row"].tolist() == [1, 3]
+    assert top["a"].tolist() == [1.0, 3.0] and top["b"].tolist() == ["x", "z"]
+    unnamed = explanation.top(1, "crps", context[["a"]].to_numpy())
+    assert unnamed["x0"].tolist() == [1.0, 3.0]
+    with pytest.raises(ValueError, match="context row 3 was explained"):
+        explanation.top(1, "crps", context[:3])
