@@ -137,8 +137,9 @@ $$
 The sum approximates the integral of the gradient along the path, so the
 values of a row sum to what the path adds,
 $\sum_j \phi_{ij} \approx s(x_i) - s(b)$, with an error that falls as $1/m$.
-`explanation.full_values` and `explanation.base_values` hold the two terms.
-The cost is $m$ times that of `"gradient"`.
+`explanation.full_values` and `explanation.base_values` hold the two terms,
+and `explanation.sum_error` their difference from the sum, which shows whether
+`n_steps` is enough. The cost is $m$ times that of `"gradient"`.
 
 ### How far a gradient reaches
 
@@ -253,7 +254,8 @@ explanation.top(5, "nll")  # each row's 5 most influential context rows
 `explanation.values` has one value per statistic, explained row and context
 row, and `explanation.context_rows` gives the positions of those context rows
 in `X_context`. `explanation.top(k)` lists, for each explained row, the $k$
-context rows with the largest absolute values.
+context rows with the largest absolute values, and
+`explanation.top(k, X_context=X_train)` adds each context row's features.
 
 Explain rows that are not in the context here too. A model recognizes its
 context rows, so the prediction of a row of the context rests on its own copy

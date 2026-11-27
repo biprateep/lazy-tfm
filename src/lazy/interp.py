@@ -174,6 +174,25 @@ class Explanation:
     barriers: tuple[Barrier, ...] = ()
     item_values: Mapping[str, _typing.FloatArray] | None = None
 
+    @property
+    def sum_error(self) -> _typing.FloatArray | None:
+        """How far each row's values are from summing to what they should.
+
+        The values of ``"shapley"`` and of ``"integrated_gradients"`` sum
+        over the features to ``full_values - base_values``: exactly for
+        Shapley values, and to the error of the Riemann sum for integrated
+        gradients, which more ``n_steps`` lower.
+
+        Returns:
+            ``values.sum(axis=-1) - (full_values - base_values)``, shape
+            (n_statistics, n_rows), or ``None`` for a method without
+            ``base_values``.
+        """
+        if self.base_values is None:
+            return None
+        gained = self.full_values - self.base_values
+        return np.asarray(self.values.sum(axis=-1) - gained)
+
     def table(self, statistic: str = "crps") -> pd.DataFrame:
         """One statistic's attributions, per explained row.
 
@@ -266,7 +285,9 @@ class ContextExplanation:
     context_rows: _typing.IntArray
     full_values: _typing.FloatArray
 
-    def top(self, k: int, statistic: str = "crps") -> pd.DataFrame:
+    def top(  # noqa: GS030 - scikit-learn's X.
+        self, k: int, statistic: str = "crps", X_context: Any = None
+    ) -> pd.DataFrame:
         """Each explained row's most influential context rows.
 
         The most influential have the largest absolute attribution.
@@ -275,17 +296,22 @@ class ContextExplanation:
             k: How many context rows to give per explained row; all of them
                 if there are fewer.
             statistic: One of ``statistics``.
+            X_context: The context that was explained, to show each context
+                row's features beside its attribution; ``None`` for none.
 
         Returns:
             A table with one row per explained row and rank, shape
             (n_rows * k, 4), sorted by both. Its columns are ``row``, the
             explained row's position in ``X``; ``rank``, from 1 for the most
             influential; ``context_row``, its position in ``X_context``; and
-            ``value``, its attribution.
+            ``value``, its attribution. With ``X_context``, the columns of
+            that context row follow, under the context's column names, or
+            ``x0`` onwards for a table without names.
 
         Raises:
-            ValueError: If ``statistic`` is not one of ``statistics``, or
-                ``k`` is below 1.
+            ValueError: If ``statistic`` is not one of ``statistics``,
+                ``k`` is below 1, or ``X_context`` has fewer rows than the
+                context rows explained need.
             TypeError: If ``k`` is not an integer.
         """
         values = self.values[_statistic_index(self.statistics, statistic)]
@@ -293,7 +319,7 @@ class ContextExplanation:
         k = min(int(k), values.shape[1])
         order = np.argsort(-np.abs(values), axis=1, kind="stable")[:, :k]
         n_rows = len(values)
-        return pd.DataFrame(
+        table = pd.DataFrame(
             {
                 "row": np.repeat(np.arange(n_rows), k),
                 "rank": np.tile(np.arange(1, k + 1), n_rows),
@@ -301,6 +327,17 @@ class ContextExplanation:
                 "value": np.take_along_axis(values, order, axis=1).ravel(),
             }
         )
+        if X_context is None:
+            return table
+        context, _ = _frame(X_context)
+        if len(context) <= self.context_rows.max():
+            raise ValueError(
+                f"X_context has {len(context)} rows, but context row"
+                f" {self.context_rows.max()} was explained: give the context"
+                " that explain_context was given"
+            )
+        features = context.iloc[table["context_row"]].reset_index(drop=True)
+        return pd.concat([table, features], axis=1)
 
 
 def _statistic_index(statistics: tuple[str, ...], statistic: str) -> int:

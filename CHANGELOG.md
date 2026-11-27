@@ -62,6 +62,10 @@ change the API.
   any class can ask `LazyPipeline.fit` to train it this way, by declaring
   `trains_through_model` and implementing `_fit_through`. The "Adaptive
   reducer" page of the user guide gives the equations.
+- `lazy.interp.Explanation.sum_error`: how far each row's Shapley values or
+  integrated gradients are from summing to `full_values - base_values`.
+  `ContextExplanation.top` takes `X_context`, and then shows each context
+  row's features beside its attribution.
 - `lazy.interp.Explanation.plot(statistic="crps", ax=None)`: draws one
   statistic's `importance()` as a horizontal bar chart, with the most
   important feature at the top, and returns the matplotlib axes.
