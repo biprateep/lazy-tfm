@@ -221,14 +221,26 @@ def test_a_tabularizers_seed_seeds_each_columns_augmentations():
     assert any(len(set(views(seed))) == 2 for seed in range(8))
 
 
-def test_noise_is_a_barrier_since_a_last_bit_changes_its_draw():
-    row = np.array([[0.1, 0.2, 0.3]])
-    noise = augment.Noise(0.5).fit(row)
-    assert not np.allclose(
-        noise.transform(row) - row,
-        noise.transform(np.nextafter(row, 1.0)) - np.nextafter(row, 1.0),
+@pytest.mark.parametrize("relative", [False, True])
+def test_noise_keeps_its_draw_when_a_value_moves_in_its_last_bit(relative):
+    torch = pytest.importorskip("torch")
+    row = np.array([[0.1, 0.2, 0.3, -1.5]])
+    noise = augment.Noise(0.5, relative=relative).fit(row)
+    moved = np.nextafter(row, 1.0)
+    np.testing.assert_allclose(
+        noise.transform(moved) - moved, noise.transform(row) - row, rtol=1e-12
     )
-    assert "exact values" in _steps.barrier("noise", noise).reason
+    # The draw is held fixed, so the gradient is that of x + s * eps.
+    point = torch.tensor(row, requires_grad=True)
+    out = _steps.forward(noise, point)
+    np.testing.assert_allclose(out.detach().numpy(), noise.transform(row))
+    out.sum().backward()
+    if relative:
+        draws = (noise.transform(row) - row) / row.std()
+        expected = 1 + draws.sum() * (row - row.mean()) / (row.size * row.std())
+    else:
+        expected = np.ones_like(row)
+    np.testing.assert_allclose(point.grad.numpy(), expected)
 
 
 def test_a_grey_image_is_masked_alike_with_and_without_its_channel_axis():

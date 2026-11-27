@@ -17,8 +17,8 @@ pipelines that differ only in their seed, whose predictions pool:
 
 The augmentations, by the data they suit and their gradient kind:
 
-* numbers, in any array: :class:`Rescale` (differentiable) and
-  :class:`Noise` (a barrier);
+* numbers, in any array: :class:`Rescale` and :class:`Noise`
+  (differentiable);
 * images: :class:`Dihedral` and :class:`Crop` (index maps), and
   :class:`Mask` (a mask);
 * time series: :class:`Crop`, :class:`Mask`, :class:`Noise` and
@@ -301,13 +301,20 @@ class Rescale(_Augmentation):
 
 
 class Noise(_Augmentation):
-    """Gaussian noise added to every value.
+    r"""Gaussian noise added to every value: :math:`x + s\,\epsilon`.
 
-    Each row, or item, draws its noise from the seed and its own values,
-    so a row's noise does not depend on the rows that come with it, and
-    the same row always gets the same noise. A value that differs in its
-    last bit draws other noise, so the output is not one smooth function
-    of the input: the step is a barrier to gradients.
+    The noise is reparameterized: :math:`\epsilon` is a standard normal
+    draw that is held fixed, so the output is differentiable in the
+    input, with :math:`s` the scale, or the scale times the row's own
+    standard deviation if ``relative``.
+
+    Each row, or item, draws :math:`\epsilon` from the seed and its own
+    values, rounded to float32, so a row's noise does not depend on the
+    rows that come with it, the same row always gets the same noise, and
+    a change in a value's last bits does not change the draw. Two rows
+    that differ by more draw separately, so along a path of integrated
+    gradients each point has a draw of its own, and the attributions sum
+    to the gain only roughly; gradient times input is exact.
 
     Attributes:
         scale: The standard deviation of the noise: in units of each row's
@@ -319,12 +326,6 @@ class Noise(_Augmentation):
             before this one, or takes an absolute ``scale``.
         random_state: The seed, a non-negative integer.
     """
-
-    gradient_kind = "barrier"
-    barrier_reason = (
-        "its noise is drawn from each row's exact values, so it is not one"
-        " function of them"
-    )
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -343,16 +344,28 @@ class Noise(_Augmentation):
 
     def _batch(self, values: Any) -> Any:
         rows = _arrays.detached(values)
-        noise = np.empty_like(rows)
+        draws = np.empty_like(rows)
         for index, row in enumerate(rows):
-            key = zlib.crc32(np.ascontiguousarray(row).tobytes())
+            # Keyed on float32: the last bits of a float64 do not count.
+            key = zlib.crc32(np.ascontiguousarray(row, np.float32).tobytes())
             rng = np.random.default_rng([_seed(self.random_state), key])
-            spread = float(row.std()) if self.relative else 1.0
-            noise[index] = rng.normal(0.0, self.scale * spread, row.shape)
+            draws[index] = rng.standard_normal(row.shape)
         xp = array_api_compat.array_namespace(values)
-        return values + xp.asarray(
-            noise, dtype=values.dtype, device=array_api_compat.device(values)
+        noise = self.scale * xp.asarray(
+            draws, dtype=values.dtype, device=array_api_compat.device(values)
         )
+        if self.relative:
+            axes = tuple(range(1, values.ndim))
+            centred = values - xp.mean(values, axis=axes, keepdims=True)
+            variance = xp.mean(centred**2, axis=axes, keepdims=True)
+            # A row of one value has no spread, and no gradient of it.
+            spread = xp.where(
+                variance > 0,
+                xp.sqrt(xp.where(variance > 0, variance, 1.0)),
+                0.0,
+            )
+            noise = noise * spread
+        return values + noise
 
 
 class Dihedral(_Augmentation):
