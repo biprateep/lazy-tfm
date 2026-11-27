@@ -25,6 +25,7 @@ import lazy
 from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
+from lazy.models import _members
 from lazy.models import ensemble
 
 # Every test but the warning's own fits on fewer rows than the warning's
@@ -383,11 +384,11 @@ def test_random_state_and_device_reach_members_at_their_default(
 
 def test_a_member_explicit_value_wins():
     member = lazy.LazyModel("tabicl", device="cuda:1", random_state=5)
-    configured = ensemble._configure(member, 3, "cpu")
+    configured = ensemble._configure(member, 3, "cpu", 0)
     assert configured.device == "cuda:1"
     assert configured.random_state == 5
     assert member is not configured
-    plain = ensemble._configure(Gaussian(), 3, "cpu")
+    plain = ensemble._configure(Gaussian(), 3, "cpu", 0)
     assert (plain.random_state, plain.device) == (3, "cpu")
 
 
@@ -618,9 +619,9 @@ def items(data):
     return frame, y
 
 
-def _encoded(n_components):
+def _encoded(n_columns):
     """TabPFN's stand-in behind a classical text encoder."""
-    tab = lazy.Tabularizer({"notes": "text_hashing"}, n_components=n_components)
+    tab = lazy.Tabularizer({"notes": "text_hashing"}, n_columns=n_columns)
     return lazy.make_pipeline(tab, lazy.LazyModel("tabpfn"))
 
 
@@ -639,6 +640,39 @@ def test_pipelines_pool_the_items_each_encodes(standin_backends, items):
     assert model.predict_proba(frame.iloc[:5]).shape[0] == 5
 
 
+def test_each_member_pipeline_gets_a_seed_of_its_own_for_its_steps(
+    standin_backends, items
+):
+    frame, y = items
+    member = lazy.make_pipeline(
+        lazy.Tabularizer(
+            {"notes": [lazy.augment.TokenDropout(0.3), "text_hashing"]},
+            n_columns=2,
+        ),
+        lazy.augment.Noise(0.01),
+        lazy.LazyModel("tabpfn"),
+    )
+    assert member[1].random_state == 0
+    kept = sklearn_base.clone(member).set_params(noise__random_state=11)
+    model = lazy.LazyEnsembleModel([member, member, kept], random_state=7)
+    model.fit(frame, y)
+    seeds = [
+        [_members.member_seed(7, index, step) for step in range(2)]
+        for index in range(3)
+    ]
+    fitted = model.estimators_
+    # Copies of one pipeline differ in their augmentations' seeds, and so
+    # do the steps of one copy; a seed that was given stays; the model
+    # takes the ensemble's seed as it is.
+    assert [m[0].random_state for m in fitted] == [s[0] for s in seeds]
+    assert [m[1].random_state for m in fitted] == [seeds[0][1], seeds[1][1], 11]
+    assert seeds[0][0] != seeds[0][1]
+    assert [m[-1].random_state for m in fitted] == [7, 7, 7]
+    dropped = [m[0].augmentations_["notes"][0].random_state for m in fitted[:2]]
+    assert dropped[0] != dropped[1]
+    assert member[1].random_state == 0
+
+
 def test_a_pipeline_that_ends_in_no_density_model_is_refused(items):
     frame, y = items
     member = lazy.make_pipeline(
@@ -654,7 +688,7 @@ def test_a_pipelines_model_gets_the_shared_settings(standin_backends, items):
     model.fit(frame, y)
     assert model.estimators_[0][-1].random_state == 7
     assert model.models[0][-1].random_state == 0
-    assert model.get_params()["tabpfn__tabularizer__n_components"] == 2
+    assert model.get_params()["tabpfn__tabularizer__n_columns"] == 2
 
 
 def test_a_pipelines_model_marks_the_columns_its_steps_make(

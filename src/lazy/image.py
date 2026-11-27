@@ -27,13 +27,11 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
-from collections.abc import Sequence
 import dataclasses
 import functools
 import itertools
 import os
 import pathlib
-import types
 from typing import Any
 
 import numpy as np
@@ -44,9 +42,8 @@ from lazy import _steps
 from lazy import _typing
 from lazy.encoders import _base
 from lazy.encoders import _pretrained
-from lazy.models import _hub
 
-__all__ = ["STATISTICS", "VIEWS", "Pixels", "Pretrained", "Statistics"]
+__all__ = ["STATISTICS", "Pixels", "Pretrained", "Statistics"]
 
 STATISTICS: tuple[str, ...] = (
     "mean",
@@ -59,24 +56,6 @@ STATISTICS: tuple[str, ...] = (
     "gradient",
 )
 """The columns that :class:`Statistics` gives for each channel, in order."""
-
-VIEWS: types.MappingProxyType[str, Image.Transpose | None] = (
-    types.MappingProxyType(
-        {
-            "identity": None,
-            "rotate_90": Image.Transpose.ROTATE_90,
-            "rotate_180": Image.Transpose.ROTATE_180,
-            "rotate_270": Image.Transpose.ROTATE_270,
-            "flip_left_right": Image.Transpose.FLIP_LEFT_RIGHT,
-            "flip_top_bottom": Image.Transpose.FLIP_TOP_BOTTOM,
-            "transpose": Image.Transpose.TRANSPOSE,
-            "transverse": Image.Transpose.TRANSVERSE,
-        }
-    )
-)
-"""The views of an image that :class:`Pretrained` embeds, by Pillow's names:
-the eight rotations and flips of a square (the dihedral group D4), the
-rotations counterclockwise. ``"d4"`` names all of them. Read-only."""
 
 _QUARTILES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
@@ -112,12 +91,7 @@ class _ImageEncoder(_base.BaseEncoder):
             ValueError: If the image has another number of channels, no
                 pixel, or a value that is not finite.
         """
-        if isinstance(item, (str, os.PathLike)):
-            with Image.open(item) as image:
-                return self._pixels(image)
-        if isinstance(item, Image.Image):
-            item = self._converted(item)
-        pixels = np.asarray(item, dtype=float)
+        pixels = np.asarray(self._read_item(item), dtype=float)
         if pixels.ndim == 2:
             pixels = pixels[:, :, np.newaxis]
         if pixels.ndim != 3 or pixels.shape[2] != self.n_channels:
@@ -127,6 +101,15 @@ class _ImageEncoder(_base.BaseEncoder):
                 f" {pixels.shape}"
             )
         return _finite(pixels)
+
+    def _read_item(self, item: Any) -> Any:
+        """A file or a Pillow image as an array, in ``n_channels``' mode."""
+        if isinstance(item, (str, os.PathLike)):
+            with Image.open(item) as image:
+                return self._read_item(image)
+        if isinstance(item, Image.Image):
+            return np.asarray(self._converted(item))
+        return item
 
     def _array(self, item: Any) -> _typing.FloatArray | None:
         """One image as an array, shape (height, width, n_channels)."""
@@ -453,10 +436,6 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     Attributes:
         model: The network; ``"dinov2-with-registers-small"`` by default.
-        views: The rotations and flips of each image whose embeddings are
-            averaged, at one forward pass each: ``None`` (the default) for
-            the image as it is, ``"d4"`` for all eight of :data:`VIEWS`, or
-            a list of their names. :doc:`/guide/encoders` shows their use.
         device: ``"auto"``, or a torch device such as ``"cpu"``.
         batch_size: The most images in one forward pass.
         cache: Whether, or where, to file the embeddings on disk; see
@@ -484,40 +463,14 @@ class Pretrained(_pretrained.PretrainedEncoder):
         self,
         *,
         model: str = "dinov2-with-registers-small",
-        views: str | Sequence[str] | None = None,
         device: str = "auto",
         batch_size: int = 64,
         cache: bool | str | os.PathLike[str] = True,
     ) -> None:
         self.model = model
-        self.views = views
         self.device = device
         self.batch_size = batch_size
         self.cache = cache
-
-    def fit(self, X: Any, y: Any = None) -> Pretrained:  # noqa: GS030 - scikit-learn's X, y.
-        """Checks ``views``, then the rest, as every pretrained encoder does.
-
-        Args:
-            X: One column of images.
-            y: Ignored; scikit-learn passes it.
-
-        Returns:
-            The encoder itself.
-
-        Raises:
-            UnknownNameError: If ``model`` is not one of ``recipes``, or a
-                view is not one of :data:`VIEWS`.
-            ValueError: If ``views`` is not ``None``, ``"d4"`` or a list or
-                tuple of distinct names, or ``device`` or another parameter
-                is not valid.
-            ImportError: If the ``encoders`` extra is not installed.
-            RuntimeError: If ``device`` names an accelerator that is not
-                there.
-        """
-        _transposes(self.views)
-        super().fit(X, y)
-        return self
 
     def _load(self, path: os.PathLike[str], device: str) -> Any:
         """The preprocessing of images to pixels, and the network."""
@@ -541,24 +494,17 @@ class Pretrained(_pretrained.PretrainedEncoder):
         return preprocess, model.to(device)
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
-        """The mean embedding of each image's views, as the recipe names it."""
+        """The embedding of each image, as the recipe names it."""
         preprocess, model = network
-        images = [_rgb(item) for item in items]
-        transposes = _transposes(self.views)
-        recipe = self._recipe()
-        # Summed on the device, so that the next view's preprocessing
-        # overlaps this view's forward pass.
-        total: Any = 0  # A torch tensor after the first view.
-        for transpose in transposes:
-            # Not `if transpose`: FLIP_LEFT_RIGHT is 0.
-            shown = [
-                image if transpose is None else image.transpose(transpose)
-                for image in images
-            ]
-            pixels = preprocess(shown).to(model.device)
-            result = model(pixel_values=pixels)
-            total = total + getattr(result, recipe.output).float()
-        return (total / len(transposes)).cpu().numpy()
+        pixels = preprocess([_rgb(item) for item in items]).to(model.device)
+        result = model(pixel_values=pixels)
+        return getattr(result, self._recipe().output).float().cpu().numpy()
+
+    def _read_item(self, item: Any) -> Any:
+        """A file or a Pillow image as the 8-bit RGB array the network reads."""
+        if isinstance(item, (str, os.PathLike, Image.Image)):
+            return np.asarray(_rgb(item))
+        return item
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an image: of the file for a path, else its RGB."""
@@ -607,36 +553,6 @@ def _centred(images: list[Image.Image], size: int, zoom: float) -> Any:
         squares.append(np.asarray(square))
     pixels = np.stack(squares).transpose(0, 3, 1, 2) / 255
     return torch.as_tensor(pixels, dtype=torch.float32)
-
-
-def _transposes(
-    views: str | Sequence[str] | None,
-) -> list[Image.Transpose | None]:
-    """The Pillow transposes that ``views`` names, in order.
-
-    Raises:
-        ValueError: If ``views`` is not ``None``, ``"d4"`` or a non-empty
-            list of distinct names of :data:`VIEWS`.
-    """
-    if views is None:
-        return [None]
-    if isinstance(views, str) and views == "d4":
-        return list(VIEWS.values())
-    if (
-        isinstance(views, str)
-        or not isinstance(views, Sequence)
-        or not views
-        or not all(isinstance(view, str) for view in views)
-        or len(set(views)) != len(views)
-    ):
-        raise ValueError(
-            "views must be None, 'd4' or a list or tuple of distinct names of"
-            f" {list(VIEWS)}: {views=}"
-        )
-    for view in views:
-        if view not in VIEWS:
-            raise _hub.unknown_name("view", view, list(VIEWS), argument="views")
-    return [VIEWS[view] for view in views]
 
 
 def _rgb(item: Any) -> Image.Image:

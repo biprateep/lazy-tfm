@@ -45,6 +45,7 @@ Typical usage example:
 
 from collections.abc import Mapping, Sequence
 import dataclasses
+import inspect
 import math
 import numbers
 from typing import Any
@@ -153,10 +154,13 @@ def resolve_count(value: float | None, total: int, name: str) -> int:
     return min(int(value), total)
 
 
-def member_seed(random_state: int, index: int) -> int:
+def member_seed(random_state: int, *indices: int) -> int:
     """The seed of member ``index`` of an ensemble seeded ``random_state``.
 
-    Drawn from ``SeedSequence([random_state, index])``, which hashes the pair,
+    Further indices seed a part of a member, such as step ``j`` of its
+    pipeline.
+
+    Drawn from ``SeedSequence([random_state, *indices])``, which hashes them,
     so seeds of neighboring ensembles do not overlap: an offset scheme such
     as ``random_state + index`` would give member ``i`` at ``random_state=r``
     the seed of member ``i - 1`` at ``r + 1``. Kept below 2**31, so that it is
@@ -164,7 +168,8 @@ def member_seed(random_state: int, index: int) -> int:
 
     Args:
         random_state: The ensemble's seed.
-        index: The member's position in the ensemble.
+        *indices: The member's position in the ensemble, then the
+            position of a part within it, and so on.
 
     Returns:
         The seed, in ``[0, 2**31)``.
@@ -175,8 +180,46 @@ def member_seed(random_state: int, index: int) -> int:
         >>> 0 <= member_seed(0, 0) < 2**31
         True
     """
-    sequence = np.random.SeedSequence([int(random_state) % 2**64, int(index)])
+    sequence = np.random.SeedSequence(
+        [int(random_state) % 2**64, *(int(index) for index in indices)]
+    )
     return int(sequence.generate_state(1)[0] % 2**31)
+
+
+def same_value(first: object, second: object) -> bool:
+    """Whether two parameter values are equal, False if undecidable."""
+    if type(first) is not type(second):
+        return False
+    try:
+        return bool(first == second)
+    except (TypeError, ValueError):  # An array, say, with no single truth.
+        return False
+
+
+def seed_if_default(estimator: Any, seed: int) -> None:
+    """Seeds an estimator whose ``random_state`` is still its default.
+
+    A value equal to the constructor's default is how an estimator that
+    was given no seed is told apart from one that was: ``clone`` writes
+    every default out.
+
+    Args:
+        estimator: An estimator, modified in place; one without a
+            ``random_state`` with a default is left as it is.
+        seed: The seed to give it.
+    """
+    if not hasattr(estimator, "get_params"):
+        return
+    current = estimator.get_params(deep=False)
+    default = inspect.signature(type(estimator).__init__).parameters.get(
+        "random_state"
+    )
+    if (
+        "random_state" in current
+        and default is not None
+        and same_value(current["random_state"], default.default)
+    ):
+        estimator.set_params(random_state=seed)
 
 
 def draw_bags(
