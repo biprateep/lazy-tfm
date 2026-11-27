@@ -190,7 +190,7 @@ change the API.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
   encoder that a modality, a name or an object gives. The embeddings then
-  share one budget of `n_columns` columns (default 30), whatever the number
+  share one budget of `n_columns` columns (default 120), whatever the number
   of columns of items: each embedding gets principal components of its own,
   fitted on the context, and the components that explain the most weighted
   variance are kept, every embedding its first at least. `weights="equal"`

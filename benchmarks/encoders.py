@@ -171,7 +171,7 @@ def main() -> None:
         "--folds", type=int, nargs="+", choices=range(6), default=[0]
     )
     parser.add_argument("--arms", nargs="+", choices=ARMS, default=ARMS)
-    parser.add_argument("--n-columns", type=int, default=30)
+    parser.add_argument("--n-columns", type=int, default=120)
     parser.add_argument("--n-train", type=int, default=None)
     parser.add_argument("--n-test", type=int, default=None)
     parser.add_argument("--no-images", action="store_true")

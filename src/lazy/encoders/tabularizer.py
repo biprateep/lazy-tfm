@@ -175,7 +175,7 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self,
         columns: Mapping[Hashable, str | _base.BaseEncoder],
         *,
-        n_columns: int | None = 30,
+        n_columns: int | None = 120,
         weights: str | Sequence[float] | None = "equal",
         reducer: Any = "pca",
         remainder: Any = "passthrough",

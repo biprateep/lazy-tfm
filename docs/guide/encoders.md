@@ -199,7 +199,7 @@ If you use a pretrained encoder, cite its network as well as LAZY:
 
 An embedding can have many columns, such as the 192 of `image_pixels`, and a
 table can have several columns of items. The Tabularizer gives all the
-embeddings one budget of `n_columns` columns (default 30), whatever the number
+embeddings one budget of `n_columns` columns (default 120), whatever the number
 of columns of items, so that the model's width does not grow with them.
 
 Let column of items $k$ have the embedding $e_k \in \mathbb{R}^{w_k}$ of a
@@ -244,10 +244,14 @@ The standardization and the components are fitted on the rows given to
 columns between them pass unchanged, with their encoders' names, and
 `n_columns=None` keeps every column of every embedding.
 
-The default, 30, is the number of components that the published pipelines
-(MulTaBench, TabPFN's own text features, STRABLE) keep for one column of
-items. STRABLE measured 15 as worse than 30, and 60 or 120 as no better and
-slower, for one column.
+The budget only shrinks: embeddings with fewer columns than it are never
+widened. The default, 120, is not yet measured on full data. The published
+pipelines (MulTaBench, TabPFN's own text features, STRABLE) keep 30
+components for one column of items; STRABLE measured 15 as worse than 30, and
+60 or 120 as no better and slower, for one column. A pilot on a CPU, on ten of
+MulTaBench's text tables at 512 training rows with TabPFN v3.5-fast, found
+budgets of 30, 60 and 120 within 1% of each other in median CRPS, and 300
+much worse on one table.
 
 The other columns pass through unreduced, so that they keep their meaning,
 unless `remainder` says otherwise. The output is a DataFrame with the index
