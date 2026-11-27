@@ -2,6 +2,7 @@
 # Copyright (c) 2025 Biprateep Dey
 """Finding LimiX's source and loading it under private names."""
 
+import functools
 import importlib
 from importlib import machinery
 from importlib import metadata
@@ -59,6 +60,11 @@ def clean_env(monkeypatch, tmp_path):
         monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(_limix_source, "_loaded", {})
     monkeypatch.setattr(_limix_source, "_ignored", set())
+    monkeypatch.setattr(
+        _limix_source,
+        "has_triton",
+        functools.cache(_limix_source.has_triton.__wrapped__),
+    )
     # The stand-in source plays the pinned commit's code.
     reference = _fake_source(tmp_path / "reference")
     monkeypatch.setattr(
@@ -219,7 +225,7 @@ def test_limix_imports_triton_whether_or_not_it_is_installed(
         clean_env.setitem(sys.modules, name, module if installed else None)
     with pytest.warns(_limix_source.LimiXSourceWarning):
         limix = _limix_source.load()
-    assert limix.triton is installed
+    assert _limix_source.has_triton() is installed
     assert limix.loading.kernel(5, 8) == 5
     if installed:
         assert limix.loading.launch() == 4

@@ -147,6 +147,8 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
             in full.
         device: Where to run. A CUDA device needs triton, which PyTorch
             installs on Linux only; any other device runs without it.
+            Without triton, ``"cuda"`` raises ``ValueError``, and ``"auto"``
+            runs on the CPU with a warning.
         random_state: The ensemble's seed. A group of members is run with
             the seed of its first member, ``i``, drawn from
             ``SeedSequence([random_state, i])``, which seeds each member's
@@ -507,23 +509,16 @@ class LimiXBarDistribution(_ensemble.ContextEnsembleEstimator):
         """
         return "float32", _limix_stream.load_network
 
+    def _device_problem(self, device: str) -> str | None:
+        """Refuses CUDA without triton; see the base class's hook."""
+        if device.startswith("cuda") and not _limix_source.has_triton():
+            return "it needs triton on CUDA; install triton"
+        return None
+
     def _read_network(
         self, load: Callable[..., Any], checkpoint: pathlib.Path
     ) -> Any:
-        """Reads the network from the checkpoint; see :meth:`_network`.
-
-        Raises:
-            RuntimeError: If the device is CUDA and triton is not installed.
-        """
-        # Without triton, LimiX's network runs on any device but CUDA
-        # (_limix_source._triton). Fitting and an unpickled model both come
-        # here, before the network reaches the device.
-        if self.device_.startswith("cuda") and not _limix_source.load().triton:
-            raise RuntimeError(
-                f"{self.display_name} runs on a CUDA device only with "
-                "triton, which is not installed. Install triton, or use "
-                "device='cpu'."
-            )
+        """Reads the network from the checkpoint; see :meth:`_network`."""
         self._log(f"loading LimiX network from {checkpoint}")
         return load(checkpoint, self.device_)
 
