@@ -26,6 +26,7 @@ from sklearn import decomposition
 from sklearn import preprocessing
 from sklearn.utils import validation
 
+from lazy import _steps
 from lazy import _typing
 from lazy import _warnings
 from lazy.encoders import _base
@@ -368,6 +369,115 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             constant(np.full((), np.nan)),
             reduced,
         )
+
+    def _leaves(  # noqa: GS030 - scikit-learn's X.
+        self, X: Any, X_context: Any, items: bool, name: str
+    ) -> tuple[list[_steps.Leaf], list[bool], list[_steps.Barrier]]:
+        """What a gradient method differentiates of two tables.
+
+        A column of items is a leaf of its own: the items themselves if
+        ``items`` is set, its encoder has a forward and the items have one
+        shape, and its embedding otherwise. The other columns, which must
+        be numeric, are one last leaf, unless ``remainder`` drops them.
+
+        Args:
+            X: The rows to explain, with the columns of ``fit``.
+            X_context: The context rows.
+            items: Whether to go through the encoders to the items.
+            name: The name of this step in its pipeline, for the barriers.
+
+        Returns:
+            A tuple (leaves, through, barriers): the leaves; whether each
+            leaf of a column of items goes through its encoder, in the
+            order of ``columns``; and, if ``items`` is set, each encoder
+            that the gradient cannot cross, with the reason.
+
+        Raises:
+            ValueError: If a column that passes through is not numeric.
+        """
+        frames = [_frame(X), _frame(X_context)]
+        leaves, through, barriers = [], [], []
+        for (column, encoder), position in zip(
+            self.encoders_.items(), self._positions, strict=True
+        ):
+            given = [frame.iloc[:, position] for frame in frames]
+            found = _steps.barrier(f"{name}[{column!r}]", encoder)
+            stacked = None
+            if items and found is None:
+                stacked = [encoder._stacked(part) for part in given]  # noqa: SLF001 - the encoders' contract.
+                if (
+                    stacked[0] is None
+                    or stacked[1] is None
+                    or stacked[0].shape[1:] != stacked[1].shape[1:]
+                ):
+                    found = _steps.Barrier(
+                        f"{name}[{column!r}]",
+                        "its items do not all have one shape",
+                    )
+            through.append(found is None and items)
+            if stacked is not None and found is None:
+                leaves.append(
+                    _steps.Leaf((str(column),), stacked[0], stacked[1], False)
+                )
+                continue
+            if items and found is not None:
+                barriers.append(found)
+            leaves.append(
+                _steps.Leaf(
+                    tuple(
+                        f"{column}__{feature}"
+                        for feature in encoder.get_feature_names_out()
+                    ),
+                    encoder.transform(given[0]),
+                    encoder.transform(given[1]),
+                )
+            )
+        if not (isinstance(self.remainder_, str) and self.remainder_ == "drop"):
+            rest = [
+                frame.drop(columns=frame.columns[self._positions])
+                for frame in frames
+            ]
+            other = rest[0].select_dtypes(exclude="number").columns
+            if len(other):
+                raise ValueError(
+                    "a gradient needs the columns that pass through the"
+                    f" Tabularizer to be numeric; these are not: {list(other)}"
+                )
+            leaves.append(
+                _steps.Leaf(
+                    tuple(str(column) for column in rest[0].columns),
+                    rest[0].to_numpy(dtype=np.float64),
+                    rest[1].to_numpy(dtype=np.float64),
+                )
+            )
+        return leaves, through, barriers
+
+    def _forward_leaves(
+        self, tensors: Sequence[Any], through: Sequence[bool]
+    ) -> Any:
+        """The output columns of some rows, from their leaves, on the graph.
+
+        Args:
+            tensors: One torch tensor per leaf of :meth:`_leaves`.
+            through: Whether each leaf of a column of items goes through
+                its encoder, as :meth:`_leaves` returns it.
+
+        Returns:
+            What :meth:`transform` gives for the same rows, to float
+            rounding, a torch tensor of shape (n_rows, n_features_out).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        blocks = [
+            encoder.forward(tensor) if crossed else tensor
+            for encoder, tensor, crossed in zip(
+                self.encoders_.values(), tensors, through, strict=False
+            )
+        ]
+        parts = [self._reduced(blocks)]
+        if len(tensors) > len(blocks):
+            parts.append(_steps.forward(self.remainder_, tensors[-1]))
+        return torch.cat(parts, dim=1)
 
     def _table(
         self, blocks: list[_typing.FloatArray], rest: pd.DataFrame

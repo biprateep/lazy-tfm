@@ -50,10 +50,14 @@ from sklearn import base as sklearn_base
 from sklearn.utils import validation
 
 from lazy import _inputs
+from lazy import _paths
+from lazy import _steps
 from lazy import _typing
+from lazy import _warnings
 from lazy import base
 from lazy import grid as grid_lib
 from lazy import metrics
+from lazy import pipeline
 from lazy.models import _differentiable as differentiable
 
 if typing.TYPE_CHECKING:
@@ -67,6 +71,7 @@ __all__ = [
     "EXACT_MAX_FEATURES",
     "METHODS",
     "STATISTICS",
+    "Barrier",
     "ContextExplanation",
     "Explanation",
     "explain",
@@ -105,6 +110,10 @@ DEFAULT_STEPS = 32
 
 _GRADIENT_METHODS = ("gradient", "integrated_gradients")
 
+Barrier = _steps.Barrier
+"""A step that a gradient cannot cross, with the reason; see
+:attr:`Explanation.barriers`."""
+
 # The x-axis label of Explanation.plot, for each statistic's importance.
 _IMPORTANCE_LABELS = {
     "crps": "minus CRPS (target units)",
@@ -141,6 +150,18 @@ class Explanation:
             ``full_values - base_values`` over the features, for the
             latter to the error of its Riemann sum. ``None`` for the other
             methods.
+        stage: The step of a pipeline whose output columns are the
+            features; ``None`` when they are the model's raw input.
+        barriers: For a gradient method without ``at``, the steps that the
+            gradient could not cross, each with the reason: the features
+            are the outputs of the last of them, and of each encoder among
+            them.
+        item_values: For a gradient method, each attribution to a column
+            of items spread over the items' elements, such as the pixels
+            of an image: the column's name -> an array of shape
+            (n_statistics, n_rows, ...) that sums to the column's
+            ``values`` over its trailing axes. ``None`` if no feature is a
+            column of items.
     """
 
     method: str
@@ -149,6 +170,9 @@ class Explanation:
     values: _typing.FloatArray
     full_values: _typing.FloatArray
     base_values: _typing.FloatArray | None
+    stage: str | None = None
+    barriers: tuple[Barrier, ...] = ()
+    item_values: Mapping[str, _typing.FloatArray] | None = None
 
     def table(self, statistic: str = "crps") -> pd.DataFrame:
         """One statistic's attributions, per explained row.
@@ -311,9 +335,13 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     n_repeats: int | None = None,
     n_steps: int | None = None,
     baseline: npt.ArrayLike | None = None,
+    at: str | None = None,
     random_state: int = 0,
 ) -> Explanation:
     """Attributes each row's predicted distribution to the features.
+
+    The features are the columns of ``X``, unless ``at`` names a step of a
+    pipeline: they are then that step's output columns, the *stage*.
 
     ``"shapley"`` fits the model once per coalition, ``2**p`` times when it
     is exact and at most ``n_permutations * (p - 1) + 2`` times when it is
@@ -327,11 +355,25 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     three backward passes through it, one per statistic, for each batch of
     64 rows; ``"integrated_gradients"`` takes ``n_steps`` points on the
     path to each row, so it runs ``n_steps`` times as many batches, and
-    predicts the baseline once. Both also predict the rows once, a batch
-    at a time, to check that ``X_context`` is the model's context, so that
-    a wrong one fails after the first batch. Neither refits, and each
-    pass's autograd graph holds the context and one batch of about 64
-    points, or of one row's ``n_steps`` points if there are more.
+    runs the pass once more per row, at the baseline. Both also predict
+    the rows once, a batch at a time, to check that ``X_context`` is the
+    model's context and that every step's forward gives what its
+    ``transform`` gives, so that a wrong one fails after the first batch.
+    Neither refits, and each pass's autograd graph holds one batch of
+    about 64 points, or of one row's ``n_steps`` points if there are more.
+
+    The gradient methods take the gradient as far back as it reaches
+    (:mod:`lazy._steps`). Through a :class:`~lazy.pipeline.LazyPipeline`
+    it passes each step that has a forward, down to the raw input; a
+    ``Tabularizer`` is entered column by column, down to the items of each
+    encoder that has a forward, such as the pixels of an image. A step
+    that the gradient cannot cross is a barrier: attribution ends at its
+    output, whose columns become the features, with a warning that names
+    the step and the reason, and ``Explanation.barriers`` lists them.
+    Through a :class:`~lazy.models.ensemble.LazyEnsembleModel` that pools
+    densities, one backward pass from the pooled density gives each
+    member's path its share, and a feature's attribution is the sum over
+    the members.
 
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
@@ -353,9 +395,11 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             context is given, and ``"permutation"`` otherwise.
             ``"permutation"`` does not use a context. ``"gradient"``
             (gradient times input) and ``"integrated_gradients"`` need
-            ``model`` fitted with a differentiable forward pass: a backend
-            fitted with ``transforms=("none",)`` and
-            ``outlier_threshold=None``, on numeric columns.
+            ``model`` fitted with a differentiable forward pass: a
+            backend, a pipeline that ends in one or an ensemble of them,
+            on numeric columns, with no transform or clip that the
+            backend's own package applies (``transforms=("none",)`` and
+            ``outlier_threshold=None`` always qualify).
         groups: Columns to treat as one feature each, as
             ``{feature name: column names}``: the columns of an embedding,
             say. A column in no group is a feature of its own. ``None`` for
@@ -376,7 +420,16 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             :data:`DEFAULT_STEPS`.
         baseline: For the gradient methods, the finite row that stands in
             for no feature at all, shape (n_columns,); ``None`` for the mean
-            of ``X_context``.
+            of ``X_context``, or of the context's stage or items. A row can
+            be given only when the features are the columns of one table.
+        at: The name of a step of a :class:`~lazy.pipeline.LazyPipeline`
+            before its model: the features are that step's output columns,
+            named by its ``get_feature_names_out``. A removal method runs
+            the pipeline to that stage, removes or permutes the stage's
+            columns, then runs the rest; a gradient method takes the
+            gradient in them, and every later step needs a forward.
+            ``None`` for the raw input, or, for a gradient method, as far
+            back as the gradient reaches.
         random_state: The seed of the permutations, the shuffles and the
             column of noise that stands in for no feature at all.
 
@@ -385,8 +438,9 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
 
     Raises:
         ValueError: If an argument is not as described above, an option
-            is given to a method that does not use it, or a gradient
-            method's model has no differentiable forward pass.
+            is given to a method that does not use it, a gradient
+            method's model has no differentiable forward pass, or ``at``
+            leaves a barrier between the stage and the model.
         TypeError: If ``n_permutations``, ``n_repeats`` or ``n_steps`` is
             not an integer.
         sklearn.exceptions.NotFittedError: If ``method`` is
@@ -401,13 +455,43 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         n_steps=n_steps,
         baseline=baseline,
     )
+    stage = None
+    if at is not None and method not in _GRADIENT_METHODS:
+        model, X, X_context = _staged(
+            model, at, X, X_context, y_context, refit=method != "permutation"
+        )
+        stage = at
     X, named = _frame(X)
     if X.empty:
         raise ValueError("X has no rows to explain")
     y = _inputs.check_target(y, len(X))
-    names, feature_of = _features(X.columns, groups)
     rng = np.random.default_rng(random_state)
 
+    if method in _GRADIENT_METHODS:
+        baseline = _check_baseline(baseline)
+        context, context_targets, grid = _context(
+            X_context, y_context, X, y, y_grid
+        )
+        n_steps = (
+            _count(n_steps, "n_steps", DEFAULT_STEPS)
+            if method == "integrated_gradients"
+            else 1
+        )
+        return _gradient_explanation(
+            model,
+            method,
+            context,
+            context_targets,
+            X,
+            y,
+            named,
+            grid,
+            baseline,
+            n_steps,
+            at,
+            groups,
+        )
+    names, feature_of = _features(X.columns, groups)
     if method == "permutation":
         validation.check_is_fitted(model)
         if y_grid is None and not hasattr(model, "grid_"):
@@ -419,35 +503,11 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         values, full = _permutation(
             model, X, y, named, feature_of, grid, n_repeats, rng
         )
-        return Explanation(method, STATISTICS, names, values, full, None)
+        return Explanation(method, STATISTICS, names, values, full, None, stage)
 
     context, context_targets, grid = _context(
         X_context, y_context, X, y, y_grid
     )
-    if method in _GRADIENT_METHODS:
-        baseline = _check_baseline(baseline, X.shape[1])
-        n_steps = (
-            _count(n_steps, "n_steps", DEFAULT_STEPS)
-            if method == "integrated_gradients"
-            else 1
-        )
-        values, full, empty = _gradient_attributions(
-            model,
-            method,
-            context,
-            context_targets,
-            X,
-            y,
-            named,
-            grid,
-            baseline,
-            n_steps,
-        )
-        # A feature's attribution is the sum of its columns'.
-        one_hot = feature_of[:, None] == np.arange(len(names))
-        return Explanation(
-            method, STATISTICS, names, values @ one_hot, full, empty
-        )
     value_function = _refit_values(
         model, context, context_targets, X, y, named, feature_of, grid, rng
     )
@@ -458,7 +518,9 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         )
         table = value_function(coalitions)
         values = np.moveaxis(table[0] - table[1:], 0, -1)
-        return Explanation(method, STATISTICS, names, values, table[0], None)
+        return Explanation(
+            method, STATISTICS, names, values, table[0], None, stage
+        )
     if n_permutations is None and n_features <= EXACT_MAX_FEATURES:
         values, full, empty = _exact_shapley(value_function, n_features)
     else:
@@ -468,7 +530,7 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
         values, full, empty = _sampled_shapley(
             value_function, n_features, n_permutations, rng
         )
-    return Explanation(method, STATISTICS, names, values, full, empty)
+    return Explanation(method, STATISTICS, names, values, full, empty, stage)
 
 
 def explain_context(  # noqa: GS030 - scikit-learn's X, y.
@@ -483,6 +545,8 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
     baseline: npt.ArrayLike | None = None,
     rows: int | npt.ArrayLike | None = None,
     random_state: int | None = None,
+    at: str | None = None,
+    through_encoders: bool | None = None,
 ) -> ContextExplanation:
     """Attributes each row's predicted distribution to the context rows.
 
@@ -509,9 +573,8 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
             ``"gradient"`` needs it fitted on ``X_context`` and
-            ``y_context`` with a differentiable forward pass: a backend
-            fitted with ``transforms=("none",)`` and
-            ``outlier_threshold=None``, on numeric columns. ``"loo"`` fits
+            ``y_context`` with a differentiable forward pass, as
+            :func:`explain`'s gradient methods do. ``"loo"`` fits
             clones of it and leaves it as it is.
         X: The rows to explain, shape (n_rows, n_columns), in any form the
             models take. They should not be rows of the context.
@@ -532,6 +595,15 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
             every row.
         random_state: For ``"loo"``, the seed of the rows that an integer
             ``rows`` draws; ``None`` for 0.
+        at: For ``"gradient"`` on a :class:`~lazy.pipeline.LazyPipeline`,
+            the name of the step in whose output columns each context
+            row's gradient is taken; ``None`` for as far back as the
+            gradient reaches.
+        through_encoders: For ``"gradient"``, whether the gradient goes
+            through the encoders of a ``Tabularizer`` to the context's
+            items, which encodes the whole context on the autograd graph
+            once per batch; ``None`` or ``False`` stops at the encoders'
+            outputs.
 
     Returns:
         The attributions.
@@ -546,8 +618,14 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
     if method not in CONTEXT_METHODS:
         raise ValueError(f"method must be one of {CONTEXT_METHODS}: {method=}")
     _check_options(
-        method, baseline=baseline, rows=rows, random_state=random_state
+        method,
+        baseline=baseline,
+        rows=rows,
+        random_state=random_state,
+        at=at,
+        through_encoders=through_encoders,
     )
+    baseline = _check_baseline(baseline)
     X, named = _frame(X)
     if X.empty:
         raise ValueError("X has no rows to explain")
@@ -556,10 +634,18 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
         X_context, y_context, X, y, y_grid
     )
     if method == "gradient":
-        baseline = _check_baseline(baseline, X.shape[1])
         chosen = np.arange(len(context))
         values, full = _context_gradients(
-            model, context, context_targets, X, y, named, grid, baseline
+            model,
+            context,
+            context_targets,
+            X,
+            y,
+            named,
+            grid,
+            baseline,
+            at,
+            bool(through_encoders),
         )
     else:
         chosen = _context_rows(
@@ -690,7 +776,7 @@ def _check_options(method: str, **options: Any) -> None:
     used = {
         "shapley": ("n_permutations",),
         "permutation": ("n_repeats",),
-        "gradient": ("baseline",),
+        "gradient": ("baseline", "at", "through_encoders"),
         "integrated_gradients": ("n_steps", "baseline"),
         "loo": ("rows", "random_state"),
     }
@@ -1111,7 +1197,57 @@ def _permutation(  # noqa: GS030 - scikit-learn's X, y.
     return values / n_repeats, full
 
 
-def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
+def _staged(  # noqa: GS030 - scikit-learn's X, y.
+    model: Any,
+    at: str,
+    X: Any,
+    X_context: Any,
+    y_context: Any,
+    refit: bool,
+) -> tuple[Any, Any, Any]:
+    """A pipeline cut after one of its steps, for a removal method.
+
+    Args:
+        model: A :class:`~lazy.pipeline.LazyPipeline`.
+        at: The name of a step before its model.
+        X: The rows to explain, as the pipeline takes them.
+        X_context: The context, in the same form, or ``None``.
+        y_context: Its targets, or ``None``.
+        refit: Whether the method refits: the steps up to ``at`` are then
+            cloned and fitted on the context, and the rest is cloned.
+
+    Returns:
+        A tuple (rest, X, X_context): the steps after ``at`` as a
+        pipeline, fitted unless ``refit``; and the rows and the context as
+        the step ``at`` gives them, the context ``None`` unless ``refit``.
+
+    Raises:
+        ValueError: If ``model`` is not a pipeline, or ``at`` names no step
+            before its model.
+        sklearn.exceptions.NotFittedError: If the pipeline must be fitted
+            and is not.
+    """
+    if not isinstance(model, pipeline.LazyPipeline):
+        raise ValueError(
+            f"at names a step of a LazyPipeline; {type(model).__name__} has"
+            f" none: {at=}"
+        )
+    names = [name for name, _ in model.steps[:-1]]
+    if at not in names:
+        raise ValueError(
+            f"at must name a step before the model, one of {names}: {at=}"
+        )
+    cut = names.index(at) + 1
+    head, rest = model[:cut], model[cut:]
+    if not refit:
+        validation.check_is_fitted(model)
+        return rest, head.transform(X), None
+    head = sklearn_base.clone(head)
+    context = head.fit_transform(X_context, y_context)
+    return sklearn_base.clone(rest), head.transform(X), context
+
+
+def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
     model: Any,
     method: str,
     X_context: pd.DataFrame,
@@ -1122,16 +1258,18 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
     grid: grid_lib.Grid,
     baseline: _typing.FloatArray | None,
     n_steps: int,
-) -> tuple[_typing.FloatArray, _typing.FloatArray, _typing.FloatArray | None]:
+    at: str | None,
+    groups: Mapping[str, Sequence[str]] | None,
+) -> Explanation:
     """Gradient times input, or integrated gradients, of every statistic.
 
-    Column ``j`` of row ``x`` gets ``x_j - b_j`` times the mean of the
-    statistic's derivative in ``x_j`` at ``b + (k / m) (x - b)`` for
-    ``k = 1, ..., m``: at ``x`` alone for ``"gradient"``, whose ``m`` is 1.
-    Each point's statistics depend only on its own features, so the
-    gradient of their sum over a batch of points is each point's gradient.
-    A batch holds the ``m`` points of each of about
-    ``_QUERY_BUDGET / m`` rows.
+    Element ``j`` of a leaf ``x`` of a row gets ``x_j - b_j`` times the
+    mean of the statistic's derivative in ``x_j`` at ``b + (k / m) (x - b)``
+    for ``k = 1, ..., m``: at ``x`` alone for ``"gradient"``, whose ``m`` is
+    1. Every leaf moves along its own line at once. Each point's statistics
+    depend only on its own row, so the gradient of their sum over a batch
+    of points is each point's gradient. A batch holds the ``m`` points of
+    each of about ``_QUERY_BUDGET / m`` rows.
 
     Args:
         model: A model fitted on ``X_context`` and ``y_context``.
@@ -1142,46 +1280,60 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
         y: Their true targets, shape (n,).
         named: Whether the caller named the columns; see :func:`_table`.
         grid: The grid on which the CRPS and the NLL are computed.
-        baseline: The baseline ``b``, checked, shape (n_columns,), or
-            ``None`` for the mean of ``X_context``.
+        baseline: The baseline ``b``, checked, or ``None`` for the mean of
+            the context's leaves.
         n_steps: The steps ``m``; 1 for ``"gradient"``.
+        at: The stage to start at, or ``None``; see :func:`explain`.
+        groups: Features to treat as one each, or ``None``.
 
     Returns:
-        A tuple (values, full, base): each column's attribution, shape
-        (n_statistics, n, n_columns); the statistics of the rows, shape
-        (n_statistics, n); and, for ``"integrated_gradients"``, those at
-        the baseline, of that shape, or ``None`` for ``"gradient"``.
+        The explanation. Its ``base_values`` are the statistics at the
+        baseline for ``"integrated_gradients"``, and ``None`` for
+        ``"gradient"``.
 
     Raises:
         sklearn.exceptions.NotFittedError: If the model is not fitted.
-        ValueError: As :func:`_differentiable` and :func:`_density` raise,
-            if ``X_context`` and ``y_context`` are not the model's
-            context, or if torch's inference mode is on.
+        ValueError: As :func:`lazy._paths.build` raises, if ``X_context``
+            and ``y_context`` are not the model's context, if the baseline
+            is not valid, or if torch's inference mode is on.
     """
-    model, order, context, queries = _differentiable(
-        model, method, X_context, X, named
+    label = f"method={method!r}"
+    path = _paths.build(
+        model,
+        _table(X, named),
+        _table(X_context, named),
+        y_context,
+        label=label,
+        at=at,
     )
+    _warn_of_barriers(path, label)
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-    differentiable.refuse_inference_mode(f"method={method!r}")
-    origin = context.mean(axis=0) if baseline is None else baseline[order]
-    context_tensor = torch.tensor(context)
-    delta = queries - origin
+    differentiable.refuse_inference_mode(label)
+    origins = _origins(path.leaves, baseline)
+    deltas = [
+        leaf.queries - origin
+        for leaf, origin in zip(path.leaves, origins, strict=True)
+    ]
     fractions = np.arange(1, n_steps + 1) / n_steps
     chunk = max(1, _QUERY_BUDGET // n_steps)
-    gradients = np.empty((len(STATISTICS), *queries.shape))
-    full = np.empty((len(STATISTICS), len(queries)))
+    gradients = [np.zeros((len(STATISTICS), *delta.shape)) for delta in deltas]
+    full = np.empty((len(STATISTICS), len(y)))
+    base = np.empty_like(full)
     # Inside torch.no_grad() too, which would build no graph.
     with torch.enable_grad():
-        for start in range(0, len(queries), chunk):
+        with torch.no_grad():
+            context = path.table(
+                [torch.tensor(leaf.context) for leaf in path.leaves]
+            )
+        for start in range(0, len(y), chunk):
             rows = slice(start, start + chunk)
-            path = origin + fractions[:, None, None] * delta[rows]  # (m, c, p)
-            query = torch.tensor(
-                path.reshape(-1, path.shape[-1]), requires_grad=True
-            )
-            density = differentiable.density(
-                model, f"method={method!r}", query, context_tensor, y_context
-            )
+            points = []
+            for origin, delta in zip(origins, deltas, strict=True):
+                steps = fractions.reshape(-1, *[1] * delta.ndim) * delta[rows]
+                line = (origin + steps).reshape(-1, *delta.shape[1:])
+                points.append(torch.tensor(line, requires_grad=True))
+            density = path.density(path.table(points), context)
             statistics = _scores(density, np.tile(y[rows], n_steps), grid)
             # The last step, k = m, is the row itself.
             at_points = torch.stack(statistics).detach().numpy()
@@ -1191,26 +1343,166 @@ def _gradient_attributions(  # noqa: GS030 - scikit-learn's X, y.
             # The three backward passes share one forward pass's graph,
             # which the last of them frees.
             for index, statistic in enumerate(statistics):
-                (gradient,) = torch.autograd.grad(
+                found = torch.autograd.grad(
                     statistic.sum(),
-                    query,
+                    points,
                     retain_graph=index < len(statistics) - 1,
+                    allow_unused=True,
                 )
-                gradients[index, rows] = (
-                    gradient.numpy().reshape(path.shape).sum(axis=0)
-                )
+                for gradient, delta, held in zip(
+                    found, deltas, gradients, strict=True
+                ):
+                    if gradient is not None:
+                        held[index, rows] = (
+                            gradient.numpy()
+                            .reshape(n_steps, -1, *delta.shape[1:])
+                            .sum(axis=0)
+                        )
             # After the backward passes have freed this batch's graph.
             _check_context(
                 model, method, X.iloc[rows], named, y_context, full[-1, rows]
             )
-    values = (gradients / n_steps * delta)[..., np.argsort(order)]
-    if method == "gradient":
-        return values, full, None
-    # The baseline is one row; each explained row scores it at its target.
-    at_baseline = pd.DataFrame([origin[np.argsort(order)]], columns=X.columns)
-    distribution = model.predict_distribution(_table(at_baseline, named))
-    base = _scores(distribution[np.zeros(len(y), dtype=int)], y, grid)
-    return values, full, np.stack(base)
+            if method == "integrated_gradients":
+                # The baseline is one point; each row scores it at its
+                # own target.
+                with torch.no_grad():
+                    at_origin = path.table(
+                        [
+                            torch.tensor(origin).expand(
+                                len(y[rows]), *origin.shape
+                            )
+                            for origin in origins
+                        ]
+                    )
+                    scores = _scores(
+                        path.density(at_origin, context), y[rows], grid
+                    )
+                base[:, rows] = torch.stack(scores).numpy()
+    columns, values, item_values = _by_feature(
+        path.leaves,
+        [g / n_steps * d for g, d in zip(gradients, deltas, strict=True)],
+    )
+    names, feature_of = _features(pd.Index(columns), groups)
+    # A feature's attribution is the sum of its columns'.
+    one_hot = feature_of[:, None] == np.arange(len(names))
+    return Explanation(
+        method,
+        STATISTICS,
+        names,
+        values @ one_hot,
+        full,
+        base if method == "integrated_gradients" else None,
+        path.stage,
+        path.barriers,
+        item_values or None,
+    )
+
+
+def _warn_of_barriers(path: _paths.Path, label: str) -> None:
+    """Warns of each step that a gradient could not cross."""
+    for barrier in path.barriers:
+        _warnings.warn(
+            f"{label} stops at the output of the step {barrier.step!r}, a"
+            f" barrier to gradients: {barrier.reason}",
+            _warnings.LazyWarning,
+        )
+
+
+def _check_baseline(
+    baseline: npt.ArrayLike | None,
+) -> _typing.FloatArray | None:
+    """``baseline`` as a float row, checked; ``None`` stays ``None``.
+
+    Args:
+        baseline: The baseline as given.
+
+    Returns:
+        The baseline, float64, shape (n,), or ``None``.
+
+    Raises:
+        ValueError: If it is not a finite row of numbers.
+    """
+    if baseline is None:
+        return None
+    try:
+        row = np.asarray(baseline, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"baseline must be numbers: {error}") from error
+    if row.ndim != 1 or not np.isfinite(row).all():
+        raise ValueError(
+            f"baseline must be finite, one number per column: got {row}"
+        )
+    return row
+
+
+def _origins(
+    leaves: Sequence[_steps.Leaf], baseline: _typing.FloatArray | None
+) -> list[_typing.FloatArray]:
+    """The baseline of each leaf: the point that stands in for no feature.
+
+    Args:
+        leaves: The leaves of a path.
+        baseline: A checked row of numbers, or ``None`` for the mean of
+            each leaf over the context.
+
+    Returns:
+        One array per leaf, of the leaf's trailing shape.
+
+    Raises:
+        ValueError: If a baseline is given and the leaves are not one
+            table of its width.
+    """
+    if baseline is None:
+        return [leaf.context.mean(axis=0) for leaf in leaves]
+    if len(leaves) != 1 or not leaves[0].per_column:
+        raise ValueError(
+            "baseline applies when the features are the columns of one"
+            " table; here they are several blocks, so leave it as None"
+        )
+    n_columns = leaves[0].queries.shape[1]
+    if baseline.shape != (n_columns,):
+        raise ValueError(
+            f"baseline must be finite, of shape ({n_columns},): got {baseline}"
+        )
+    return [baseline]
+
+
+def _by_feature(
+    leaves: Sequence[_steps.Leaf], values: Sequence[_typing.FloatArray]
+) -> tuple[list[str], _typing.FloatArray, dict[str, _typing.FloatArray]]:
+    """Each leaf's attributions, as one column per feature.
+
+    A leaf of a table gives a column per column. A leaf of items gives one
+    column, the sum over each item's elements. Leaves that share a name, as
+    the members of an ensemble do, add up.
+
+    Args:
+        leaves: The leaves of a path.
+        values: Each leaf's attributions, shape (n_statistics, n_rows, ...)
+            with the leaf's trailing shape.
+
+    Returns:
+        A tuple (names, values, item_values): the distinct feature names,
+        in the order they first appear; their attributions, shape
+        (n_statistics, n_rows, n_names); and the attributions of each
+        column of items, by name, with the items' shape.
+    """
+    index: dict[str, int] = {}
+    columns: list[_typing.FloatArray] = []
+    item_values: dict[str, _typing.FloatArray] = {}
+    for leaf, held in zip(leaves, values, strict=True):
+        if leaf.per_column:
+            parts = list(np.moveaxis(held, -1, 0))
+        else:
+            parts = [held.reshape(*held.shape[:2], -1).sum(axis=-1)]
+            name = leaf.names[0]
+            item_values[name] = item_values.get(name, 0.0) + held
+        for name, part in zip(leaf.names, parts, strict=True):
+            position = index.setdefault(name, len(index))
+            if position == len(columns):
+                columns.append(np.zeros_like(part))
+            columns[position] = columns[position] + part
+    return list(index), np.stack(columns, axis=-1), item_values
 
 
 def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
@@ -1222,13 +1514,15 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     named: bool,
     grid: grid_lib.Grid,
     baseline: _typing.FloatArray | None,
+    at: str | None,
+    through_encoders: bool,
 ) -> tuple[_typing.FloatArray, _typing.FloatArray]:
-    """Gradient times input of every statistic in the context's features.
+    """Gradient times input of every statistic in the context's leaves.
 
-    Context row ``r`` gets the sum over its columns ``j`` of the
-    statistic's derivative in ``x_rj`` times ``x_rj - b_j``. Every row's
-    statistics depend on the whole context, so each statistic of each row
-    takes a backward pass of its own, all through one forward pass per
+    Context row ``r`` gets the sum over the elements ``j`` of its leaves of
+    the statistic's derivative in ``x_rj`` times ``x_rj - b_j``. Every
+    row's statistics depend on the whole context, so each statistic of each
+    row takes a backward pass of its own, all through one forward pass per
     batch of ``_QUERY_BUDGET`` rows, which keeps one graph in memory.
 
     Args:
@@ -1239,8 +1533,12 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
         y: Their true targets, shape (n,).
         named: Whether the caller named the columns; see :func:`_table`.
         grid: The grid on which the CRPS and the NLL are computed.
-        baseline: The baseline ``b``, checked, shape (n_columns,), or
-            ``None`` for the mean of ``X_context``.
+        baseline: The baseline ``b``, checked, or ``None`` for the mean of
+            the context's leaves.
+        at: The stage to differentiate in, or ``None``; see
+            :func:`explain_context`.
+        through_encoders: Whether the gradient goes through the encoders
+            of a ``Tabularizer`` to the context's items.
 
     Returns:
         A tuple (values, full): each context row's attribution, shape
@@ -1249,44 +1547,66 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
 
     Raises:
         sklearn.exceptions.NotFittedError: If the model is not fitted.
-        ValueError: As :func:`_differentiable` and :func:`_density` raise,
-            if ``X_context`` and ``y_context`` are not the model's
-            context, or if torch's inference mode is on.
+        ValueError: As :func:`lazy._paths.build` raises, if ``X_context``
+            and ``y_context`` are not the model's context, if the baseline
+            is not valid, or if torch's inference mode is on.
     """
-    model, order, context, queries = _differentiable(
-        model, "gradient", X_context, X, named
+    label = "method='gradient'"
+    path = _paths.build(
+        model,
+        _table(X, named),
+        _table(X_context, named),
+        y_context,
+        label=label,
+        at=at,
+        items=through_encoders,
     )
+    _warn_of_barriers(path, label)
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-    differentiable.refuse_inference_mode("method='gradient'")
-    origin = context.mean(axis=0) if baseline is None else baseline[order]
-    offsets = torch.tensor(context - origin)
-    context_tensor = torch.tensor(context, requires_grad=True)
-    values = np.empty((len(STATISTICS), len(queries), len(context)))
-    full = np.empty((len(STATISTICS), len(queries)))
+    differentiable.refuse_inference_mode(label)
+    origins = _origins(path.leaves, baseline)
+    offsets = [
+        torch.tensor(leaf.context - origin)
+        for leaf, origin in zip(path.leaves, origins, strict=True)
+    ]
+    contexts = [
+        torch.tensor(leaf.context, requires_grad=True) for leaf in path.leaves
+    ]
+    n_context = len(y_context)
+    values = np.zeros((len(STATISTICS), len(y), n_context))
+    full = np.empty((len(STATISTICS), len(y)))
     # Inside torch.no_grad() too, which would build no graph.
     with torch.enable_grad():
-        for start in range(0, len(queries), _QUERY_BUDGET):
+        for start in range(0, len(y), _QUERY_BUDGET):
             rows = slice(start, start + _QUERY_BUDGET)
-            query = torch.tensor(queries[rows])
-            density = differentiable.density(
-                model, "method='gradient'", query, context_tensor, y_context
-            )
+            with torch.no_grad():
+                query = path.table(
+                    [torch.tensor(leaf.queries[rows]) for leaf in path.leaves]
+                )
+            density = path.density(query, path.table(contexts))
             statistics = torch.stack(_scores(density, y[rows], grid))
             full[:, rows] = statistics.detach().numpy()
             # One backward pass per statistic of a row; the last frees the
             # graph.
             flat = statistics.reshape(-1)
+            n_queries = statistics.shape[1]
             for index, statistic in enumerate(flat):
-                (gradient,) = torch.autograd.grad(
+                found = torch.autograd.grad(
                     statistic,
-                    context_tensor,
+                    contexts,
                     retain_graph=index < len(flat) - 1,
+                    allow_unused=True,
                 )
-                which, row = divmod(index, len(query))
-                values[which, start + row] = (
-                    (gradient * offsets).sum(dim=1).numpy()
-                )
+                which, row = divmod(index, n_queries)
+                for gradient, offset in zip(found, offsets, strict=True):
+                    if gradient is not None:
+                        values[which, start + row] += (
+                            (gradient * offset)
+                            .reshape(n_context, -1)
+                            .sum(dim=1)
+                            .numpy()
+                        )
             # After the backward passes have freed this batch's graph.
             _check_context(
                 model,
@@ -1299,44 +1619,6 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     return values, full
 
 
-def _differentiable(  # noqa: GS030 - scikit-learn's X.
-    model: Any,
-    method: str,
-    X_context: pd.DataFrame,
-    X: pd.DataFrame,
-    named: bool,
-) -> tuple[Any, _typing.IntArray, _typing.FloatArray, _typing.FloatArray]:
-    """The backend whose forward pass a gradient method runs, and its inputs.
-
-    Args:
-        model: A model fitted on ``X_context``.
-        method: The gradient method, for the errors.
-        X_context: Its context, shape (n_context, n_columns).
-        X: The rows to explain, shape (n, n_columns).
-        named: Whether the caller named the columns; see :func:`_table`.
-
-    Returns:
-        A tuple (backend, order, context, queries): the backend; the
-        position in ``X`` of each of the fit's columns, shape (n_columns,);
-        and the context and the rows as floats in the fit's column order,
-        shapes (n_context, n_columns) and (n, n_columns).
-
-    Raises:
-        sklearn.exceptions.NotFittedError: If the model is not fitted.
-        ValueError: If the model has no differentiable forward pass, a
-            column is not numeric, a feature is missing, or the columns do
-            not match the fit's.
-    """
-    validation.check_is_fitted(model)
-    model = differentiable.backend(model, f"method={method!r}")
-    # Where each of the fit's columns is in X, by predict's rule for names.
-    positions = pd.DataFrame([np.arange(X.shape[1])], columns=X.columns)
-    order = model._align_to_fit(positions, named).to_numpy()[0]  # noqa: SLF001 - predict's rule.
-    context = _float_features(X_context, "X_context", method)[:, order]
-    queries = _float_features(X, "X", method)[:, order]
-    return model, order, context, queries
-
-
 def _check_context(  # noqa: GS030 - scikit-learn's X, y.
     model: Any,
     method: str,
@@ -1345,14 +1627,15 @@ def _check_context(  # noqa: GS030 - scikit-learn's X, y.
     y_context: _typing.FloatArray,
     means: _typing.FloatArray,
 ) -> None:
-    """Refuses a context other than the one the model was fitted on.
+    """Refuses a pass that does not predict what the fitted model predicts.
 
     The forward pass's context is the caller's; predict's is the fit's.
     Their means agree to float32 rounding, far inside this tolerance, when
-    they are the same context.
+    they are the same context and every step's forward gives what its
+    ``transform`` gives.
 
     Args:
-        model: The backend.
+        model: The fitted model.
         method: The gradient method, for the errors.
         X: The rows explained, shape (n, n_columns).
         named: Whether the caller named the columns; see :func:`_table`.
@@ -1372,62 +1655,3 @@ def _check_context(  # noqa: GS030 - scikit-learn's X, y.
             " predicts means that differ from predict's by up to"
             f" {np.abs(means - predicted).max():.3g}"
         )
-
-
-def _check_baseline(
-    baseline: npt.ArrayLike | None, n_columns: int
-) -> _typing.FloatArray | None:
-    """``baseline`` as a float array, checked; ``None`` stays ``None``.
-
-    Args:
-        baseline: The baseline as given.
-        n_columns: The number of columns of ``X``.
-
-    Returns:
-        The baseline, float64, shape (n_columns,), or ``None``.
-
-    Raises:
-        ValueError: If it is not a finite row of ``n_columns`` numbers.
-    """
-    if baseline is None:
-        return None
-    try:
-        row = np.asarray(baseline, dtype=np.float64)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"baseline must be numbers: {error}") from error
-    if row.shape != (n_columns,) or not np.isfinite(row).all():
-        raise ValueError(
-            f"baseline must be finite, of shape ({n_columns},): got {row}"
-        )
-    return row
-
-
-def _float_features(
-    frame: pd.DataFrame, name: str, method: str
-) -> _typing.FloatArray:
-    """A table's values, which gradients need numeric and present.
-
-    Args:
-        frame: Features, shape (n, p).
-        name: The argument's name, for the errors.
-        method: The gradient method, for the errors.
-
-    Returns:
-        The values, float64, shape (n, p).
-
-    Raises:
-        ValueError: If a column is not numeric, or a value is missing or
-            infinite.
-    """
-    other = frame.select_dtypes(exclude="number").columns
-    if len(other):
-        raise ValueError(
-            f"method={method!r} needs numeric columns; {name} has others:"
-            f" {list(other)}"
-        )
-    values = frame.to_numpy(dtype=np.float64)
-    if not np.isfinite(values).all():
-        raise ValueError(
-            f"method={method!r} needs {name} without missing or infinite values"
-        )
-    return values

@@ -642,7 +642,7 @@ def test_top_ranks_context_rows_by_absolute_value():
         ({"method": "shapley"}, "method must be one of"),
         ({"rows": 3}, "rows does not apply"),
         ({"method": "loo", "baseline": np.zeros(3)}, "baseline does not"),
-        ({"baseline": np.zeros(2)}, "baseline must be finite"),
+        ({"baseline": np.zeros((2, 2))}, "baseline must be finite"),
         ({"method": "loo", "rows": 0}, "rows == 0, must be >= 1"),
         ({"method": "loo", "rows": [1, 1]}, "rows repeats rows"),
         ({"method": "loo", "rows": [200]}, r"rows must be row positions in"),

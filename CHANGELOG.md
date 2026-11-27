@@ -9,6 +9,26 @@ change the API.
 
 ### Added
 
+- Gradients from end to end. The gradient methods of `lazy.interp.explain`
+  and `explain_context` now run on a `LazyPipeline` and on a
+  `LazyEnsembleModel` that pools densities, and no longer only on a backend.
+  A gradient passes each step that has a forward on torch tensors: the fitted
+  scikit-learn scalers, `PowerTransformer`, `QuantileTransformer`, `PCA`,
+  `TruncatedSVD`, `SimpleImputer`, `FunctionTransformer` with a numpy
+  function, and `Pipeline` and `ColumnTransformer` of these; the
+  `Tabularizer`'s reduction; and the classical encoders of images and time
+  series, down to the pixels of an image or the values of a series.
+  `Explanation.item_values` holds the attribution of each element of such an
+  item. A step that a gradient cannot cross is a barrier: attribution ends at
+  its output, `explain` warns with the reason, and `Explanation.barriers`
+  lists them. Through an ensemble, one backward pass from the pooled density
+  gives each member its share.
+- `at=` on `lazy.interp.explain`, for every method, and on
+  `explain_context`: the name of a step of a `LazyPipeline` whose output
+  columns are the features. Shapley values, `"loco"` and `"permutation"` run
+  the pipeline to that stage, remove or permute its columns, and run the
+  rest. `Explanation.stage` records it. `explain_context` stops at the
+  outputs of a `Tabularizer`'s encoders unless `through_encoders=True`.
 - The gradient methods of `lazy.interp` (`"gradient"` and
   `"integrated_gradients"` of `explain`, `"gradient"` of `explain_context`)
   now run on a model fitted with the transforms that lazy applies itself: on
