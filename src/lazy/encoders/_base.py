@@ -92,6 +92,20 @@ class BaseEncoder(
     encoder's parameters nor its later answers. Every answer is checked to
     be finite, with one row per item and :meth:`_width` columns.
 
+    An encoder whose embedding is differentiable in its items declares
+    ``gradient_kind = "differentiable"`` (:mod:`lazy._steps`), and
+    implements :meth:`_array`, one item as an array, and ``forward``, so
+    that a gradient can be taken in the items themselves. A subclass that
+    changes the embedding (:meth:`_encode`, or how an item is read) must
+    give its own ``forward``, or set ``gradient_kind = "barrier"``: it
+    inherits both otherwise, and they would describe the parent.
+    ``forward(items)`` takes what :meth:`_stacked` returns, as a float
+    torch tensor of shape (n, ...), and gives what :meth:`transform` gives
+    for the same items, to float rounding: a tensor of shape (n,
+    n_features_out), of the type and on the device of ``items``, that
+    keeps their gradient. An encoder that cannot, such as one of text,
+    may say why in ``barrier_reason``.
+
     With ``cache`` set, the embedding of each item is filed on disk under
     the content of the item (:meth:`_item_bytes`) and the identity of the
     encoder (:meth:`_cache_identity`), and an item that is filed is not
@@ -107,6 +121,8 @@ class BaseEncoder(
     """
 
     modality: ClassVar[str] = ""
+    gradient_kind: ClassVar[str] = "barrier"
+    barrier_reason: ClassVar[str] = ""
 
     # The parameters that do not change an embedding, left out of the
     # identity of the cache.
@@ -166,6 +182,48 @@ class BaseEncoder(
         """
         del item  # Unused: by default, the order of the column.
         return 0
+
+    def _array(self, item: Any) -> _typing.FloatArray | None:
+        """One item as the float64 array that :meth:`forward` takes.
+
+        Args:
+            item: One item, not missing.
+
+        Returns:
+            The array, or ``None`` if the encoder has no forward, or the
+            item has none: a series with a gap, say.
+        """
+        del item  # Unused: by default, an encoder has no forward.
+        return None
+
+    def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+        """The items of a column as one array, for :meth:`forward`.
+
+        The caller chooses the rows: the array holds every item given, in
+        float64, so a column of large items is stacked in parts.
+
+        Args:
+            X: One column of items, n of them.
+
+        Returns:
+            The items' arrays (:meth:`_array`), shape (n, ...), or ``None``
+            if an item is missing or has no array, or they do not all have
+            one shape. It stops reading at the first such item.
+        """
+        items = _as_items(X)
+        stacked = None
+        for index, item in enumerate(items):
+            array = None if _is_missing(item) else self._array(item)
+            if stacked is None and array is not None:
+                stacked = np.empty((len(items), *array.shape))
+            if (
+                array is None
+                or stacked is None
+                or array.shape != stacked.shape[1:]
+            ):
+                return None
+            stacked[index] = array
+        return stacked
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an item, which keys its embedding in the cache.

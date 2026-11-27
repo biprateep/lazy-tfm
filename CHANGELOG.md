@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- A `forward` on the classical encoders of images and time series
+  (`lazy.image.Pixels`, `lazy.image.Statistics`, `lazy.time.Statistics` and
+  `lazy.time.Spectrum`): their embedding of stacked items as a torch tensor,
+  on the autograd graph. Every encoder declares a `gradient_kind`, a barrier
+  by default, and may say why in `barrier_reason`. No embedding changes.
 - The gradient methods of `lazy.interp` (`"gradient"` and
   `"integrated_gradients"` of `explain`, `"gradient"` of `explain_context`)
   now run on a model fitted with the transforms that lazy applies itself: on

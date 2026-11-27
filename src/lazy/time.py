@@ -31,6 +31,8 @@ from typing import Any, ClassVar
 import numpy as np
 import numpy.typing as npt
 
+from lazy import _arrays
+from lazy import _steps
 from lazy import _typing
 from lazy.encoders import _base
 from lazy.encoders import _pretrained
@@ -57,7 +59,49 @@ STATISTICS: tuple[str, ...] = (
 _QUARTILES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
-class Statistics(_base.BaseEncoder):
+class _SeriesEncoder(_base.BaseEncoder):
+    """What the classical encoders of series share: their forward's input.
+
+    Their embeddings are differentiable in the values of a series.
+    """
+
+    modality = "time"
+    gradient_kind = "differentiable"
+
+    def _array(self, item: Any) -> _typing.FloatArray | None:
+        """One series as an array, shape (length,); ``None`` with a gap.
+
+        ``transform`` drops the values that are not finite, so a series
+        with one has no array whose elements line up with its values.
+        """
+        series = np.asarray(item, dtype=float)
+        if series.ndim != 1 or not series.size or not np.isfinite(series).all():
+            return None
+        return series
+
+    def _stack(self, items: Any) -> Any:
+        """Stacked series, as a forward takes them.
+
+        Args:
+            items: A float torch tensor of shape (n, length).
+
+        Returns:
+            ``items`` itself.
+
+        Raises:
+            lazy._steps.BarrierError: If a value is not finite. ``transform``
+                drops such a value, which no function of the tensor's
+                elements does.
+        """
+        if items.ndim != 2 or not bool(items.isfinite().all()):
+            raise _steps.BarrierError(
+                f"{type(self).__name__} has a forward only for series of"
+                " one length whose values are all finite"
+            )
+        return items
+
+
+class Statistics(_SeriesEncoder):
     """Summary statistics of each time series, over its finite values.
 
     The columns are those of :data:`STATISTICS`: location, spread, shape,
@@ -71,8 +115,6 @@ class Statistics(_base.BaseEncoder):
         cache: Whether, or where, to file the embeddings on disk; see
             :class:`~lazy.encoders.BaseEncoder`.
     """
-
-    modality = "time"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -94,6 +136,57 @@ class Statistics(_base.BaseEncoder):
     def _encode(self, items: list[Any]) -> _typing.FloatArray:
         """The statistics of each series, shape (len(items), 13)."""
         return np.array([_statistics(_values(item)) for item in items])
+
+    def forward(self, items: Any) -> Any:
+        """The statistics of stacked series, on torch's autograd graph.
+
+        A quartile's gradient goes to the values it is interpolated from,
+        and the length has none.
+
+        Args:
+            items: Series of one length, a float torch tensor of shape (n,
+                length).
+
+        Returns:
+            What ``transform`` gives, shape (n, 13).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        n = self._stack(items).shape[1]
+        mean = items.mean(dim=1, keepdim=True)
+        constant = (items.min(dim=1).values == items.max(dim=1).values)[:, None]
+        centred = items - mean
+        variance = centred.square().mean(dim=1, keepdim=True)
+        std = torch.where(constant, 1.0, variance).sqrt()
+        scaled = centred / std
+        time = (
+            torch.arange(n, dtype=items.dtype, device=items.device)
+            - (n - 1) / 2
+        )
+        shape = torch.stack(
+            [
+                std[:, 0],
+                scaled.pow(3).mean(dim=1),
+                scaled.pow(4).mean(dim=1) - 3,
+                # 0.5 is its least value above zero, at two values.
+                centred @ time / (time @ time).clamp(min=0.5),
+                (scaled[:, :-1] * scaled[:, 1:]).sum(dim=1) / n,
+                items.diff(dim=1).abs().sum(dim=1) / max(n - 1, 1),
+            ],
+            dim=1,
+        )
+        shape = torch.where(constant, 0.0, shape)
+        quartiles = torch.quantile(items, items.new_tensor(_QUARTILES), dim=1).T
+        return torch.cat(
+            [
+                mean,
+                shape[:, :1],
+                quartiles,
+                shape[:, 1:],
+                torch.full_like(mean, n),
+            ],
+            dim=1,
+        )
 
 
 def _statistics(series: _typing.FloatArray) -> list[float]:
@@ -126,7 +219,7 @@ def _is_constant(series: _typing.FloatArray) -> bool:
     return bool(series.min() == series.max())
 
 
-class Spectrum(_base.BaseEncoder):
+class Spectrum(_SeriesEncoder):
     """The share of each series' variance in each octave of frequency.
 
     The values of a series that are not finite are dropped first.
@@ -145,8 +238,6 @@ class Spectrum(_base.BaseEncoder):
         cache: Whether, or where, to file the embeddings on disk; see
             :class:`~lazy.encoders.BaseEncoder`.
     """
-
-    modality = "time"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -186,6 +277,43 @@ class Spectrum(_base.BaseEncoder):
             row[:-1] = np.bincount(octave, power, self.n_octaves) / total
             row[-1] = frequency[np.argmax(power)]
         return rows
+
+    def forward(self, items: Any) -> Any:
+        """The spectrum of stacked series, on torch's autograd graph.
+
+        The peak frequency is a choice among frequencies, so it has no
+        gradient: it is that of ``transform``, computed off the graph.
+
+        Args:
+            items: Series of one length, a float torch tensor of shape (n,
+                length).
+
+        Returns:
+            What ``transform`` gives, shape (n, n_octaves + 1).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        n = self._stack(items).shape[1]
+        encoded = items.new_tensor(self._encode(list(_arrays.detached(items))))
+        if n < 2:
+            # On the graph, with no gradient: one value has no spectrum.
+            return encoded + items[:, :1] * 0
+        centred = items - items.mean(dim=1, keepdim=True)
+        power = torch.fft.rfft(centred, dim=1)[:, 1:].abs().square()
+        if n % 2 == 0:
+            power = torch.cat([power[:, :-1], power[:, -1:] / 2], dim=1)
+        constant = (items.min(dim=1).values == items.max(dim=1).values)[:, None]
+        total = torch.where(constant, 1.0, power.sum(dim=1, keepdim=True))
+        frequency = np.fft.rfftfreq(n)[1:]
+        octave = np.floor(-np.log2(2 * frequency)).astype(int)
+        bins = torch.as_tensor(
+            np.minimum(octave, self.n_octaves - 1), device=items.device
+        )
+        shares = items.new_zeros((len(items), self.n_octaves)).index_add(
+            1, bins, power / total
+        )
+        shares = torch.where(constant, 0.0, shares)
+        return torch.cat([shares, encoded[:, -1:]], dim=1)
 
 
 @dataclasses.dataclass(frozen=True)

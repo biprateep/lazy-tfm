@@ -49,6 +49,9 @@ STATISTICS: tuple[str, ...] = (
 
 _PUNCTUATION = frozenset(string.punctuation)
 
+# Why no gradient crosses an encoder of text.
+_DISCRETE = "a text is a sequence of characters, which have no gradient"
+
 
 def _texts(items: list[Any]) -> list[str]:
     """The items, checked to be text.
@@ -88,6 +91,7 @@ class Statistics(_base.BaseEncoder):
     """
 
     modality = "text"
+    barrier_reason = _DISCRETE
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -150,6 +154,7 @@ class Hashing(_base.BaseEncoder):
     """
 
     modality = "text"
+    barrier_reason = _DISCRETE
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
