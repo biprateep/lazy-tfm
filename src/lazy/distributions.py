@@ -54,6 +54,7 @@ import numpy as np
 import numpy.typing as npt
 
 from lazy import _arrays
+from lazy import _inputs
 from lazy import _typing
 from lazy import grid as grid_lib
 
@@ -609,14 +610,6 @@ def _masses_from(cdf: Any, atoms: Any) -> tuple[Any, Any]:
     return masses, cdf[:, 0] + (1.0 - cdf[:, -1])
 
 
-def _as_levels(levels: npt.ArrayLike) -> _typing.FloatArray:
-    """Probability levels as a 1-D array inside [0, 1]."""
-    out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
-    if out.ndim != 1 or np.any((out < 0.0) | (out > 1.0)):
-        raise ValueError(f"levels must be a 1-D array within [0, 1]: {levels=}")
-    return out
-
-
 class _Base:
     """Methods every distribution derives from its own ``cdf`` and ``ppf``."""
 
@@ -675,12 +668,17 @@ class _Base:
         """The inverse CDF (quantile function), exact.
 
         Args:
-            levels: Cumulative probabilities within [0, 1], shape (k,).
+            levels: Cumulative probabilities within [0, 1], a scalar or shape
+                (k,).
 
         Returns:
             The values at those levels, shape (n_rows, k).
+
+        Raises:
+            ValueError: If ``levels`` is not a scalar or 1-D array within
+                [0, 1].
         """
-        levels = _as_levels(levels)
+        levels = _inputs.check_levels(levels, name="levels")
         return self._ppf_rows(np.broadcast_to(levels, (self.npdf, levels.size)))
 
     def quantiles(self, levels: npt.ArrayLike) -> _typing.FloatArray:
@@ -700,8 +698,7 @@ class _Base:
         Returns:
             The lower and upper values, shape (n_rows, 2).
         """
-        if not 0.0 < confidence < 1.0:
-            raise ValueError(f"confidence must lie in (0, 1): {confidence=}")
+        _inputs.check_coverage(confidence, name="confidence")
         tail = 0.5 * (1.0 - confidence)
         return self.ppf([tail, 1.0 - tail])
 

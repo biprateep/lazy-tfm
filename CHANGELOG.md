@@ -281,6 +281,12 @@ change the API.
 
 ### Fixed
 
+- `predict_quantiles`, on a model and on a `LazyPipeline`, checks
+  `quantiles` before it runs anything, and its `ValueError` names
+  `quantiles`. Before, the check ran after the first chunk's forward pass and
+  named `levels`. The same check, now shared by `Distribution.ppf` and
+  `metrics.pinball_loss`, refuses `NaN`. `LazyPipeline.predict_interval`
+  likewise checks `coverage` before any step runs.
 - Under scikit-learn's metadata routing, `LazyPipeline` states that its
   methods that predict take no metadata. A search or `cross_validate` given
   metadata for a transformer now routes it to `fit` alone, and scores the

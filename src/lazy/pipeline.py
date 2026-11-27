@@ -43,6 +43,7 @@ from sklearn.utils import metadata_routing
 from sklearn.utils import metaestimators
 from sklearn.utils import validation
 
+from lazy import _inputs
 from lazy import _typing
 from lazy import distributions
 from lazy import grid as grid_lib
@@ -290,11 +291,18 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Args:
             X: Features as the first step takes them, n_samples rows.
-            quantiles: Cumulative probabilities within [0, 1], shape (k,).
+            quantiles: Cumulative probabilities within [0, 1], a scalar or
+                shape (k,).
 
         Returns:
             The value at each level, shape (n_samples, k).
+
+        Raises:
+            ValueError: If ``quantiles`` is not a scalar or 1-D array within
+                [0, 1]; no step has run.
         """
+        validation.check_is_fitted(self)
+        quantiles = _inputs.check_levels(quantiles, name="quantiles")
         return self.steps[-1][1].predict_quantiles(self._features(X), quantiles)
 
     @metaestimators.available_if(_last_step_has("predict_interval"))
@@ -309,7 +317,13 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             The lower and upper bounds, shape (n_samples, 2).
+
+        Raises:
+            ValueError: If ``coverage`` does not lie in (0, 1); no step has
+                run.
         """
+        validation.check_is_fitted(self)
+        _inputs.check_coverage(coverage, name="coverage")
         return self.steps[-1][1].predict_interval(self._features(X), coverage)
 
     @metaestimators.available_if(_last_step_has("predict_pit"))
