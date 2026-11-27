@@ -83,11 +83,18 @@ change the API.
   sum to the statistic at the row minus that at the baseline. `baseline`
   defaults to the mean of `X_context`. The model must be fitted with
   `transforms=("none",)` and `outlier_threshold=None`, on numeric columns.
-- `lazy.image.Pretrained(views=...)`: rotates and flips each image before it
-  is embedded, and averages the embeddings of the views. `"d4"` takes all
-  eight rotations and flips, listed in `lazy.image.VIEWS`; one view gives a
-  member of a pool its own view of the images. The default, `None`, embeds
-  each image as before.
+- `lazy.augment`: augmentations as scikit-learn steps, which train nothing
+  and have no averaging mode. `Rescale` and `Noise` for any numbers,
+  `Dihedral`, `Crop` and `Mask` for images and time series, `TokenDropout`
+  and `Truncate` for text, and `ColumnDropout` for tables, which can drop a
+  whole data type. A column of a `Tabularizer` takes a list of augmentations
+  before its encoder, as `{"cutout": [augment.Dihedral(), "image"]}`, and
+  the Tabularizer's new `random_state` seeds them. Averaging over views is an
+  ensemble of copies of one pipeline: `LazyEnsembleModel` now seeds each step
+  of member `i` whose `random_state` is still its default from
+  `SeedSequence([random_state, i])`. Each augmentation declares its gradient
+  kind, so the gradient methods of `lazy.interp` pass all but those of text.
+  The "Augmentation" page of the user guide describes them.
 - `LazyEnsembleModel` accepts a `LazyPipeline` that ends in a model as a
   member, so that one pool combines models that see different views of the
   same table, such as two encoders of a column of items. A pipeline gets the

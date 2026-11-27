@@ -45,6 +45,7 @@ REDUCERS: tuple[str, ...] = ("pca", "mlp")
 
 _FITTED = (
     "encoders_",
+    "augmentations_",
     "remainder_",
     "mean_",
     "scale_",
@@ -67,8 +68,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     Each column named in ``columns`` is encoded by its encoder, which a
     modality (``"image"``, ``"text"`` or ``"time"``, through
     :data:`~lazy.encoders.DEFAULT_ENCODERS`), the name of a registered
-    encoder, or an encoder object names. The embeddings of all the columns
-    are then reduced together to ``n_columns`` columns, whatever the number
+    encoder, or an encoder object names. A list gives the steps of
+    :mod:`lazy.augment` that transform the column's items first, then its
+    encoder, as ``[augment.Dihedral(), "image"]``. The embeddings of all
+    the columns are then reduced together to ``n_columns`` columns, whatever the number
     of columns of items: each column of each embedding is standardized,
     each embedding is weighted as ``weights`` says, and the weighted
     embeddings, side by side, are projected on their first ``n_columns``
@@ -99,7 +102,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
 
     Attributes:
         columns: Column name (or position, for an array) -> what encodes
-            it: a modality, an encoder name or an encoder.
+            it: a modality, an encoder name or an encoder, or a list of
+            augmentations that ends with one of those.
         n_columns: The most columns that all the embeddings keep between
             them; ``None`` keeps every column of every embedding.
         weights: The share of each embedding in the reduction: ``"equal"``
@@ -119,8 +123,14 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             ``"passthrough"`` keeps them, ``"drop"`` drops them, and a
             transformer transforms them, as in
             :class:`~sklearn.compose.ColumnTransformer`.
+        random_state: The seed of the columns' augmentations: augmentation
+            ``j`` of column ``k`` is seeded from ``SeedSequence(
+            [random_state, k, j])``, whatever its own ``random_state``.
+            ``None`` leaves each augmentation its own seed.
         encoders_: The fitted encoder of each column of items, by the
             column's name, in the order of ``columns``.
+        augmentations_: The fitted augmentations of each column of items,
+            a list in their order, by the column's name.
         mean_: The mean of each column of the embeddings, side by side,
             shape (n_embedding_columns,).
         scale_: What each of those columns is divided by, its standard
@@ -158,12 +168,14 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         weights: str | Sequence[float] | None = "equal",
         reducer: Any = "pca",
         remainder: Any = "passthrough",
+        random_state: int | None = None,
     ) -> None:
         self.columns = columns
         self.n_columns = n_columns
         self.weights = weights
         self.reducer = reducer
         self.remainder = remainder
+        self.random_state = random_state
 
     @property
     def trains_through_model(self) -> bool:
@@ -260,16 +272,17 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             )
         frame = _frame(X)
         positions = [_position(frame, column) for column in self.columns]
-        encoders = {
-            column: _encoder(column, spec)
-            for column, spec in self.columns.items()
-        }
-        blocks = [
-            encoder.fit_transform(frame.iloc[:, position])
-            for encoder, position in zip(
-                encoders.values(), positions, strict=True
+        encoders, augmentations = {}, {}
+        blocks = []
+        for index, (column, spec) in enumerate(self.columns.items()):
+            steps, encoders[column] = _steps_of(
+                column, spec, self.random_state, index
             )
-        ]
+            items = frame.iloc[:, positions[index]]
+            for step in steps:
+                items = step.fit_transform(items)
+            augmentations[column] = steps
+            blocks.append(encoders[column].fit_transform(items))
         fitted = self._fit_reduction(blocks)
         rest = frame.drop(columns=frame.columns[positions])
         remainder = self.remainder
@@ -277,6 +290,7 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             remainder = sklearn_base.clone(self.remainder).fit(rest)
         validation.validate_data(self, X, skip_check_array=True)
         self.encoders_ = encoders
+        self.augmentations_ = augmentations
         self.remainder_ = remainder
         self._positions = positions
         self.__dict__.update(fitted)
@@ -412,12 +426,18 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         frame = _frame(X)
         positions = [_position(frame, column) for column in self.columns]
         blocks = [
-            encoder.transform(frame.iloc[:, position])
-            for encoder, position in zip(
-                self.encoders_.values(), positions, strict=True
+            self.encoders_[column].transform(
+                self._augmented(column, frame.iloc[:, position])
             )
+            for column, position in zip(self.columns, positions, strict=True)
         ]
         return blocks, frame.drop(columns=frame.columns[positions])
+
+    def _augmented(self, column: Hashable, items: Any) -> Any:
+        """A column's items after its augmentations, in order."""
+        for step in self.augmentations_[column]:
+            items = step.transform(items)
+        return items
 
     def _reduced(self, blocks: Sequence[Any], network: Any = None) -> Any:
         """The reduced columns of some rows' embeddings.
@@ -622,7 +642,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             self.encoders_.items(), self._positions, strict=True
         ):
             given = [frame.iloc[:, position] for frame in frames]
-            found = _steps.barrier(f"{name}[{column!r}]", encoder)
+            label = f"{name}[{column!r}]"
+            found = _steps.barrier(label, encoder)
+            for step in self.augmentations_[column]:
+                found = found or _steps.barrier(label, step)
             stacked = None
             if items and found is None:
                 stacked = [encoder._stacked(part) for part in given]  # noqa: SLF001 - the encoders' contract.
@@ -649,8 +672,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                         f"{column}__{feature}"
                         for feature in encoder.get_feature_names_out()
                     ),
-                    encoder.transform(given[0]),
-                    encoder.transform(given[1]),
+                    encoder.transform(self._augmented(column, given[0])),
+                    encoder.transform(self._augmented(column, given[1])),
                 )
             )
         if not (isinstance(self.remainder_, str) and self.remainder_ == "drop"):
@@ -689,12 +712,15 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         """
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
-        blocks = [
-            encoder.forward(tensor) if crossed else tensor
-            for encoder, tensor, crossed in zip(
-                self.encoders_.values(), tensors, through, strict=False
-            )
-        ]
+        blocks = []
+        for column, tensor, crossed in zip(
+            self.encoders_, tensors, through, strict=False
+        ):
+            if crossed:
+                for step in self.augmentations_[column]:
+                    tensor = _steps.forward(step, tensor)
+                tensor = self.encoders_[column].forward(tensor)
+            blocks.append(tensor)
         parts = [self._reduced(blocks)]
         if len(tensors) > len(blocks):
             parts.append(_steps.forward(self.remainder_, tensors[-1]))
@@ -854,6 +880,48 @@ def _position(frame: pd.DataFrame, column: Hashable) -> int:
     if not isinstance(position, int):
         raise ValueError(f"X has several columns named {column!r}")
     return position
+
+
+def _steps_of(
+    column: Hashable, spec: object, random_state: int | None, index: int
+) -> tuple[list[Any], _base.BaseEncoder]:
+    """New augmentations and a new encoder for one entry of ``columns``.
+
+    Args:
+        column: The column's name, for the errors.
+        spec: The entry: what names an encoder, or a list of augmentations
+            that ends with it.
+        random_state: The Tabularizer's seed, or ``None``.
+        index: The position of the entry in ``columns``.
+
+    Returns:
+        A tuple (augmentations, encoder), all unfitted clones; augmentation
+        ``j`` is seeded from ``SeedSequence([random_state, index, j])`` if
+        ``random_state`` is given and it takes a seed.
+
+    Raises:
+        TypeError: If an entry of a list but the last is no transformer,
+            or as :func:`_encoder` raises.
+        UnknownNameError: As :func:`_encoder` raises.
+        ValueError: If a list is empty.
+    """
+    if not isinstance(spec, (list, tuple)):
+        return [], _encoder(column, spec)
+    if not spec:
+        raise ValueError(f"columns[{column!r}] must not be an empty list")
+    steps = []
+    for position, given in enumerate(spec[:-1]):
+        if not hasattr(given, "fit_transform"):
+            raise TypeError(
+                f"columns[{column!r}] must list augmentations, then what"
+                f" encodes the column; got {type(given).__name__} first"
+            )
+        step = sklearn_base.clone(given)
+        if random_state is not None and "random_state" in step.get_params():
+            seed = np.random.SeedSequence([random_state, index, position])
+            step.set_params(random_state=int(seed.generate_state(1)[0]))
+        steps.append(step)
+    return steps, _encoder(column, spec[-1])
 
 
 def _encoder(column: Hashable, spec: object) -> _base.BaseEncoder:

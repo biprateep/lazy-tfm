@@ -328,3 +328,33 @@ def test_context_gradients_stop_at_the_embeddings_unless_asked(backend, images):
     np.testing.assert_allclose(staged.values, at_embeddings.values, atol=1e-9)
     with pytest.raises(ValueError, match="at does not apply to method='loo'"):
         interp.explain_context(*args, method="loo", at="tabularizer")
+
+
+def test_an_index_map_carries_the_gradient_back_to_the_pixels(backend, images):
+    # The quarter turn moves each pixel, so its attribution moves back
+    # with it: the image's top-left pixel gets what the encoder's cell at
+    # the turned position got.
+    X_context, y_context, X, y = images
+    columns = lazy.image.Pixels(size=4, n_channels=1)
+    plain = lazy.make_pipeline(
+        lazy.Tabularizer({"cutout": columns}, n_columns=None), backend()
+    ).fit(X_context, y_context)
+    turned = lazy.make_pipeline(
+        lazy.Tabularizer(
+            {"cutout": [lazy.augment.Dihedral("rotate_90"), columns]},
+            n_columns=None,
+        ),
+        backend(),
+    ).fit(X_context, y_context)
+    explanations = [
+        interp.explain(model, X, y, X_context, y_context, method="gradient")
+        for model in (plain, turned)
+    ]
+    assert explanations[1].feature_names == ("cutout", "number")
+    # The fake reads the mean of its columns, which a turn leaves as it
+    # is, so both models attribute alike, pixel by pixel.
+    np.testing.assert_allclose(
+        explanations[1].item_values["cutout"],
+        explanations[0].item_values["cutout"],
+        atol=1e-6,
+    )

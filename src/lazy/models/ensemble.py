@@ -57,6 +57,7 @@ from lazy import grid as grid_lib
 from lazy import pipeline
 from lazy.models import _ensemble
 from lazy.models import _hub
+from lazy.models import _members
 from lazy.models import lazy_model
 from lazy.models import registry
 
@@ -170,7 +171,11 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             columns its steps make.
         random_state: The seed given to every member whose own
             ``random_state`` is still its default (0); a member given
-            another value keeps it. A pipeline passes it to its model only.
+            another value keeps it. A pipeline passes it to its model, and
+            seeds each of its other steps whose ``random_state`` is still
+            its default from ``SeedSequence([random_state, i])`` for member
+            ``i``, so that members which are copies of one pipeline differ
+            in their augmentations (:mod:`lazy.augment`).
         device: The device given to every member whose own ``device`` is
             still its default (``"auto"``); a member given another value
             keeps it. A pipeline passes it to its model only.
@@ -314,8 +319,8 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         pooling = _check_pooling(self.pooling)
         _check_options(self.pool_bins, self.chunk_size)
         members = [
-            (name, _configure(item, self.random_state, self.device))
-            for name, item in _check_models(self.models)
+            (name, _configure(item, self.random_state, self.device, index))
+            for index, (name, item) in enumerate(_check_models(self.models))
         ]
         _warn_if_small(len(X), len(members))
         # Before any member fits, so that a column that only a pipeline can
@@ -588,19 +593,23 @@ def _check_models(models: object) -> list[tuple[str, Member]]:
     return _named_items(models)
 
 
-def _configure(item: Member, random_state: int | None, device: str) -> Any:
+def _configure(
+    item: Member, random_state: int | None, device: str, index: int
+) -> Any:
     """An unfitted copy of a member, with the ensemble's shared settings.
 
     ``random_state`` and ``device`` replace the member's own only where the
     member's value equals its default, which is how a member that was not
     given one is told apart from one that was (``clone`` writes every
     default out, so whether it was passed explicitly cannot be known). In
-    a pipeline, they go to its model only.
+    a pipeline, they go to its model only; each other step of a pipeline
+    whose ``random_state`` equals its default gets the member's own seed.
 
     Args:
         item: A backend name, an estimator or a pipeline.
         random_state: The ensemble's seed.
         device: The ensemble's device.
+        index: The member's position in the ensemble.
 
     Returns:
         A new, unfitted estimator or pipeline.
@@ -622,6 +631,19 @@ def _configure(item: Member, random_state: int | None, device: str) -> Any:
         and _equal(current[name], defaults[name])
     }
     model.set_params(**updates)
+    if isinstance(member, pipeline.LazyPipeline) and random_state is not None:
+        seed = _members.member_seed(random_state, index)
+        for _, step in member.steps[:-1]:
+            if not hasattr(step, "get_params"):
+                continue
+            current = step.get_params(deep=False)
+            defaults = _default_params(step)
+            if (
+                "random_state" in current
+                and "random_state" in defaults
+                and _equal(current["random_state"], defaults["random_state"])
+            ):
+                step.set_params(random_state=seed)
     return member
 
 

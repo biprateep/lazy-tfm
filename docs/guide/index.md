@@ -14,6 +14,7 @@ distributions
 interface
 scikit_learn
 encoders
+augmentation
 interpretability
 adapter
 choosing

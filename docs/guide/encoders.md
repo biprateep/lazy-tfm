@@ -151,36 +151,10 @@ table column of its own. A network reads one band (grey) or three.
 
 ### Rotated and flipped views
 
-`views` rotates and flips each image before the network reads it, and averages
-the embeddings of the views. Each view is one more forward pass. The views are
-the eight rotations and flips of a square, named in {data}`lazy.image.VIEWS`
-after Pillow's transposes. With $g$ a view, $f$ the network and $V$ the views,
-the embedding of an image $x$ is
-
-$$
-e(x) = \frac{1}{|V|} \sum_{g \in V} f(g\,x).
-$$
-
-`views="d4"` takes all eight, so the embedding of every rotation or flip of an
-image is the same, up to float rounding; the networks themselves are not
-invariant. One view, such
-as `views=["rotate_90"]`, gives one member of a pool its own view of the
-images:
-
-```python
-views = ["identity", "rotate_90", "rotate_180", "rotate_270"]
-model = lazy.LazyEnsembleModel(
-    [
-        lazy.make_pipeline(
-            lazy.Tabularizer({"cutout": lazy.image.Pretrained(views=[view])}),
-            lazy.LazyModel(),
-        )
-        for view in views
-    ]
-)
-```
-
-The default, `None`, embeds the image as it is.
+The networks are not invariant to a rotation or a flip of an image.
+{class}`lazy.augment.Dihedral` shows a network one of the eight views of a
+square, and an ensemble of pipelines with seeds of their own averages the
+predictions over them; {doc}`augmentation` shows how.
 
 ### Citing
 
