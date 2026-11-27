@@ -66,6 +66,7 @@ class PretrainedEncoder(_base.BaseEncoder):
 
     recipes: ClassVar[Mapping[str, Any]]
     package: ClassVar[str]
+    barrier_reason = "lazy runs its network without gradients"
 
     _UNKEYED = (*_base.BASE_PARAMS, "device")
 

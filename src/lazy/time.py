@@ -71,6 +71,7 @@ class Statistics(_base.BaseEncoder):
     """
 
     modality = "time"
+    gradient_kind = "differentiable"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -92,6 +93,59 @@ class Statistics(_base.BaseEncoder):
     def _encode(self, items: list[Any]) -> _typing.FloatArray:
         """The statistics of each series, shape (len(items), 13)."""
         return np.array([_statistics(_values(item)) for item in items])
+
+    def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+        """The series as one array; see :func:`_stacked`."""
+        return _stacked(X)
+
+    def forward(self, items: Any) -> Any:
+        """The statistics of stacked series, on torch's autograd graph.
+
+        A quartile's gradient goes to the values it is interpolated from,
+        and the length has none.
+
+        Args:
+            items: Series of one length, a float torch tensor of shape (n,
+                length).
+
+        Returns:
+            What :meth:`transform` gives, shape (n, 13).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        n = items.shape[1]
+        mean = items.mean(dim=1, keepdim=True)
+        constant = (items.min(dim=1).values == items.max(dim=1).values)[:, None]
+        centred = items - mean
+        variance = centred.square().mean(dim=1, keepdim=True)
+        std = torch.where(constant, 1.0, variance).sqrt()
+        scaled = centred / std
+        time = torch.arange(n, dtype=items.dtype) - (n - 1) / 2
+        shape = torch.stack(
+            [
+                std[:, 0],
+                scaled.pow(3).mean(dim=1),
+                scaled.pow(4).mean(dim=1) - 3,
+                centred @ time / (time @ time).clamp(min=1),
+                (scaled[:, :-1] * scaled[:, 1:]).sum(dim=1) / n,
+                items.diff(dim=1).abs().sum(dim=1) / max(n - 1, 1),
+            ],
+            dim=1,
+        )
+        shape = torch.where(constant, 0.0, shape)
+        quartiles = torch.quantile(
+            items, torch.tensor(_QUARTILES, dtype=items.dtype), dim=1
+        ).T
+        return torch.cat(
+            [
+                mean,
+                shape[:, :1],
+                quartiles,
+                shape[:, 1:],
+                torch.full_like(mean, n),
+            ],
+            dim=1,
+        )
 
 
 def _statistics(series: _typing.FloatArray) -> list[float]:
@@ -145,6 +199,7 @@ class Spectrum(_base.BaseEncoder):
     """
 
     modality = "time"
+    gradient_kind = "differentiable"
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -184,6 +239,46 @@ class Spectrum(_base.BaseEncoder):
             row[:-1] = np.bincount(octave, power, self.n_octaves) / total
             row[-1] = frequency[np.argmax(power)]
         return rows
+
+    def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+        """The series as one array; see :func:`_stacked`."""
+        return _stacked(X)
+
+    def forward(self, items: Any) -> Any:
+        """The spectrum of stacked series, on torch's autograd graph.
+
+        The peak frequency is a choice among frequencies, and has no
+        gradient.
+
+        Args:
+            items: Series of one length, a float torch tensor of shape (n,
+                length).
+
+        Returns:
+            What :meth:`transform` gives, shape (n, n_octaves + 1).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        n = items.shape[1]
+        out = torch.zeros((len(items), self.n_octaves + 1), dtype=items.dtype)
+        if n < 2:
+            return out
+        centred = items - items.mean(dim=1, keepdim=True)
+        power = torch.fft.rfft(centred, dim=1)[:, 1:].abs().square()
+        if n % 2 == 0:
+            power = torch.cat([power[:, :-1], power[:, -1:] / 2], dim=1)
+        constant = (items.min(dim=1).values == items.max(dim=1).values)[:, None]
+        total = torch.where(constant, 1.0, power.sum(dim=1, keepdim=True))
+        frequency = np.fft.rfftfreq(n)[1:]
+        octave = np.floor(-np.log2(2 * frequency)).astype(int)
+        bins = torch.as_tensor(np.minimum(octave, self.n_octaves - 1))
+        shares = out[:, :-1].index_add(1, bins, power / total)
+        peak = torch.as_tensor(frequency, dtype=items.dtype)[
+            power.argmax(dim=1)
+        ]
+        return torch.where(
+            constant, 0.0, torch.cat([shares, peak[:, None]], dim=1)
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -484,6 +579,26 @@ def _observed(item: Any) -> _typing.FloatArray:
         raise ValueError("a time series has no finite value")
     series = series[finite[0] : finite[-1] + 1]
     return np.where(np.isfinite(series), series, np.nan)
+
+
+def _stacked(X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+    """The series of a column as one array, shape (n, length).
+
+    Args:
+        X: One column of series.
+
+    Returns:
+        The array, or ``None`` if the series differ in length, or one is
+        missing or has a value that is not finite.
+    """
+    items = _base._as_items(X)  # noqa: SLF001 - the encoders' reading of a column.
+    if any(_base._is_missing(item) for item in items):  # noqa: SLF001 - as above.
+        return None
+    series = [np.asarray(item, dtype=float) for item in items]
+    same = len({part.shape for part in series}) == 1 and series[0].ndim == 1
+    if not same or not all(np.isfinite(part).all() for part in series):
+        return None
+    return np.stack(series)
 
 
 def _values(item: Any) -> _typing.FloatArray:

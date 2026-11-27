@@ -9,6 +9,7 @@ from scipy import stats
 from sklearn import base as sklearn_base
 
 import lazy
+from lazy import _steps
 from lazy import encoders
 from lazy.encoders import _pretrained
 
@@ -293,3 +294,55 @@ def test_an_item_that_is_no_text_is_refused():
 def test_a_bad_parameter_of_an_encoder_is_refused_at_fit(encoder, message):
     with pytest.raises(ValueError, match=message):
         encoder.fit(ITEMS[encoder.modality])
+
+
+# -- the forwards, on torch's autograd graph ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "encoder",
+    [
+        lazy.image.Pixels(size=3, n_channels=2),
+        lazy.image.Statistics(n_channels=2),
+        lazy.time.Statistics(),
+        lazy.time.Spectrum(n_octaves=3),
+    ],
+    ids=lambda encoder: f"{encoder.modality}_{type(encoder).__name__}",
+)
+def test_a_forward_gives_what_transform_gives_and_has_gradients(encoder):
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    shape = (7, 5, 2) if encoder.modality == "image" else (12,)
+    # The second item is constant, which has no spread to scale by.
+    items = [rng.normal(size=shape), np.full(shape, 2.5)]
+    items += [rng.normal(size=shape).cumsum(axis=0) for _ in range(3)]
+    stacked = encoder.fit(items)._stacked(items)
+    assert stacked.shape == (5, *shape)
+    tensor = torch.tensor(stacked, requires_grad=True)
+    embedding = encoder.forward(tensor)
+    np.testing.assert_allclose(
+        embedding.detach().numpy(), encoder.transform(items), atol=1e-12
+    )
+    embedding.sum().backward()
+    assert tensor.grad.isfinite().all() and tensor.grad[0].abs().sum() > 0
+
+
+@pytest.mark.parametrize(
+    "encoder", [lazy.image.Pixels(n_channels=1), lazy.time.Statistics()]
+)
+def test_items_that_do_not_stack_have_no_tensor(encoder):
+    sizes = [(4, 4), (4, 5)] if encoder.modality == "image" else [(6,), (7,)]
+    items = [np.ones(size) for size in sizes]
+    assert encoder.fit(items)._stacked(items) is None
+    assert encoder._stacked([np.ones(sizes[0]), None]) is None
+
+
+def test_a_series_with_a_gap_has_no_tensor():
+    items = [np.array([1.0, np.nan, 3.0]), np.array([1.0, 2.0, 3.0])]
+    assert lazy.time.Statistics().fit(items)._stacked(items) is None
+
+
+def test_an_encoder_of_text_is_a_barrier_and_says_why():
+    found = _steps.barrier("notes", lazy.text.Hashing().fit(["a b"]))
+    assert "characters" in found.reason
+    assert _steps.barrier("curve", lazy.time.Statistics()) is None

@@ -40,6 +40,7 @@ __all__ = [
     "GRADIENT_KINDS",
     "Barrier",
     "BarrierError",
+    "Leaf",
     "barrier",
     "forward",
     "gradient_kind",
@@ -66,6 +67,30 @@ class Barrier:
 
     step: str
     reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Leaf:
+    """Inputs at which a gradient is taken, and the features they are.
+
+    A leaf is a block of what a path differentiates: the columns of a
+    table, or one column of items of one shape, such as images.
+
+    Attributes:
+        names: The features of the block: one per column for a table, and
+            one for a column of items.
+        queries: The rows to explain, float64, shape (n_rows, n_columns)
+            for a table and (n_rows, ...) for items.
+        context: The context rows, of the same trailing shape, shape
+            (n_context, ...).
+        per_column: Whether each column is a feature, as in a table; if
+            not, the whole of each item is one feature.
+    """
+
+    names: tuple[str, ...]
+    queries: Any
+    context: Any
+    per_column: bool = True
 
 
 class BarrierError(ValueError):
@@ -159,7 +184,7 @@ def barrier(name: str, step: Any) -> Barrier | None:
     if gradient_kind(step) != "barrier":
         return None
     reason = getattr(step, "barrier_reason", None)
-    if not isinstance(reason, str):
+    if not reason or not isinstance(reason, str):
         reason = (
             f"{type(step).__name__} has no differentiable forward that lazy"
             " knows"

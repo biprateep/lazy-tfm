@@ -92,6 +92,12 @@ class BaseEncoder(
     encoder's parameters nor its later answers. Every answer is checked to
     be finite, with one row per item and :meth:`_width` columns.
 
+    An encoder whose embedding is differentiable in its items declares a
+    ``gradient_kind`` other than ``"barrier"`` (:mod:`lazy._steps`), and
+    implements :meth:`_stacked` and :meth:`forward`, so that a gradient
+    method attributes to the items themselves. An encoder that cannot,
+    such as one of text, may say why in ``barrier_reason``.
+
     With ``cache`` set, the embedding of each item is filed on disk under
     the content of the item (:meth:`_item_bytes`) and the identity of the
     encoder (:meth:`_cache_identity`), and an item that is filed is not
@@ -107,6 +113,8 @@ class BaseEncoder(
     """
 
     modality: ClassVar[str] = ""
+    gradient_kind: ClassVar[str] = "barrier"
+    barrier_reason: ClassVar[str] = ""
 
     # The parameters that do not change an embedding, left out of the
     # identity of the cache.
@@ -166,6 +174,39 @@ class BaseEncoder(
         """
         del item  # Unused: by default, the order of the column.
         return 0
+
+    def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+        """The items of a column as one array, for :meth:`forward`.
+
+        Args:
+            X: One column of items, n of them, none missing.
+
+        Returns:
+            The items as float64, shape (n, ...), or ``None`` if they do
+            not all have one shape, or the encoder has no forward.
+        """
+        del X  # Unused: by default, an encoder has no forward.
+        return None
+
+    def forward(self, items: Any) -> Any:
+        """The embeddings of stacked items, on torch's autograd graph.
+
+        Args:
+            items: What :meth:`_stacked` returns, as a float torch tensor
+                of shape (n, ...).
+
+        Returns:
+            What :meth:`transform` gives for the same items, to float
+            rounding, a torch tensor of shape (n, n_features_out) that
+            keeps the gradient of ``items``.
+
+        Raises:
+            NotImplementedError: Unless the encoder implements it.
+        """
+        del items  # Unused: an encoder with a forward implements this.
+        raise NotImplementedError(
+            f"{type(self).__name__} has no differentiable forward"
+        )
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an item, which keys its embedding in the cache.

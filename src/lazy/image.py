@@ -84,9 +84,13 @@ _MODES = {1: "L", 3: "RGB", 4: "RGBA"}
 
 
 class _ImageEncoder(_base.BaseEncoder):
-    """The classical image encoders' ``n_channels``, reading and cache key."""
+    """The classical image encoders' ``n_channels``, reading and cache key.
+
+    Their embeddings are differentiable in the pixels.
+    """
 
     modality = "image"
+    gradient_kind = "differentiable"
 
     # Set by each encoder's __init__; declared for the type checker only.
     n_channels: int
@@ -122,6 +126,21 @@ class _ImageEncoder(_base.BaseEncoder):
                 f" {pixels.shape}"
             )
         return _finite(pixels)
+
+    def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
+        """The images as one array, shape (n, height, width, n_channels).
+
+        Returns:
+            The array, or ``None`` if the images differ in size or one is
+            missing.
+        """
+        items = _base._as_items(X)  # noqa: SLF001 - the encoders' reading of a column.
+        if any(_base._is_missing(item) for item in items):  # noqa: SLF001 - as above.
+            return None
+        pixels = [self._pixels(item) for item in items]
+        if len({image.shape for image in pixels}) != 1:
+            return None
+        return np.stack(pixels)
 
     def _converted(self, image: Image.Image) -> Image.Image:
         """A Pillow image in the mode of ``n_channels``.
@@ -230,6 +249,34 @@ class Statistics(_ImageEncoder):
         """The statistics, shape (len(items), 8 * n_channels)."""
         return np.array([_statistics(self._pixels(item)) for item in items])
 
+    def forward(self, items: Any) -> Any:
+        """The statistics of stacked images, on torch's autograd graph.
+
+        A quartile's gradient goes to the pixels it is interpolated from,
+        and the standard deviation of a channel of one value has none.
+
+        Args:
+            items: Images, a float torch tensor of shape (n, height, width,
+                n_channels).
+
+        Returns:
+            What :meth:`transform` gives, shape (n, 8 * n_channels).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        values = items.reshape(len(items), -1, items.shape[-1])
+        variance = values.var(dim=1, correction=0)
+        std = torch.where(
+            variance > 0, torch.where(variance > 0, variance, 1.0).sqrt(), 0.0
+        )
+        quartiles = torch.quantile(
+            values, torch.tensor(_QUARTILES, dtype=values.dtype), dim=1
+        )
+        steps = [items.diff(dim=axis).abs() for axis in (1, 2)]
+        n_steps = sum(step[0, :, :, 0].numel() for step in steps)
+        gradient = sum(step.sum(dim=(1, 2)) for step in steps) / max(n_steps, 1)
+        return torch.cat([values.mean(dim=1), std, *quartiles, gradient], dim=1)
+
 
 def _statistics(pixels: _typing.FloatArray) -> _typing.FloatArray:
     """The statistics of one image, flat, grouped by statistic."""
@@ -303,6 +350,27 @@ class Pixels(_ImageEncoder):
             small = down @ pixels.transpose(2, 0, 1) @ across.T
             rows.append(small.transpose(1, 2, 0).ravel())
         return np.array(rows)
+
+    def forward(self, items: Any) -> Any:
+        """The small images of stacked images, on torch's autograd graph.
+
+        Args:
+            items: Images, a float torch tensor of shape (n, height, width,
+                n_channels).
+
+        Returns:
+            What :meth:`transform` gives, shape (n, size * size *
+            n_channels).
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        down, across = (
+            torch.as_tensor(_area_weights(n, self.size), dtype=items.dtype)
+            for n in items.shape[1:3]
+        )
+        # (n, c, h, w) -> (n, c, size, size) -> (n, size, size, c).
+        small = down @ items.permute(0, 3, 1, 2) @ across.T
+        return small.permute(0, 2, 3, 1).reshape(len(items), -1)
 
 
 def _area_weights(n_in: int, n_out: int) -> _typing.FloatArray:
