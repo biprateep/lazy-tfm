@@ -301,6 +301,6 @@ ignore_missing_imports = true
 source = ["src/lazy"]
 
 [tool.coverage.report]
-# A floor for the run without the backend packages; the backends CI job sets
-# its own.
-fail_under = 78
+# A floor for the run with CPU-only PyTorch and no backend package, as CI's
+# build jobs run; the backends CI job sets its own.
+fail_under = 81

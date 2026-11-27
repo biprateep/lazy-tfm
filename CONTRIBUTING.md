@@ -16,7 +16,7 @@ uv sync --extra all         # ...and every backend
 uv run pre-commit install   # lint and format on every commit
 ```
 
-A plain `uv sync` installs no extra, so it and CI stay light, without PyTorch.
+A plain `uv sync` installs no extra, so it stays light, without PyTorch.
 
 The hooks run ruff, mypy and the style checker from this environment, at the
 versions in `uv.lock`, so run `uv sync` again after the lockfile changes.
@@ -73,7 +73,9 @@ golden files, which needs Biprateep's approval, run the workflow by hand with
 re-recording TabPFN takes a run on each.
 
 On every pull request, CI runs the tests on Python 3.12 to 3.14 against the
-lockfile, on Linux, with Python 3.12 on macOS and Windows too. It also runs
+lockfile, on Linux with CPU-only PyTorch added, so that the code that needs
+torch runs through the fakes. Python 3.12 on macOS and Windows runs them
+without PyTorch, which checks that `lazy` works without it. It also runs
 them with every backend package on a CPU, and at the lowest dependency
 versions `pyproject.toml` allows. It runs the pre-commit
 hooks, a docs build with warnings treated as errors, and a build of the package
