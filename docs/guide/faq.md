@@ -30,8 +30,9 @@ LAZY does not fine-tune the weights. The models are pretrained and used in
 context, so everything a model knows about a dataset comes from the context it
 is given. LAZY lets the user change the context itself and the shared
 parameters (e.g., the ensemble, the transforms and the softmax temperature;
-see {doc}`interface`). The experimental {doc}`adapter` trains a small network
-that maps the columns for a frozen model, but never the model's own weights.
+see {doc}`interface`). The Tabularizer's {doc}`adapter` trains a small
+network that maps the embeddings for a frozen model, but never the model's own
+weights.
 
 ## Can I use it commercially?
 

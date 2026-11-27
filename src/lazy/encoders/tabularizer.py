@@ -15,6 +15,7 @@ step before the model in a pipeline::
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
+import copy
 from typing import Any
 
 import array_api_compat
@@ -29,13 +30,18 @@ from sklearn.utils import validation
 from lazy import _steps
 from lazy import _typing
 from lazy import _warnings
+from lazy.encoders import _adaptive
 from lazy.encoders import _base
 from lazy.encoders import registry
+from lazy.models import _differentiable as differentiable
 
-__all__ = ["WEIGHTS", "Tabularizer"]
+__all__ = ["REDUCERS", "WEIGHTS", "Tabularizer"]
 
 WEIGHTS: tuple[str, ...] = ("equal",)
 """The named values of ``weights``."""
+
+REDUCERS: tuple[str, ...] = ("pca", "mlp")
+"""The named values of ``reducer``."""
 
 _FITTED = (
     "encoders_",
@@ -45,7 +51,11 @@ _FITTED = (
     "components_",
     "offset_",
     "weights_",
+    "network_",
+    "history_",
+    "best_step_",
     "_positions",
+    "_n_reduced",
     "n_features_in_",
     "feature_names_in_",
 )
@@ -81,6 +91,12 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     components are fitted on the rows given to ``fit``, the context, and
     a row's output depends on that row alone.
 
+    ``reducer="mlp"``, or a torch module, makes the reduction adaptive:
+    a network that :meth:`lazy.pipeline.LazyPipeline.fit` trains through
+    the frozen model that follows (:class:`~lazy.encoders.AdaptiveReducer`).
+    It trains weights, so it is opt-in. Outside a ``LazyPipeline`` the
+    network stays as it starts: PCA for ``"mlp"``, and the module as given.
+
     Attributes:
         columns: Column name (or position, for an array) -> what encodes
             it: a modality, an encoder name or an encoder.
@@ -91,6 +107,14 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             width; ``None`` leaves every standardized column at variance
             1, so that a wider embedding weighs more; a list gives each
             embedding its total variance, in the order of ``columns``.
+        reducer: What reduces the weighted embeddings: ``"pca"``, the
+            principal components; ``"mlp"``, the components plus a
+            residual network, trained through the model; a
+            ``torch.nn.Module`` from the embeddings to the columns,
+            trained likewise; or an
+            :class:`~lazy.encoders.AdaptiveReducer`, which also holds the
+            settings of the training. An adaptive reducer always reduces,
+            to at most ``n_columns`` columns.
         remainder: What becomes of the columns not in ``columns``:
             ``"passthrough"`` keeps them, ``"drop"`` drops them, and a
             transformer transforms them, as in
@@ -108,9 +132,23 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             unchanged.
         offset_: What is subtracted from the projection, shape
             (n_columns_kept,), or ``None``.
+        network_: The adaptive reducer's network: for ``"mlp"``, float64
+            arrays by name (``"components"``, ``"hidden_weight"``,
+            ``"hidden_bias"``, ``"output_weight"`` and ``"output_bias"``);
+            for a module, a trained copy of it; ``None`` for ``"pca"``.
+        history_: Set when a pipeline trains the reducer: the mean NLL, in
+            nats, of the training queries (``"train_nll"``) and of the
+            validation queries (``"validation_nll"``) before each step's
+            update, one row per step from 0.
+        best_step_: Set with ``history_``: the kept step, the row of
+            ``history_`` with the lowest ``"validation_nll"``; 0 if none
+            is finite.
         remainder_: The fitted transformer of the other columns, or
             ``remainder`` itself for ``"passthrough"`` and ``"drop"``.
     """
+
+    # Set by fit; declared for the type checker only.
+    network_: Any
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -118,12 +156,41 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         *,
         n_columns: int | None = 30,
         weights: str | Sequence[float] | None = "equal",
+        reducer: Any = "pca",
         remainder: Any = "passthrough",
     ) -> None:
         self.columns = columns
         self.n_columns = n_columns
         self.weights = weights
+        self.reducer = reducer
         self.remainder = remainder
+
+    @property
+    def trains_through_model(self) -> bool:
+        """Whether a pipeline trains this step through its model.
+
+        :meth:`lazy.pipeline.LazyPipeline.fit` calls
+        :meth:`_fit_through` on a step for which this is true.
+        """
+        return self._adaptive() is not None
+
+    def _adaptive(self) -> _adaptive.AdaptiveReducer | None:
+        """The settings of an adaptive ``reducer``; ``None`` for ``"pca"``.
+
+        Raises:
+            ValueError: If ``reducer`` is none of the values documented.
+        """
+        reducer = self.reducer
+        if isinstance(reducer, _adaptive.AdaptiveReducer):
+            return reducer
+        if _adaptive.is_module(reducer):
+            return _adaptive.AdaptiveReducer(network=reducer)
+        if isinstance(reducer, str) and reducer in REDUCERS:
+            return _adaptive.AdaptiveReducer() if reducer == "mlp" else None
+        raise ValueError(
+            "reducer must be 'pca', 'mlp', a torch.nn.Module or an"
+            f" AdaptiveReducer: {reducer=}"
+        )
 
     def fit(self, X: Any, y: Any = None) -> Tabularizer:  # noqa: GS030 - scikit-learn's X, y.
         """Builds the encoders, and fits the reduction on the context.
@@ -146,9 +213,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 registered encoder.
             ValueError: If ``columns`` is empty or names a column that
                 ``X`` does not have, ``n_columns`` is not a positive
-                integer or ``None``, ``weights`` or ``remainder`` is not
-                valid, or the embeddings to reduce have fewer than two rows
-                with an item that is not missing.
+                integer or ``None``, ``weights``, ``reducer`` or
+                ``remainder`` is not valid, or the embeddings to reduce
+                have fewer than two rows with an item that is not missing.
         """
         self.fit_transform(X, y)
         return self
@@ -213,6 +280,14 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self.remainder_ = remainder
         self._positions = positions
         self.__dict__.update(fitted)
+        self._n_reduced = int(self._reduced(blocks).shape[1])
+        if self.n_columns is not None and self._n_reduced > self.n_columns:
+            width = self._n_reduced
+            del self.encoders_
+            raise ValueError(
+                f"the reducer's module gives {width} columns, more than"
+                f" n_columns={self.n_columns}; set n_columns={width} or None"
+            )
         return self._table(blocks, rest)
 
     def _fit_reduction(
@@ -267,8 +342,17 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             "components_": None,
             "offset_": None,
         }
-        if self.n_columns is None or sum(widths) <= self.n_columns:
+        adaptive = self._adaptive()
+        if adaptive is not None:
+            adaptive.check()
+        target = sum(widths) if self.n_columns is None else self.n_columns
+        fitted["network_"] = None
+        if adaptive is not None and _adaptive.is_module(adaptive.network):
+            fitted["network_"] = copy.deepcopy(adaptive.network).eval()
             return fitted
+        if adaptive is None and sum(widths) <= target:
+            return fitted
+        target = min(target, sum(widths))
         wide = np.hstack(blocks)
         present = ~np.isnan(wide).all(axis=1)
         if present.sum() < 2:
@@ -277,10 +361,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 " item that is not missing; they need at least 2"
             )
         # The centred rows span at most one direction fewer than they are.
-        n_kept = min(self.n_columns, int(present.sum()) - 1)
-        if n_kept < self.n_columns:
+        n_kept = min(target, int(present.sum()) - 1)
+        if n_kept < target:
             _warnings.warn(
-                f"the embeddings reduced to n_columns={self.n_columns} have"
+                f"the embeddings reduced to n_columns={target} have"
                 f" {present.sum()} rows with an item that is not missing,"
                 f" so they keep {n_kept} columns",
                 _warnings.LazyWarning,
@@ -289,6 +373,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         pca = decomposition.PCA(n_kept, svd_solver="full").fit(standardized)
         fitted["components_"] = pca.components_
         fitted["offset_"] = pca.mean_ @ pca.components_.T
+        if adaptive is not None:
+            fitted["network_"] = adaptive.initial(
+                pca.components_, np.random.default_rng(adaptive.random_state)
+            )
         return fitted
 
     def transform(self, X: Any) -> pd.DataFrame:  # noqa: GS030 - scikit-learn's X, y.
@@ -331,7 +419,7 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         ]
         return blocks, frame.drop(columns=frame.columns[positions])
 
-    def _reduced(self, blocks: Sequence[Any]) -> Any:
+    def _reduced(self, blocks: Sequence[Any], network: Any = None) -> Any:
         """The reduced columns of some rows' embeddings.
 
         One implementation for numpy arrays and for torch tensors, which
@@ -340,17 +428,21 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         Args:
             blocks: Each column's embeddings, in the order of ``columns``,
                 arrays of one kind and of shape (n_rows, width).
+            network: The adaptive network to map with, of the kind of
+                ``blocks``; ``None`` for the fitted ``network_``.
 
         Returns:
             The embeddings side by side if they pass unchanged, else their
-            components, of that kind and shape (n_rows, n_columns_kept).
+            components, or what the network makes of them, of that kind
+            and shape (n_rows, n_columns_kept).
         """
         xp = array_api_compat.array_namespace(*blocks)
         wide = xp.concat(list(blocks), axis=1)
-        if self.components_ is None:
+        network = self.network_ if network is None else network
+        if self.components_ is None and network is None:
             return wide
 
-        def constant(values: _typing.FloatArray) -> Any:
+        def constant(values: Any) -> Any:
             """A fitted array, of the kind of the embeddings."""
             return xp.asarray(
                 values, dtype=wide.dtype, device=array_api_compat.device(wide)
@@ -362,13 +454,142 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             constant(np.zeros(())),
             (wide - constant(self.mean_)) / constant(self.scale_),
         )
-        components = constant(self.components_)
-        reduced = standardized @ components.T - constant(self.offset_)
+        if _adaptive.is_module(network):
+            reduced = _through_module(network, standardized)
+        elif network is None:
+            reduced = standardized @ constant(self.components_).T - constant(
+                self.offset_
+            )
+        else:
+            weights = {name: constant(value) for name, value in network.items()}
+            projected = standardized @ weights["components"].T - constant(
+                self.offset_
+            )
+            reduced = _adaptive.residual(weights, projected, xp)
         return xp.where(
             xp.all(missing, axis=1)[:, None],
             constant(np.full((), np.nan)),
             reduced,
         )
+
+    def _fit_through(  # noqa: GS030 - scikit-learn's X, y.
+        self, X: Any, y: Any, later: Sequence[Any], model: Any
+    ) -> None:
+        """Trains the adaptive reducer through the model that follows.
+
+        :meth:`lazy.pipeline.LazyPipeline.fit` calls it once every step is
+        fitted. A clone of ``model`` is fitted on the support rows, and
+        Adam lowers the NLL of the training queries through the forward of
+        each later step and the clone's differentiable pass
+        (:class:`~lazy.encoders.AdaptiveReducer`). It sets ``network_``,
+        ``history_`` and ``best_step_``.
+
+        Args:
+            X: The context as this step takes it, with the columns of
+                ``fit``.
+            y: Its finite targets, shape (n_rows,).
+            later: The fitted steps between this one and the model, in
+                order; each needs a forward.
+            model: The pipeline's model, which is cloned.
+
+        Raises:
+            ValueError: If a column that passes through is not numeric, a
+                feature is missing or infinite, a later step is a barrier,
+                the model has no differentiable forward pass, or a part of
+                the split has no row.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        reducer = self._adaptive()
+        if reducer is None:
+            raise ValueError("reducer='pca' trains nothing")
+        y = np.asarray(y, dtype=np.float64)
+        blocks, rest = self._encoded(X)
+        kept = self._kept(rest)
+        tensors = [torch.tensor(block) for block in blocks]
+        if kept is not None:
+            other = kept.select_dtypes(exclude="number").columns
+            if len(other):
+                raise ValueError(
+                    "an adaptive reducer needs the columns that pass through"
+                    f" the Tabularizer to be numeric; these are not:"
+                    f" {list(other)}"
+                )
+        others = (
+            None
+            if kept is None
+            else torch.tensor(kept.to_numpy(dtype=np.float64))
+        )
+        rng = np.random.default_rng(reducer.random_state)
+        parts = reducer.split(len(y), rng)
+        if _adaptive.is_module(self.network_):
+            network = self.network_
+            weights = list(network.parameters())
+            network.train()
+
+            def snapshot() -> Any:
+                """A copy of the module's weights."""
+                return copy.deepcopy(network.state_dict())
+        else:
+            network = {
+                name: torch.tensor(value, requires_grad=True)
+                for name, value in self.network_.items()
+            }
+            weights = list(network.values())
+
+            def snapshot() -> Any:
+                """The network's weights, as float64 arrays."""
+                return {
+                    name: value.detach().numpy().copy()
+                    for name, value in network.items()
+                }
+
+        def features() -> Any:
+            """Every row's features as the model reads them, on the graph."""
+            columns = self._reduced(tensors, network)
+            if others is not None:
+                columns = torch.cat([columns, others], dim=1)
+            for step in later:
+                columns = _steps.forward(step, columns)
+            return columns
+
+        label = "an adaptive reducer"
+        with torch.no_grad():
+            start = features().numpy()
+        if not np.isfinite(start).all():
+            raise ValueError(
+                f"{label} needs X without missing or infinite values"
+            )
+        support = parts[0]
+        fitted = sklearn_base.clone(model).fit(start[support], y[support])
+        kept_network, history, self.best_step_ = _adaptive.train(
+            reducer,
+            weights,
+            features,
+            y,
+            parts,
+            differentiable.backend(fitted, label),
+            snapshot,
+        )
+        if _adaptive.is_module(self.network_):
+            self.network_.load_state_dict(kept_network)
+            self.network_.eval()
+        else:
+            self.network_ = kept_network
+        self.history_ = pd.DataFrame(
+            history, columns=["train_nll", "validation_nll"]
+        ).rename_axis("step")
+        if (
+            reducer.n_steps
+            and not np.isfinite(self.history_["validation_nll"]).any()
+        ):
+            _warnings.warn(
+                "no step had a finite validation NLL, so the reducer stays"
+                " as it started: a validation query's target is outside the"
+                " model's buckets, which the support rows' targets set;"
+                " another random_state splits the rows differently",
+                _warnings.LazyWarning,
+            )
 
     def _leaves(  # noqa: GS030 - scikit-learn's X.
         self, X: Any, X_context: Any, items: bool, name: str
@@ -528,7 +749,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             input_features: Ignored; scikit-learn passes it.
 
         Returns:
-            ``embedding__pc0`` onwards for the reduced columns, or
+            ``embedding__pc0`` onwards for the reduced columns
+            (``embedding__z0`` onwards from an adaptive reducer), or
             ``<column>__<name>`` with each encoder's names
             (``notes__text_hashing_3``) for embeddings that pass unchanged;
             then ``remainder__<column>`` for each column kept.
@@ -538,15 +760,17 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         """
         del input_features  # Unused: the fitted table names the columns.
         validation.check_is_fitted(self, "encoders_")
-        if self.components_ is None:
+        if self.components_ is None and self.network_ is None:
             names: list[str] = []
             for column, encoder in self.encoders_.items():
                 names.extend(
                     f"{column}__{name}"
                     for name in encoder.get_feature_names_out()
                 )
-        else:
+        elif self.network_ is None:
             names = [f"embedding__pc{i}" for i in range(len(self.components_))]
+        else:
+            names = [f"embedding__z{i}" for i in range(self._n_reduced)]
         return np.array([*names, *self._remainder_names()], dtype=object)
 
     def _remainder_names(self) -> list[str]:
@@ -647,3 +871,26 @@ def _encoder(column: Hashable, spec: object) -> _base.BaseEncoder:
             f" encoder; got {type(spec).__name__}"
         )
     return registry.get_encoder(spec)
+
+
+def _through_module(module: Any, standardized: Any) -> Any:
+    """A torch module's columns of standardized embeddings.
+
+    Args:
+        module: The module, which maps (n_rows, n_embedding_columns) to
+            (n_rows, n_columns).
+        standardized: The embeddings, a numpy array or a torch tensor,
+            which keeps its gradient.
+
+    Returns:
+        The module's output, of the kind and type of ``standardized``.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    weight = next(iter(module.parameters()), None)
+    dtype = standardized.dtype if weight is None else weight.dtype
+    if array_api_compat.is_torch_array(standardized):
+        return module(standardized.to(dtype)).to(standardized.dtype)
+    with torch.no_grad():
+        out = module(torch.as_tensor(standardized, dtype=dtype))
+    return out.double().numpy()

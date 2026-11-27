@@ -20,6 +20,14 @@ Each of these methods transforms ``X`` with every step but the last and
 calls the last step, the model, on the result. Everything else is
 scikit-learn's: ``clone``, ``get_params``, ``set_params``, slicing, caching
 with ``memory``, and the ``<step>__<parameter>`` names a search uses.
+
+``fit`` adds one thing to scikit-learn's. A step that must train through
+the model after it, which a scikit-learn step never sees, declares
+``trains_through_model`` and implements ``_fit_through(X, y, later,
+model)``; :meth:`LazyPipeline.fit` calls it once every step is fitted, and
+then fits the later steps and the model again on what the trained step
+gives. The adaptive reducer of :class:`~lazy.encoders.Tabularizer` is such
+a step.
 """
 
 from __future__ import annotations
@@ -84,6 +92,45 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
     before ``fit``. Under scikit-learn's metadata routing they take no
     metadata (see :meth:`get_metadata_routing`).
     """
+
+    def fit(self, X: _Features, y: Any = None, **params: Any) -> LazyPipeline:  # noqa: GS030 - scikit-learn's X, y.
+        """Fits every step, then each step that trains through the model.
+
+        Args:
+            X: Features as the first step takes them, n_samples rows.
+            y: The targets, shape (n_samples,).
+            **params: Parameters of the steps' ``fit``, as
+                :meth:`sklearn.pipeline.Pipeline.fit` takes them. The fits
+                that follow a step trained through the model do not get
+                them again.
+
+        Returns:
+            The pipeline itself.
+
+        Raises:
+            ValueError: As a step that trains through the model raises it:
+                a later step with no forward, say, or a model with no
+                differentiable forward pass.
+        """
+        super().fit(X, y, **params)
+        for index, (_, step) in enumerate(self.steps[:-1]):
+            if not getattr(step, "trains_through_model", False):
+                continue
+            stage = X
+            for _, earlier in self.steps[:index]:
+                if earlier is not None and earlier != "passthrough":
+                    stage = earlier.transform(stage)
+            later = [
+                inner
+                for _, inner in self.steps[index + 1 : -1]
+                if inner is not None and inner != "passthrough"
+            ]
+            step._fit_through(stage, y, later, self.steps[-1][1])  # noqa: SLF001 - the hook of such a step.
+            table = step.transform(stage)
+            for inner in later:
+                table = inner.fit_transform(table, y)
+            self.steps[-1][1].fit(table, y)
+        return self
 
     def get_metadata_routing(self) -> metadata_routing.MetadataRouter:
         """scikit-learn's routing, without the methods that predict.

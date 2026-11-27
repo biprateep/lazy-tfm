@@ -49,17 +49,19 @@ change the API.
   Chronos-2 for time series (`lazy.time.Pretrained(model="chronos-2")`). The
   defaults do not change. The `encoders` extra now installs `timm`, which
   runs Zoobot's network.
-- `lazy.experimental`, a module that a release may change or remove without a
-  deprecation, and in it `ContextAdapter`: an opt-in density regressor that
-  trains a small network to map some columns to `n_components` new ones for a
-  frozen model. The network starts at the principal components of the
-  standardized columns and adds a residual MLP whose output layer starts at
-  zero. Adam lowers the NLL of training queries given support rows, both
-  mapped, through the model's differentiable forward pass; the step with the
-  lowest validation NLL is kept, step 0 (PCA) included, and recorded in
-  `history_` and `best_step_`. The model must be fitted with
-  `transforms=("none",)` and `outlier_threshold=None`. The "Context adapter"
-  page of the user guide gives the equations.
+- An adaptive reducer for `lazy.Tabularizer`, opt-in since it trains
+  weights: `reducer="mlp"`, a `torch.nn.Module`, or a
+  `lazy.encoders.AdaptiveReducer`, which holds the settings. The `"mlp"`
+  network starts at the principal components of the standardized, weighted
+  embeddings and adds a residual MLP whose output layer starts at zero.
+  `LazyPipeline.fit` trains it through the model that follows: Adam lowers
+  the NLL of training queries given support rows, both mapped, through the
+  forward of each later step and the model's differentiable forward pass.
+  The step with the lowest validation NLL is kept, step 0 (PCA) included,
+  and recorded in the Tabularizer's `history_` and `best_step_`. A step of
+  any class can ask `LazyPipeline.fit` to train it this way, by declaring
+  `trains_through_model` and implementing `_fit_through`. The "Adaptive
+  reducer" page of the user guide gives the equations.
 - `lazy.interp.Explanation.plot(statistic="crps", ax=None)`: draws one
   statistic's `importance()` as a horizontal bar chart, with the most
   important feature at the top, and returns the matplotlib axes.
