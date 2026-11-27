@@ -15,21 +15,16 @@ pipelines that differ only in their seed, whose predictions pool:
     member = lazy.make_pipeline(tab, lazy.LazyModel())
     model = lazy.LazyEnsembleModel([member] * 8, pooling="linear")
 
-============================  ==========================  ==============
-Data                          Augmentations               Gradient kind
-============================  ==========================  ==============
-Numbers (any array)           :class:`Rescale`            differentiable
-                              :class:`Noise`              differentiable
-Images                        :class:`Dihedral`           index_map
-                              :class:`Crop`               index_map
-                              :class:`Mask`               mask
-Time series                   :class:`Crop`, :class:`Mask`,
-                              :class:`Noise`,
-                              :class:`Rescale`
-Text                          :class:`TokenDropout`       barrier
-                              :class:`Truncate`           barrier
-Tables                        :class:`ColumnDropout`      index_map
-============================  ==========================  ==============
+The augmentations, by the data they suit and their gradient kind:
+
+* numbers, in any array: :class:`Rescale` and :class:`Noise`
+  (differentiable);
+* images: :class:`Dihedral` and :class:`Crop` (index maps), and
+  :class:`Mask` (a mask);
+* time series: :class:`Crop`, :class:`Mask`, :class:`Noise` and
+  :class:`Rescale`;
+* text: :class:`TokenDropout` and :class:`Truncate` (barriers);
+* tables: :class:`ColumnDropout` (an index map).
 
 Each declares its gradient kind (:mod:`lazy._steps`) and, unless it is a
 barrier, a ``forward`` on torch tensors, so that a gradient method of
@@ -557,8 +552,8 @@ class ColumnDropout(_Augmentation):
             X: A table with the columns of ``fit``.
 
         Returns:
-            The kept columns, in order: a DataFrame for a DataFrame, an
-            array for an array.
+            A DataFrame for a DataFrame and an array for an array, of the
+            kept columns in their order.
 
         Raises:
             sklearn.exceptions.NotFittedError: If it is not fitted.

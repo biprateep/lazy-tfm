@@ -239,7 +239,7 @@ class Statistics(_ImageEncoder):
                 n_channels).
 
         Returns:
-            What :meth:`transform` gives, shape (n, 8 * n_channels).
+            What ``transform`` gives, shape (n, 8 * n_channels).
         """
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
@@ -338,7 +338,7 @@ class Pixels(_ImageEncoder):
                 n_channels).
 
         Returns:
-            What :meth:`transform` gives, shape (n, size * size *
+            What ``transform`` gives, shape (n, size * size *
             n_channels).
         """
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.

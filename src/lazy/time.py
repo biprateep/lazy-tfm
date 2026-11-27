@@ -109,7 +109,7 @@ class Statistics(_base.BaseEncoder):
                 length).
 
         Returns:
-            What :meth:`transform` gives, shape (n, 13).
+            What ``transform`` gives, shape (n, 13).
         """
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
@@ -255,7 +255,7 @@ class Spectrum(_base.BaseEncoder):
                 length).
 
         Returns:
-            What :meth:`transform` gives, shape (n, n_octaves + 1).
+            What ``transform`` gives, shape (n, n_octaves + 1).
         """
         import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
