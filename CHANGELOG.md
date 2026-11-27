@@ -281,6 +281,9 @@ change the API.
 
 ### Fixed
 
+- A `Grid` that is copied, cloned or unpickled keeps its edges read-only, as
+  a `Grid` that the constructor builds does. Pickles hold the same data as
+  before, and pickles of earlier releases load read-only.
 - Under scikit-learn's metadata routing, `LazyPipeline` states that its
   methods that predict take no metadata. A search or `cross_validate` given
   metadata for a transformer now routes it to `fit` alone, and scores the
