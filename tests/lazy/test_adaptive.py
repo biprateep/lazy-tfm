@@ -74,7 +74,7 @@ def test_step_zero_is_the_pca_reduction_then_the_model(model, data):
     np.testing.assert_allclose(
         adaptive.predict_proba(X_test), fixed.predict_proba(X_test)
     )
-    assert adaptive[0].get_feature_names_out()[0] == "embedding__z0"
+    assert adaptive[0].get_feature_names_out()[0] == "curve__z0"
 
 
 def test_training_keeps_the_step_with_the_lowest_validation_nll(model, data):
@@ -124,7 +124,8 @@ def test_a_module_is_trained_as_the_reducer_and_the_given_one_is_not(
 ):
     X, y, X_test = _as_images(data[0]), data[1], _as_images(data[2])
     torch.manual_seed(0)
-    module = torch.nn.Linear(6, 2).double()
+    # Its input is the six standardized columns, then the mask of items.
+    module = torch.nn.Linear(7, 2).double()
     before = module.weight.detach().clone()
     tab = lazy.Tabularizer(
         {"curve": lazy.image.Pixels(size=1, n_channels=6)},
@@ -241,6 +242,7 @@ def test_a_model_without_a_differentiable_pass_is_refused(data):
             "must be below 1, to leave support rows",
         ),
         ({"random_state": -1}, "random_state == -1, must be >= 0"),
+        ({"block_dropout": 1.0}, "block_dropout == 1.0, must be < 1"),
         ({"network": "cnn"}, "network must be 'mlp' or a torch.nn.Module"),
     ],
 )
@@ -248,6 +250,52 @@ def test_a_bad_setting_is_refused_by_name(model, data, params, message):
     X, y = _as_images(data[0]), data[1]
     with pytest.raises(ValueError, match=message):
         _pipeline(model, **params).fit(X, y)
+
+
+def _two_items(data):
+    """The context and the queries with the series as two columns of items."""
+    tables = []
+    for part in (data[0], data[2]):
+        tables.append(
+            pd.DataFrame(
+                {
+                    "left": [c[:3].reshape(1, 1, 3) for c in part["curve"]],
+                    "right": [c[3:].reshape(1, 1, 3) for c in part["curve"]],
+                }
+            )
+        )
+    return tables
+
+
+def test_the_network_reads_a_mask_and_a_missing_item_stays_nan(model, data):
+    X, X_test = _two_items(data)
+    X.loc[[4, 11], "right"] = None
+    X_test.loc[0, "left"] = None
+    pixels = lazy.image.Pixels(size=1, n_channels=3)
+    reducer = encoders.AdaptiveReducer(
+        n_steps=20, learning_rate=1e-2, block_dropout=0.3
+    )
+    tab = lazy.Tabularizer(
+        {"left": pixels, "right": pixels}, n_columns=4, reducer=reducer
+    )
+    fitted = lazy.make_pipeline(tab, sklearn_base.clone(model)).fit(X, data[1])
+    # The hidden layer reads the four components and the two masks.
+    assert fitted[0].network_["hidden_weight"].shape == (64, 6)
+    assert np.isfinite(fitted[0].history_["train_nll"]).all()
+    out = fitted[0].transform(X_test)
+    left = [name for name in out.columns if name.startswith("left__")]
+    right = [name for name in out.columns if name.startswith("right__")]
+    assert out.loc[0, left].isna().all() and not out.loc[0, right].isna().any()
+    # Each trained loading stays inside its own embedding.
+    loadings = fitted[0].network_["components"] * (fitted[0].components_ != 0)
+    np.testing.assert_array_equal((loadings != 0), (fitted[0].components_ != 0))
+    # The other item's columns depend on the mask of the missing one.
+    whole = X_test.copy()
+    whole.loc[0, "left"] = X.loc[0, "left"]
+    assert not np.allclose(
+        out.loc[0, right], fitted[0].transform(whole).loc[0, right]
+    )
+    assert fitted.predict(X_test).shape == (len(X_test),)
 
 
 def test_a_bad_reducer_and_a_missing_number_are_refused(model, data):

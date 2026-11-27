@@ -52,6 +52,7 @@ _FITTED = (
     "scale_",
     "components_",
     "offset_",
+    "blocks_",
     "weights_",
     "network_",
     "history_",
@@ -64,28 +65,30 @@ _FITTED = (
 
 
 class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
-    r"""Encodes the columns of items, reduces them together, keeps the others.
+    r"""Encodes the columns of items, reduces them, and keeps the others.
 
     Each column named in ``columns`` is encoded by its encoder, which a
     modality (``"image"``, ``"text"`` or ``"time"``, through
     :data:`~lazy.encoders.DEFAULT_ENCODERS`), the name of a registered
     encoder, or an encoder object names. A list gives the steps of
     :mod:`lazy.augment` that transform the column's items first, then its
-    encoder, as ``[augment.Dihedral(), "image"]``. The embeddings of all
-    the columns are then reduced together to ``n_columns`` columns,
-    whatever the number of columns of items: each column of each embedding
-    is standardized,
-    each embedding is weighted as ``weights`` says, and the weighted
-    embeddings, side by side, are projected on their first ``n_columns``
-    principal components. :doc:`/guide/encoders` gives the equations.
-    Embeddings that have no more than ``n_columns`` columns between them
-    pass unchanged, with their encoders' names. The other columns of the
-    table pass through unreduced, or are dropped, as ``remainder`` says.
+    encoder, as ``[augment.Dihedral(), "image"]``.
 
-    A missing item gives its embedding the mean of the context, so that a
-    row keeps what its other items say; a row whose items are all missing
-    is ``NaN`` in every reduced column, and is left out of the fit. Without
-    a reduction, a missing item stays a row of ``NaN`` in its embedding.
+    The embeddings share one budget of ``n_columns`` columns, whatever the
+    number of columns of items. Each column of each embedding is
+    standardized, and each embedding gets principal components of its
+    own. All the components are then ranked together, by the variance
+    each explains times its embedding's weight (``weights``), and the best
+    ``n_columns`` are kept; every embedding keeps at least its first.
+    :doc:`/guide/encoders` gives the equations. Embeddings that have no
+    more than ``n_columns`` columns between them pass unchanged, with
+    their encoders' names. The other columns of the table pass through
+    unreduced, or are dropped, as ``remainder`` says.
+
+    Each reduced column belongs to one column of items. A missing item
+    is therefore ``NaN`` in its own columns alone, which the models read
+    as missing features, and its row keeps what its other items say. It
+    is left out of the fit of its embedding.
 
     The output is a DataFrame with the index of ``X`` and the names of
     :meth:`get_feature_names_out`. The encoded columns are float64, and a
@@ -108,11 +111,12 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             augmentations that ends with one of those.
         n_columns: The most columns that all the embeddings keep between
             them; ``None`` keeps every column of every embedding.
-        weights: The share of each embedding in the reduction: ``"equal"``
-            gives every embedding the same total variance, 1, whatever its
-            width; ``None`` leaves every standardized column at variance
-            1, so that a wider embedding weighs more; a list gives each
-            embedding its total variance, in the order of ``columns``.
+        weights: The share of each embedding in the budget: ``"equal"``
+            ranks the components as if every embedding had the same total
+            variance, 1, whatever its width; ``None`` leaves every
+            standardized column at variance 1, so that a wider embedding
+            takes more of the budget; a list gives each embedding its
+            total variance, in the order of ``columns``.
         reducer: What reduces the weighted embeddings: ``"pca"``, the
             principal components; ``"mlp"``, the components plus a
             residual network, trained through the model; a
@@ -136,15 +140,19 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             a list in their order, by the column's name.
         mean_: The mean of each column of the embeddings, side by side,
             shape (n_embedding_columns,).
-        scale_: What each of those columns is divided by, its standard
-            deviation over its embedding's weight, of that shape.
-        weights_: The factor that multiplies each standardized embedding,
-            shape (n_item_columns,).
-        components_: The principal components, shape (n_columns_kept,
-            n_embedding_columns), or ``None`` when the embeddings pass
-            unchanged.
+        scale_: The standard deviation of each of those columns, of that
+            shape.
+        weights_: The factor of each embedding, whose square multiplies
+            the variance of its components when they are ranked, shape
+            (n_item_columns,).
+        components_: The components kept, each zero outside its own
+            embedding, shape (n_columns_kept, n_embedding_columns), or
+            ``None`` when the embeddings pass unchanged.
         offset_: What is subtracted from the projection, shape
             (n_columns_kept,), or ``None``.
+        blocks_: The position in ``columns`` of the column of items that
+            each kept component belongs to, shape (n_columns_kept,), or
+            ``None``.
         network_: The adaptive reducer's network: for ``"mlp"``, float64
             arrays by name (``"components"``, ``"hidden_weight"``,
             ``"hidden_bias"``, ``"output_weight"`` and ``"output_bias"``);
@@ -318,7 +326,13 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     def _fit_reduction(
         self, blocks: list[_typing.FloatArray]
     ) -> dict[str, Any]:
-        """The fitted standardization, weights and components.
+        """The fitted standardization, the components kept and the network.
+
+        Each embedding is standardized and gets principal components of
+        its own, fitted on its rows that have an item. All the components
+        are then ranked together by the variance they explain, times
+        their embedding's weight, and the best ``n_columns`` are kept; an
+        embedding keeps at least its first, if there is room.
 
         Args:
             blocks: Each column's embeddings of the context, shape
@@ -326,30 +340,20 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
 
         Returns:
             The fitted attributes ``mean_``, ``scale_``, ``weights_``,
-            ``components_`` and ``offset_``, by name.
+            ``components_``, ``offset_``, ``blocks_`` and ``network_``, by
+            name.
 
         Raises:
-            ValueError: If ``weights`` is not valid, or the embeddings must
-                be reduced and fewer than two rows have an item.
+            ValueError: If ``weights`` or ``reducer`` is not valid, or an
+                embedding to reduce has fewer than two rows with an item.
         """
-        scalers = [
-            preprocessing.StandardScaler().fit(
-                block[~np.isnan(block).any(axis=1)]
-            )
-            if not np.isnan(block).all()
-            else None
-            for block in blocks
-        ]
+        present = [~np.isnan(block).any(axis=1) for block in blocks]
         widths = [block.shape[1] for block in blocks]
-        mean = np.concatenate(
-            [
-                np.zeros(width) if scaler is None else scaler.mean_
-                for scaler, width in zip(scalers, widths, strict=True)
-            ]
-        )
-        spread = [
-            np.ones(width) if scaler is None else scaler.scale_
-            for scaler, width in zip(scalers, widths, strict=True)
+        scalers = [
+            preprocessing.StandardScaler().fit(block[rows])
+            if rows.any()
+            else None
+            for block, rows in zip(blocks, present, strict=True)
         ]
         # A column that is constant has no variance to share.
         varying = [
@@ -357,50 +361,77 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             for scaler in scalers
         ]
         factors = _factors(self.weights, varying)
-        scale = np.concatenate(
-            [s / f for s, f in zip(spread, factors, strict=True)]
-        )
         fitted: dict[str, Any] = {
-            "mean_": mean,
-            "scale_": scale,
+            "mean_": np.concatenate(
+                [
+                    np.zeros(width) if scaler is None else scaler.mean_
+                    for scaler, width in zip(scalers, widths, strict=True)
+                ]
+            ),
+            "scale_": np.concatenate(
+                [
+                    np.ones(width) if scaler is None else scaler.scale_
+                    for scaler, width in zip(scalers, widths, strict=True)
+                ]
+            ),
             "weights_": factors,
             "components_": None,
             "offset_": None,
+            "blocks_": None,
+            "network_": None,
         }
         adaptive = self._adaptive()
         if adaptive is not None:
             adaptive.check()
-        target = sum(widths) if self.n_columns is None else self.n_columns
-        fitted["network_"] = None
         if adaptive is not None and _adaptive.is_module(adaptive.network):
             fitted["network_"] = copy.deepcopy(adaptive.network).eval()
             return fitted
+        target = sum(widths) if self.n_columns is None else self.n_columns
         if adaptive is None and sum(widths) <= target:
             return fitted
-        target = min(target, sum(widths))
-        wide = np.hstack(blocks)
-        present = ~np.isnan(wide).all(axis=1)
-        if present.sum() < 2:
-            raise ValueError(
-                f"the embeddings to reduce have {present.sum()} rows with an"
-                " item that is not missing; they need at least 2"
-            )
-        # The centred rows span at most one direction fewer than they are.
-        n_kept = min(target, int(present.sum()) - 1)
-        if n_kept < target:
+        starts = np.cumsum([0, *widths])
+        rows_of: list[_typing.FloatArray] = []
+        offsets: list[float] = []
+        ranked: list[tuple[float, int, int]] = []
+        for index, (block, rows) in enumerate(
+            zip(blocks, present, strict=True)
+        ):
+            if rows.sum() < 2:
+                raise ValueError(
+                    f"an embedding to reduce has {rows.sum()} rows with an"
+                    " item that is not missing; it needs at least 2"
+                )
+            pca = decomposition.PCA(
+                # The centred rows span one direction fewer than they are.
+                min(widths[index], int(rows.sum()) - 1),
+                svd_solver="full",
+            ).fit(preprocessing.StandardScaler().fit_transform(block[rows]))
+            for number, component in enumerate(pca.components_):
+                row = np.zeros(starts[-1])
+                row[starts[index] : starts[index + 1]] = component
+                rows_of.append(row)
+                offsets.append(float(pca.mean_ @ component))
+                # An embedding's first component is kept before any other.
+                first = number == 0 and target >= len(blocks)
+                value = pca.explained_variance_[number] * factors[index] ** 2
+                ranked.append((np.inf if first else value, index, number))
+        order = sorted(range(len(ranked)), key=lambda i: -ranked[i][0])
+        kept = sorted(order[:target])
+        if len(kept) < min(target, sum(widths)):
             _warnings.warn(
-                f"the embeddings reduced to n_columns={target} have"
-                f" {present.sum()} rows with an item that is not missing,"
-                f" so they keep {n_kept} columns",
+                f"the embeddings reduced to n_columns={target} have too few"
+                f" rows with an item for that many components, so they keep"
+                f" {len(kept)} columns",
                 _warnings.LazyWarning,
             )
-        standardized = np.nan_to_num((wide[present] - mean) / scale, nan=0.0)
-        pca = decomposition.PCA(n_kept, svd_solver="full").fit(standardized)
-        fitted["components_"] = pca.components_
-        fitted["offset_"] = pca.mean_ @ pca.components_.T
+        fitted["components_"] = np.array([rows_of[i] for i in kept])
+        fitted["offset_"] = np.array([offsets[i] for i in kept])
+        fitted["blocks_"] = np.array([ranked[i][1] for i in kept])
         if adaptive is not None:
             fitted["network_"] = adaptive.initial(
-                pca.components_, np.random.default_rng(adaptive.random_state)
+                fitted["components_"],
+                len(blocks),
+                np.random.default_rng(adaptive.random_state),
             )
         return fitted
 
@@ -452,17 +483,26 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             items = step.transform(items)
         return items
 
-    def _reduced(self, blocks: Sequence[Any], network: Any = None) -> Any:
+    def _reduced(
+        self, blocks: Sequence[Any], network: Any = None, dropped: Any = None
+    ) -> Any:
         """The reduced columns of some rows' embeddings.
 
         One implementation for numpy arrays and for torch tensors, which
-        keep their gradients.
+        keep their gradients. Each reduced column belongs to one
+        embedding, and is ``NaN`` in a row whose item is missing there; an
+        adaptive network reads, beside the components, a mask of which
+        items a row has.
 
         Args:
             blocks: Each column's embeddings, in the order of ``columns``,
                 arrays of one kind and of shape (n_rows, width).
             network: The adaptive network to map with, of the kind of
                 ``blocks``; ``None`` for the fitted ``network_``.
+            dropped: For training, which items to treat as missing, bool
+                of shape (n_rows, n_item_columns). A missing item's
+                columns are then 0, their mean, since a differentiable
+                pass takes no ``NaN``; ``None`` leaves them ``NaN``.
 
         Returns:
             The embeddings side by side if they pass unchanged, else their
@@ -481,29 +521,43 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 values, dtype=wide.dtype, device=array_api_compat.device(wide)
             )
 
-        missing = xp.isnan(wide)
+        absent = xp.stack(
+            [xp.any(xp.isnan(block), axis=1) for block in blocks], axis=1
+        )
+        if dropped is not None:
+            absent = absent | dropped
+        zero, one = constant(np.zeros(())), constant(np.ones(()))
+        owner = np.repeat(
+            np.arange(len(blocks)), [block.shape[1] for block in blocks]
+        )
         standardized = xp.where(
-            missing,
-            constant(np.zeros(())),
+            absent[:, owner],
+            zero,
             (wide - constant(self.mean_)) / constant(self.scale_),
         )
+        mask = xp.where(absent, zero, one)
         if _adaptive.is_module(network):
-            reduced = _through_module(network, standardized)
-        elif network is None:
-            reduced = standardized @ constant(self.components_).T - constant(
-                self.offset_
+            reduced = _through_module(
+                network, xp.concat([standardized, mask], axis=1)
             )
+            gone = xp.all(absent, axis=1)[:, None]
         else:
-            weights = {name: constant(value) for name, value in network.items()}
-            projected = standardized @ weights["components"].T - constant(
-                self.offset_
+            components = constant(self.components_)
+            if network is not None:
+                # The trained loadings, each within its own embedding.
+                support = constant((self.components_ != 0).astype(float))
+                components = constant(network["components"]) * support
+            gone = absent[:, self.blocks_]
+            reduced = xp.where(
+                gone, zero, standardized @ components.T - constant(self.offset_)
             )
-            reduced = _adaptive.residual(weights, projected, xp)
-        return xp.where(
-            xp.all(missing, axis=1)[:, None],
-            constant(np.full((), np.nan)),
-            reduced,
-        )
+            if network is not None:
+                weights = {
+                    name: constant(value) for name, value in network.items()
+                }
+                reduced = _adaptive.residual(weights, reduced, mask, xp)
+        fill = constant(np.full((), np.nan)) if dropped is None else zero
+        return xp.where(gone, fill, reduced)
 
     def _fit_through(  # noqa: GS030 - scikit-learn's X, y.
         self, X: Any, y: Any, later: Sequence[Any], model: Any
@@ -577,9 +631,21 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                     for name, value in network.items()
                 }
 
-        def features() -> Any:
-            """Every row's features as the model reads them, on the graph."""
-            columns = self._reduced(tensors, network)
+        generator = torch.Generator().manual_seed(int(rng.integers(2**31 - 1)))
+        n_blocks = len(blocks)
+
+        def features(drop: bool) -> Any:
+            """Every row's features as the model reads them, on the graph.
+
+            With ``drop``, each item is treated as missing with the
+            probability ``block_dropout``, a row keeping at least one.
+            """
+            dropped = torch.zeros((len(y), n_blocks), dtype=torch.bool)
+            if drop and n_blocks > 1 and reducer.block_dropout:
+                draws = torch.rand((len(y), n_blocks), generator=generator)
+                dropped = draws < reducer.block_dropout
+                dropped[dropped.all(dim=1), 0] = False
+            columns = self._reduced(tensors, network, dropped)
             if others is not None:
                 columns = torch.cat([columns, others], dim=1)
             for step in later:
@@ -588,10 +654,11 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
 
         label = "an adaptive reducer"
         with torch.no_grad():
-            start = features().numpy()
+            start = features(False).numpy()
         if not np.isfinite(start).all():
             raise ValueError(
-                f"{label} needs X without missing or infinite values"
+                f"{label} needs the columns that pass through the"
+                " Tabularizer without missing or infinite values"
             )
         support = parts[0]
         try:
@@ -809,8 +876,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             input_features: Ignored; scikit-learn passes it.
 
         Returns:
-            ``embedding__pc0`` onwards for the reduced columns
-            (``embedding__z0`` onwards from an adaptive reducer), or
+            ``<column>__pc0`` onwards for each column's components
+            (``<column>__z0`` onwards from the ``"mlp"`` reducer, and
+            ``embedding__z0`` onwards from a module), or
             ``<column>__<name>`` with each encoder's names
             (``notes__text_hashing_3``) for embeddings that pass unchanged;
             then ``remainder__<column>`` for each column kept.
@@ -820,17 +888,23 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         """
         del input_features  # Unused: the fitted table names the columns.
         validation.check_is_fitted(self, "encoders_")
+        names: list[str] = []
         if self.components_ is None and self.network_ is None:
-            names: list[str] = []
             for column, encoder in self.encoders_.items():
                 names.extend(
                     f"{column}__{name}"
                     for name in encoder.get_feature_names_out()
                 )
-        elif self.network_ is None:
-            names = [f"embedding__pc{i}" for i in range(len(self.components_))]
-        else:
+        elif self.components_ is None:
             names = [f"embedding__z{i}" for i in range(self._n_reduced)]
+        else:
+            kind = "pc" if self.network_ is None else "z"
+            columns = list(self.encoders_)
+            counts = dict.fromkeys(columns, 0)
+            for block in self.blocks_:
+                column = columns[block]
+                names.append(f"{column}__{kind}{counts[column]}")
+                counts[column] += 1
         return np.array([*names, *self._remainder_names()], dtype=object)
 
     def _remainder_names(self) -> list[str]:

@@ -35,29 +35,36 @@ on the trained reducer's columns. A Tabularizer fitted on its own, outside a
 
 ## The network
 
-Let $z$ be the standardized, weighted embeddings of a row, side by side
-({doc}`encoders` defines them). The network gives $k$ new columns
+Let $z$ be the standardized embeddings of a row, side by side, and $h = W z -
+c$ the components that the Tabularizer keeps ({doc}`encoders` defines them).
+Let $m$ be the row's mask: one entry per column of items, 1 if the row has
+that item and 0 if it is missing. The network gives $k$ new columns
 (`n_columns`):
 
 $$
-f(z) = h + B \tanh(A h + a) + b, \qquad h = W z - c,
+f(z, m) = h + B \tanh\bigl(A\,[h, m] + a\bigr) + b,
 $$
 
-where $W$ is a $k \times p$ matrix for $p$ embedding columns, $c$ centres the
-projection, and $A$, $a$, $B$ and $b$ are the weights of a multilayer
-perceptron (MLP) with one hidden layer of `hidden` units, added to $h$ as a
-residual. The model reads $f(z)$, then the columns that pass through the
-Tabularizer, unchanged.
+where $A$, $a$, $B$ and $b$ are the weights of a multilayer perceptron (MLP)
+with one hidden layer of `hidden` units, added to $h$ as a residual. The
+model reads $f$, then the columns that pass through the Tabularizer,
+unchanged.
 
-At step 0, $W$ holds the loadings of the first $k$ principal components of
-$z$ over the context, and $B$ and $b$ are zero, so that $f(z) = W z - c$ is
-PCA. $A$ and $a$ are drawn uniformly within $1 / \sqrt{k}$ of zero. The
-standardization and the weights of the embeddings stay as fitted.
+Each row of $W$ is zero outside one embedding, at step 0 and through
+training. So each new column still belongs to one column of items. Where a
+row's item is missing, its entries of $h$ are 0 inside the network, the mask
+says so, and its own new columns are `NaN` for the model, as without a
+network.
+
+At step 0, $W$ holds the principal components kept, and $B$ and $b$ are zero,
+so that $f = h$. $A$ and $a$ are drawn uniformly within $1 / \sqrt{k + K}$ of
+zero, for $K$ columns of items. The standardization stays as fitted.
 
 `AdaptiveReducer(network=module)`, or a `torch.nn.Module` given as `reducer`,
-trains that module in place of the network above. It maps $z$, of shape
-(rows, $p$), to the columns the model reads, and it starts as it is given. A
-copy of the module is trained, and the one given is left as it is.
+trains that module in place of the network above. It maps $[z, m]$, of shape
+(rows, $p + K$), to the columns the model reads, and it starts as it is given.
+A copy of the module is trained, and the one given is left as it is. Its
+columns mix the embeddings, so they are `NaN` only in a row with no item.
 
 ## Training
 
@@ -78,6 +85,12 @@ Tabularizer and the model, and through the model's differentiable forward
 pass, which {doc}`interpretability` also uses, to $\theta$ alone. Each of the
 `n_steps` steps of Adam, at `learning_rate`, updates $\theta$.
 
+So that the network learns to map a row that lacks an item, each step treats
+each item of each row as missing with the probability `block_dropout` (0.1 by
+default), and a row always keeps one item. A missing or dropped item's own
+columns are 0 during training, since the model's differentiable pass takes no
+`NaN`; at prediction they are `NaN`. The validation NLL drops nothing.
+
 The reducer keeps the step with the lowest validation NLL $L_V(\theta_t)$,
 over $t = 0, \ldots,$ `n_steps`. Step 0 is a candidate, so the reducer falls
 back to PCA when training does not help. `history_` holds $L_Q$ and $L_V$ at
@@ -96,8 +109,7 @@ each step, and `best_step_` the step kept.
 - The model needs a differentiable forward pass, and every step between the
   Tabularizer and the model a forward ({doc}`interpretability` lists them).
 - The columns that pass through the Tabularizer must be numeric, and no value
-  may be missing. A missing item takes the context's mean embedding, as in
-  every reduction.
+  of them may be missing. An item may be missing.
 - A query whose target falls outside the model's buckets has an infinite NLL.
   A step whose validation NLL is infinite is never kept.
 - The model's own limits hold for the new columns too. TabPFN, for example,

@@ -198,45 +198,51 @@ If you use a pretrained encoder, cite its network as well as LAZY:
 - an encoder, such as `lazy.text.Hashing(n_features=32)`.
 
 An embedding can have many columns, such as the 192 of `image_pixels`, and a
-table can have several columns of items. The Tabularizer reduces all the
-embeddings together to `n_columns` columns (default 30), whatever the number
+table can have several columns of items. The Tabularizer gives all the
+embeddings one budget of `n_columns` columns (default 30), whatever the number
 of columns of items, so that the model's width does not grow with them.
 
 Let column of items $k$ have the embedding $e_k \in \mathbb{R}^{w_k}$ of a
 row. Each column $j$ of each embedding is standardized with its mean
-$\mu_{kj}$ and standard deviation $\sigma_{kj}$ over the context, and each
-embedding is multiplied by a factor $f_k$:
+$\mu_{kj}$ and standard deviation $\sigma_{kj}$ over the context,
+$z_k = (e_k - \mu_k) / \sigma_k$. Each embedding then gets principal
+components of its own: component $i$ of embedding $k$ has the loadings
+$c_{ki}$ and explains the variance $\lambda_{ki}$ of $z_k$ in the context.
+
+All the components of all the embeddings are ranked together by their
+weighted variance,
 
 $$
-z_k = f_k \, \frac{e_k - \mu_k}{\sigma_k}, \qquad
-f_k = \sqrt{\frac{v_k}{m_k}},
+s_{ki} = f_k^2\,\lambda_{ki}, \qquad f_k^2 = \frac{v_k}{m_k},
 $$
 
 where $m_k$ is the number of columns of $e_k$ that vary in the context, so
-that $z_k$ has the total variance $v_k$. `weights` sets $v_k$:
+that embedding $k$ counts for a total variance of $v_k$. The $n$ components
+with the largest $s_{ki}$ are kept (`n_columns`), after the first component of
+every embedding, which is always kept if there is room. The output column of
+a kept component is its score, $h_{ki} = c_{ki}^\top z_k$. `weights` sets
+$v_k$:
 
 | `weights` | $v_k$ | Effect |
 |---|---|---|
-| `"equal"` (default) | 1 | Every embedding has the same total variance, whatever its width. |
-| `None` | $m_k$ | Every standardized column has variance 1, so a wider embedding weighs more. |
-| a list | its entry $k$ | Each embedding has the total variance given. |
+| `"equal"` (default) | 1 | Every embedding counts the same, whatever its width. |
+| `None` | $m_k$ | Every standardized column counts the same, so a wider embedding takes more of the budget. |
+| a list | its entry $k$ | Each embedding counts as given. |
 
-The weighted embeddings are set side by side, $z = (z_1, \dots, z_K)$, and
-the output is the projection of $z$ on its first `n_columns` principal
-components in the context, $h = C (z - \bar z)$. The components are joint, so
-a direction shared by an image and a text takes one column, not two.
+Each output column belongs to one column of items, and is named after it, as
+`notes__pc0`. So a missing item is `NaN` in its own columns alone: the model
+reads those as missing, and the row keeps what its other items say. A missing
+item is left out of the fit of its embedding. An embedding with fewer rows
+that have an item than it would keep components keeps one fewer than it has
+such rows, with a warning.
+
+The price of components that belong to one embedding is that a direction
+which two embeddings share takes a column in each.
 
 The standardization and the components are fitted on the rows given to
-`fit`, the context, as the model is. A missing item gives its embedding the
-context's mean, $z_k = 0$, so that a row keeps what its other items say. A
-row whose items are all missing is `NaN` in every reduced column, and is left
-out of the fit. A context with no more rows that have an item than
-`n_columns` keeps one column fewer than it has such rows, with a warning.
-
-Embeddings with no more than `n_columns` columns between them pass
-unchanged, with their encoders' names, and `n_columns=None` keeps every
-column of every embedding. A missing item then stays a row of `NaN` in its
-embedding's columns.
+`fit`, the context, as the model is. Embeddings with no more than `n_columns`
+columns between them pass unchanged, with their encoders' names, and
+`n_columns=None` keeps every column of every embedding.
 
 The default, 30, is the number of components that the published pipelines
 (MulTaBench, TabPFN's own text features, STRABLE) keep for one column of
@@ -246,7 +252,7 @@ slower, for one column.
 The other columns pass through unreduced, so that they keep their meaning,
 unless `remainder` says otherwise. The output is a DataFrame with the index
 of the input, and its columns carry the names of `get_feature_names_out`,
-such as `embedding__pc0` or `remainder__price`, so the model after it knows
+such as `notes__pc0` or `remainder__price`, so the model after it knows
 each column by name. The encoded columns are float64, and a column that
 passes through keeps its type. A search tunes the Tabularizer as any step,
 for example over `tabularizer__n_columns`.

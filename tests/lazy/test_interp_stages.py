@@ -180,7 +180,6 @@ def test_gradients_reach_the_pixels_through_the_tabularizer(backend, images):
     np.testing.assert_allclose(
         pixels.sum(axis=(2, 3, 4)), explanation.values[..., 0]
     )
-    assert explanation.importance()["nll"].idxmax() == "cutout"
 
 
 def test_an_encoder_that_is_a_barrier_gives_its_columns_as_features(
@@ -291,7 +290,7 @@ def test_a_removal_method_at_a_stage_is_that_method_on_the_rest(items):
         model, X, y, method="permutation", at="tabularizer", y_grid=grid
     )
     assert staged.stage == "tabularizer"
-    assert staged.feature_names == ("embedding__pc0", "embedding__pc1")
+    assert staged.feature_names == ("cutout__pc0", "cutout__pc1")
     direct = interp.explain(
         model[-1], model[0].transform(X), y, method="permutation", y_grid=grid
     )

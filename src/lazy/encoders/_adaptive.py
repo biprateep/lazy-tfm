@@ -68,9 +68,10 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
         network: ``"mlp"``, the principal components plus a residual
             multilayer perceptron (MLP) whose output layer starts at zero,
             so that the untrained network is principal component analysis
-            (PCA); or a ``torch.nn.Module`` that maps the standardized,
-            weighted embeddings, side by side, shape (n_rows,
-            n_embedding_columns), to the columns the model reads.
+            (PCA); or a ``torch.nn.Module`` that maps the standardized
+            embeddings, side by side, then the mask of the items a row
+            has, shape (n_rows, n_embedding_columns + n_item_columns), to
+            the columns the model reads.
         hidden: For ``"mlp"``, the units of the one hidden layer, which
             applies ``tanh``.
         n_steps: The steps of Adam; 0 keeps the network as it starts.
@@ -80,8 +81,14 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
         query_fraction: The share of them used as training queries, in
             (0, 1). The two fractions sum to less than 1; the other rows
             are the support rows.
-        random_state: The seed of the split and of the MLP's initial
-            weights, a non-negative integer, or ``None`` for fresh entropy.
+        block_dropout: The probability that a training step treats an
+            item of a row as missing, in [0, 1), so that the network
+            learns to map a row that lacks an item; a row always keeps one
+            item, so a table with one column of items drops none. The
+            network reads a mask of the items a row has.
+        random_state: The seed of the split, of the dropout and of the
+            MLP's initial weights, a non-negative integer, or ``None`` for
+            fresh entropy.
     """
 
     def __init__(
@@ -93,6 +100,7 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
         learning_rate: float = 1e-3,
         validation_fraction: float = 0.2,
         query_fraction: float = 0.2,
+        block_dropout: float = 0.1,
         random_state: int | None = 0,
     ) -> None:
         self.network = network
@@ -101,6 +109,7 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
         self.learning_rate = learning_rate
         self.validation_fraction = validation_fraction
         self.query_fraction = query_fraction
+        self.block_dropout = block_dropout
         self.random_state = random_state
 
     def check(self) -> None:
@@ -136,6 +145,14 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
                 max_val=1.0,
                 include_boundaries="neither",
             )
+        validation.check_scalar(
+            self.block_dropout,
+            "block_dropout",
+            numbers.Real,
+            min_val=0.0,
+            max_val=1.0,
+            include_boundaries="left",
+        )
         if self.random_state is not None:
             validation.check_scalar(
                 self.random_state, "random_state", numbers.Integral, min_val=0
@@ -181,28 +198,34 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
         return np.sort(support), np.sort(queries), np.sort(held_out)
 
     def initial(
-        self, components: _typing.FloatArray, rng: np.random.Generator
+        self,
+        components: _typing.FloatArray,
+        n_blocks: int,
+        rng: np.random.Generator,
     ) -> dict[str, _typing.FloatArray]:
         """The ``"mlp"`` network at step 0: the components, and an MLP.
 
-        The hidden layer's weights and biases are drawn uniformly within
-        ``1 / sqrt(n_columns)`` of zero, as ``torch.nn.Linear`` draws them;
+        The hidden layer reads the components and the mask of the items a
+        row has. Its weights and biases are drawn uniformly within
+        ``1 / sqrt(n_inputs)`` of zero, as ``torch.nn.Linear`` draws them;
         the output layer is zero, so that the network is PCA.
 
         Args:
             components: The principal components, shape (n_columns,
                 n_embedding_columns).
+            n_blocks: The number of columns of items.
             rng: The generator that draws the hidden layer.
 
         Returns:
             The network, float64, by the names of ``MLP_WEIGHTS``.
         """
         n_columns = len(components)
-        bound = 1.0 / math.sqrt(n_columns)
+        n_inputs = n_columns + n_blocks
+        bound = 1.0 / math.sqrt(n_inputs)
         return {
             "components": components.copy(),
             "hidden_weight": rng.uniform(
-                -bound, bound, (self.hidden, n_columns)
+                -bound, bound, (self.hidden, n_inputs)
             ),
             "hidden_bias": rng.uniform(-bound, bound, self.hidden),
             "output_weight": np.zeros((n_columns, self.hidden)),
@@ -218,20 +241,26 @@ def is_module(network: object) -> bool:
     )
 
 
-def residual(network: Mapping[str, Any], components: Any, xp: Any) -> Any:
-    """The ``"mlp"`` network's columns, ``h + tanh(h A^T + a) B^T + b``.
+def residual(
+    network: Mapping[str, Any], components: Any, mask: Any, xp: Any
+) -> Any:
+    """The ``"mlp"`` network's columns, ``h + tanh([h, m] A^T + a) B^T + b``.
 
     Args:
         network: The network's arrays, of the kind of ``components``.
-        components: The projection ``h`` of some rows, a numpy array or a
-            torch tensor of shape (n_rows, n_columns).
+        components: The projection ``h`` of some rows, 0 where an item is
+            missing, a numpy array or a torch tensor of shape (n_rows,
+            n_columns).
+        mask: ``m``, 1 for each item a row has and 0 for one it lacks, of
+            that kind, shape (n_rows, n_item_columns).
         xp: The array namespace of ``components``.
 
     Returns:
         The new columns, of that kind and shape.
     """
+    inputs = xp.concat([components, mask], axis=1)
     hidden = xp.tanh(
-        components @ network["hidden_weight"].T + network["hidden_bias"]
+        inputs @ network["hidden_weight"].T + network["hidden_bias"]
     )
     return (
         components
@@ -243,7 +272,7 @@ def residual(network: Mapping[str, Any], components: Any, xp: Any) -> Any:
 def train(  # noqa: GS030 - scikit-learn's y.
     reducer: AdaptiveReducer,
     weights: list[Any],
-    features: Callable[[], Any],
+    features: Callable[[bool], Any],
     y: _typing.FloatArray,
     parts: tuple[_typing.IntArray, _typing.IntArray, _typing.IntArray],
     backend: Any,
@@ -256,7 +285,8 @@ def train(  # noqa: GS030 - scikit-learn's y.
         weights: The torch tensors to train, which require gradients.
         features: Gives every row's features as the model reads them, a
             torch tensor of shape (n_rows, n_features) on the graph of
-            ``weights`` at their current values.
+            ``weights`` at their current values; its argument says
+            whether to drop items at random, as a training step does.
         y: Every row's target, shape (n_rows,).
         parts: The rows of the support, the training and the validation
             queries.
@@ -292,12 +322,12 @@ def train(  # noqa: GS030 - scikit-learn's y.
     # Inside torch.no_grad() too, which would build no graph.
     with torch.enable_grad():
         for step in range(reducer.n_steps + 1):
-            columns = features()
+            columns = features(True)
             if not bool(columns.isfinite().all()):
                 break
             loss = nll(columns, queries)
             with torch.no_grad():
-                held = float(nll(columns, held_out))
+                held = float(nll(features(False), held_out))
             history.append((float(loss.detach()), held))
             if held < best:
                 kept, best, best_step = snapshot(), held, step

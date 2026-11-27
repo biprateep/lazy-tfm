@@ -52,8 +52,10 @@ change the API.
 - An adaptive reducer for `lazy.Tabularizer`, opt-in since it trains
   weights: `reducer="mlp"`, a `torch.nn.Module`, or a
   `lazy.encoders.AdaptiveReducer`, which holds the settings. The `"mlp"`
-  network starts at the principal components of the standardized, weighted
-  embeddings and adds a residual MLP whose output layer starts at zero.
+  network starts at the principal components kept of the standardized
+  embeddings and adds a residual MLP whose output layer starts at zero. It
+  reads a mask of the items a row has, and training drops items at random
+  (`block_dropout`), so that it maps a row that lacks an item.
   `LazyPipeline.fit` trains it through the model that follows: Adam lowers
   the NLL of training queries given support rows, both mapped, through the
   forward of each later step and the model's differentiable forward pass.
@@ -187,17 +189,17 @@ change the API.
   pyarrow.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
-  encoder that a modality, a name or an object gives. It then reduces all the
-  embeddings together to `n_columns` columns (default 30), whatever the
-  number of columns of items: each column of each embedding is standardized,
-  each embedding is weighted, and the weighted embeddings, side by side, are
-  projected on their first principal components, fitted on the context.
-  `weights="equal"` (the default) gives every embedding the same total
-  variance, `None` leaves every standardized column at variance 1, and a list
-  gives each embedding its total variance. A missing item takes the
-  context's mean embedding. The other columns pass through unreduced. It
-  returns a DataFrame whose columns carry their names, such as
-  `embedding__pc0`, and a column that passes through keeps its type.
+  encoder that a modality, a name or an object gives. The embeddings then
+  share one budget of `n_columns` columns (default 30), whatever the number
+  of columns of items: each embedding gets principal components of its own,
+  fitted on the context, and the components that explain the most weighted
+  variance are kept, every embedding its first at least. `weights="equal"`
+  (the default) counts every embedding the same, `None` counts every
+  standardized column the same, and a list gives each embedding its total
+  variance. Each reduced column belongs to one column of items, so a missing
+  item is `NaN` in its own columns alone. The other columns pass through
+  unreduced. It returns a DataFrame whose columns carry their names, such as
+  `notes__pc0`, and a column that passes through keeps its type.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
 - Categorical columns. Every model takes `categorical_features`, as
