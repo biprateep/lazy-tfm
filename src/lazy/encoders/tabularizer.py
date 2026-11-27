@@ -71,8 +71,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
     encoder, or an encoder object names. A list gives the steps of
     :mod:`lazy.augment` that transform the column's items first, then its
     encoder, as ``[augment.Dihedral(), "image"]``. The embeddings of all
-    the columns are then reduced together to ``n_columns`` columns, whatever the number
-    of columns of items: each column of each embedding is standardized,
+    the columns are then reduced together to ``n_columns`` columns,
+    whatever the number of columns of items: each column of each embedding
+    is standardized,
     each embedding is weighted as ``weights`` says, and the weighted
     embeddings, side by side, are projected on their first ``n_columns``
     principal components. :doc:`/guide/encoders` gives the equations.
