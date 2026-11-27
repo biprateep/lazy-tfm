@@ -234,16 +234,32 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     A text longer than its model reads is cut to its first tokens.
 
+    A forward pass holds every text of its batch padded to the longest, so
+    its memory grows with the texts' count times that length. A batch
+    whose padded tokens would exceed ``max_batch_tokens`` is split into
+    passes that do not, so that a few long
+    texts do not exhaust a GPU. A text's embedding is the same either way,
+    up to float rounding.
+
     Attributes:
         model: The network; ``"e5-small-v2"`` by default.
+        max_batch_tokens: The most tokens, padding included, in one forward
+            pass; a single text longer than that is a pass of its own. The
+            default, 32,768, is 64 texts of 512 tokens, so a larger
+            ``batch_size`` needs a larger budget to take effect on long
+            texts. The cache does not key it: a split moves an embedding
+            by float rounding at most.
         device: ``"auto"``, or a torch device such as ``"cpu"``.
-        batch_size: The most texts in one forward pass.
+        batch_size: The most texts in one forward pass, which
+            ``max_batch_tokens`` may lower.
         cache: Whether, or where, to file the embeddings on disk; see
             :class:`~lazy.encoders.BaseEncoder`.
     """
 
     modality = "text"
     package = "transformers"
+    # The split of a batch moves an embedding by float rounding at most.
+    _UNKEYED = (*_base.BASE_PARAMS, "device", "max_batch_tokens")
     recipes = {
         "e5-small-v2": _Recipe(384, "mean", prefix="query: "),
         "bge-small-en-v1.5": _Recipe(384, "cls"),
@@ -258,14 +274,21 @@ class Pretrained(_pretrained.PretrainedEncoder):
         self,
         *,
         model: str = "e5-small-v2",
+        max_batch_tokens: int = 32_768,
         device: str = "auto",
         batch_size: int = 64,
         cache: bool | str | os.PathLike[str] = True,
     ) -> None:
         self.model = model
+        self.max_batch_tokens = max_batch_tokens
         self.device = device
         self.batch_size = batch_size
         self.cache = cache
+
+    def _width(self) -> int:
+        """The width of the model's embedding; checks the parameters."""
+        _base.positive_integer("max_batch_tokens", self.max_batch_tokens)
+        return super()._width()
 
     def _length(self, item: Any) -> int:
         """The number of characters, which the tokens grow with."""
@@ -293,19 +316,82 @@ class Pretrained(_pretrained.PretrainedEncoder):
             truncation=True,
             max_length=recipe.max_tokens,
             return_tensors="pt",
-        ).to(model.device)
-        states = model(**tokens).last_hidden_state
-        if recipe.pooling == "cls":
-            pooled = states[:, 0]
-        elif recipe.pooling == "last":
-            # The last position the mask keeps, on either side of padding.
-            mask = tokens["attention_mask"]
-            positions = torch.arange(mask.shape[1], device=mask.device)
-            last = (mask * positions).argmax(dim=1)
-            rows = torch.arange(len(states), device=mask.device)
-            pooled = states[rows, last]
-        else:
-            mask = tokens["attention_mask"].unsqueeze(-1).to(states.dtype)
-            pooled = (states * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-        unit = torch.nn.functional.normalize(pooled, p=2, dim=1)
-        return unit.float().cpu().numpy()
+        )
+        mask = tokens["attention_mask"]
+        embeddings = torch.empty(
+            (len(items), recipe.width), dtype=torch.float32
+        )
+        for rows in _token_batches(
+            mask.sum(dim=1).tolist(), self.max_batch_tokens
+        ):
+            # The columns that hold a token of these texts: padding beyond
+            # their longest is cut, on either side.
+            columns = mask[rows].any(dim=0)
+            batch = {
+                name: values[rows][:, columns].to(model.device)
+                for name, values in tokens.items()
+            }
+            # Pooled at once, so that no pass's states outlive it.
+            embeddings[rows] = _pooled(
+                model(**batch).last_hidden_state,
+                batch["attention_mask"],
+                recipe.pooling,
+            )
+        return embeddings.numpy()
+
+
+def _pooled(states: Any, mask: Any, pooling: str) -> Any:
+    """The unit-length pooled states of a batch.
+
+    Args:
+        states: The token states, a torch tensor of shape (n, length,
+            width).
+        mask: Which positions hold a token, shape (n, length).
+        pooling: ``"cls"``, ``"last"`` or ``"mean"``, as the recipe says.
+
+    Returns:
+        The embeddings, float32 on the CPU, shape (n, width).
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    if pooling == "cls":
+        pooled = states[:, 0]
+    elif pooling == "last":
+        # The last position the mask keeps, on either side of padding.
+        positions = torch.arange(mask.shape[1], device=mask.device)
+        last = (mask * positions).argmax(dim=1)
+        rows = torch.arange(len(states), device=mask.device)
+        pooled = states[rows, last]
+    else:
+        weights = mask.unsqueeze(-1).to(states.dtype)
+        pooled = (states * weights).sum(dim=1) / weights.sum(dim=1).clamp(min=1)
+    unit = torch.nn.functional.normalize(pooled, p=2, dim=1)
+    return unit.float().cpu()
+
+
+def _token_batches(lengths: list[int], budget: int) -> list[slice]:
+    """The texts of each forward pass, under a budget of padded tokens.
+
+    The texts are taken in their order, which is that of their length in
+    characters, and a pass ends before its texts, padded to its longest,
+    would exceed the budget; a text longer than the budget is a pass of
+    its own. Texts that fit together are therefore one pass.
+
+    Args:
+        lengths: Each text's number of tokens.
+        budget: The most padded tokens in one pass.
+
+    Returns:
+        The positions of the texts of each pass; every text is in one.
+    """
+    batches = []
+    start = longest = 0
+    for position, length in enumerate(lengths):
+        if (
+            position > start
+            and (position - start + 1) * max(longest, length) > budget
+        ):
+            batches.append(slice(start, position))
+            start, longest = position, 0
+        longest = max(longest, length)
+    return [*batches, slice(start, len(lengths))]

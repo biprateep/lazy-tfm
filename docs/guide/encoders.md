@@ -91,7 +91,10 @@ The default network of each modality allows commercial use.
 ```
 
 A row depends on its own item alone, up to float rounding: a batch pads its
-items to one shape, and the items are batched in order of length. The
+items to one shape, and the items are batched in order of length. A batch of
+texts whose padded tokens would exceed `max_batch_tokens` (32,768 by default)
+is split into passes, so that a few long texts do
+not exhaust a GPU's memory. The
 pretrained encoders cache their embeddings by default (see
 [The cache](#the-cache)).
 
