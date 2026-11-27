@@ -41,7 +41,9 @@ class Tokens(dict):
 
 
 class Tokenizer:
-    """One token per word between a first and a last, padded on the right."""
+    """One token per word between a first and a last, padded on a side."""
+
+    padding_side = "right"
 
     def __call__(self, text, padding, truncation, max_length, return_tensors):
         import torch  # noqa: PLC0415 - collected without torch installed.
@@ -52,8 +54,13 @@ class Tokenizer:
         ids = torch.zeros((len(text), width), dtype=torch.long)
         mask = torch.zeros((len(text), width), dtype=torch.long)
         for row, code in enumerate(codes):
-            ids[row, : len(code)] = torch.tensor(code)
-            mask[row, : len(code)] = 1
+            held = (
+                slice(len(code))
+                if self.padding_side == "right"
+                else slice(width - len(code), width)
+            )
+            ids[row, held] = torch.tensor(code)
+            mask[row, held] = 1
         return Tokens(input_ids=ids, attention_mask=mask)
 
 

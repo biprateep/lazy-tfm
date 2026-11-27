@@ -49,6 +49,13 @@ change the API.
   important feature at the top, and returns the matplotlib axes.
   `lazy.plotting.plot_importance` draws such bars from any series of
   importances.
+- `lazy.text.Pretrained(max_batch_tokens=32768)`: the most tokens, padding
+  included, in one forward pass. A batch that would exceed it is split into
+  passes, so that a few long texts do not exhaust a GPU's memory. Embeddings
+  are unchanged, up to float rounding where a batch is split. At the default
+  `batch_size=64`, no batch of the networks that read 512 tokens is split;
+  a batch of `gte-modernbert-base` or `Qwen3-Embedding-0.6B` with texts
+  longer than 512 tokens now is, so its embeddings move by float rounding.
 - `lazy.interp.explain_context`: attributes each row's predicted distribution
   to the rows of the context, as a `ContextExplanation`, whose `top(k)` lists
   each row's `k` most influential context rows. `method="gradient"`, the
