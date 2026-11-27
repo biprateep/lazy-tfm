@@ -180,36 +180,10 @@ table column of its own. A network reads one band (grey) or three.
 
 ### Rotated and flipped views
 
-`views` rotates and flips each image before the network reads it, and averages
-the embeddings of the views. Each view is one more forward pass. The views are
-the eight rotations and flips of a square, named in {data}`lazy.image.VIEWS`
-after Pillow's transposes. With $g$ a view, $f$ the network and $V$ the views,
-the embedding of an image $x$ is
-
-$$
-e(x) = \frac{1}{|V|} \sum_{g \in V} f(g\,x).
-$$
-
-`views="d4"` takes all eight, so the embedding of every rotation or flip of an
-image is the same, up to float rounding; the networks themselves are not
-invariant. One view, such
-as `views=["rotate_90"]`, gives one member of a pool its own view of the
-images:
-
-```python
-views = ["identity", "rotate_90", "rotate_180", "rotate_270"]
-model = lazy.LazyEnsembleModel(
-    [
-        lazy.make_pipeline(
-            lazy.Tabularizer({"cutout": lazy.image.Pretrained(views=[view])}),
-            lazy.LazyModel(),
-        )
-        for view in views
-    ]
-)
-```
-
-The default, `None`, embeds the image as it is.
+The networks are not invariant to a rotation or a flip of an image.
+{class}`lazy.augment.Dihedral` shows a network one of the eight views of a
+square, and an ensemble of pipelines with seeds of their own averages the
+predictions over them; {doc}`augmentation` shows how.
 
 ### Citing
 
@@ -256,28 +230,71 @@ If you use a pretrained encoder, cite its network as well as LAZY:
 - the name of an encoder, such as `"time_spectrum"`;
 - an encoder, such as `lazy.text.Hashing(n_features=32)`.
 
-An embedding can have many columns, such as the 192 of `image_pixels`. The
-Tabularizer reduces each embedding wider than `n_components` (default 30): it
-standardizes each column of the embedding and keeps the first `n_components`
-principal components. Both are fitted on the rows given to `fit`, the context,
-as the model is. A missing item gives a row of `NaN`, which is left out of the
-fit and stays `NaN`. A context with no more items that are not missing than
-`n_components` keeps one component fewer than it has such items, with a
-warning. `n_components=None` keeps every column.
+An embedding can have many columns, such as the 192 of `image_pixels`, and a
+table can have several columns of items. The Tabularizer gives all the
+embeddings one budget of `n_columns` columns (default 120), whatever the number
+of columns of items, so that the model's width does not grow with them.
 
-The default follows the published pipelines (MulTaBench, TabPFN's own text
-features, STRABLE), which all keep 30 components per column. STRABLE measured
-15 as worse than 30, and 60 or 120 as no better and slower.
+Let column of items $k$ have the embedding $e_k \in \mathbb{R}^{w_k}$ of a
+row. Each column $j$ of each embedding is standardized with its mean
+$\mu_{kj}$ and standard deviation $\sigma_{kj}$ over the context,
+$z_k = (e_k - \mu_k) / \sigma_k$. Each embedding then gets principal
+components of its own: component $i$ of embedding $k$ has the loadings
+$c_{ki}$ and explains the variance $\lambda_{ki}$ of $z_k$ in the context.
 
-The other columns pass through, unless `remainder` says otherwise. The output
-is a DataFrame with the index of the input, and its columns carry the names of
-`get_feature_names_out`, such as `notes__pc0` or `remainder__price`, so the
-model after it knows each column by name. The encoded columns are float64,
-and a column that passes through keeps its type. A search tunes the
-Tabularizer as any step, for example over `tabularizer__n_components`.
+All the components of all the embeddings are ranked together by their
+weighted variance,
 
-One setting, `n_components`, serves every column. For another reduction, or
-a search over an encoder's own parameters, build a
+$$
+s_{ki} = f_k^2\,\lambda_{ki}, \qquad f_k^2 = \frac{v_k}{m_k},
+$$
+
+where $m_k$ is the number of columns of $e_k$ that vary in the context, so
+that embedding $k$ counts for a total variance of $v_k$. The $n$ components
+with the largest $s_{ki}$ are kept (`n_columns`), after the first component of
+every embedding, which is always kept if there is room. The output column of
+a kept component is its score, $h_{ki} = c_{ki}^\top z_k$. `weights` sets
+$v_k$:
+
+| `weights` | $v_k$ | Effect |
+|---|---|---|
+| `"equal"` (default) | 1 | Every embedding counts the same, whatever its width. |
+| `None` | $m_k$ | Every standardized column counts the same, so a wider embedding takes more of the budget. |
+| a list | its entry $k$ | Each embedding counts as given. |
+
+Each output column belongs to one column of items, and is named after it, as
+`notes__pc0`. So a missing item is `NaN` in its own columns alone: the model
+reads those as missing, and the row keeps what its other items say. A missing
+item is left out of the fit of its embedding. An embedding with fewer rows
+that have an item than it would keep components keeps one fewer than it has
+such rows, with a warning.
+
+The price of components that belong to one embedding is that a direction
+which two embeddings share takes a column in each.
+
+The standardization and the components are fitted on the rows given to
+`fit`, the context, as the model is. Embeddings with no more than `n_columns`
+columns between them pass unchanged, with their encoders' names, and
+`n_columns=None` keeps every column of every embedding.
+
+The budget only shrinks: embeddings with fewer columns than it are never
+widened. The default, 120, is not yet measured on full data. The published
+pipelines (MulTaBench, TabPFN's own text features, STRABLE) keep 30
+components for one column of items; STRABLE measured 15 as worse than 30, and
+60 or 120 as no better and slower, for one column. A pilot on a CPU, on ten of
+MulTaBench's text tables at 512 training rows with TabPFN v3.5-fast, found
+budgets of 30, 60 and 120 within 1% of each other in median CRPS, and 300
+much worse on one table.
+
+The other columns pass through unreduced, so that they keep their meaning,
+unless `remainder` says otherwise. The output is a DataFrame with the index
+of the input, and its columns carry the names of `get_feature_names_out`,
+such as `notes__pc0` or `remainder__price`, so the model after it knows
+each column by name. The encoded columns are float64, and a column that
+passes through keeps its type. A search tunes the Tabularizer as any step,
+for example over `tabularizer__n_columns`.
+
+For another reduction, or a search over an encoder's own parameters, build a
 {class}`~sklearn.compose.ColumnTransformer` of encoders and any other steps:
 an encoder is a scikit-learn transformer on its own, and
 {func}`~lazy.encoders.get_encoder` builds the default encoder of a modality,

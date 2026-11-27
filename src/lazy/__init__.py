@@ -56,13 +56,13 @@ The package is laid out as follows.
 :mod:`lazy.image`, :mod:`lazy.text`, :mod:`lazy.time`
     The encoders of each kind of item: summary statistics and simple
     transforms that need no download.
+:mod:`lazy.augment`
+    Augmentations: steps that transform a table, or the items of a column,
+    such as a rotation of every image; an ensemble of seeded copies of one
+    pipeline averages over them.
 :mod:`lazy.interp`
     :func:`~lazy.interp.explain`: which features a model's predicted
     distributions rely on, by Shapley values, leave-one-out or permutation.
-:mod:`lazy.experimental`
-    Estimators that a release may change or remove without a deprecation:
-    :class:`~lazy.experimental.ContextAdapter`, which trains a network to
-    map the columns for a frozen model.
 :mod:`lazy.plotting`
     The publication style, and the standard diagnostic figures.
 :mod:`lazy.datasets`
@@ -89,8 +89,8 @@ import types
 import typing
 
 from lazy import _namespace
+from lazy import augment
 from lazy import encoders
-from lazy import experimental
 from lazy import image
 from lazy import interp
 from lazy import text
@@ -169,10 +169,10 @@ __all__ = [
     "UnknownNameError",
     "__version__",
     "as_grid",
+    "augment",
     "clear_model_cache",
     "download_checkpoint",
     "encoders",
-    "experimental",
     "get_checkpoint",
     "get_estimator",
     "image",

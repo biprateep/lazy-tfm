@@ -9,12 +9,14 @@ encoder meets, a scikit-learn transformer; :func:`register`,
 :func:`list_encoders` and :func:`get_encoder` file encoders by name;
 :func:`clear_embedding_cache` empties the cache of embeddings on disk;
 :data:`CHECKPOINTS` pins the weights of the pretrained encoders' models;
-and :class:`Tabularizer` encodes the columns of items of a table.
+and :class:`Tabularizer` encodes the columns of items of a table, with
+:class:`AdaptiveReducer` for a reduction that is trained through the model.
 """
 
 # This file's imports re-export the public API by name; that is its purpose.
 # ruff: noqa: GS001
 
+from lazy.encoders._adaptive import AdaptiveReducer
 from lazy.encoders._base import BaseEncoder
 from lazy.encoders._base import MODALITIES
 from lazy.encoders._cache import clear_embedding_cache
@@ -33,6 +35,7 @@ __all__ = [
     "DEFAULT_MODELS",
     "ENCODERS",
     "MODALITIES",
+    "AdaptiveReducer",
     "BaseEncoder",
     "Tabularizer",
     "clear_embedding_cache",

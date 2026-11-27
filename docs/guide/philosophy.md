@@ -56,7 +56,7 @@ tuning. Since each is a parameter, scikit-learn's searches, such as
 
 LAZY trains no weights by default. A method that trains weights, such as
 fine-tuning or an adapter, can only be an option that the user turns on, and
-never the default; the one so far is the experimental
-[context adapter](adapter.md), which trains a small network before a frozen
-model. A user who wants to change a prediction changes the context or the
+never the default; the one so far is the
+[adaptive reducer](adapter.md) of the Tabularizer, which trains a small
+network before a frozen model. A user who wants to change a prediction changes the context or the
 parameters instead (see [the FAQ](faq.md#can-i-fine-tune)).

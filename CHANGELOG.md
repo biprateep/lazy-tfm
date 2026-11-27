@@ -46,17 +46,21 @@ change the API.
   Chronos-2 for time series (`lazy.time.Pretrained(model="chronos-2")`). The
   defaults do not change. The `encoders` extra now installs `timm`, which
   runs Zoobot's network.
-- `lazy.experimental`, a module that a release may change or remove without a
-  deprecation, and in it `ContextAdapter`: an opt-in density regressor that
-  trains a small network to map some columns to `n_components` new ones for a
-  frozen model. The network starts at the principal components of the
-  standardized columns and adds a residual MLP whose output layer starts at
-  zero. Adam lowers the NLL of training queries given support rows, both
-  mapped, through the model's differentiable forward pass; the step with the
-  lowest validation NLL is kept, step 0 (PCA) included, and recorded in
-  `history_` and `best_step_`. The model must be fitted with
-  `transforms=("none",)` and `outlier_threshold=None`. The "Context adapter"
-  page of the user guide gives the equations.
+- An adaptive reducer for `lazy.Tabularizer`, opt-in since it trains
+  weights: `reducer="mlp"`, a `torch.nn.Module`, or a
+  `lazy.encoders.AdaptiveReducer`, which holds the settings. The `"mlp"`
+  network starts at the principal components kept of the standardized
+  embeddings and adds a residual MLP whose output layer starts at zero. It
+  reads a mask of the items a row has, and training drops items at random
+  (`block_dropout`), so that it maps a row that lacks an item.
+  `LazyPipeline.fit` trains it through the model that follows: Adam lowers
+  the NLL of training queries given support rows, both mapped, through the
+  forward of each later step and the model's differentiable forward pass.
+  The step with the lowest validation NLL is kept, step 0 (PCA) included,
+  and recorded in the Tabularizer's `history_` and `best_step_`. A step of
+  any class can ask `LazyPipeline.fit` to train it this way, by declaring
+  `trains_through_model` and implementing `_fit_through`. The "Adaptive
+  reducer" page of the user guide gives the equations.
 - `lazy.interp.Explanation.plot(statistic="crps", ax=None)`: draws one
   statistic's `importance()` as a horizontal bar chart, with the most
   important feature at the top, and returns the matplotlib axes.
@@ -78,11 +82,18 @@ change the API.
   sum to the statistic at the row minus that at the baseline. `baseline`
   defaults to the mean of `X_context`. The model must be fitted with
   `transforms=("none",)` and `outlier_threshold=None`, on numeric columns.
-- `lazy.image.Pretrained(views=...)`: rotates and flips each image before it
-  is embedded, and averages the embeddings of the views. `"d4"` takes all
-  eight rotations and flips, listed in `lazy.image.VIEWS`; one view gives a
-  member of a pool its own view of the images. The default, `None`, embeds
-  each image as before.
+- `lazy.augment`: augmentations as scikit-learn steps, which train nothing
+  and have no averaging mode. `Rescale` and `Noise` for any numbers,
+  `Dihedral`, `Crop` and `Mask` for images and time series, `TokenDropout`
+  and `Truncate` for text, and `ColumnDropout` for tables, which can drop a
+  whole data type. A column of a `Tabularizer` takes a list of augmentations
+  before its encoder, as `{"cutout": [augment.Dihedral(), "image"]}`, and
+  the Tabularizer's new `random_state` seeds them. Averaging over views is an
+  ensemble of copies of one pipeline: `LazyEnsembleModel` now seeds step `j`
+  of member `i`, if its `random_state` is still its default, from
+  `SeedSequence([random_state, i, j])`. Each augmentation declares its gradient
+  kind, so the gradient methods of `lazy.interp` pass all but those of text.
+  The "Augmentation" page of the user guide describes them.
 - `LazyEnsembleModel` accepts a `LazyPipeline` that ends in a model as a
   member, so that one pool combines models that see different views of the
   same table, such as two encoders of a column of items. A pipeline gets the
@@ -166,11 +177,17 @@ change the API.
   pyarrow.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
-  encoder that a modality, a name or an object gives, reduces each embedding
-  to its first `n_components` principal components (default 30, as the
-  published pipelines use), fitted on the context, and passes the other
-  columns through. It returns a DataFrame whose columns carry their names,
-  such as `notes__pc0`, and a column that passes through keeps its type.
+  encoder that a modality, a name or an object gives. The embeddings then
+  share one budget of `n_columns` columns (default 120), whatever the number
+  of columns of items: each embedding gets principal components of its own,
+  fitted on the context, and the components that explain the most weighted
+  variance are kept, every embedding its first at least. `weights="equal"`
+  (the default) counts every embedding the same, `None` counts every
+  standardized column the same, and a list gives each embedding its total
+  variance. Each reduced column belongs to one column of items, so a missing
+  item is `NaN` in its own columns alone. The other columns pass through
+  unreduced. It returns a DataFrame whose columns carry their names, such as
+  `notes__pc0`, and a column that passes through keeps its type.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
 - Categorical columns. Every model takes `categorical_features`, as

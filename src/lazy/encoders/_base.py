@@ -183,6 +183,21 @@ class BaseEncoder(
         del item  # Unused: by default, the order of the column.
         return 0
 
+    def _read_item(self, item: Any) -> Any:
+        """An item as a step that transforms items before this encoder takes it.
+
+        By default the item itself. An encoder that reads files, or
+        objects that are not arrays, returns the array it would encode, so
+        that an augmentation gets it in the encoder's own reading.
+
+        Args:
+            item: One item, not missing.
+
+        Returns:
+            The item, or the array the encoder reads of it.
+        """
+        return item
+
     def _array(self, item: Any) -> _typing.FloatArray | None:
         """One item as the float64 array that :meth:`forward` takes.
 
