@@ -12,9 +12,10 @@ pip install 'lazy-tfm[tabfm]'     # + the TabFM backend
 pip install 'lazy-tfm[limix]'     # + the LimiX-2 backend's dependencies
 pip install 'lazy-tfm[kumo]'      # + the Kumo Tabular backend's dependencies
 pip install 'lazy-tfm[encoders]'  # + the pretrained encoders of images, text and time series
+pip install 'lazy-tfm[tirex]'     # + the encoders and TiRex, whose package's licence restricts commercial use
 pip install 'lazy-tfm[multabench]' # + MulTaBench's datasets of text and images
 pip install 'lazy-tfm[qp]'        # + qp interoperability (to_qp / from_qp, for RAIL)
-pip install 'lazy-tfm[all]'       # + everything above
+pip install 'lazy-tfm[all]'       # + everything above but tirex
 ```
 
 With [uv](https://docs.astral.sh/uv/), use `uv add 'lazy-tfm[tabpfn]'` in a
