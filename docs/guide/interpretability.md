@@ -141,10 +141,14 @@ $\sum_j \phi_{ij} \approx s(x_i) - s(b)$, with an error that falls as $1/m$.
 The cost is $m$ times that of `"gradient"`.
 
 The forward pass is differentiable only when nothing between the features and
-the model's network is a step that has no gradient. Fit the model with
-`transforms=("none",)` and `outlier_threshold=None`, on numeric columns;
-`explain` refuses any other fit, and any model with no differentiable forward
-pass, such as a pipeline.
+the model's network is a step that has no gradient. The columns must be
+numeric. A transform or a clip that lazy applies itself for the backend has a
+gradient, such as `"quantile"` on TabPFN or TabICL; its fitted parameters are
+constants, so the gradient does not see how they depend on the context. A
+transform or a clip that the model's own package applies has none:
+`transforms=("none",)` and `outlier_threshold=None` always avoid them.
+`explain` refuses a fit without a differentiable pass, and any model with no
+such pass, such as a pipeline.
 
 ## Groups of columns
 

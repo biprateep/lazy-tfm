@@ -22,6 +22,7 @@ lazy asks the user to do as little as possible. `docs/guide/philosophy.md` state
   - `base.py` holds `BaseDensityRegressor`, the estimator protocol every model meets.
   - `models/` holds the backends (`tabpfn.py`, `tabicl.py`, `tabfm.py`, `limix.py`, `kumo.py`), the layer they share (`_ensemble.py`, `ContextEnsembleEstimator`), `LazyModel` (`lazy_model.py`, a backend chosen by name), `LazyEnsembleModel` (`ensemble.py`), the registry, and the pinned checkpoints and default versions (`_hub.py`).
   - `pipeline.py` holds `LazyPipeline`, a scikit-learn pipeline with the density methods of the model at its end.
+  - `_steps.py` holds the step contract of gradients: each step's gradient kind and its forward on torch tensors. `_sklearn_forwards.py` holds the forwards of fitted scikit-learn transformers.
   - `encoders/` holds `BaseEncoder`, the contract of the transformers that turn items which are not table cells into table columns (`_base.py`), their registry, the cache of their embeddings (`_cache.py`) and `Tabularizer`, which encodes the columns of items of a table (`tabularizer.py`).
   - `time.py`, `image.py` and `text.py` hold the encoders of each kind of item: a pretrained one, which runs one of several networks pinned to a commit on the Hugging Face Hub (`encoders/_pretrained.py` holds their contract; `models/_hub.py` pins the weights), and classical ones, fixed computations that need no download.
   - `interp.py` holds `explain`, the entry point for interpretability: attributions of a predicted distribution to the features.

@@ -642,7 +642,12 @@ def _nll(  # noqa: GS030 - scikit-learn's y.
         ValueError: If the backend refuses the pass.
     """
     density = differentiable.density(
-        backend, "ContextAdapter", features[rows], features[support], y[support]
+        backend,
+        "ContextAdapter",
+        features[rows],
+        features[support],
+        y[support],
+        context_moves=True,
     )
     return -density.log_prob(y[rows]).mean()
 

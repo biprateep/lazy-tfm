@@ -76,7 +76,13 @@ def refuse_inference_mode(label: str) -> None:
 
 
 def density(
-    model: Any, label: str, query: Any, context: Any, y_context: Any
+    model: Any,
+    label: str,
+    query: Any,
+    context: Any,
+    y_context: Any,
+    *,
+    context_moves: bool = False,
 ) -> Any:
     """A backend's differentiable densities, with its refusals labelled.
 
@@ -87,6 +93,8 @@ def density(
         context: The context features, a torch tensor of shape
             (n_context, n_columns).
         y_context: Their targets, shape (n_context,).
+        context_moves: Whether ``context`` holds other values than the
+            fit's, as when a network that makes its columns is trained.
 
     Returns:
         What the backend's ``_differentiable_density`` returns.
@@ -96,7 +104,9 @@ def density(
             differentiable, or it has no differentiable forward pass.
     """
     try:
-        return model._differentiable_density(query, context, y_context)  # noqa: SLF001 - lazy's own backends.
+        return model._differentiable_density(  # noqa: SLF001 - lazy's own backends.
+            query, context, y_context, context_moves=context_moves
+        )
     except (ValueError, NotImplementedError) as error:
         raise ValueError(f"{label}: {error}") from error
 

@@ -353,9 +353,10 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             context is given, and ``"permutation"`` otherwise.
             ``"permutation"`` does not use a context. ``"gradient"``
             (gradient times input) and ``"integrated_gradients"`` need
-            ``model`` fitted with a differentiable forward pass: a backend
-            fitted with ``transforms=("none",)`` and
-            ``outlier_threshold=None``, on numeric columns.
+            ``model`` fitted with a differentiable forward pass: a
+            backend, on numeric columns, with no transform or clip that
+            the backend's own package applies (``transforms=("none",)``
+            and ``outlier_threshold=None`` always qualify).
         groups: Columns to treat as one feature each, as
             ``{feature name: column names}``: the columns of an embedding,
             say. A column in no group is a feature of its own. ``None`` for
@@ -509,9 +510,10 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
             ``"gradient"`` needs it fitted on ``X_context`` and
-            ``y_context`` with a differentiable forward pass: a backend
-            fitted with ``transforms=("none",)`` and
-            ``outlier_threshold=None``, on numeric columns. ``"loo"`` fits
+            ``y_context`` with a differentiable forward pass, as
+            :func:`explain`'s gradient methods do. A transform or a clip
+            that lazy fitted on the context is held fixed, so the values
+            leave out how it depends on each context row. ``"loo"`` fits
             clones of it and leaves it as it is.
         X: The rows to explain, shape (n_rows, n_columns), in any form the
             models take. They should not be rows of the context.

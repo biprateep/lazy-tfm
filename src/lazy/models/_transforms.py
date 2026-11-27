@@ -48,12 +48,16 @@ Typical usage example:
 
 from collections.abc import Sequence
 import dataclasses
+from typing import Any
 import warnings
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 from sklearn import preprocessing
 
+from lazy import _arrays
+from lazy import _steps
 from lazy import _typing
 
 __all__ = [
@@ -147,6 +151,9 @@ def _parse_one(name: str) -> TransformSpec:
 class ScaffoldTransform:
     """A transform applied by the package for a model that lacks it.
 
+    :meth:`forward` is :meth:`transform` on torch's autograd graph, so a
+    gradient passes through every transform of the vocabulary.
+
     Fitted on its member group's context rows only (see the module
     docstring), so a query row's features never depend on the other query
     rows. Missing values (NaN) are ignored
@@ -159,6 +166,8 @@ class ScaffoldTransform:
         categorical: Which columns are categorical, shape (n_features,);
             ``None`` for none.
     """
+
+    gradient_kind = "differentiable"
 
     def __init__(
         self,
@@ -245,6 +254,36 @@ class ScaffoldTransform:
             out = np.hstack([out, np.asarray(features, dtype=np.float64)])
         return out
 
+    def forward(self, features: Any) -> Any:
+        """:meth:`transform` on a torch tensor, on the autograd graph.
+
+        The fitted parameters are constants: the gradient does not see how
+        they depend on the context.
+
+        Args:
+            features: Features, a float torch tensor of shape (n_rows,
+                n_features).
+
+        Returns:
+            What :meth:`transform` gives for the same values, to float
+            rounding, of the kind of ``features``.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        out = features
+        if self._transformer is not None and self._columns is None:
+            out = _steps.forward(self._transformer, features)
+        elif self._transformer is not None:
+            columns = torch.as_tensor(self._columns, device=features.device)
+            out = features.index_copy(
+                1,
+                columns,
+                _steps.forward(self._transformer, features[:, columns]),
+            )
+        if self.spec.original:
+            out = torch.cat([out, features], dim=1)
+        return out
+
 
 class SoftClip:
     """The soft outlier clip the backends' models share, for any model.
@@ -326,15 +365,30 @@ class SoftClip:
             np.where(np.isnan(upper), np.inf, upper),
         )
 
-    def transform(self, features: _typing.FloatArray) -> _typing.FloatArray:
-        """Applies the clip, shape (n_rows, n_features)."""
+    def transform(self, features: Any) -> Any:
+        """Applies the clip, shape (n_rows, n_features).
+
+        One implementation for numpy arrays and for torch tensors, which
+        keep their gradients.
+
+        Args:
+            features: Features, shape (n_rows, n_features): array-like, read
+                as float64, or a float torch tensor.
+
+        Returns:
+            The clipped features, of that shape: a float64 numpy array, or
+            a tensor of the kind of ``features``.
+        """
         if self._lower is None or self._upper is None:
             raise RuntimeError("SoftClip.transform before fit")
-        out = np.asarray(features, dtype=np.float64)
+        if not array_api_compat.is_torch_array(features):
+            features = np.asarray(features, dtype=np.float64)
+        xp = array_api_compat.array_namespace(features)
+        lower = _arrays.constant(self._lower, features)
+        upper = _arrays.constant(self._upper, features)
         with np.errstate(invalid="ignore"):
-            out = np.maximum(-np.log1p(np.abs(out)) + self._lower, out)
-            out = np.minimum(np.log1p(np.abs(out)) + self._upper, out)
-        return out
+            out = xp.maximum(lower - xp.log1p(xp.abs(features)), features)
+            return xp.minimum(upper + xp.log1p(xp.abs(out)), out)
 
 
 def _quantile(
