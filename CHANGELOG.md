@@ -281,6 +281,9 @@ change the API.
 
 ### Fixed
 
+- A `Grid` that is copied, cloned or unpickled keeps its edges read-only, as
+  a `Grid` that the constructor builds does. Pickles hold the same data as
+  before, and pickles of earlier releases load read-only.
 - `Tabularizer` reduces an embedding with LAPACK's `gesvd` driver when
   `gesdd`, the default, fails to converge, as it did on one embedding on
   aarch64. Where `gesdd` converges, the result does not change.
