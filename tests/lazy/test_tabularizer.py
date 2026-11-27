@@ -391,3 +391,58 @@ def test_a_random_state_that_is_no_seed_is_refused(seed):
     tab = lazy.Tabularizer({"notes": "text_hashing"}, random_state=seed)
     with pytest.raises((TypeError, ValueError), match="random_state"):
         tab.fit(frame)
+
+
+def _curves():
+    """Each of 120 rows a series of six values, as an image of one pixel."""
+    rng = np.random.default_rng(0)
+    curves = rng.normal(size=(120, 6))
+    return pd.DataFrame(
+        {
+            "curve": [curve.reshape(1, 1, 6) for curve in curves],
+            "number": rng.normal(size=120),
+        }
+    )
+
+
+def _reducing(**reducer):
+    """A Tabularizer of the curves, reduced to 3 columns."""
+    return lazy.Tabularizer(
+        {"curve": lazy.image.Pixels(size=1, n_channels=6)},
+        n_columns=3,
+        reducer=encoders.AdaptiveReducer(**reducer) if reducer else "pca",
+    )
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"hidden": 0}, "hidden == 0, must be >= 1"),
+        ({"n_steps": -1}, "n_steps == -1, must be >= 0"),
+        ({"learning_rate": 0.0}, "learning_rate == 0.0, must be > 0"),
+        ({"validation_fraction": 1.0}, "validation_fraction == 1.0, must"),
+        (
+            {"validation_fraction": 0.6, "query_fraction": 0.5},
+            "must be below 1, to leave support rows",
+        ),
+        ({"random_state": -1}, "random_state == -1, must be >= 0"),
+        ({"block_dropout": 1.0}, "block_dropout == 1.0, must be < 1"),
+        ({"network": "cnn"}, "network must be 'mlp' or a torch.nn.Module"),
+    ],
+)
+def test_a_bad_setting_of_the_adaptive_reducer_is_refused_by_name(
+    params, message
+):
+    with pytest.raises(ValueError, match=message):
+        _reducing(**params).fit(_curves())
+
+
+def test_outside_a_pipeline_the_mlp_stays_pca_and_pickles():
+    X = _curves()
+    tab = _reducing(n_steps=3).fit(X)
+    assert tab.trains_through_model and not hasattr(tab, "history_")
+    np.testing.assert_allclose(
+        tab.transform(X), _reducing().fit(X).transform(X)
+    )
+    again = pickle.loads(pickle.dumps(tab))
+    pd.testing.assert_frame_equal(again.transform(X), tab.transform(X))

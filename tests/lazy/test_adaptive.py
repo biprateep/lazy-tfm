@@ -2,8 +2,6 @@
 # Copyright (c) 2025 Biprateep Dey
 """The Tabularizer's adaptive reducer, trained through a pipeline's model."""
 
-import pickle
-
 import fakes
 import numpy as np
 import pandas as pd
@@ -247,28 +245,6 @@ def test_a_model_without_a_differentiable_pass_is_refused(data):
         _pipeline(standin, n_steps=1).fit(X, y)
 
 
-@pytest.mark.parametrize(
-    ("params", "message"),
-    [
-        ({"hidden": 0}, "hidden == 0, must be >= 1"),
-        ({"n_steps": -1}, "n_steps == -1, must be >= 0"),
-        ({"learning_rate": 0.0}, "learning_rate == 0.0, must be > 0"),
-        ({"validation_fraction": 1.0}, "validation_fraction == 1.0, must"),
-        (
-            {"validation_fraction": 0.6, "query_fraction": 0.5},
-            "must be below 1, to leave support rows",
-        ),
-        ({"random_state": -1}, "random_state == -1, must be >= 0"),
-        ({"block_dropout": 1.0}, "block_dropout == 1.0, must be < 1"),
-        ({"network": "cnn"}, "network must be 'mlp' or a torch.nn.Module"),
-    ],
-)
-def test_a_bad_setting_is_refused_by_name(model, data, params, message):
-    X, y = _as_images(data[0]), data[1]
-    with pytest.raises(ValueError, match=message):
-        _pipeline(model, **params).fit(X, y)
-
-
 def _two_items(data):
     """The context and the queries with the series as two columns of items."""
     tables = []
@@ -324,17 +300,6 @@ def test_a_bad_reducer_and_a_missing_number_are_refused(model, data):
     gappy.loc[3, "number"] = np.nan
     with pytest.raises(ValueError, match="without missing or infinite"):
         _pipeline(model, n_steps=1).fit(gappy, y)
-
-
-def test_outside_a_pipeline_the_mlp_stays_pca_and_pickles(model, data):
-    X = _as_images(data[0])
-    tab = _pipeline(model, n_steps=3)[0].fit(X)
-    assert tab.trains_through_model and not hasattr(tab, "history_")
-    np.testing.assert_allclose(
-        tab.transform(X), _pipeline(model)[0].fit(X).transform(X)
-    )
-    again = pickle.loads(pickle.dumps(tab))
-    pd.testing.assert_frame_equal(again.transform(X), tab.transform(X))
 
 
 @pytest.mark.checkpoint
