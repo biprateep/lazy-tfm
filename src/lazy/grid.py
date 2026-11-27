@@ -31,7 +31,7 @@ Typical usage example:
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -118,6 +118,11 @@ class Grid:
             )
         edges.setflags(write=False)
         object.__setattr__(self, "edges", edges)
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restores the fields and keeps the edges read-only."""
+        self.__dict__.update(state)
+        self.edges.setflags(write=False)
 
     # -- constructors ------------------------------------------------------
 

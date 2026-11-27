@@ -36,6 +36,7 @@ import atexit
 from collections.abc import Iterator
 import contextlib
 import dataclasses
+import functools
 import hashlib
 import importlib
 from importlib import metadata
@@ -278,9 +279,7 @@ def load() -> types.SimpleNamespace:
 
     Returns:
         A namespace with ``loading`` (``model.v2_0.loading``), ``preprocess``
-        (``inference.v2_0.preprocess``), ``source`` (a :class:`Source`) and
-        ``triton`` (whether triton is installed; without it, the network
-        runs on any device but CUDA, as :func:`_triton` explains).
+        (``inference.v2_0.preprocess``) and ``source`` (a :class:`Source`).
 
     Raises:
         ImportError: If the source cannot be found, or one of its own
@@ -313,7 +312,7 @@ def load() -> types.SimpleNamespace:
             else source.root
         )
         try:
-            with _triton() as triton:
+            with _triton():
                 for name, parts in _SUBTREES.items():
                     _load_package(f"{_ALIAS}.{name}", root.joinpath(*parts))
                 namespace = types.SimpleNamespace(
@@ -322,7 +321,6 @@ def load() -> types.SimpleNamespace:
                         f"{_ALIAS}.inference.preprocess"
                     ),
                     source=source,
-                    triton=triton,
                 )
         except ModuleNotFoundError as error:
             if (error.name or "").partition(".")[0] not in _DEPENDENCIES:
@@ -370,8 +368,23 @@ def missing_dependency(name: str) -> ImportError:
     )
 
 
+@functools.cache
+def has_triton() -> bool:
+    """Whether triton is installed.
+
+    Without it, LimiX's network runs on any device but CUDA, as
+    :func:`_triton` explains. The answer is kept for the process, as LimiX's
+    code is imported once, with triton or with the stand-in: a triton
+    installed later would not reach it.
+
+    Returns:
+        Whether Python can find the ``triton`` package.
+    """
+    return util.find_spec("triton") is not None
+
+
 @contextlib.contextmanager
-def _triton() -> Iterator[bool]:
+def _triton() -> Iterator[None]:
     """Lets LimiX's network import triton, which PyTorch installs on Linux only.
 
     LimiX's triton modules use only ``triton.jit``, as a decorator, and
@@ -383,10 +396,10 @@ def _triton() -> Iterator[bool]:
     unchanged; any other name raises :class:`AttributeError`.
 
     Yields:
-        Whether triton is installed; if not, the stand-in is in place.
+        Nothing; while it runs, triton or its stand-in can be imported.
     """
-    if util.find_spec("triton") is not None:
-        yield True
+    if has_triton():
+        yield
         return
     # torch probes for triton, so it must not import under the stand-in.
     # Without torch, LimiX's own import of it says what is missing.
@@ -403,7 +416,7 @@ def _triton() -> Iterator[bool]:
     saved = {name: sys.modules[name] for name in names if name in sys.modules}
     sys.modules.update(dict.fromkeys(names, stand_in))
     try:
-        yield False
+        yield
     finally:
         for name in names:
             if name in saved:

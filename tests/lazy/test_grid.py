@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Biprateep Dey
 
+import copy
+import pickle
+
 import numpy as np
 import pytest
 
@@ -242,3 +245,15 @@ def test_a_deprecated_grid_method_warns_once_and_still_works(
         density = getattr(grid, method)(*args)
     assert len(record) == 1
     np.testing.assert_allclose(density, expected)
+
+
+@pytest.mark.parametrize(
+    "route",
+    [copy.deepcopy, lambda grid: pickle.loads(pickle.dumps(grid))],
+    ids=["deepcopy", "pickle"],
+)
+def test_a_copied_or_unpickled_grid_keeps_its_edges_read_only(route):
+    grid = lazy.Grid.from_edges([0.0, 1.0, 3.0, 6.0], normalization="histogram")
+    duplicate = route(grid)
+    assert duplicate == grid
+    assert not duplicate.edges.flags.writeable

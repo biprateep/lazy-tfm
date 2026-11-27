@@ -241,6 +241,12 @@ change the API.
 
 ### Changed
 
+- LimiX-2 without `triton` on a CUDA device raises a `ValueError`, as the
+  other backends do for a device they cannot use, not a `RuntimeError`. The
+  check runs when the device is resolved, at fit and at unpickling, before
+  any weights load. Under `device="auto"`, it moves the model to the CPU
+  with a `PerformanceWarning`, as it does for them. A model pickled with
+  an explicit CUDA device no longer loads on a machine without `triton`.
 - The embedding cache of `lazy.encoders` reads a cached embedding about 6
   times faster and writes one about twice as fast. Its files are unchanged.
 - A pandas `category` column whose categories are numbers was read as those
@@ -287,6 +293,9 @@ change the API.
   named `levels`. The same check, now shared by `Distribution.ppf` and
   `metrics.pinball_loss`, refuses `NaN`. `LazyPipeline.predict_interval`
   likewise checks `coverage` before any step runs.
+- A `Grid` that is copied, cloned or unpickled keeps its edges read-only, as
+  a `Grid` that the constructor builds does. Pickles hold the same data as
+  before, and pickles of earlier releases load read-only.
 - `Tabularizer` reduces an embedding with LAPACK's `gesvd` driver when
   `gesdd`, the default, fails to converge, as it did on one embedding on
   aarch64. Where `gesdd` converges, the result does not change.

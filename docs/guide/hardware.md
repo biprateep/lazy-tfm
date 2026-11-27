@@ -91,8 +91,8 @@ and not run.
 
 On a CPU, the models run on Linux, macOS and Windows. On an
 NVIDIA GPU under Windows, LimiX-2 needs `triton`, which PyTorch installs on
-Linux only, so LAZY refuses `device="cuda"` there unless `triton` is
-installed. The table of {doc}`../models/index` shows which
+Linux only. Without `triton`, LAZY refuses `device="cuda"`, and
+`device="auto"` runs LimiX-2 on the CPU with a warning. The table of {doc}`../models/index` shows which
 of them are fast enough on a CPU, and {doc}`scaling` how fast.
 
 On an AMD GPU, we first install PyTorch's ROCm build from the PyTorch ROCm
