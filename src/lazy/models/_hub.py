@@ -161,9 +161,12 @@ class Checkpoint:
         page: The page of the documentation that lists the references of
             the weights, relative to its root; ``""`` for the page of the
             backend, ``models/<backend>.html``.
+        extra: The extra of lazy-tfm that installs ``package``, when it is
+            not the one its backend or modality names; ``""`` for that one.
 
-    The last six fields write the documentation's table of the models
-    (docs/models/index.md), so they are kept with the weights they describe.
+    The six fields from ``display_name`` to ``cpu`` write the
+    documentation's table of the models (docs/models/index.md), so they
+    are kept with the weights they describe.
     """
 
     backend: str
@@ -183,6 +186,7 @@ class Checkpoint:
     gpu: str = ""
     cpu: str = ""
     page: str = ""
+    extra: str = ""
 
     @property
     def key(self) -> str:
@@ -727,13 +731,24 @@ def _encoder(
     display_name: str,
     license_name: str,
     package: str = "transformers",
+    commercial_use: bool = True,
+    extra: str = "",
 ) -> Checkpoint:
     """The pinned weights of one network of a pretrained encoder.
 
-    Every network here has an open license that permits commercial use. Its
-    download notice points to the encoders page, and its version is that of
-    ``package``, the distribution that loads it.
+    A network may restrict commercial use, as some backends' weights do;
+    its download notice then asks the user to read the license first, at
+    the repository's page. A modality's default network permits it. The
+    notice points to the encoders page, and the version of the network is
+    that of ``package``, the distribution that loads it.
     """
+    note = f"{display_name} is released under {license_name}."
+    if not commercial_use:
+        note = (
+            f"{display_name} is released under a license that restricts "
+            f"commercial use ({license_name}); read it at "
+            f"https://huggingface.co/{repo_id} before use."
+        )
     return Checkpoint(
         backend=modality,
         version=model,
@@ -741,8 +756,9 @@ def _encoder(
         revision=revision,
         allow_patterns=files,
         package=package,
-        commercial_use=True,
-        license_note=f"{display_name} is released under {license_name}.",
+        commercial_use=commercial_use,
+        extra=extra,
+        license_note=note,
         display_name=display_name,
         parameters=parameters,
         size_bytes=size_bytes,
@@ -979,6 +995,41 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             parameters=231_289_280,
             display_name="TimesFM-2.5-200M",
             license_name="Apache-2.0",
+        ),
+        # The timesfm package, under Apache-2.0, loads the network; the
+        # file holds the forecast head too (0.7 M parameters), which the
+        # embedding does not use. The license comes with the weights.
+        _encoder(
+            "time",
+            "timesfm-3.0",
+            repo_id="google/timesfm-3.0-pytorch",
+            revision="43046b85ec22d584a13f8098c2ed39c889e129c2",
+            files=("LICENSE", "config.json", "model.safetensors"),
+            size_bytes=1_322_907_367,
+            parameters=330_710_976,
+            display_name="TimesFM-3.0",
+            license_name="TimesFM, non-commercial",
+            package="timesfm",
+            commercial_use=False,
+        ),
+        # A PyTorch Lightning checkpoint, which tirex-ts loads with
+        # torch.load(weights_only=True). The NXAI Community License covers
+        # tirex-ts too.
+        _encoder(
+            "time",
+            "tirex",
+            repo_id="NX-AI/TiRex",
+            revision="43ebaaff068c1390785c387b3e5178df3f4c92ca",
+            files=("LICENSE", "model.ckpt"),
+            size_bytes=141_237_624,
+            parameters=35_291_200,
+            display_name="TiRex",
+            license_name="NXAI Community, restricted commercial use",
+            package="tirex-ts",
+            commercial_use=False,
+            # tirex-ts's own code is under that license, so neither the
+            # encoders extra nor all installs it.
+            extra="tirex",
         ),
     )
 }

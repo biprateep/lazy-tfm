@@ -220,8 +220,14 @@ def test_the_first_download_shows_the_license_and_what_to_cite(
 
 @pytest.mark.parametrize("key", list(PINNED))
 def test_commercial_use_agrees_with_the_license_name(key):
+    """A license name mentions commercial use only to restrict it."""
     spec = PINNED[key]
-    assert spec.commercial_use == ("non-commercial" not in spec.license_name)
+    assert spec.commercial_use == ("commercial" not in spec.license_name)
+
+
+@pytest.mark.parametrize("modality", list(_hub.DEFAULT_ENCODER_MODELS))
+def test_the_default_network_of_each_modality_allows_commercial_use(modality):
+    assert _hub.get_checkpoint(modality).commercial_use
 
 
 def test_an_encoders_weights_are_found_and_fetched_by_modality(hub):

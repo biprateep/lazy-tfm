@@ -43,8 +43,10 @@ non-commercial. LimiX-2's weights are released under the
 StableAI LimiX Non-Commercial License 1.0, which also requires distributions,
 derivatives and publications to display "Built with StableAI LimiX", while
 LimiX's code is under the Apache-2.0-based Stable AI Technology Co., Ltd.
-License 1.0. Please check the license of each backend at its original source
-before use.
+License 1.0. The networks of the pretrained encoders have licenses of their
+own, which {doc}`encoders` lists: the default network of each modality allows
+commercial use, and TimesFM-3.0 and TiRex restrict it. Please check the
+license of each backend and network at its original source before use.
 
 Built with StableAI LimiX.
 

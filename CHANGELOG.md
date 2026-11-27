@@ -9,6 +9,18 @@ change the API.
 
 ### Added
 
+- TimesFM-3.0 and TiRex as pretrained networks for time series
+  (`lazy.time.Pretrained(model="timesfm-3.0")` and `model="tirex"`). A
+  pretrained encoder may now run a network whose licence restricts commercial
+  use, as a backend may: TimesFM-3.0's licence is non-commercial, and TiRex's
+  (the NXAI Community License) requires a commercial licence from NXAI above
+  an annual revenue of €100 million. Their first download warns with a
+  `LicenseWarning` that asks you to read the licence, and the table of
+  networks in the docs states whether each allows commercial use. The default
+  networks do not change, and each allows commercial use. The `encoders`
+  extra now installs `timesfm`. TiRex needs the new `tirex` extra, which
+  installs `tirex-ts`: its code is under the NXAI Community License too, so
+  neither `encoders` nor `all` installs it.
 - TimesFM-2.5-200M and TimesFM-2.0-500M as pretrained networks for time
   series (`lazy.time.Pretrained(model="timesfm-2.5-200m")` and
   `model="timesfm-2.0-500m"`), the first from a family other than Chronos.

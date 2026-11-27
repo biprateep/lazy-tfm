@@ -6,9 +6,9 @@ A time series is one row of a numeric array, or a sequence of numbers of
 any length, read as evenly sampled.
 
 :class:`Pretrained`
-    A frozen Chronos or TimesFM network, chosen by ``model``: the default
-    of the modality ``"time"``. Its weights download on first use; it
-    needs the ``encoders`` extra.
+    A frozen Chronos, TimesFM or TiRex network, chosen by ``model``: the
+    default of the modality ``"time"``. Its weights download on first use;
+    it needs the ``encoders`` extra, and TiRex the ``tirex`` extra.
 :class:`Statistics`
     Summary statistics of the values: location, spread, shape, trend and
     roughness.
@@ -22,8 +22,10 @@ Typical usage example:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
+import pathlib
 from typing import Any, ClassVar
 
 import numpy as np
@@ -194,7 +196,7 @@ class _Recipe:
     states.
 
     Attributes:
-        states: The width of the network's states.
+        states: The width of the pooled states.
         patch: The number of values in one token.
         context: The most values of a series, its last ones, that it reads.
         package: The module that loads the network.
@@ -290,10 +292,10 @@ class _TimesFm(_Recipe):
     here to whole patches of the batch's longest series, where the forecast
     pads to the whole context. Each series is standardized first. The
     network normalizes the values by statistics of the series itself
-    (TimesFM 2.5 each patch by those of the series up to it, TimesFM 2.0
-    the series by those of its first patch of at least three values), so
-    this leaves its states as they are, but keeps their precision in
-    float32. TimesFM has no summary token.
+    (TimesFM 2.5 and 3 each patch by those of the series up to it,
+    TimesFM 2.0 the series by those of its first patch of at least three
+    values), so this leaves its states as they are, but keeps their
+    precision in float32. TimesFM has no summary token.
 
     Attributes:
         freq: The frequency indicator that TimesFM 2.0 reads with each
@@ -320,21 +322,13 @@ class _TimesFm(_Recipe):
         length = self.patch * max(-(-len(v) // self.patch) for v in filled)
         values = np.zeros((len(filled), length), dtype=np.float32)
         padding = np.ones((len(filled), length), dtype=np.float32)
-        observed = np.zeros((len(filled), length // self.patch))
-        for i, (own, whole) in enumerate(zip(filled, series, strict=True)):
+        for row, pad, own in zip(values, padding, filled, strict=True):
             scale = float(own.std()) or 1.0
-            values[i, length - len(own) :] = (own - own.mean()) / scale
-            padding[i, length - len(own) :] = 0
-            flags = _tokens(whole[-self.context :], self.patch)
-            observed[i, len(observed[i]) - len(flags) :] = flags
-        inputs = {
-            "past_values": torch.from_numpy(values),
-            "past_values_padding": torch.from_numpy(padding),
-        }
-        if self.freq is not None:
-            inputs["freq"] = torch.full((len(filled), 1), self.freq)
-        inputs = {name: x.to(network.device) for name, x in inputs.items()}
-        states = network(**inputs).last_hidden_state
+            row[length - len(own) :] = (own - own.mean()) / scale
+            pad[length - len(own) :] = 0
+        windows = [values[-self.context :] for values in series]
+        observed = _observed_tokens(windows, self.patch, length // self.patch)
+        states = self._states(network, values, padding)
         # Summed in float64, except on an Apple GPU, which has none.
         dtype = torch.float32 if states.device.type == "mps" else torch.float64
         states = states.to(dtype)
@@ -343,6 +337,159 @@ class _TimesFm(_Recipe):
         pooled = (states * mask).sum(dim=1) / mask.sum(dim=1)
         return pooled.cpu().numpy()
 
+    def _states(
+        self,
+        network: Any,
+        values: npt.NDArray[np.float32],
+        padding: npt.NDArray[np.float32],
+    ) -> Any:
+        """The decoder's final states over the patches of each series.
+
+        Args:
+            network: What :meth:`load` returned.
+            values: The standardized series, padded on the left to whole
+                patches of the longest, shape (n_series, length).
+            padding: 1 where ``values`` is padding, else 0; the same shape.
+
+        Returns:
+            The states, a tensor of shape (n_series, length // patch,
+            states) on the network's device.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        inputs = {
+            "past_values": torch.from_numpy(values),
+            "past_values_padding": torch.from_numpy(padding),
+        }
+        if self.freq is not None:
+            inputs["freq"] = torch.full((len(values), 1), self.freq)
+        inputs = {name: x.to(network.device) for name, x in inputs.items()}
+        return network(**inputs).last_hidden_state
+
+
+@dataclasses.dataclass(frozen=True)
+class _TimesFm3(_TimesFm):
+    """TimesFM 3, which reads a series from its first patch.
+
+    TimesFM 3 normalizes its queries and keys after their rotary position
+    embedding, so its states depend on the patch that a series starts at,
+    not only on the order of its patches. Each series therefore starts at
+    the first patch, as when TimesFM 3's forecast reads it alone, and is
+    padded on the right, which its causal attention keeps from the
+    series' own patches; their states then move back to the end. The
+    network reads the series through its ``decode``, as its forecast does,
+    with a horizon of one value.
+    """
+
+    package: ClassVar[str] = "timesfm3"
+
+    def load(self, path: os.PathLike[str], device: str) -> Any:
+        """The network, on ``device``, in float32."""
+        import timesfm3.torch  # noqa: PLC0415 - an optional, heavy extra.
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        # huggingface_hub's loader prints that it reads a local directory.
+        with contextlib.redirect_stdout(None):
+            network = timesfm3.torch.TimesFM3Torch.from_pretrained(
+                os.fspath(path)
+            )
+        return network.to(device, torch.float32).eval()
+
+    def _states(
+        self,
+        network: Any,
+        values: npt.NDArray[np.float32],
+        padding: npt.NDArray[np.float32],
+    ) -> Any:
+        """The final states over each series' patches, read from the start."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        length = values.shape[1]
+        tokens = length // self.patch
+        # Each series moves left by its whole patches of padding.
+        shifts = padding.argmin(axis=1) // self.patch
+        order = (np.arange(length) + self.patch * shifts[:, None]) % length
+        values = np.take_along_axis(values, order, axis=1)
+        padded = np.take_along_axis(padding.astype(bool), order, axis=1)
+        device = next(network.parameters()).device
+        _, outputs = network.decode(
+            torch.from_numpy(values)[:, None].to(device),
+            horizon=1,
+            mask=torch.from_numpy(padded).to(device),
+            return_aux_outputs=True,
+        )
+        states = outputs["__call__:transformer_output"][:, 0, :tokens]
+        # Each series' states move back to the end, where pooled reads them.
+        back = (np.arange(tokens) - shifts[:, None]) % tokens
+        back = torch.as_tensor(back, device=states.device)[..., None]
+        return torch.take_along_dim(states, back, dim=1)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TiRex(_Recipe):
+    """TiRex, an xLSTM, which masks a missing value.
+
+    As TiRex's own embedding does (``TiRexEmbedding`` in tirex-ts), each
+    series' window is padded on the left with missing values to the whole
+    context, and every layer's states are kept: each layer's mean over the
+    observed patches is scaled to unit length, and the layers' means are
+    joined and standardized together, by a layer norm without weights.
+    The network's matrix products run in float64, except on an Apple GPU,
+    which has none; its RMS norms round to float32, as tirex-ts writes
+    them. A row then depends on its batch only by float rounding.
+    """
+
+    package: ClassVar[str] = "tirex"
+
+    def load(self, path: os.PathLike[str], device: str) -> Any:
+        """The network, on ``device``, in float64 where it can be."""
+        import tirex  # noqa: PLC0415 - an optional, heavy extra.
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        # tirex-ts prints that it reads a local file; its CUDA kernels,
+        # which run in bfloat16, are not used.
+        with contextlib.redirect_stdout(None):
+            network = tirex.TiRexZero.from_pretrained(
+                os.fspath(pathlib.Path(path) / "model.ckpt"),
+                backend="torch",
+                device=device,
+            )
+        apple = torch.device(device).type == "mps"
+        return network.to(torch.float32 if apple else torch.float64).eval()
+
+    def pooled(
+        self, network: Any, series: list[_typing.FloatArray]
+    ) -> _typing.FloatArray:
+        """Each layer's mean state over the observed patches, normalized."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        windows = [values[-self.context :] for values in series]
+        batch = np.full((len(windows), self.context), np.nan)
+        for row, values in zip(batch, windows, strict=True):
+            row[len(row) - len(values) :] = values
+        observed = _observed_tokens(
+            windows, self.patch, self.context // self.patch
+        )
+        weight = next(network.parameters())
+        context = torch.as_tensor(
+            batch, dtype=weight.dtype, device=weight.device
+        )
+        # As TiRex's _prepare_context_for_embedding: the tokenizer
+        # standardizes the window, and the network reads each patch's mask.
+        tokens, _ = network.tokenizer.input_transform(context)
+        mask = tokens.isfinite().to(tokens.dtype)
+        tokens = torch.nan_to_num(tokens, nan=network.config.nan_mask_value)
+        _, states = network._forward_model(  # noqa: SLF001 - TiRexEmbedding's.
+            torch.cat([tokens, mask], dim=2), return_all_hidden=True
+        )
+        # The states are (series, patches, layers, width).
+        weights = torch.as_tensor(observed, dtype=states.dtype)
+        weights = weights.to(states.device)[..., None, None]
+        means = (states * weights).sum(dim=1) / weights.sum(dim=1)
+        means = torch.nn.functional.normalize(means, dim=-1).flatten(1)
+        rows = torch.nn.functional.layer_norm(means, means.shape[-1:])
+        return rows.cpu().double().numpy()
+
 
 class Pretrained(_pretrained.PretrainedEncoder):
     """The embedding of each time series, from a frozen pretrained network.
@@ -350,23 +497,27 @@ class Pretrained(_pretrained.PretrainedEncoder):
     ``model`` picks one of the networks of ``recipes``, each pinned to a
     commit on the Hugging Face Hub: ``"chronos-t5-tiny"`` (the default),
     ``"chronos-t5-mini"``, ``"chronos-t5-small"``, ``"chronos-bolt-small"``,
-    ``"chronos-2"``, ``"timesfm-2.0-500m"`` and ``"timesfm-2.5-200m"``.
-    Chronos-T5 reads one value per token and the last 512 values of a
-    series; Chronos-Bolt reads one patch of 16 values per token and the
-    last 2,048, and Chronos-2 the last 8,192. TimesFM reads patches of 32
-    values: TimesFM 2.0 the last 2,048, and TimesFM 2.5 the last 16,384.
+    ``"chronos-2"``, ``"timesfm-2.0-500m"``, ``"timesfm-2.5-200m"``,
+    ``"timesfm-3.0"`` and ``"tirex"``. Chronos-T5 reads one value per token
+    and the last 512 values of a series; Chronos-Bolt reads one patch of 16
+    values per token and the last 2,048, and Chronos-2 the last 8,192.
+    TimesFM reads patches of 32 values: TimesFM 2.0 the last 2,048,
+    TimesFM 2.5 the last 16,384 and TimesFM 3 the last 15,360. TiRex reads
+    patches of 32 values and the last 2,048. TimesFM 3 and TiRex restrict
+    commercial use, as their licences state.
     :doc:`/guide/encoders` lists the networks and gives the evidence behind
     the choice.
 
     The embedding is the mean of the network's final states over the
     tokens that hold an observed value and over its summary token, if it
-    has one (TimesFM has none), then ``mean`` and ``scale``, the mean and
+    has one (TimesFM has none), or, for TiRex, each layer's such mean,
+    normalized as its authors do; then ``mean`` and ``scale``, the mean and
     the standard deviation of the observed values in the window it read,
     missing values left out. The network scales each
     series by its own level, so these two columns keep what it removes. A
-    value that is not finite is a missing value: Chronos masks it, and
-    TimesFM reads it filled in by linear interpolation, as TimesFM's own
-    forecasts fill it.
+    value that is not finite is a missing value: Chronos and TiRex mask
+    it, and TimesFM reads it filled in by linear interpolation, as
+    TimesFM's own forecasts fill it.
 
     Attributes:
         model: The network; ``"chronos-t5-tiny"`` by default.
@@ -393,6 +544,13 @@ class Pretrained(_pretrained.PretrainedEncoder):
         # default, for data up to daily.
         "timesfm-2.0-500m": _TimesFm(1280, 32, 2048, freq=0),
         "timesfm-2.5-200m": _TimesFm(1280, 32, 16384),
+        # The context is the longest that TimesFM 3's forecast reads
+        # (_MAX_CONTEXT_LENGTH in timesfm3_forecaster.py), which fills a
+        # missing value as TimesFM 2.5's does.
+        "timesfm-3.0": _TimesFm3(1280, 32, 15360),
+        # 12 layers of 512 states, patches of 32 values and the context of
+        # 2,048 (train_ctx_len), from the checkpoint's hyper-parameters.
+        "tirex": _TiRex(12 * 512, 32, 2048),
     }
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -446,6 +604,28 @@ def _interpolated(values: _typing.FloatArray) -> _typing.FloatArray:
     """
     known = np.flatnonzero(np.isfinite(values))
     return np.interp(np.arange(values.size), known, values[known])
+
+
+def _observed_tokens(
+    windows: list[_typing.FloatArray], patch: int, tokens: int
+) -> npt.NDArray[np.float64]:
+    """Which tokens of a batch hold an observed value, as weights.
+
+    Args:
+        windows: The values each series' network reads, with ``NaN`` for
+            a missing value.
+        patch: The number of values in one token.
+        tokens: The tokens of the batch; each series' come last.
+
+    Returns:
+        1 for a token with an observed value, else 0, shape
+        (len(windows), tokens).
+    """
+    observed = np.zeros((len(windows), tokens))
+    for row, values in zip(observed, windows, strict=True):
+        flags = _tokens(values, patch)
+        row[tokens - len(flags) :] = flags
+    return observed
 
 
 def _tokens(values: _typing.FloatArray, patch: int) -> npt.NDArray[np.bool_]:
