@@ -12,7 +12,11 @@ from sklearn import preprocessing
 
 from lazy import _steps
 
-torch = pytest.importorskip("torch")
+
+@pytest.fixture(name="torch")
+def _torch():
+    """torch, for the tests of forwards; the kinds need no torch."""
+    return pytest.importorskip("torch")
 
 
 def _table(n_rows=80, seed=0):
@@ -63,7 +67,7 @@ _TRANSFORMERS = [
 @pytest.mark.parametrize(
     "transformer", _TRANSFORMERS, ids=lambda t: repr(t)[:60]
 )
-def test_a_forward_gives_what_transform_gives(transformer):
+def test_a_forward_gives_what_transform_gives(transformer, torch):
     # Queries beyond the fitted range on both sides, and on its bounds.
     X = _table()
     transformer.fit(X)
@@ -74,14 +78,14 @@ def test_a_forward_gives_what_transform_gives(transformer):
     )
 
 
-def test_a_quantile_transformer_of_one_quantile_is_constant():
+def test_a_quantile_transformer_of_one_quantile_is_constant(torch):
     X = _table()
     transformer = preprocessing.QuantileTransformer(n_quantiles=1).fit(X)
     got = _steps.forward(transformer, torch.tensor(X[:5]))
     np.testing.assert_allclose(got.numpy(), transformer.transform(X[:5]))
 
 
-def test_box_cox_gives_what_transform_gives():
+def test_box_cox_gives_what_transform_gives(torch):
     X = np.abs(_table()) + 0.1
     transformer = preprocessing.PowerTransformer(method="box-cox").fit(X)
     got = _steps.forward(transformer, torch.tensor(X))
@@ -99,7 +103,7 @@ def test_box_cox_gives_what_transform_gives():
     ],
     ids=["power", "quantile", "pca"],
 )
-def test_a_forwards_gradient_is_the_slope_of_transform(transformer):
+def test_a_forwards_gradient_is_the_slope_of_transform(transformer, torch):
     X = _table()
     transformer.fit(X)
     # Inside the fitted range and away from the knots' kinks by chance.
@@ -118,7 +122,7 @@ def test_a_forwards_gradient_is_the_slope_of_transform(transformer):
         )
 
 
-def test_missing_values_stay_missing_and_an_imputed_one_gets_no_gradient():
+def test_missing_values_stay_missing_and_an_imputed_one_gets_no_gradient(torch):
     X = _table()
     queries = X[:6].copy()
     queries[0, 0] = queries[3, 2] = np.nan
@@ -154,7 +158,7 @@ def test_each_kind_is_reported():
     assert _steps.gradient_kind(chained) == "mask"
 
 
-def test_a_barrier_names_its_reason_and_refuses_a_forward():
+def test_a_barrier_names_its_reason_and_refuses_a_forward(torch):
     X = _table()
     function = preprocessing.FunctionTransformer(lambda x: x).fit(X)
     found = _steps.barrier("identity", function)
@@ -175,7 +179,7 @@ def test_a_subclass_of_a_registered_class_is_a_barrier():
     assert _steps.gradient_kind(Scaler().fit(_table())) == "barrier"
 
 
-def test_a_lazy_step_declares_its_kind_and_its_forward():
+def test_a_lazy_step_declares_its_kind_and_its_forward(torch):
     class Doubled:
         gradient_kind = "differentiable"
 
@@ -187,7 +191,7 @@ def test_a_lazy_step_declares_its_kind_and_its_forward():
         _steps.register_forward(Doubled, "open")
 
 
-def test_a_step_that_declares_a_kind_without_a_forward_is_a_barrier():
+def test_a_step_that_declares_a_kind_without_a_forward_is_a_barrier(torch):
     class Declared:
         gradient_kind = "differentiable"
 
@@ -203,7 +207,7 @@ def test_a_barrier_is_found_before_any_kind_was_asked():
     assert "np.log1p" in _steps.barrier("sign", function).reason
 
 
-def test_a_float32_tensor_takes_the_pieces_that_float64_takes():
+def test_a_float32_tensor_takes_the_pieces_that_float64_takes(torch):
     X = _table()
     transformer = preprocessing.QuantileTransformer(n_quantiles=20).fit(X)
     queries = X[:30].astype(np.float32)
@@ -214,8 +218,9 @@ def test_a_float32_tensor_takes_the_pieces_that_float64_takes():
     )
 
 
-@pytest.mark.parametrize("dtype", [torch.float64, torch.float32])
-def test_a_value_on_a_normal_quantiles_bound_has_a_finite_gradient(dtype):
+@pytest.mark.parametrize("name", ["float64", "float32"])
+def test_a_value_on_a_normal_quantiles_bound_has_a_finite_gradient(torch, name):
+    dtype = getattr(torch, name)
     # Large values, where the bound's margin of 1e-7 is below the spacing
     # of floats, and a column of one value, whose bounds coincide.
     X = _table()
