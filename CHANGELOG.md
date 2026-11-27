@@ -281,6 +281,9 @@ change the API.
 
 ### Fixed
 
+- `Tabularizer` reduces an embedding with LAPACK's `gesvd` driver when
+  `gesdd`, the default, fails to converge, as it did on one embedding on
+  aarch64. Where `gesdd` converges, the result does not change.
 - Under scikit-learn's metadata routing, `LazyPipeline` states that its
   methods that predict take no metadata. A search or `cross_validate` given
   metadata for a transformer now routes it to `fit` alone, and scores the
