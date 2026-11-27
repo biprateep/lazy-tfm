@@ -298,7 +298,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self._n_reduced = int(self._reduced(blocks).shape[1])
         if self.n_columns is not None and self._n_reduced > self.n_columns:
             width = self._n_reduced
-            del self.encoders_
+            for name in _FITTED:
+                self.__dict__.pop(name, None)
             raise ValueError(
                 f"the reducer's module gives {width} columns, more than"
                 f" n_columns={self.n_columns}; set n_columns={width} or None"

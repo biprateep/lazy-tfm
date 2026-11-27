@@ -143,3 +143,24 @@ after such a change.
 
 An encoder that is cheap to run should default to `cache=False`: reading a
 file costs more than a few arithmetic operations.
+
+## Gradients
+
+A gradient method of {mod}`lazy.interp` attributes a prediction to the items
+of a column when their encoder has a forward
+({doc}`guide/interpretability`). An encoder is a barrier to gradients by
+default: attribution ends at its embedding. To let a gradient through, an
+encoder does three things.
+
+1. It declares `gradient_kind = "differentiable"` on the class.
+2. It implements `_stacked(X)`: the items of a column as one float64 array of
+   shape (n, ...), or `None` when they do not all have one shape or one is
+   missing. The attribution is then to the elements of that array.
+3. It implements `forward(items)`: the embeddings of that array as a torch
+   tensor, on the autograd graph. It must give what `transform` gives for the
+   same items, to float rounding; `explain` checks the model's predictions
+   through it against `predict`, and a test should check the forward against
+   `transform` directly.
+
+An encoder that cannot have a forward, such as one of text, may say why in
+`barrier_reason`, which `explain` reports.
