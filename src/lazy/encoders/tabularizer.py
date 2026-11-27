@@ -23,9 +23,10 @@ import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from scipy import linalg
 from sklearn import base as sklearn_base
-from sklearn import decomposition
 from sklearn import preprocessing
+from sklearn.utils import extmath
 from sklearn.utils import validation
 
 from lazy import _steps
@@ -416,20 +417,20 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                     f"an embedding to reduce has {rows.sum()} rows with an"
                     " item that is not missing; it needs at least 2"
                 )
-            pca = decomposition.PCA(
+            mean, components, variances = _principal_components(
+                scaler.transform(block[rows]),
                 # The centred rows span one direction fewer than they are.
                 # No embedding can keep more than all the columns asked.
                 min(widths[index], int(rows.sum()) - 1, target),
-                svd_solver="full",
-            ).fit(scaler.transform(block[rows]))
-            for number, component in enumerate(pca.components_):
+            )
+            for number, component in enumerate(components):
                 row = np.zeros(starts[-1])
                 row[starts[index] : starts[index + 1]] = component
                 rows_of.append(row)
-                offsets.append(float(pca.mean_ @ component))
+                offsets.append(float(mean @ component))
                 # An embedding's first component is kept before any other.
                 first = number == 0 and target >= len(blocks)
-                value = pca.explained_variance_[number] * factors[index] ** 2
+                value = variances[number] * factors[index] ** 2
                 scores.append(np.inf if first else value)
                 owners.append(index)
         # Stable: components that tie keep their order.
@@ -940,6 +941,43 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             return list(self.remainder_.get_feature_names_out())
         kept = self._kept(rest)
         return [] if kept is None else list(kept.columns)
+
+
+def _principal_components(
+    standardized: _typing.FloatArray, n_components: int
+) -> tuple[_typing.FloatArray, _typing.FloatArray, _typing.FloatArray]:
+    """The leading principal components of standardized embedding rows.
+
+    This is scikit-learn's ``PCA(svd_solver="full")``: the same SVD, sign
+    convention and variances. LAPACK's default driver, ``gesdd``, fails to
+    converge on some matrices and platforms; then the SVD runs again with the
+    ``gesvd`` driver.
+
+    Args:
+        standardized: Standardized rows of one embedding, shape
+            ``(n_rows, n_columns)``.
+        n_components: Number of components to keep, at most
+            ``min(n_rows - 1, n_columns)``.
+
+    Returns:
+        The column means, shape ``(n_columns,)``; the components, shape
+        ``(n_components, n_columns)``; and the variance each explains, shape
+        ``(n_components,)``.
+
+    Raises:
+        numpy.linalg.LinAlgError: If neither driver converges.
+    """
+    mean = standardized.mean(axis=0)
+    centred = standardized - mean
+    try:
+        u, singular, vt = linalg.svd(centred, full_matrices=False)
+    except np.linalg.LinAlgError:
+        u, singular, vt = linalg.svd(
+            centred, full_matrices=False, lapack_driver="gesvd"
+        )
+    _, vt = extmath.svd_flip(u, vt, u_based_decision=False)
+    variances = singular**2 / (len(standardized) - 1)
+    return mean, vt[:n_components], variances[:n_components]
 
 
 def _factors(weights: object, varying: list[int]) -> _typing.FloatArray:

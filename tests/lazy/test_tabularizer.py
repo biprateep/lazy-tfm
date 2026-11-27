@@ -7,6 +7,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import linalg
 from sklearn import decomposition
 from sklearn import exceptions
 from sklearn import model_selection
@@ -15,6 +16,7 @@ import standins
 
 import lazy
 from lazy import encoders
+from lazy.encoders import tabularizer
 
 N_ROWS = 40
 
@@ -280,6 +282,36 @@ def test_a_short_context_keeps_fewer_components_and_says_so(table):
     assert not out[:5].isna().any(axis=None)
     with pytest.raises(ValueError, match="has 1 rows with an item"):
         tab.fit(table.assign(notes=[*table["notes"][:1], *[None] * 39]))
+
+
+def test_the_principal_components_are_scikit_learns_full_pca():
+    rows = np.random.default_rng(0).normal(size=(60, 8)) * np.arange(1, 9)
+    pca = decomposition.PCA(5, svd_solver="full").fit(rows)
+    got = tabularizer._principal_components(rows, 5)
+    want = (pca.mean_, pca.components_, pca.explained_variance_)
+    for got_array, want_array in zip(got, want, strict=True):
+        np.testing.assert_array_equal(got_array, want_array)
+
+
+def test_a_failed_svd_driver_falls_back_to_gesvd_and_reduces_the_same(
+    monkeypatch,
+):
+    rows = np.random.default_rng(0).normal(size=(60, 8)) * np.arange(1, 9)
+    expected = tabularizer._principal_components(rows, 5)
+    default_svd = linalg.svd
+    drivers = []
+
+    def gesdd_fails(*args, lapack_driver="gesdd", **kwargs):
+        drivers.append(lapack_driver)
+        if lapack_driver == "gesdd":
+            raise np.linalg.LinAlgError("SVD did not converge")
+        return default_svd(*args, lapack_driver=lapack_driver, **kwargs)
+
+    monkeypatch.setattr(linalg, "svd", gesdd_fails)
+    fallback = tabularizer._principal_components(rows, 5)
+    assert drivers == ["gesdd", "gesvd"]
+    for got, want in zip(fallback, expected, strict=True):
+        np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)
 
 
 @pytest.mark.parametrize("name", ["flux__g", "remainder", "verbose"])
