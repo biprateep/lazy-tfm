@@ -79,7 +79,9 @@ a CPU; each takes `device` as the models do.
 A row depends on its own item alone, up to float rounding: a batch pads its
 items to one shape, and the items are batched in order of length. The
 pretrained encoders cache their embeddings by default (see
-[The cache](#the-cache)).
+[The cache](#the-cache)). A batch of texts whose padded tokens would exceed
+`max_batch_tokens` (32,768 by default) is split into passes of texts of
+similar length, so that a few long texts do not exhaust a GPU's memory.
 
 ### How the networks were chosen
 

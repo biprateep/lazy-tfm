@@ -241,6 +241,37 @@ def _corner_processor(fakes, monkeypatch):
     monkeypatch.setattr(fake_encoders.ImageProcessor, "__call__", corner)
 
 
+def test_long_texts_are_split_into_passes_under_the_token_budget(
+    fakes, monkeypatch
+):
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    sizes = [1, 40, 3, 2, 38, 5, 4, 1]
+    texts = [" ".join(rng.choice(["ab", "abc", "a"], n)) for n in sizes]
+    shapes = []
+    call = fake_encoders.TextModel.__call__
+
+    def recording(self, input_ids, attention_mask):
+        shapes.append(tuple(input_ids.shape))
+        return call(self, input_ids, attention_mask)
+
+    monkeypatch.setattr(fake_encoders.TextModel, "__call__", recording)
+    whole = lazy.text.Pretrained(device="cpu", cache=False).fit_transform(texts)
+    # A first and a last token, and one for the prefix, beside 40 words.
+    assert shapes == [(8, 43)]
+    shapes.clear()
+    split = lazy.text.Pretrained(
+        max_batch_tokens=50, device="cpu", cache=False
+    ).fit_transform(texts)
+    # Each pass fits the budget, padded; the six short texts share one.
+    assert all(n * length <= 50 for n, length in shapes) and len(shapes) == 3
+    assert sorted(n for n, _ in shapes) == [1, 1, 6]
+    # A padded state is 1e6, so pooling that read other padding would show.
+    np.testing.assert_allclose(split, whole, rtol=1e-6)
+    with pytest.raises(ValueError, match="max_batch_tokens must be a posit"):
+        lazy.text.Pretrained(max_batch_tokens=0, device="cpu").fit(texts)
+
+
 def test_an_augmentation_shows_the_network_another_view(corner):
     rng = np.random.default_rng(2)
     images = [rng.integers(0, 256, (5, 4, 3), dtype=np.uint8) for _ in range(3)]

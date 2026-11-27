@@ -62,6 +62,11 @@ change the API.
   any class can ask `LazyPipeline.fit` to train it this way, by declaring
   `trains_through_model` and implementing `_fit_through`. The "Adaptive
   reducer" page of the user guide gives the equations.
+- `lazy.text.Pretrained(max_batch_tokens=32768)`: the most tokens, padding
+  included, in one forward pass. A batch that would exceed it is split into
+  passes of texts of similar length, so that a few long texts do not exhaust
+  a GPU's memory. Embeddings are unchanged, up to float rounding where a
+  batch is split, and no batch of the networks that read 512 tokens is.
 - `lazy.interp.Explanation.sum_error`: how far each row's Shapley values or
   integrated gradients are from summing to `full_values - base_values`.
   `ContextExplanation.top` takes `X_context`, and then shows each context
