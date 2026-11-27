@@ -9,6 +9,14 @@ change the API.
 
 ### Added
 
+- The gradient methods of `lazy.interp` (`"gradient"` and
+  `"integrated_gradients"` of `explain`, `"gradient"` of `explain_context`)
+  now run on a model fitted with the transforms that lazy applies itself: on
+  a backend that does not implement a transform natively, `"power"`,
+  `"quantile"`, `"quantile_uniform"`, `"quantile_rtdl"` and `"robust"`, each
+  with or without `"+original"`, and the soft clip of `outlier_threshold` on a
+  backend without a clip of its own. A transform or a clip that the model's
+  own package applies is still refused.
 - TimesFM-3.0 and TiRex as pretrained networks for time series
   (`lazy.time.Pretrained(model="timesfm-3.0")` and `model="tirex"`). A
   pretrained encoder may now run a network whose licence restricts commercial

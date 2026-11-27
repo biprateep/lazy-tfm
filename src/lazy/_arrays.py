@@ -98,6 +98,26 @@ def detached(array: Any) -> _typing.FloatArray:
     return np.asarray(array)
 
 
+def constant(values: Any, like: Any) -> Any:
+    """Fixed values as an array of the kind, type and device of another.
+
+    Args:
+        values: The values, such as a fitted parameter held as numpy.
+        like: A numpy array or a torch tensor.
+
+    Returns:
+        ``values`` as an array of the namespace of ``like``, with its type
+        and on its device; it carries no gradient.
+    """
+    xp = array_api_compat.array_namespace(like)
+    return xp.asarray(
+        # In C order: torch takes no view with a negative stride.
+        np.require(values, requirements="C"),
+        dtype=like.dtype,
+        device=array_api_compat.device(like),
+    )
+
+
 _IN_PLACE = {
     operator.add: operator.iadd,
     operator.sub: operator.isub,

@@ -42,6 +42,7 @@ import sys
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -571,7 +572,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         )
 
     def _differentiable_density(
-        self, query: Any, X: Any, y: npt.ArrayLike
+        self,
+        query: Any,
+        X: Any,
+        y: npt.ArrayLike,
+        *,
+        context_moves: bool = False,
     ) -> _differentiable.TorchMixture | _differentiable.TorchQuantiles:
         """The model's densities for ``query``, on torch's autograd graph.
 
@@ -592,6 +598,10 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             X: Context features, a float torch tensor of shape
                 (n_context_, n_features_in_), in the order of ``fit``'s.
             y: Their target values, shape (n_context_,).
+            context_moves: Whether ``X`` holds other values than the
+                context of ``fit``. A transform or a clip that lazy fitted
+                on that context is a constant on the graph, so it would
+                not follow ``X``: such a fit is then refused.
 
         Returns:
             The pooled densities, whose :meth:`log_prob` keeps the
@@ -606,7 +616,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
                 (:meth:`_check_differentiable`).
         """
         validation.check_is_fitted(self)
-        self._check_differentiable()
+        self._check_differentiable(context_moves)
         y = np.asarray(y, dtype=np.float64)
         shapes = (tuple(query.shape[1:]), tuple(X.shape), y.shape)
         expected = (
@@ -631,15 +641,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         # Histograms, or quantiles under "quantile_average"; each member's
         # quantiles under a trim, which spans every member, as predicting.
         parts: list[Any] = []
-        for handle, group in zip(
-            self.handles_, self.member_groups_, strict=True
+        for handle, group, fitted, clipper in zip(
+            self.handles_,
+            self.member_groups_,
+            self.transformers_,
+            self.clippers_,
+            strict=True,
         ):
             rows = slice(None) if group.rows is None else group.rows
             args = (
                 handle,
-                self._prepare(X[rows], group, None),
+                self._prepare(X[rows], group, fitted, clipper),
                 y[rows],
-                self._prepare(query, group, None),
+                self._prepare(query, group, fitted, clipper),
                 group,
             )
             if trimmed:
@@ -661,27 +675,52 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             ),
         )
 
-    def _check_differentiable(self) -> None:
+    def _check_differentiable(self, context_moves: bool = False) -> None:
         """Refuses a fit whose prediction is not differentiable.
 
+        The transforms and the clip that lazy applies itself have forwards
+        (:mod:`lazy.models._transforms`), so they pass, with their fitted
+        parameters as constants. What the model's own package applies
+        inside a member does not.
+
+        Args:
+            context_moves: Whether the pass will get a context of other
+                values than the fit's, which a fitted transform or clip
+                of lazy's would not follow.
+
         Raises:
-            ValueError: If the fit ran a feature transform other than the
-                model's own ``"none"``, a clip, a categorical column, native
-                bagging, or a constant target.
+            ValueError: If the fit ran a feature transform of the model's
+                package other than its ``"none"``, a clip of the model's
+                package, a categorical column, native bagging, or a
+                constant target; or, for a context that moves, a
+                transform or a clip of lazy's.
         """
         none = self.native_transforms.get("none")
+        advice = (
+            "fit with transforms=('none',) and outlier_threshold=None, on "
+            "numeric columns"
+        )
         if hasattr(self, "constant_target_"):
             problem = "a target that is not constant"
         elif (
-            any(t is not None for t in self.transformers_)
-            or self.outlier_threshold_ is not None
-            or any(
-                g.native_transforms is None
-                or any(token != none for token in g.native_transforms)
-                for g in self.member_groups_
-            )
+            self.outlier_threshold_ is not None and self.native_outlier_clipping
+        ) or any(
+            g.native_transforms is None
+            or any(token != none for token in g.native_transforms)
+            for g in self.member_groups_
         ):
-            problem = "no feature transform or clip"
+            problem = (
+                f"no feature transform or clip that {self.display_name}'s own"
+                " package applies"
+            )
+            advice += ", or with a transform that lazy applies itself"
+        elif context_moves and any(
+            step is not None for step in (*self.transformers_, *self.clippers_)
+        ):
+            problem = (
+                "no feature transform or clip fitted on the context, which"
+                " would not follow a context that changes"
+            )
         elif self.is_categorical_.any():
             problem = "no categorical column"
         elif any(g.member_rows is not None for g in self.member_groups_):
@@ -689,9 +728,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         else:
             return
         raise ValueError(
-            f"a differentiable forward pass needs {problem}; fit with "
-            "transforms=('none',) and outlier_threshold=None, on numeric "
-            "columns"
+            f"a differentiable forward pass needs {problem}; {advice}"
         )
 
     def _group_weights(self) -> _typing.FloatArray:
@@ -1216,19 +1253,36 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _prepare(
         self,
-        features: _typing.FloatArray,
+        features: Any,
         group: _members.MemberGroup,
         transformer: _transforms.ScaffoldTransform | None,
         clipper: _transforms.SoftClip | None = None,
-    ) -> _typing.FloatArray:
+    ) -> Any:
         """A group's view of some features: subset, transformed and permuted.
 
         The group's columns are taken first, then transformed, clipped and
-        permuted.
+        permuted. A torch tensor goes through the transform's forward, and
+        keeps its gradient through it and the clip.
+
+        Args:
+            features: Features, a numpy array or a torch tensor of shape
+                (n_rows, n_features).
+            group: The member group.
+            transformer: Its fitted transform, or None.
+            clipper: Its fitted clip, or None.
+
+        Returns:
+            The view, of the kind of ``features``, shape (n_rows,
+            n_view_columns).
         """
+        on_graph = array_api_compat.is_torch_array(features)
         features = _subset(features, group)
         if transformer is not None:
-            features = transformer.transform(features)
+            features = (
+                transformer.forward(features)
+                if on_graph
+                else transformer.transform(features)
+            )
         if clipper is not None:
             features = clipper.transform(features)
         if group.permutation is None:
