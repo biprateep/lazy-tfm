@@ -45,14 +45,14 @@ def test_public_api_is_importable():
 
 
 def test_the_all_extra_installs_every_other_extra():
-    """``lazy-tfm[all]`` is everything: each backend and each extra."""
+    """Every extra but tirex, whose package restricts commercial use."""
     pyproject = pathlib.Path(__file__).parents[2] / "pyproject.toml"
     extras = tomllib.loads(pyproject.read_text())["project"][
         "optional-dependencies"
     ]
     (requirement,) = extras["all"]
     named = requirement.partition("[")[2].rstrip("]").split(",")
-    assert sorted(named) == sorted(set(extras) - {"all"})
+    assert sorted(named) == sorted(set(extras) - {"all", "tirex"})
 
 
 def test_lazy_setup_installs_the_tabfm_commit_uv_pins():

@@ -44,10 +44,18 @@ at most a few hundred features well ({doc}`limits`), so keep the total small.
 ## Pretrained encoders
 
 The pretrained encoders need the `encoders` extra, which installs PyTorch,
-Hugging Face `transformers`, `chronos-forecasting` and `timm`:
+Hugging Face `transformers`, `chronos-forecasting`, `timm` and `timesfm`:
 
 ```console
 pip install 'lazy-tfm[encoders]'
+```
+
+TiRex needs the `tirex` extra as well, which adds `tirex-ts`. Its code, not
+only its weights, is under the NXAI Community License, so neither `encoders`
+nor `all` installs it:
+
+```console
+pip install 'lazy-tfm[tirex]'
 ```
 
 Each modality's pretrained encoder runs one of several frozen networks, which
@@ -70,8 +78,14 @@ that names the network and its licence, and loads it once per process.
 modality and network: `lazy.download_checkpoint("text")` for the default,
 `lazy.download_checkpoint("image:dinov2-large")` for another. So does the
 command `lazy download text image:dinov2-large`, and `lazy models` lists them
-all. Every network here has a licence that allows commercial use, and runs on
-a CPU; each takes `device` as the models do.
+all. Every network runs on a CPU, and takes `device` as the models do.
+
+Each network's weights carry their own licence, which the table below names.
+As with the models, some licences restrict commercial use: TimesFM-3.0's is
+non-commercial, and TiRex's requires a commercial licence from NXAI for a
+commercial product of a company with an annual revenue above €100 million.
+The first download of such a network asks you to read its licence before use.
+The default network of each modality allows commercial use.
 
 ```{include} _encoders.md
 ```
@@ -128,8 +142,23 @@ defaults will be confirmed on the MulTaBench benchmark.
   card recommends for data up to daily ("high frequency"). Both read a
   missing value filled in by linear interpolation, as their own forecasts
   fill it. Their embedding is the mean of their states over the patches that
-  hold an observed value, since they have no summary token. No general network reads observation times or
-  uncertainties, so an irregular light curve is read as evenly sampled.
+  hold an observed value, since they have no summary token. TimesFM-3.0, the
+  newest, ranks first among the foundation models on fev-bench, TIME and
+  GIFT-Eval, as its repository reports, and its weights are non-commercial.
+  It reads the last 15,360 values, and detrends a series that a line fits
+  closely, as its forecast does.
+  TiRex, from NXAI, is a recurrent network (an xLSTM) that led GIFT-Eval and
+  Chronos-ZS at its release, ahead of TimesFM 2.0 and Chronos-Bolt, as its
+  paper reports. It reads the last 2,048 values in patches of 32, and masks
+  a missing value. Its embedding is the one its authors measured for
+  classifying series: each layer's mean state over the observed patches,
+  scaled to unit length, the 12 layers joined and standardized together
+  (6,144 columns). On the univariate datasets of the UCR archive, it gave
+  TiRex a mean accuracy of 0.80 with a random forest, the highest of the
+  forecasting networks they compared (0.79 for TimesFM 2.0, 0.77 for
+  Chronos-Bolt), against 0.75 for the last layer alone. No general network
+  reads observation times or uncertainties, so an irregular light curve is
+  read as evenly sampled.
 
 Issue [#344](https://github.com/biprateep/lazy-tfm/issues/344) gives the
 sources and the figures.
@@ -187,6 +216,12 @@ If you use a pretrained encoder, cite its network as well as LAZY:
   Universal Forecasting. arXiv:2510.15821.
 - TimesFM: Das, A., Kong, W., Sen, R., and Zhou, Y. (2024). A Decoder-only
   Foundation Model for Time-series Forecasting. ICML.
+- TiRex: Auer, A., et al. (2025). TiRex: Zero-Shot Forecasting Across Long
+  and Short Horizons with Enhanced In-Context Learning. NeurIPS. Auer, A.,
+  et al. (2025). Pre-trained Forecasting Models: Strong Zero-Shot Feature
+  Extractors for Time Series Classification. arXiv:2510.26777. TiRex's
+  licence asks a product that uses it to display "Built with technology
+  from NXAI".
 
 ## The Tabularizer
 

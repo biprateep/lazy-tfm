@@ -23,7 +23,24 @@ import lazy
 from lazy import encoders
 from lazy.encoders import _pretrained
 
-MODELS = sorted(encoders.CHECKPOINTS)
+
+def _needing_its_package(key):
+    """``key`` as a test parameter, skipped without the package it needs.
+
+    TiRex's package comes only with its own extra, which ``all`` leaves
+    out.
+    """
+    modality, _, model = key.partition(":")
+    encoder = encoders.get_encoder(modality).set_params(model=model)
+    module = encoder._package().partition(".")[0]
+    reason = f"{module}, which loads {key}, is not installed"
+    skip = pytest.mark.skipif(
+        not fake_encoders.installed(module), reason=reason
+    )
+    return pytest.param(key, marks=skip)
+
+
+MODELS = [_needing_its_package(key) for key in sorted(encoders.CHECKPOINTS)]
 """Every pinned model, as ``"<modality>:<model>"``."""
 
 PRETRAINED = {
@@ -155,9 +172,15 @@ def test_chronos_pools_the_observed_tokens_of_the_last_values(
         encoder.transform([[np.nan, np.inf]])
 
 
-@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
-def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes, model):
-    encoder = _encoder(f"time:{model}")
+@pytest.mark.parametrize(
+    "key",
+    [
+        _needing_its_package(f"time:{model}")
+        for model in ("timesfm-2.0-500m", "timesfm-2.5-200m", "timesfm-3.0")
+    ],
+)
+def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes, key):
+    encoder = _encoder(key)
     context = encoder._recipe().context
     long = np.arange(20_000.0)
     # Three patches of 32 values, the first padded on the left. The second
@@ -177,6 +200,35 @@ def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes, model):
     # plus the frequency indicator: 0, high frequency, for TimesFM 2.0.
     expected = np.mean([read[:6].mean(), read[38:].mean()])
     assert rows[2, -3] == pytest.approx(expected, rel=1e-5)
+
+
+def test_tirex_normalizes_each_layers_mean_over_the_observed_patches(fakes):
+    pytest.importorskip("tirex")
+    encoder = _encoder("time:tirex")
+    context = encoder._recipe().context
+    long = np.arange(5_000.0)
+    # Three patches of 32 values, the first padded on the left. The second
+    # is all missing, and left out of the pooling.
+    gappy = np.arange(70.0) ** 2
+    gappy[6:38] = np.nan
+    gappy[50] = np.inf
+    rows = encoder.fit_transform([long, long[-context:], gappy])
+    np.testing.assert_allclose(rows[0], rows[1], rtol=1e-6)
+    known = np.isfinite(gappy)
+    np.testing.assert_allclose(
+        rows[2, -2:], [gappy[known].mean(), gappy[known].std()]
+    )
+    # The tokenizer scales the window by its own mean and deviation.
+    observed = np.where(known, gappy, np.nan)
+    read = (observed - gappy[known].mean()) / gappy[known].std()
+    means = np.mean([np.nanmean(read[:6]), np.nanmean(read[38:])])
+    # The fake's state of a patch in layer l is a ramp plus (l + 1) times
+    # the mean value it read.
+    layers = np.linspace(0, 1, 512) + means * np.arange(1, 13)[:, None]
+    layers /= np.linalg.norm(layers, axis=1, keepdims=True)
+    # A layer norm, whose epsilon is 1e-5.
+    expected = (layers - layers.mean()) / np.sqrt(layers.var() + 1e-5)
+    np.testing.assert_allclose(rows[2, :-2], expected.ravel(), atol=1e-6)
 
 
 def test_timesfm_runs_on_transformers_without_chronos(monkeypatch):
@@ -371,6 +423,14 @@ def test_zoobot_is_cached_by_the_versions_of_transformers_and_timm():
     ]
 
 
+def test_tirex_without_its_package_names_its_own_extra(monkeypatch):
+    """tirex-ts is not open source, so the encoders extra leaves it out."""
+    monkeypatch.setitem(sys.modules, "tirex", None)
+    tirex = lazy.time.Pretrained(model="tirex")
+    with pytest.raises(ImportError, match=r"lazy-tfm\[tirex\]"):
+        tirex.fit(golden_data.encoder_items()["time"])
+
+
 class _Unpinned(lazy.text.Pretrained):
     """Breaks the contract: a model with no pinned weights, and no device."""
 
@@ -412,9 +472,21 @@ def test_the_real_weights_give_the_golden_embeddings(key):
 
 
 @pytest.mark.checkpoint
-@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
-def test_a_timesfm_row_does_not_depend_on_a_longer_series_in_its_batch(model):
-    """TimesFM pads a batch to its longest series, which it masks."""
+@pytest.mark.parametrize(
+    "key",
+    [
+        _needing_its_package(f"time:{model}")
+        for model in (
+            "timesfm-2.0-500m",
+            "timesfm-2.5-200m",
+            "timesfm-3.0",
+            "tirex",
+        )
+    ],
+)
+def test_a_row_does_not_depend_on_a_longer_series_in_its_batch(key):
+    """A batch pads each series to its longest, or to the context."""
+    model = key.partition(":")[2]
     generator = np.random.default_rng(0)
     short = generator.normal(size=70).cumsum()
     long = generator.normal(size=1500).cumsum()
@@ -424,3 +496,26 @@ def test_a_timesfm_row_does_not_depend_on_a_longer_series_in_its_batch(model):
         together = encoder.transform([short, long])[:1]
     # Measured: the rows differ by float32 rounding, at most 4.1e-5.
     np.testing.assert_allclose(together, alone, rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.checkpoint
+def test_tirex_pools_as_its_authors_embed_a_series():
+    """TiRexEmbedding, in float32, is tirex-ts's own embedding."""
+    torch = pytest.importorskip("torch")
+    embedding = pytest.importorskip("tirex.models.embedding")
+    encoder = lazy.time.Pretrained(model="tirex", device="cpu", cache=False)
+    path = encoder._checkpoint().download()
+    network = encoder._recipe().load(path, "cpu").float()
+    reference = embedding.TiRexEmbedding.__new__(embedding.TiRexEmbedding)
+    torch.nn.Module.__init__(reference)
+    reference.model = network
+    reference.batch_size = 512
+    reference.data_augmentation = False
+    series = golden_data.encoder_items()["time"][0]
+    with torch.inference_mode():
+        ours = encoder._recipe().pooled(network, [series])
+        theirs = reference(
+            torch.tensor(series, dtype=torch.float32)[None, None]
+        )
+    # Measured: identical in float32.
+    np.testing.assert_allclose(ours, theirs.numpy(), rtol=1e-6, atol=1e-6)

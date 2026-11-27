@@ -94,7 +94,10 @@ the device and the network cache. It runs one of several networks, which its
   the Hugging Face Hub, its commit, the files to fetch, the licence, the size
   and the number of parameters. The first download warns with this licence,
   as the models' checkpoints do, and `lazy.download_checkpoint` fetches it
-  ahead of time. The default network is in `DEFAULT_ENCODER_MODELS`.
+  ahead of time. A network whose licence restricts commercial use passes
+  `commercial_use=False`, and its first download asks the user to read the
+  licence. The default network is in `DEFAULT_ENCODER_MODELS`, and allows
+  commercial use.
 - `recipes`, which maps each network to its recipe: the width of the
   embedding (`width`) and what else differs between its networks, such as the
   pooling or a prompt. `register` refuses a class whose recipes are not exactly the

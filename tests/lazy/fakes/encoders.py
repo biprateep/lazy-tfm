@@ -2,16 +2,19 @@
 # Copyright (c) 2025 Biprateep Dey
 """Fake upstream objects for the pretrained encoders.
 
-The fakes replace what each encoder loads from ``transformers`` and
-``chronos`` (a tokenizer and a network, an image processor and a network,
-a Chronos pipeline, TimesFM's network) and the checkpoint download, so
+The fakes replace what each encoder loads from ``transformers``,
+``chronos``, ``timesfm3`` and ``tirex`` (a tokenizer and a network, an
+image processor and a network, a Chronos pipeline, TimesFM's and TiRex's
+networks) and the checkpoint download, so
 that an encoder's own code (its ``_load``, its pooling, its padding, its
 reading of items) runs on a CPU in milliseconds with nothing downloaded.
 Each fake pads a batch as upstream does, and gives a padded position a
-state of 1e6, so that pooling that reads padding shows. They need torch,
-transformers and chronos.
+state of 1e6, so that pooling that reads padding shows. They need torch
+and the packages of the ``encoders`` extra.
 """
 
+import importlib
+import importlib.util
 import pathlib
 import types
 
@@ -190,6 +193,98 @@ class TimesFM(Network):
         return types.SimpleNamespace(last_hidden_state=states)
 
 
+class TimesFM3(Network):
+    """TimesFM 3's ``decode``: patches of ``patch`` values from the first.
+
+    A patch's state is the mean of its values that are not masked times a
+    ramp to 1, and a masked patch's is 1e6. TimesFM 3's states depend on
+    the patch a series starts at, so a series must start at the first.
+    """
+
+    def __init__(self, width, patch):
+        super().__init__(width)
+        self.patch = patch
+
+    def to(self, device, dtype):
+        """The network itself, which must be in float32."""
+        import torch  # noqa: PLC0415
+
+        assert dtype == torch.float32
+        return self
+
+    def parameters(self):
+        """One tensor, on the CPU."""
+        import torch  # noqa: PLC0415
+
+        return iter([torch.zeros(1)])
+
+    def decode(self, target, horizon, mask, return_aux_outputs):
+        import torch  # noqa: PLC0415
+
+        assert (horizon, return_aux_outputs) == (1, True)
+        assert target.shape[1] == 1
+        assert mask.dtype == torch.bool
+        tokens = (len(target), -1, self.patch)
+        values = target[:, 0].double().reshape(tokens)
+        real = (~mask).reshape(tokens)
+        assert real[:, 0].any(), "a series does not start at the first patch"
+        means = (values * real).sum(dim=2) / real.sum(dim=2).clamp(min=1)
+        ramp = torch.linspace(0, 1, self.width, dtype=torch.float64)
+        states = means[..., None] * ramp
+        states[~real.any(dim=2)] = PAD
+        # The horizon's two patches, after the context's.
+        future = torch.full((len(target), 2, self.width), PAD)
+        states = torch.cat([states, future], dim=1)[:, None]
+        return None, {"__call__:transformer_output": states}
+
+
+class TiRex(Network):
+    """TiRex's ``_forward_model``: every layer's state of each patch.
+
+    It keeps upstream's tokenizer. A patch's state in layer ``l`` is a ramp
+    to 1 plus ``l + 1`` times the mean of its observed values, as the
+    tokenizer scaled them; a patch with none gets 1e6.
+    """
+
+    def __init__(self, width, patch, layers):
+        import tirex  # noqa: PLC0415
+
+        super().__init__(width)
+        self.layers = layers
+        self.tokenizer = tirex.models.patcher.PatchedTokenizer(patch)
+        self.config = types.SimpleNamespace(nan_mask_value=0)
+
+    def to(self, dtype):
+        """The network itself, which must be in float64 on a CPU."""
+        import torch  # noqa: PLC0415
+
+        assert dtype == torch.float64
+        return self
+
+    def parameters(self):
+        """One tensor in float64, on the CPU."""
+        import torch  # noqa: PLC0415
+
+        return iter([torch.zeros(1, dtype=torch.float64)])
+
+    def _forward_model(
+        self,
+        input,  # noqa: A002 - upstream's name.
+        return_all_hidden=False,
+    ):
+        import torch  # noqa: PLC0415
+
+        assert return_all_hidden
+        values, observed = input.chunk(2, dim=2)
+        count = observed.sum(dim=2)
+        means = (values * observed).sum(dim=2) / count.clamp(min=1)
+        ramp = torch.linspace(0, 1, self.width // self.layers).to(values)
+        layer = torch.arange(1, self.layers + 1).to(values)
+        states = ramp + means[..., None, None] * layer[:, None]
+        states[count == 0] = PAD
+        return None, states
+
+
 def install(monkeypatch, tmp_path):
     """Installs the fakes; returns how often each model's network loads.
 
@@ -234,6 +329,18 @@ def install(monkeypatch, tmp_path):
         cls = Chronos2 if found.outputs else Chronos
         return cls(found.states, found.patch)
 
+    def timesfm3_network(path):
+        found = recipe(path)
+        return TimesFM3(found.states, found.patch)
+
+    def tirex_network(path, backend, device):
+        # The torch backend: the CUDA kernels run in bfloat16.
+        assert backend == "torch"
+        path = pathlib.Path(path)
+        assert path.name == "model.ckpt"
+        found = recipe(path.parent)
+        return TiRex(found.states, found.patch, layers=12)
+
     fakes.patch(
         monkeypatch,
         LAZY_SEAMS,
@@ -258,4 +365,19 @@ def install(monkeypatch, tmp_path):
     monkeypatch.setattr(
         chronos.BaseChronosPipeline, "from_pretrained", pipeline
     )
+    # The packages of TimesFM 3 and TiRex come only with their own extras
+    # or installs, so their fakes stand in only where they are installed.
+    if installed("timesfm3"):
+        timesfm3 = importlib.import_module("timesfm3.torch")
+        monkeypatch.setattr(
+            timesfm3.TimesFM3Torch, "from_pretrained", timesfm3_network
+        )
+    if installed("tirex"):
+        tirex = importlib.import_module("tirex")
+        monkeypatch.setattr(tirex.TiRexZero, "from_pretrained", tirex_network)
     return loads
+
+
+def installed(module):
+    """Whether ``module`` can be imported, without importing it."""
+    return importlib.util.find_spec(module) is not None

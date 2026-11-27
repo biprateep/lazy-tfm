@@ -10,7 +10,8 @@ is pinned in the encoder's class. The weights download on first use, with
 a :class:`~lazy.LicenseWarning`, or ahead of time through
 :func:`lazy.download_checkpoint`, and load once per process and device, in
 the cache that the models share (:func:`lazy.clear_model_cache` empties
-it). The packages come from the ``encoders`` extra.
+it). The packages come from the ``encoders`` extra, or from the extra
+that a network's checkpoint names (``Checkpoint.extra``).
 
 A subclass declares ``recipes`` (model name -> recipe, with the width of
 an embedding as ``width``) and the import name of its ``package``, which
@@ -131,7 +132,7 @@ class PretrainedEncoder(_base.BaseEncoder):
 
         Raises:
             UnknownNameError: If ``model`` is not one of ``recipes``.
-            ImportError: If the ``encoders`` extra is not installed.
+            ImportError: If the extra of ``model`` is not installed.
             ValueError: If ``device`` is not a device, or a parameter of
                 :class:`~lazy.encoders.BaseEncoder` is not valid.
             RuntimeError: If ``device`` names an accelerator that is not
@@ -166,12 +167,13 @@ class PretrainedEncoder(_base.BaseEncoder):
         """Imports the packages; returns torch.
 
         Raises:
-            ImportError: If the ``encoders`` extra is not installed.
+            ImportError: If the extra of ``model`` is not installed.
         """
         name = f"lazy.{self.modality}.{type(self).__name__}"
+        extra = self._checkpoint().extra or EXTRA
         for package in (self._package(), *self._requires()):
-            _ensemble.import_extra(package, needed_by=name, extra=EXTRA)
-        return _ensemble.import_extra("torch", needed_by=name, extra=EXTRA)
+            _ensemble.import_extra(package, needed_by=name, extra=extra)
+        return _ensemble.import_extra("torch", needed_by=name, extra=extra)
 
     def _package(self) -> str:
         """The module that loads ``model``; a subclass may vary it by model."""
