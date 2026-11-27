@@ -241,6 +241,12 @@ change the API.
 
 ### Changed
 
+- LimiX-2 without `triton` on a CUDA device raises a `ValueError`, as the
+  other backends do for a device they cannot use, not a `RuntimeError`. The
+  check runs when the device is resolved, at fit and at unpickling, before
+  any weights load. Under `device="auto"`, it moves the model to the CPU
+  with a `PerformanceWarning`, as it does for them. A model pickled with
+  an explicit CUDA device no longer loads on a machine without `triton`.
 - The embedding cache of `lazy.encoders` reads a cached embedding about 6
   times faster and writes one about twice as fast. Its files are unchanged.
 - A pandas `category` column whose categories are numbers was read as those
