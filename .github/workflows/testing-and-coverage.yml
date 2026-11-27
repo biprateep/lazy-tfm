@@ -2,9 +2,11 @@
 #
 # `uv sync --locked` fails if uv.lock is out of date with pyproject.toml, so a
 # dependency change that was not locked cannot merge. The `build` jobs install
-# no backend package, so the tests whose fakes need one skip there; the
-# `backends` job installs every backend's locked package with CPU-only PyTorch
-# and runs them. No job needs a GPU or downloads a checkpoint.
+# no backend package, so the tests whose fakes need one skip there, but they
+# add CPU-only PyTorch, so the code that needs torch runs. The `platforms` and
+# `minimum-dependencies` jobs have no torch, which checks that lazy works
+# without it. The `backends` job installs every backend's locked package with
+# CPU-only PyTorch and runs them. No job needs a GPU or downloads a checkpoint.
 
 name: Unit test and code coverage
 
@@ -41,6 +43,11 @@ jobs:
         enable-cache: true
     - name: Install the locked environment
       run: uv sync --locked --python ${{ matrix.python-version }}
+    - name: Add CPU-only PyTorch at its locked version
+      run: |
+        torch=$(uv export --locked --all-extras --no-hashes \
+          --no-emit-project | grep '^torch==' | cut -d' ' -f1)
+        uv pip install --torch-backend cpu "$torch"
     - name: Run unit tests with pytest
       run: uv run --no-sync pytest --cov
 
@@ -106,7 +113,7 @@ jobs:
     - name: Run unit tests with pytest
       # This job also runs the tests that need a backend package, so it
       # holds coverage to a higher floor than pyproject.toml's.
-      run: .venv/bin/python -m pytest --cov --cov-fail-under=89
+      run: .venv/bin/python -m pytest --cov --cov-fail-under=93
 
   # The same build and checks the release runs, on every push and pull request,
   # so a packaging mistake surfaces here rather than on release day.
