@@ -9,6 +9,11 @@ change the API.
 
 ### Added
 
+- TimesFM-2.5-200M and TimesFM-2.0-500M as pretrained networks for time
+  series (`lazy.time.Pretrained(model="timesfm-2.5-200m")` and
+  `model="timesfm-2.0-500m"`), the first from a family other than Chronos.
+  They load with `transformers`, which the `encoders` extra already installs.
+  The default does not change.
 - Three more pretrained networks: Qwen3-Embedding-0.6B for text
   (`lazy.text.Pretrained(model="Qwen3-Embedding-0.6B")`), Zoobot
   ConvNeXt-Nano for images of galaxies

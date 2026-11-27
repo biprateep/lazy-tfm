@@ -6,9 +6,9 @@ A time series is one row of a numeric array, or a sequence of numbers of
 any length, read as evenly sampled.
 
 :class:`Pretrained`
-    A frozen Chronos network, chosen by ``model``: the default of the
-    modality ``"time"``. Its weights download on first use; it needs the
-    ``encoders`` extra.
+    A frozen Chronos or TimesFM network, chosen by ``model``: the default
+    of the modality ``"time"``. Its weights download on first use; it
+    needs the ``encoders`` extra.
 :class:`Statistics`
     Summary statistics of the values: location, spread, shape, trend and
     roughness.
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import numpy.typing as npt
@@ -188,48 +188,185 @@ class Spectrum(_base.BaseEncoder):
 
 @dataclasses.dataclass(frozen=True)
 class _Recipe:
-    """How one Chronos model turns a series into an embedding.
+    """How one network turns a series into an embedding.
+
+    A subclass per family of networks loads its network and pools its
+    states.
 
     Attributes:
         states: The width of the network's states.
         patch: The number of values in one token.
         context: The most values of a series, its last ones, that it reads.
-        outputs: The tokens that the network puts after the summary token,
-            which the embedding leaves out: Chronos-2's masked output patch.
-        pinned: Whether the loader takes the precision and the attention
-            that transformers is pinned to; Chronos-T5's takes no attention.
+        package: The module that loads the network.
     """
 
     states: int
     patch: int
     context: int
-    outputs: int = 0
-    pinned: bool = False
+    package: ClassVar[str]
 
     @property
     def width(self) -> int:
         """The width of the embedding: the states, the mean and the scale."""
         return self.states + 2
 
+    def load(self, path: os.PathLike[str], device: str) -> Any:
+        """The network, on ``device``, in float32."""
+        raise NotImplementedError
+
+    def pooled(
+        self, network: Any, series: list[_typing.FloatArray]
+    ) -> _typing.FloatArray:
+        """The mean state over the observed tokens of each series' window.
+
+        Args:
+            network: What :meth:`load` returned.
+            series: The whole series, with ``NaN`` for a missing value;
+                none starts or ends with one.
+
+        Returns:
+            The pooled states, shape (len(series), states).
+        """
+        raise NotImplementedError
+
+
+@dataclasses.dataclass(frozen=True)
+class _Chronos(_Recipe):
+    """A Chronos pipeline, which masks a missing value.
+
+    Attributes:
+        outputs: The tokens that the network puts after the summary token,
+            which the embedding leaves out: Chronos-2's masked output patch.
+        pinned: Whether the pipeline takes the precision and the attention
+            that transformers is pinned to; Chronos-T5's takes no attention.
+    """
+
+    outputs: int = 0
+    pinned: bool = False
+    package: ClassVar[str] = "chronos"
+
+    def load(self, path: os.PathLike[str], device: str) -> Any:
+        """The Chronos pipeline, on ``device``, in float32."""
+        import chronos  # noqa: PLC0415 - an optional, heavy extra.
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        if self.pinned:
+            settings = _pretrained.PINNED
+        else:
+            settings = {"torch_dtype": torch.float32}
+        return chronos.BaseChronosPipeline.from_pretrained(
+            path, device_map=device, **settings
+        )
+
+    def pooled(
+        self, network: Any, series: list[_typing.FloatArray]
+    ) -> _typing.FloatArray:
+        """The mean state over the observed tokens and the summary token."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        windows = [values[-self.context :] for values in series]
+        states, _ = network.embed(
+            [torch.as_tensor(values, dtype=torch.float32) for values in windows]
+        )
+        rows = np.empty((len(windows), self.states))
+        for row, values, state in zip(rows, windows, states, strict=True):
+            # Chronos-2 gives each series its own tensor, of one variate.
+            tokens = state.float().numpy().reshape(-1, self.states)
+            # A batch pads on the left: a series' own tokens and its one
+            # summary token come last, before the output tokens.
+            observed = np.append(_tokens(values, self.patch), True)
+            end = len(tokens) - self.outputs
+            row[:] = tokens[end - len(observed) : end][observed].mean(axis=0)
+        return rows
+
+
+@dataclasses.dataclass(frozen=True)
+class _TimesFm(_Recipe):
+    """A TimesFM decoder, which reads a missing value filled in.
+
+    As TimesFM's own forecast does, each series has its missing values
+    filled by linear interpolation before its last ``context`` values are
+    read, and is padded on the left with values that the network masks:
+    here to whole patches of the batch's longest series, where the forecast
+    pads to the whole context. Each series is standardized first. The
+    network normalizes the values by statistics of the series itself
+    (TimesFM 2.5 each patch by those of the series up to it, TimesFM 2.0
+    the series by those of its first patch of at least three values), so
+    this leaves its states as they are, but keeps their precision in
+    float32. TimesFM has no summary token.
+
+    Attributes:
+        freq: The frequency indicator that TimesFM 2.0 reads with each
+            series; ``None`` for a network that reads none.
+    """
+
+    freq: int | None = None
+    package: ClassVar[str] = "transformers"
+
+    def load(self, path: os.PathLike[str], device: str) -> Any:
+        """The decoder, without the file's forecast heads, on ``device``."""
+        import transformers  # noqa: PLC0415 - an optional, heavy extra.
+
+        network = _pretrained.load_quietly(transformers.AutoModel, path)
+        return network.to(device)
+
+    def pooled(
+        self, network: Any, series: list[_typing.FloatArray]
+    ) -> _typing.FloatArray:
+        """The mean state over the observed patches, pooled on the device."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        filled = [_interpolated(values)[-self.context :] for values in series]
+        length = self.patch * max(-(-len(v) // self.patch) for v in filled)
+        values = np.zeros((len(filled), length), dtype=np.float32)
+        padding = np.ones((len(filled), length), dtype=np.float32)
+        observed = np.zeros((len(filled), length // self.patch))
+        for i, (own, whole) in enumerate(zip(filled, series, strict=True)):
+            scale = float(own.std()) or 1.0
+            values[i, length - len(own) :] = (own - own.mean()) / scale
+            padding[i, length - len(own) :] = 0
+            flags = _tokens(whole[-self.context :], self.patch)
+            observed[i, len(observed[i]) - len(flags) :] = flags
+        inputs = {
+            "past_values": torch.from_numpy(values),
+            "past_values_padding": torch.from_numpy(padding),
+        }
+        if self.freq is not None:
+            inputs["freq"] = torch.full((len(filled), 1), self.freq)
+        inputs = {name: x.to(network.device) for name, x in inputs.items()}
+        states = network(**inputs).last_hidden_state
+        # Summed in float64, except on an Apple GPU, which has none.
+        dtype = torch.float32 if states.device.type == "mps" else torch.float64
+        states = states.to(dtype)
+        mask = torch.as_tensor(observed, dtype=dtype, device=states.device)
+        mask = mask[..., None]
+        pooled = (states * mask).sum(dim=1) / mask.sum(dim=1)
+        return pooled.cpu().numpy()
+
 
 class Pretrained(_pretrained.PretrainedEncoder):
-    """The embedding of each time series, from a frozen Chronos network.
+    """The embedding of each time series, from a frozen pretrained network.
 
     ``model`` picks one of the networks of ``recipes``, each pinned to a
     commit on the Hugging Face Hub: ``"chronos-t5-tiny"`` (the default),
-    ``"chronos-t5-mini"``, ``"chronos-t5-small"``, ``"chronos-bolt-small"``
-    and ``"chronos-2"``. Chronos-T5 reads one value per token and the last
-    512 values of a series; Chronos-Bolt reads one patch of 16 values per
-    token and the last 2,048, and Chronos-2 the last 8,192.
+    ``"chronos-t5-mini"``, ``"chronos-t5-small"``, ``"chronos-bolt-small"``,
+    ``"chronos-2"``, ``"timesfm-2.0-500m"`` and ``"timesfm-2.5-200m"``.
+    Chronos-T5 reads one value per token and the last 512 values of a
+    series; Chronos-Bolt reads one patch of 16 values per token and the
+    last 2,048, and Chronos-2 the last 8,192. TimesFM reads patches of 32
+    values: TimesFM 2.0 the last 2,048, and TimesFM 2.5 the last 16,384.
     :doc:`/guide/encoders` lists the networks and gives the evidence behind
     the choice.
 
     The embedding is the mean of the network's final states over the
-    tokens that hold an observed value and over its summary token, then
-    ``mean`` and ``scale``, the mean and the standard deviation of the
-    values it read. The network scales each series by its own level, so
-    these two columns keep what it removes. A value that is not finite is
-    a missing value, which the network masks.
+    tokens that hold an observed value and over its summary token, if it
+    has one (TimesFM has none), then ``mean`` and ``scale``, the mean and
+    the standard deviation of the observed values in the window it read,
+    missing values left out. The network scales each
+    series by its own level, so these two columns keep what it removes. A
+    value that is not finite is a missing value: Chronos masks it, and
+    TimesFM reads it filled in by linear interpolation, as TimesFM's own
+    forecasts fill it.
 
     Attributes:
         model: The network; ``"chronos-t5-tiny"`` by default.
@@ -242,11 +379,20 @@ class Pretrained(_pretrained.PretrainedEncoder):
     modality = "time"
     package = "chronos"
     recipes = {
-        "chronos-t5-tiny": _Recipe(256, 1, 512),
-        "chronos-t5-mini": _Recipe(384, 1, 512),
-        "chronos-t5-small": _Recipe(512, 1, 512),
-        "chronos-bolt-small": _Recipe(512, 16, 2048),
-        "chronos-2": _Recipe(768, 16, 8192, outputs=1, pinned=True),
+        "chronos-t5-tiny": _Chronos(256, 1, 512),
+        "chronos-t5-mini": _Chronos(384, 1, 512),
+        "chronos-t5-small": _Chronos(512, 1, 512),
+        "chronos-bolt-small": _Chronos(512, 16, 2048),
+        "chronos-2": _Chronos(768, 16, 8192, outputs=1, pinned=True),
+        # Each TimesFM's patch and context come from its config.json. The
+        # states are the decoder stack's, before the forecast heads. A
+        # missing value is filled as the timesfm package's forecast fills
+        # it (linear_interpolation in timesfm_2p5_base.py), and as TimesFM
+        # 2.0's card says it does. TimesFM 2.0 reads the frequency
+        # indicator 0, "high frequency", which its card gives as the
+        # default, for data up to daily.
+        "timesfm-2.0-500m": _TimesFm(1280, 32, 2048, freq=0),
+        "timesfm-2.5-200m": _TimesFm(1280, 32, 16384),
     }
 
     def __init__(  # noqa: D107 - arguments documented on the class.
@@ -271,40 +417,35 @@ class Pretrained(_pretrained.PretrainedEncoder):
         """The number of values, which the tokens grow with."""
         return int(np.size(item))
 
-    def _load(self, path: os.PathLike[str], device: str) -> Any:
-        """The Chronos pipeline, on ``device``, in float32."""
-        import chronos  # noqa: PLC0415 - an optional, heavy extra.
-        import torch  # noqa: PLC0415 - an optional, heavy extra.
+    def _package(self) -> str:
+        """The module that loads ``model``, which its family names."""
+        return self._recipe().package
 
-        if self._recipe().pinned:
-            settings = _pretrained.PINNED
-        else:
-            settings = {"torch_dtype": torch.float32}
-        return chronos.BaseChronosPipeline.from_pretrained(
-            path, device_map=device, **settings
-        )
+    def _load(self, path: os.PathLike[str], device: str) -> Any:
+        """The network of ``model``, on ``device``, in float32."""
+        return self._recipe().load(path, device)
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
         """The mean state over each series' observed tokens, mean, scale."""
-        import torch  # noqa: PLC0415 - an optional, heavy extra.
-
         recipe = self._recipe()
-        series = [_observed(item)[-recipe.context :] for item in items]
-        states, _ = network.embed(
-            [torch.as_tensor(values, dtype=torch.float32) for values in series]
-        )
-        rows = np.empty((len(series), recipe.width))
-        for row, values, state in zip(rows, series, states, strict=True):
-            # Chronos-2 gives each series its own tensor, of one variate.
-            tokens = state.float().numpy().reshape(-1, recipe.states)
-            # A batch pads on the left: a series' own tokens and its one
-            # summary token come last, before the output tokens.
-            observed = _tokens(values, recipe.patch)
-            end = len(tokens) - recipe.outputs
-            own = tokens[end - len(observed) - 1 : end]
-            row[:-2] = own[np.append(observed, True)].mean(axis=0)
-            row[-2:] = np.nanmean(values), np.nanstd(values)
-        return rows
+        series = [_observed(item) for item in items]
+        windows = [values[-recipe.context :] for values in series]
+        means = [(np.nanmean(v), np.nanstd(v)) for v in windows]
+        return np.hstack([recipe.pooled(network, series), means])
+
+
+def _interpolated(values: _typing.FloatArray) -> _typing.FloatArray:
+    """A series with each missing value filled linearly from its neighbours.
+
+    Args:
+        values: The series, with ``NaN`` for a missing value; it starts and
+            ends with a finite one.
+
+    Returns:
+        The filled series, of the same shape.
+    """
+    known = np.flatnonzero(np.isfinite(values))
+    return np.interp(np.arange(values.size), known, values[known])
 
 
 def _tokens(values: _typing.FloatArray, patch: int) -> npt.NDArray[np.bool_]:

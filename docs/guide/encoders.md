@@ -117,9 +117,17 @@ defaults will be confirmed on the MulTaBench benchmark.
   features made for light curves beat every pretrained network. Chronos-T5
   reads one value per token. Chronos-2 has the best zero-shot forecasts of
   the public pretrained networks on GIFT-Eval and fev-bench, as its card
-  reports, and reads the last 8,192 values in patches of 16. No general
-  network reads observation times or uncertainties, so an irregular light
-  curve is read as evenly sampled.
+  reports, and reads the last 8,192 values in patches of 16.
+  TimesFM, from Google, is a network of another family, a decoder trained on
+  other data: TimesFM-2.5-200M on GIFT-Eval's pretraining set, Wikipedia page
+  views, Google Trends and synthetic series, as its card lists. It reads the
+  last 16,384 values in patches of 32. TimesFM-2.0-500M, its larger
+  predecessor, reads the last 2,048, with the frequency indicator that its
+  card recommends for data up to daily ("high frequency"). Both read a
+  missing value filled in by linear interpolation, as their own forecasts
+  fill it. Their embedding is the mean of their states over the patches that
+  hold an observed value, since they have no summary token. No general network reads observation times or
+  uncertainties, so an irregular light curve is read as evenly sampled.
 
 Issue [#344](https://github.com/biprateep/lazy-tfm/issues/344) gives the
 sources and the figures.
@@ -201,6 +209,8 @@ If you use a pretrained encoder, cite its network as well as LAZY:
   Time Series. TMLR.
 - Chronos-2: Ansari, A. F., et al. (2025). Chronos-2: From Univariate to
   Universal Forecasting. arXiv:2510.15821.
+- TimesFM: Das, A., Kong, W., Sen, R., and Zhou, Y. (2024). A Decoder-only
+  Foundation Model for Time-series Forecasting. ICML.
 
 ## The Tabularizer
 

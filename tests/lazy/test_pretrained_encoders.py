@@ -154,6 +154,43 @@ def test_chronos_pools_the_observed_tokens_of_the_last_values(
         encoder.transform([[np.nan, np.inf]])
 
 
+@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
+def test_timesfm_pools_the_observed_patches_of_the_filled_series(fakes, model):
+    encoder = _encoder(f"time:{model}")
+    context = encoder._recipe().context
+    long = np.arange(20_000.0)
+    # Three patches of 32 values, the first padded on the left. The second
+    # is all missing: filled in, read, and left out of the pooling.
+    gappy = np.arange(70.0) ** 2
+    gappy[6:38] = np.nan
+    gappy[50] = np.inf
+    rows = encoder.fit_transform([long, long[-context:], gappy])
+    np.testing.assert_allclose(rows[0], rows[1], rtol=1e-6)
+    known = np.isfinite(gappy)
+    np.testing.assert_allclose(
+        rows[2, -2:], [gappy[known].mean(), gappy[known].std()]
+    )
+    filled = np.interp(np.arange(70), np.flatnonzero(known), gappy[known])
+    read = (filled - filled.mean()) / filled.std()
+    # The fake's token state is the mean value it read times a ramp to 1,
+    # plus the frequency indicator: 0, high frequency, for TimesFM 2.0.
+    expected = np.mean([read[:6].mean(), read[38:].mean()])
+    assert rows[2, -3] == pytest.approx(expected, rel=1e-5)
+
+
+def test_timesfm_runs_on_transformers_without_chronos(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    monkeypatch.setitem(sys.modules, "chronos", None)
+    timesfm = lazy.time.Pretrained(model="timesfm-2.5-200m", device="cpu")
+    timesfm.fit(golden_data.encoder_items()["time"])
+    identity = json.loads(timesfm._cache_identity())
+    assert identity[1:3] == [
+        metadata.version("transformers"),
+        metadata.version("torch"),
+    ]
+
+
 def test_trailing_padding_of_a_series_is_dropped_before_its_window(fakes):
     encoder = _encoder("time:chronos-t5-tiny")
     series = np.arange(300.0)
@@ -369,3 +406,18 @@ def test_the_real_weights_give_the_golden_embeddings(key):
             rtol=1e-4,
             atol=1e-5,
         )
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("model", ["timesfm-2.0-500m", "timesfm-2.5-200m"])
+def test_a_timesfm_row_does_not_depend_on_a_longer_series_in_its_batch(model):
+    """TimesFM pads a batch to its longest series, which it masks."""
+    generator = np.random.default_rng(0)
+    short = generator.normal(size=70).cumsum()
+    long = generator.normal(size=1500).cumsum()
+    encoder = lazy.time.Pretrained(model=model, device="cpu", cache=False)
+    with golden_data.pinned_threads():
+        alone = encoder.fit_transform([short])
+        together = encoder.transform([short, long])[:1]
+    # Measured: the rows differ by float32 rounding, at most 4.1e-5.
+    np.testing.assert_allclose(together, alone, rtol=1e-4, atol=1e-4)

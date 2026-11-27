@@ -726,13 +726,13 @@ def _encoder(
     parameters: int,
     display_name: str,
     license_name: str,
+    package: str = "transformers",
 ) -> Checkpoint:
     """The pinned weights of one network of a pretrained encoder.
 
     Every network here has an open license that permits commercial use. Its
-    download notice points to the encoders page, and its version is the
-    distribution that loads it: chronos-forecasting for time series,
-    transformers otherwise.
+    download notice points to the encoders page, and its version is that of
+    ``package``, the distribution that loads it.
     """
     return Checkpoint(
         backend=modality,
@@ -740,7 +740,7 @@ def _encoder(
         repo_id=repo_id,
         revision=revision,
         allow_patterns=files,
-        package="chronos-forecasting" if modality == "time" else "transformers",
+        package=package,
         commercial_use=True,
         license_note=f"{display_name} is released under {license_name}.",
         display_name=display_name,
@@ -902,6 +902,7 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             parameters=8_394_496,
             display_name="Chronos-T5-tiny",
             license_name="Apache-2.0",
+            package="chronos-forecasting",
         ),
         _encoder(
             "time",
@@ -913,6 +914,7 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             parameters=20_456_192,
             display_name="Chronos-T5-mini",
             license_name="Apache-2.0",
+            package="chronos-forecasting",
         ),
         _encoder(
             "time",
@@ -924,6 +926,7 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             parameters=46_154_240,
             display_name="Chronos-T5-small",
             license_name="Apache-2.0",
+            package="chronos-forecasting",
         ),
         _encoder(
             "time",
@@ -935,6 +938,7 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             parameters=47_718_016,
             display_name="Chronos-Bolt-small",
             license_name="Apache-2.0",
+            package="chronos-forecasting",
         ),
         _encoder(
             "time",
@@ -945,6 +949,35 @@ ENCODER_CHECKPOINTS: dict[str, Checkpoint] = {
             size_bytes=477_931_539,
             parameters=119_477_664,
             display_name="Chronos-2",
+            license_name="Apache-2.0",
+            package="chronos-forecasting",
+        ),
+        # Weights in transformers' format; the original's torch_model.ckpt
+        # is not downloaded. The file holds the forecast head too (4.9 M
+        # parameters), which is not loaded.
+        _encoder(
+            "time",
+            "timesfm-2.0-500m",
+            repo_id="google/timesfm-2.0-500m-pytorch",
+            revision="dc2443792ce5516872b89b37cf1bc058c3bf0c10",
+            files=("config.json", "model.safetensors"),
+            size_bytes=1_995_407_668,
+            parameters=498_828_960,
+            display_name="TimesFM-2.0-500M",
+            license_name="Apache-2.0",
+        ),
+        # The port to transformers of google/timesfm-2.5-200m-pytorch, which
+        # Google publishes under Apache-2.0, as the original. The file holds
+        # the forecast heads too (33 M parameters), which are not loaded.
+        _encoder(
+            "time",
+            "timesfm-2.5-200m",
+            repo_id="google/timesfm-2.5-200m-transformers",
+            revision="5a9806b9b291fad9233b5249d88263f1846304d3",
+            files=("config.json", "model.safetensors"),
+            size_bytes=925_188_362,
+            parameters=231_289_280,
+            display_name="TimesFM-2.5-200M",
             license_name="Apache-2.0",
         ),
     )
