@@ -256,14 +256,18 @@ plt.show()
 # nothing between the columns and the network lacks a gradient. TabICL's own
 # recipe applies a power transform to half of its members and clips outliers,
 # so we fit a second model without them: `transforms=("none",)` and
-# `outlier_threshold=None`. TabICL still standardizes every column. We check
-# what the change costs in CRPS.
+# `outlier_threshold=None`. TabICL still standardizes every column. The
+# gradient methods also check that their forward pass gives the same means as
+# `predict`. On a GPU, TabICL computes in float16 by default, whose rounding
+# can fail that check, so the second model computes in float32:
+# `mixed_precision=False`. We check what the changes cost in CRPS.
 
 # %%
 smooth = lazy.LazyModel(
     "tabicl",
     transforms=("none",),
     outlier_threshold=None,
+    mixed_precision=False,
     random_state=SEED,
     progress=False,
 )
@@ -276,7 +280,9 @@ print(f"CRPS without transforms or clip: {smooth_crps:.2f} MPa")
 # is a fair stand-in for the first.
 #
 # The gradient methods need the context the model was fitted on, as
-# `X_context` and `y_context`.
+# `X_context` and `y_context`. The predicted mean bends along the path from
+# the baseline, so we take 128 steps rather than the default 32, and check the
+# error of the sum.
 
 # %%
 gradients = interp.explain(
@@ -286,14 +292,16 @@ gradients = interp.explain(
     X_train,
     y_train,
     method="integrated_gradients",
+    n_steps=128,
 )
 gap = gradients.full_values - gradients.base_values - gradients.values.sum(-1)
-mean_gap = np.abs(gap[interp.STATISTICS.index("mean")]).max()
-print(f"Largest error of the sum for the mean: {mean_gap:.3f} MPa")
+mean_gap = np.abs(gap[interp.STATISTICS.index("mean")])
+print(f"Error of the sum for the mean: median {np.median(mean_gap):.2f} MPa,")
+print(f"largest {mean_gap.max():.2f} MPa")
 
 # %% [markdown]
-# The error of the sum should be small next to the attributions themselves; a
-# larger `n_steps` lowers it.
+# The error of the sum should be small next to the attributions themselves,
+# which reach several MPa; a larger `n_steps` lowers it further.
 # To compare the methods on the same model, we compute Shapley values of the
 # second model too. The table gives each feature's importance for the
 # predicted mean under the two methods.
@@ -316,8 +324,9 @@ pd.DataFrame(
 ).sort_values("Shapley (refit)", ascending=False).round(2)
 
 # %% [markdown]
-# The two methods should rank the leading features in the same order.
-# They need not agree on the values. Shapley values remove a feature, while
+# Both methods should put age and cement first, though possibly in another
+# order, and integrated gradients gives blast furnace slag much more weight.
+# The methods need not agree. Shapley values remove a feature, while
 # integrated gradients moves it from the context mean. `method="gradient"`
 # (gradient times input) is cheaper still: one gradient at the row instead of
 # `n_steps`, which is exact only for a statistic linear in the features.
@@ -358,8 +367,8 @@ neighbours["strength"] = y_train[top["context_row"]]
 pd.concat([top, neighbours], axis=1).round(2)
 
 # %% [markdown]
-# The most influential context rows of a test row should have a similar age
-# and a similar amount of cement, the two features that matter most.
+# The most influential context rows of a test row should share its mix, cement
+# included: often the same recipe, tested at another age.
 # The gradient does not see a context row's target, so a row with a wrong
 # target but typical features can get a small value. `method="loo"` refits the
 # model without each context row instead: it sees the targets and works on any
