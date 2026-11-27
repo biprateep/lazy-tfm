@@ -21,7 +21,7 @@ adapter = experimental.ContextAdapter(
     n_components=8,
 )
 model = lazy.make_pipeline(
-    lazy.Tabularizer({"notes": "text_pretrained"}, n_components=None),
+    lazy.Tabularizer({"notes": "text_pretrained"}, n_columns=None),
     adapter,
 )
 model.fit(X_train, y_train)

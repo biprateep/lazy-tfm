@@ -149,11 +149,17 @@ change the API.
   pyarrow.
 - `lazy.Tabularizer`: the step before a model for a table with columns of
   images, texts or time series. It encodes each such column with the
-  encoder that a modality, a name or an object gives, reduces each embedding
-  to its first `n_components` principal components (default 30, as the
-  published pipelines use), fitted on the context, and passes the other
-  columns through. It returns a DataFrame whose columns carry their names,
-  such as `notes__pc0`, and a column that passes through keeps its type.
+  encoder that a modality, a name or an object gives. It then reduces all the
+  embeddings together to `n_columns` columns (default 30), whatever the
+  number of columns of items: each column of each embedding is standardized,
+  each embedding is weighted, and the weighted embeddings, side by side, are
+  projected on their first principal components, fitted on the context.
+  `weights="equal"` (the default) gives every embedding the same total
+  variance, `None` leaves every standardized column at variance 1, and a list
+  gives each embedding its total variance. A missing item takes the
+  context's mean embedding. The other columns pass through unreduced. It
+  returns a DataFrame whose columns carry their names, such as
+  `embedding__pc0`, and a column that passes through keeps its type.
   `lazy.encoders.get_encoder` also takes a modality, `"image"`, `"text"` or
   `"time"`, for its default encoder.
 - Categorical columns. Every model takes `categorical_features`, as

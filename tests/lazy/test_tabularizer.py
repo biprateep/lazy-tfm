@@ -2,7 +2,6 @@
 # Copyright (c) 2025 Biprateep Dey
 """The Tabularizer: columns of items to encoded, reduced columns."""
 
-import itertools
 import pickle
 
 import numpy as np
@@ -11,7 +10,6 @@ import pytest
 from sklearn import decomposition
 from sklearn import exceptions
 from sklearn import model_selection
-from sklearn import pipeline
 from sklearn import preprocessing
 import standins
 
@@ -42,18 +40,18 @@ def _table():
     )
 
 
-def test_each_column_is_encoded_reduced_and_named(table):
+def test_the_columns_are_encoded_reduced_together_and_named(table):
     tab = lazy.Tabularizer(
         {
             "curve": "time_statistics",
             "notes": "text_hashing",
             "cutout": "image_statistics",
         },
-        n_components=3,
+        n_columns=5,
     ).fit(table)
-    pairs = itertools.product(("curve", "notes", "cutout"), range(3))
-    expected = [f"{column}__pc{i}" for column, i in pairs]
+    expected = [f"embedding__pc{i}" for i in range(5)]
     assert list(tab.get_feature_names_out()) == [*expected, "remainder__number"]
+    assert list(tab.encoders_) == ["curve", "notes", "cutout"]
     out = tab.transform(table.set_axis(range(100, 100 + N_ROWS)))
     assert list(out.columns) == list(tab.get_feature_names_out())
     assert out.index.tolist() == list(range(100, 100 + N_ROWS))
@@ -63,62 +61,86 @@ def test_each_column_is_encoded_reduced_and_named(table):
 def test_a_column_passed_through_keeps_its_type(table):
     kinds = pd.Categorical(["a", "b"] * (N_ROWS // 2))
     typed = table.assign(kind=kinds, count=np.arange(N_ROWS))
-    out = lazy.Tabularizer({"notes": "text_hashing"}, n_components=2).fit(typed)
+    out = lazy.Tabularizer({"notes": "text_hashing"}, n_columns=2).fit(typed)
     out = out.transform(typed)
-    assert out["notes__pc0"].dtype == np.float64
+    assert out["embedding__pc0"].dtype == np.float64
     assert out["remainder__kind"].dtype == kinds.dtype
     assert out["remainder__count"].dtype == np.int64
 
 
-def test_a_reduced_embedding_is_the_principal_components_of_its_scaled_rows(
-    table,
+def _standardized(table, column, encoder):
+    """A column's embedding, standardized, and its columns that vary."""
+    embedding = encoder.fit_transform(table[column])
+    scaler = preprocessing.StandardScaler().fit(embedding)
+    return scaler.transform(embedding), int((scaler.var_ > 0).sum())
+
+
+@pytest.mark.parametrize(
+    ("weights", "totals"),
+    [("equal", (1.0, 1.0)), (None, None), ([4.0, 0.25], (4.0, 0.25))],
+)
+def test_the_reduction_is_the_pca_of_the_weighted_standardized_embeddings(
+    table, weights, totals
 ):
     tab = lazy.Tabularizer(
-        {"curve": "time_statistics"}, n_components=4, remainder="drop"
+        {"curve": "time_statistics", "cutout": "image_pixels"},
+        n_columns=4,
+        weights=weights,
+        remainder="drop",
     ).fit(table)
-    embedding = lazy.time.Statistics().fit_transform(table["curve"])
-    expected = pipeline.make_pipeline(
-        preprocessing.StandardScaler(),
-        decomposition.PCA(4, svd_solver="full"),
-    ).fit_transform(embedding)
-    np.testing.assert_allclose(tab.transform(table), expected)
+    blocks = []
+    for index, (column, encoder) in enumerate(
+        (("curve", lazy.time.Statistics()), ("cutout", lazy.image.Pixels()))
+    ):
+        block, n_varying = _standardized(table, column, encoder)
+        if totals is not None:
+            block = block * np.sqrt(totals[index] / n_varying)
+            # The embedding's total variance is its weight.
+            assert block.var(axis=0).sum() == pytest.approx(totals[index])
+        blocks.append(block)
+    expected = decomposition.PCA(4, svd_solver="full").fit_transform(
+        np.hstack(blocks)
+    )
+    np.testing.assert_allclose(tab.transform(table), expected, atol=1e-10)
 
 
-def test_a_narrow_embedding_keeps_its_columns_and_names(table):
+def test_narrow_embeddings_keep_their_columns_and_names(table):
     tab = lazy.Tabularizer(
-        {"curve": "time_statistics"}, n_components=None, remainder="drop"
+        {"curve": "time_statistics"}, n_columns=None, remainder="drop"
     ).fit(table)
     np.testing.assert_array_equal(
         tab.transform(table),
         lazy.time.Statistics().fit_transform(table["curve"]),
     )
     assert tab.get_feature_names_out()[0] == "curve__time_statistics_mean"
-    wide = lazy.Tabularizer({"curve": "time_statistics"}, n_components=13)
+    assert tab.components_ is None
+    wide = lazy.Tabularizer({"curve": "time_statistics"}, n_columns=13)
     assert wide.fit_transform(table[["number", "curve"]]).shape == (N_ROWS, 14)
 
 
-def test_a_missing_item_stays_missing_and_is_left_out_of_the_fit(table):
+def test_a_missing_item_takes_the_contexts_mean_embedding(table):
     gappy = table.copy()
     gappy.loc[[2, 7], "notes"] = None
-    tab = lazy.Tabularizer(
-        {"notes": "text_hashing"}, n_components=3, remainder="drop"
-    ).fit(gappy)
+    gappy.loc[[7, 9], "curve"] = None
+    columns = {"notes": "text_hashing", "curve": "time_statistics"}
+    tab = lazy.Tabularizer(columns, n_columns=3, remainder="drop").fit(gappy)
     out = tab.transform(gappy)
-    assert out.loc[[2, 7]].isna().all(axis=None)
-    assert not out.drop(index=[2, 7]).isna().any(axis=None)
-    complete = gappy.drop(index=[2, 7])
-    alone = lazy.Tabularizer(
-        {"notes": "text_hashing"}, n_components=3, remainder="drop"
-    ).fit(complete)
-    np.testing.assert_allclose(
-        out[~gappy["notes"].isna()], alone.transform(complete)
-    )
+    # Row 7 has no item at all; rows 2 and 9 keep what their other item says.
+    assert out.loc[7].isna().all()
+    assert not out.drop(index=7).isna().any(axis=None)
+    blocks, _ = tab._encoded(gappy.loc[[2]])
+    blocks[0] = tab.mean_[None, : blocks[0].shape[1]]
+    np.testing.assert_allclose(out.loc[[2]], tab._reduced(blocks))
+    # Without a reduction, a missing item stays a row of NaN in its columns.
+    plain = lazy.Tabularizer(columns, n_columns=None, remainder="drop")
+    out = plain.fit_transform(gappy)
+    assert out.loc[2].isna().sum() == blocks[0].shape[1]
 
 
 def test_the_reduction_is_fitted_on_the_context_only(table):
     context, queries = table.iloc[:30], table.iloc[30:]
     tab = lazy.Tabularizer(
-        {"curve": "time_statistics"}, n_components=3, remainder="drop"
+        {"curve": "time_statistics"}, n_columns=3, remainder="drop"
     ).fit(context)
     one_at_a_time = [tab.transform(queries.iloc[[i]]) for i in range(10)]
     np.testing.assert_allclose(np.vstack(one_at_a_time), tab.transform(queries))
@@ -127,11 +149,9 @@ def test_the_reduction_is_fitted_on_the_context_only(table):
 def test_an_encoder_given_is_cloned_and_a_name_builds_one(table):
     given = lazy.time.Spectrum(n_octaves=3)
     tab = lazy.Tabularizer(
-        {"curve": given, "notes": "text_statistics"}, n_components=None
+        {"curve": given, "notes": "text_statistics"}, n_columns=None
     ).fit(table)
-    encoders_used = [
-        step[0] for _, step, _ in tab.transformer_.transformers_[:2]
-    ]
+    encoders_used = list(tab.encoders_.values())
     assert encoders_used[0].get_params() == given.get_params()
     assert isinstance(encoders_used[1], lazy.text.Statistics)
     assert not hasattr(given, "_n_features_out")
@@ -143,17 +163,17 @@ def test_a_model_behind_it_predicts_and_a_search_tunes_it(table):
     model = lazy.make_pipeline(
         lazy.Tabularizer(
             {"curve": "time_statistics", "notes": "text_hashing"},
-            n_components=2,
+            n_columns=2,
         ),
         standins.HistogramStandIn(n_estimators=2, progress=False),
     )
     model.fit(table, y)
-    assert model[-1].feature_names_in_[0] == "curve__pc0"
+    assert model[-1].feature_names_in_[0] == "embedding__pc0"
     assert model.predict_quantiles(table, [0.5]).shape == (N_ROWS, 1)
     search = model_selection.GridSearchCV(
-        model, {"tabularizer__n_components": [1, 2]}, cv=2
+        model, {"tabularizer__n_columns": [1, 2]}, cv=2
     ).fit(table, y)
-    assert search.best_params_["tabularizer__n_components"] in (1, 2)
+    assert search.best_params_["tabularizer__n_columns"] in (1, 2)
 
 
 class _Recording(lazy.text.Statistics):
@@ -167,9 +187,7 @@ class _Recording(lazy.text.Statistics):
 def test_fitting_in_a_pipeline_encodes_each_item_once(table):
     tab = lazy.Tabularizer({"notes": _Recording()}, remainder="drop")
     tab.fit_transform(table)
-    assert (
-        tab.transformer_.named_transformers_["column0"][0].n_encoded_ == N_ROWS
-    )
+    assert tab.encoders_["notes"].n_encoded_ == N_ROWS
 
 
 @pytest.mark.parametrize(
@@ -184,9 +202,24 @@ def test_fitting_in_a_pipeline_encodes_each_item_once(table):
             "unknown encoder 'times'; known: .'image', 'text', 'time'",
         ),
         (
-            {"columns": {"curve": "time_statistics"}, "n_components": 0},
+            {"columns": {"curve": "time_statistics"}, "n_columns": 0},
             ValueError,
-            "n_components must be a positive integer",
+            "n_columns must be a positive integer",
+        ),
+        (
+            {"columns": {"curve": "time_statistics"}, "weights": "even"},
+            ValueError,
+            "weights must be 'equal', None or a list",
+        ),
+        (
+            {"columns": {"curve": "time_statistics"}, "weights": [1.0, 2.0]},
+            ValueError,
+            "one positive number per column of items, 1 here",
+        ),
+        (
+            {"columns": {"curve": "time_statistics"}, "weights": [0.0]},
+            ValueError,
+            "one positive number per column of items",
         ),
         (
             {"columns": {"curve": "time_statistics"}, "remainder": "keep"},
@@ -206,30 +239,31 @@ def test_a_short_context_keeps_fewer_components_and_says_so(table):
     few = table.copy()
     few.loc[5:, "notes"] = None
     tab = lazy.Tabularizer({"notes": "text_hashing"}, remainder="drop")
-    with pytest.warns(lazy.LazyWarning, match="so it keeps 4 components"):
+    with pytest.warns(lazy.LazyWarning, match="so they keep 4 columns"):
         out = tab.fit_transform(few)
     assert out.shape == (N_ROWS, 4)
     assert not out[:5].isna().any(axis=None)
-    with pytest.raises(ValueError, match="has 1 rows without NaN"):
+    with pytest.raises(ValueError, match="have 1 rows with an item"):
         tab.fit(table.assign(notes=[*table["notes"][:1], *[None] * 39]))
 
 
 @pytest.mark.parametrize("name", ["flux__g", "remainder", "verbose"])
 def test_any_column_name_works_and_names_its_output(table, name):
     renamed = table.rename(columns={"curve": name})
-    tab = lazy.Tabularizer({name: "time_statistics"}, n_components=2).fit(
-        renamed
-    )
-    assert list(tab.get_feature_names_out()[:2]) == [
-        f"{name}__pc0",
-        f"{name}__pc1",
+    tab = lazy.Tabularizer({name: "time_statistics"}, n_columns=None)
+    names = tab.fit(renamed).get_feature_names_out()
+    assert names[0] == f"{name}__time_statistics_mean"
+    assert list(names[-3:]) == [
+        "remainder__number",
+        "remainder__notes",
+        "remainder__cutout",
     ]
 
 
 def test_an_integer_label_of_a_dataframe_is_a_label_not_a_position(table):
     labelled = table[["notes", "curve"]].set_axis([1, 0], axis=1)
     tab = lazy.Tabularizer(
-        {0: "time_statistics"}, n_components=None, remainder="drop"
+        {0: "time_statistics"}, n_columns=None, remainder="drop"
     )
     np.testing.assert_array_equal(
         tab.fit_transform(labelled),
@@ -257,7 +291,27 @@ def test_each_modality_names_a_registered_encoder_of_its_own():
 
 
 def test_a_fitted_tabularizer_pickles(table):
-    tab = lazy.Tabularizer({"curve": "time_statistics"}, n_components=2)
+    tab = lazy.Tabularizer({"curve": "time_statistics"}, n_columns=2)
     tab.fit(table)
     again = pickle.loads(pickle.dumps(tab))
     pd.testing.assert_frame_equal(again.transform(table), tab.transform(table))
+
+
+def test_a_transformer_of_the_remainder_is_cloned_fitted_and_named(table):
+    scaler = preprocessing.StandardScaler()
+    tab = lazy.Tabularizer(
+        {"curve": "time_statistics", "notes": "text", "cutout": "image_pixels"},
+        n_columns=2,
+        remainder=scaler,
+    )
+    tab.set_params(columns={"curve": "time_statistics"})
+    out = tab.fit_transform(table[["number", "curve"]])
+    assert list(out.columns)[-1] == "remainder__number"
+    assert out["remainder__number"].std(ddof=0) == pytest.approx(1.0)
+    assert not hasattr(scaler, "mean_")
+
+
+def test_a_table_with_other_columns_is_refused_at_transform(table):
+    tab = lazy.Tabularizer({"curve": "time_statistics"}).fit(table)
+    with pytest.raises(ValueError, match="feature names"):
+        tab.transform(table.rename(columns={"number": "count"}))

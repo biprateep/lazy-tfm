@@ -163,7 +163,7 @@ def test_a_pipeline_encodes_items_and_adapts_them(model):
     )
     y = table["number"].to_numpy() + 0.1 * rng.normal(size=60)
     pipe = lazy.make_pipeline(
-        lazy.Tabularizer({"curve": "time_statistics"}, n_components=None),
+        lazy.Tabularizer({"curve": "time_statistics"}, n_columns=None),
         experimental.ContextAdapter(model, n_components=4, n_steps=2),
     ).fit(table[:40], y[:40])
     densities = pipe.predict_proba(table[40:])

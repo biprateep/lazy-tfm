@@ -618,9 +618,9 @@ def items(data):
     return frame, y
 
 
-def _encoded(n_components):
+def _encoded(n_columns):
     """TabPFN's stand-in behind a classical text encoder."""
-    tab = lazy.Tabularizer({"notes": "text_hashing"}, n_components=n_components)
+    tab = lazy.Tabularizer({"notes": "text_hashing"}, n_columns=n_columns)
     return lazy.make_pipeline(tab, lazy.LazyModel("tabpfn"))
 
 
@@ -654,7 +654,7 @@ def test_a_pipelines_model_gets_the_shared_settings(standin_backends, items):
     model.fit(frame, y)
     assert model.estimators_[0][-1].random_state == 7
     assert model.models[0][-1].random_state == 0
-    assert model.get_params()["tabpfn__tabularizer__n_components"] == 2
+    assert model.get_params()["tabpfn__tabularizer__n_columns"] == 2
 
 
 def test_a_pipelines_model_marks_the_columns_its_steps_make(

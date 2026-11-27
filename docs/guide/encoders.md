@@ -221,28 +221,61 @@ If you use a pretrained encoder, cite its network as well as LAZY:
 - the name of an encoder, such as `"time_spectrum"`;
 - an encoder, such as `lazy.text.Hashing(n_features=32)`.
 
-An embedding can have many columns, such as the 192 of `image_pixels`. The
-Tabularizer reduces each embedding wider than `n_components` (default 30): it
-standardizes each column of the embedding and keeps the first `n_components`
-principal components. Both are fitted on the rows given to `fit`, the context,
-as the model is. A missing item gives a row of `NaN`, which is left out of the
-fit and stays `NaN`. A context with no more items that are not missing than
-`n_components` keeps one component fewer than it has such items, with a
-warning. `n_components=None` keeps every column.
+An embedding can have many columns, such as the 192 of `image_pixels`, and a
+table can have several columns of items. The Tabularizer reduces all the
+embeddings together to `n_columns` columns (default 30), whatever the number
+of columns of items, so that the model's width does not grow with them.
 
-The default follows the published pipelines (MulTaBench, TabPFN's own text
-features, STRABLE), which all keep 30 components per column. STRABLE measured
-15 as worse than 30, and 60 or 120 as no better and slower.
+Let column of items $k$ have the embedding $e_k \in \mathbb{R}^{w_k}$ of a
+row. Each column $j$ of each embedding is standardized with its mean
+$\mu_{kj}$ and standard deviation $\sigma_{kj}$ over the context, and each
+embedding is multiplied by a factor $f_k$:
 
-The other columns pass through, unless `remainder` says otherwise. The output
-is a DataFrame with the index of the input, and its columns carry the names of
-`get_feature_names_out`, such as `notes__pc0` or `remainder__price`, so the
-model after it knows each column by name. The encoded columns are float64,
-and a column that passes through keeps its type. A search tunes the
-Tabularizer as any step, for example over `tabularizer__n_components`.
+$$
+z_k = f_k \, \frac{e_k - \mu_k}{\sigma_k}, \qquad
+f_k = \sqrt{\frac{v_k}{m_k}},
+$$
 
-One setting, `n_components`, serves every column. For another reduction, or
-a search over an encoder's own parameters, build a
+where $m_k$ is the number of columns of $e_k$ that vary in the context, so
+that $z_k$ has the total variance $v_k$. `weights` sets $v_k$:
+
+| `weights` | $v_k$ | Effect |
+|---|---|---|
+| `"equal"` (default) | 1 | Every embedding has the same total variance, whatever its width. |
+| `None` | $m_k$ | Every standardized column has variance 1, so a wider embedding weighs more. |
+| a list | its entry $k$ | Each embedding has the total variance given. |
+
+The weighted embeddings are set side by side, $z = (z_1, \dots, z_K)$, and
+the output is the projection of $z$ on its first `n_columns` principal
+components in the context, $h = C (z - \bar z)$. The components are joint, so
+a direction shared by an image and a text takes one column, not two.
+
+The standardization and the components are fitted on the rows given to
+`fit`, the context, as the model is. A missing item gives its embedding the
+context's mean, $z_k = 0$, so that a row keeps what its other items say. A
+row whose items are all missing is `NaN` in every reduced column, and is left
+out of the fit. A context with no more rows that have an item than
+`n_columns` keeps one column fewer than it has such rows, with a warning.
+
+Embeddings with no more than `n_columns` columns between them pass
+unchanged, with their encoders' names, and `n_columns=None` keeps every
+column of every embedding. A missing item then stays a row of `NaN` in its
+embedding's columns.
+
+The default, 30, is the number of components that the published pipelines
+(MulTaBench, TabPFN's own text features, STRABLE) keep for one column of
+items. STRABLE measured 15 as worse than 30, and 60 or 120 as no better and
+slower, for one column.
+
+The other columns pass through unreduced, so that they keep their meaning,
+unless `remainder` says otherwise. The output is a DataFrame with the index
+of the input, and its columns carry the names of `get_feature_names_out`,
+such as `embedding__pc0` or `remainder__price`, so the model after it knows
+each column by name. The encoded columns are float64, and a column that
+passes through keeps its type. A search tunes the Tabularizer as any step,
+for example over `tabularizer__n_columns`.
+
+For another reduction, or a search over an encoder's own parameters, build a
 {class}`~sklearn.compose.ColumnTransformer` of encoders and any other steps:
 an encoder is a scikit-learn transformer on its own, and
 {func}`~lazy.encoders.get_encoder` builds the default encoder of a modality,
