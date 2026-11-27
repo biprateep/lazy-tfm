@@ -516,3 +516,48 @@ def test_tirex_pools_as_its_authors_embed_a_series():
         )
     # Measured: identical in float32.
     np.testing.assert_allclose(ours, theirs.numpy(), rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("model", "side"),
+    [("e5-small-v2", "right"), ("Qwen3-Embedding-0.6B", "left")],
+)
+def test_long_texts_are_split_into_passes_under_the_token_budget(
+    fakes, monkeypatch, model, side
+):
+    pytest.importorskip("torch")
+    monkeypatch.setattr(fake_encoders.Tokenizer, "padding_side", side)
+    rng = np.random.default_rng(0)
+    sizes = [1, 40, 3, 2, 38, 5, 4, 1]
+    texts = [" ".join(rng.choice(["ab", "abc", "a"], n)) for n in sizes]
+    shapes = []
+    call = fake_encoders.TextModel.__call__
+
+    def recording(self, input_ids, attention_mask):
+        shapes.append(tuple(input_ids.shape))
+        return call(self, input_ids, attention_mask)
+
+    monkeypatch.setattr(fake_encoders.TextModel, "__call__", recording)
+    settings = {"model": model, "device": "cpu", "cache": False}
+    whole = lazy.text.Pretrained(**settings).fit_transform(texts)
+    # A first and a last token beside 40 words, and one for e5's prefix.
+    assert shapes == [(8, 43 if model == "e5-small-v2" else 42)]
+    shapes.clear()
+    split = lazy.text.Pretrained(max_batch_tokens=50, **settings).fit_transform(
+        texts
+    )
+    # Each pass fits the budget, padded; the six short texts share one.
+    assert all(n * length <= 50 for n, length in shapes) and len(shapes) == 3
+    assert sorted(n for n, _ in shapes) == [1, 1, 6]
+    # A padded state is 1e6, so pooling that read other padding would show.
+    np.testing.assert_allclose(split, whole, rtol=1e-6)
+    # A text longer than the budget is a pass of its own.
+    shapes.clear()
+    alone = lazy.text.Pretrained(max_batch_tokens=10, **settings).fit_transform(
+        texts
+    )
+    assert all(n == 1 or n * length <= 10 for n, length in shapes)
+    assert whole.dtype == alone.dtype == np.float64
+    np.testing.assert_allclose(alone, whole, rtol=1e-6)
+    with pytest.raises(ValueError, match="max_batch_tokens must be a posit"):
+        lazy.text.Pretrained(max_batch_tokens=0, device="cpu").fit(texts)
