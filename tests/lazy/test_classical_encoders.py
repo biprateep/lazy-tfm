@@ -337,6 +337,24 @@ def test_items_that_do_not_stack_have_no_tensor(encoder):
     assert encoder._stacked([np.ones(sizes[0]), None]) is None
 
 
+@pytest.mark.parametrize("length", [1, 2])
+@pytest.mark.parametrize(
+    "encoder", [lazy.time.Statistics(), lazy.time.Spectrum()]
+)
+def test_a_very_short_series_has_a_forward_on_the_graph(encoder, length):
+    torch = pytest.importorskip("torch")
+    items = [np.array([1.0, -1.0])[:length], np.array([0.5, 2.0])[:length]]
+    tensor = torch.tensor(
+        encoder.fit(items)._stacked(items), requires_grad=True
+    )
+    embedding = encoder.forward(tensor)
+    np.testing.assert_allclose(
+        embedding.detach().numpy(), encoder.transform(items), atol=1e-12
+    )
+    embedding.sum().backward()
+    assert tensor.grad.isfinite().all()
+
+
 def test_a_series_with_a_gap_has_no_tensor():
     items = [np.array([1.0, np.nan, 3.0]), np.array([1.0, 2.0, 3.0])]
     assert lazy.time.Statistics().fit(items)._stacked(items) is None

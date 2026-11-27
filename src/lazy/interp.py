@@ -461,7 +461,8 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             be given only when the features are the columns of one table.
         at: The name of a step of a :class:`~lazy.pipeline.LazyPipeline`
             before its model: the features are that step's output columns,
-            named by its ``get_feature_names_out``. A removal method runs
+            named as the table it returns names them, or ``x0`` onwards
+            for a step that returns an array. A removal method runs
             the pipeline to that stage, removes or permutes the stage's
             columns, then runs the rest; a gradient method takes the
             gradient in them, and every later step needs a forward.
@@ -1279,8 +1280,15 @@ def _staged(  # noqa: GS030 - scikit-learn's X, y.
     if not refit:
         validation.check_is_fitted(model)
         return rest, head.transform(X), None
-    head = sklearn_base.clone(head)
-    context = head.fit_transform(X_context, y_context)
+    if any(
+        getattr(step, "trains_through_model", False) for _, step in head.steps
+    ):
+        # Such a step is fitted through the model, by the whole pipeline.
+        head = sklearn_base.clone(model).fit(X_context, y_context)[:cut]
+        context = head.transform(X_context)
+    else:
+        head = sklearn_base.clone(head)
+        context = head.fit_transform(X_context, y_context)
     return sklearn_base.clone(rest), head.transform(X), context
 
 

@@ -175,6 +175,20 @@ class BaseEncoder(
         del item  # Unused: by default, the order of the column.
         return 0
 
+    def _read_item(self, item: Any) -> Any:
+        """An item as an augmentation before this encoder takes it.
+
+        By default the item itself. An encoder that reads files, or
+        objects that are not arrays, returns the array it would encode.
+
+        Args:
+            item: One item, not missing.
+
+        Returns:
+            The item, or the array the encoder reads of it.
+        """
+        return item
+
     def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
         """The items of a column as one array, for :meth:`forward`.
 

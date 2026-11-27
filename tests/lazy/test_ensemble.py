@@ -652,6 +652,7 @@ def test_each_member_pipeline_gets_a_seed_of_its_own_for_its_steps(
         lazy.augment.Noise(0.01),
         lazy.LazyModel("tabpfn"),
     )
+    assert member[1].random_state == 0
     kept = sklearn_base.clone(member).set_params(noise__random_state=11)
     model = lazy.LazyEnsembleModel([member, member, kept], random_state=7)
     model.fit(frame, y)

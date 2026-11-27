@@ -37,6 +37,7 @@ from typing import Any
 
 import numpy.typing as npt
 import pandas as pd
+from sklearn import base as sklearn_base
 from sklearn import pipeline as sklearn_pipeline
 from sklearn.utils import metadata_routing
 from sklearn.utils import metaestimators
@@ -125,11 +126,22 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
                 for _, inner in self.steps[index + 1 : -1]
                 if inner is not None and inner != "passthrough"
             ]
-            step._fit_through(stage, y, later, self.steps[-1][1])  # noqa: SLF001 - the hook of such a step.
-            table = step.transform(stage)
-            for inner in later:
-                table = inner.fit_transform(table, y)
-            self.steps[-1][1].fit(table, y)
+            try:
+                step._fit_through(stage, y, later, self.steps[-1][1])  # noqa: SLF001 - the hook of such a step.
+                table = step.transform(stage)
+                for inner in later:
+                    table = inner.fit_transform(table, y)
+                self.steps[-1][1].fit(table, y)
+            except Exception:
+                # A failed fit leaves the pipeline unfitted: this step and
+                # the later ones are replaced by unfitted copies.
+                self.steps[index:] = [
+                    (name, sklearn_base.clone(inner))
+                    if hasattr(inner, "get_params")
+                    else (name, inner)
+                    for name, inner in self.steps[index:]
+                ]
+                raise
         return self
 
     def get_metadata_routing(self) -> metadata_routing.MetadataRouter:

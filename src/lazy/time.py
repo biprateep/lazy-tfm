@@ -126,7 +126,8 @@ class Statistics(_base.BaseEncoder):
                 std[:, 0],
                 scaled.pow(3).mean(dim=1),
                 scaled.pow(4).mean(dim=1) - 3,
-                centred @ time / (time @ time).clamp(min=1),
+                # 0.5 is its least value above zero, at two values.
+                centred @ time / (time @ time).clamp(min=0.5),
                 (scaled[:, :-1] * scaled[:, 1:]).sum(dim=1) / n,
                 items.diff(dim=1).abs().sum(dim=1) / max(n - 1, 1),
             ],
@@ -262,7 +263,8 @@ class Spectrum(_base.BaseEncoder):
         n = items.shape[1]
         out = torch.zeros((len(items), self.n_octaves + 1), dtype=items.dtype)
         if n < 2:
-            return out
+            # On the graph, with no gradient: one value has no spectrum.
+            return out + items[:, :1] * 0
         centred = items - items.mean(dim=1, keepdim=True)
         power = torch.fft.rfft(centred, dim=1)[:, 1:].abs().square()
         if n % 2 == 0:

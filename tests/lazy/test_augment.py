@@ -23,7 +23,6 @@ def _images(n=4, shape=(8, 6, 3), seed=0):
 NUMERIC = [
     augment.Rescale("asinh", scale=0.5),
     augment.Rescale("identity", scale=4.0),
-    augment.Noise(0.2, relative=True, random_state=3),
     augment.Dihedral("rotate_90"),
     augment.Dihedral("transverse"),
     augment.Dihedral(random_state=5),
@@ -47,7 +46,11 @@ def test_a_forward_gives_what_transform_gives_and_declares_its_kind(step):
     assert _steps.gradient_kind(step) in ("differentiable", "index_map", "mask")
 
 
-@pytest.mark.parametrize("step", NUMERIC, ids=repr)
+@pytest.mark.parametrize(
+    "step",
+    [*NUMERIC, augment.Noise(0.2, relative=True, random_state=3)],
+    ids=repr,
+)
 def test_a_rows_augmentation_does_not_depend_on_the_rows_with_it(step):
     images = _images()
     together = step.fit(images).transform(images)
@@ -216,3 +219,66 @@ def test_a_tabularizers_seed_seeds_each_columns_augmentations():
     assert len({tuple(views(seed)) for seed in range(8)}) > 1
     assert views(3) == views(3)
     assert any(len(set(views(seed))) == 2 for seed in range(8))
+
+
+def test_noise_is_a_barrier_since_a_last_bit_changes_its_draw():
+    row = np.array([[0.1, 0.2, 0.3]])
+    noise = augment.Noise(0.5).fit(row)
+    assert not np.allclose(
+        noise.transform(row) - row,
+        noise.transform(np.nextafter(row, 1.0)) - np.nextafter(row, 1.0),
+    )
+    assert "exact values" in _steps.barrier("noise", noise).reason
+
+
+def test_a_grey_image_is_masked_alike_with_and_without_its_channel_axis():
+    mask = augment.Mask(0.5, patch=2, random_state=3)
+    np.testing.assert_array_equal(
+        mask._kept((8, 8)), mask._kept((8, 8, 1))[:, :, 0]
+    )
+
+
+def test_a_file_is_read_in_the_encoders_mode_before_it_is_augmented(tmp_path):
+    rng = np.random.default_rng(0)
+    paths = []
+    for index in range(4):
+        pixels = rng.integers(0, 256, (6, 6, 3), dtype=np.uint8)
+        path = tmp_path / f"{index}.png"
+        # A palette image: its values index colours, they are not levels.
+        Image.fromarray(pixels).convert("P").save(path)
+        paths.append(str(path))
+    table = pd.DataFrame({"cutout": paths})
+    encoder = image_lib.Statistics(n_channels=3)
+    augmented = lazy.Tabularizer(
+        {"cutout": [augment.Dihedral("identity"), encoder]}, n_columns=None
+    ).fit_transform(table)
+    np.testing.assert_allclose(augmented, encoder.fit_transform(paths))
+
+
+def test_a_tables_bool_column_and_its_names_pass_an_augmentation():
+    table = pd.DataFrame({"a": [1.0, 2.0], "flag": [True, False]})
+    noise = augment.Noise(0.1).fit(table)
+    out = noise.transform(table)
+    assert out["flag"].tolist() == [True, False] and out["flag"].dtype == bool
+    assert list(noise.get_feature_names_out()) == ["a", "flag"]
+    with pytest.raises(ValueError, match="fitted on no table"):
+        augment.Noise().fit([np.ones(3)]).get_feature_names_out()
+
+
+def test_a_failed_refit_leaves_an_augmentation_unfitted():
+    table = pd.DataFrame({"a__0": [1.0], "b__0": [2.0]})
+    step = augment.ColumnDropout(0.5, by="prefix").fit(table)
+    with pytest.raises(ValueError, match="needs a table with column names"):
+        step.fit(table.to_numpy())
+    with pytest.raises(exceptions.NotFittedError):
+        step.transform(table)
+
+
+def test_a_tabularizers_seed_leaves_a_seed_that_was_given():
+    images = _images(n=4, shape=(4, 4, 1))
+    table = pd.DataFrame({"a": images})
+    pixels = image_lib.Pixels(size=4, n_channels=1)
+    spec = [augment.Crop(0.5, random_state=5), augment.Dihedral(), pixels]
+    tab = lazy.Tabularizer({"a": spec}, n_columns=None, random_state=9)
+    crop, turn = tab.fit(table).augmentations_["a"]
+    assert crop.random_state == 5 and turn.random_state != 0

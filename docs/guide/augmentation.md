@@ -59,7 +59,7 @@ lazy.make_pipeline(
 | Data | Augmentation | What it does | Gradient kind |
 |---|---|---|---|
 | Numbers | {class}`~lazy.augment.Rescale` | $f(x / s)$, with $f$ the identity, `asinh`, `log` or `log1p` | differentiable |
-| Numbers | {class}`~lazy.augment.Noise` | adds Gaussian noise of a set scale | differentiable |
+| Numbers | {class}`~lazy.augment.Noise` | adds Gaussian noise of a set scale | barrier |
 | Images | {class}`~lazy.augment.Dihedral` | one of the eight rotations and flips of a square | index map |
 | Images, time series | {class}`~lazy.augment.Crop` | keeps a window of each axis | index map |
 | Images, time series | {class}`~lazy.augment.Mask` | sets patches to zero | mask |
@@ -92,8 +92,10 @@ batch:
 
 ## Gradients
 
-Each augmentation declares its gradient kind, and all but those of text have
-a forward on torch tensors. A gradient method of {mod}`lazy.interp` therefore
+Each augmentation declares its gradient kind, and all but `Noise` and those
+of text have a forward on torch tensors. `Noise` draws from each row's exact
+values, so it is not one smooth function of them, and attribution ends at its
+output. A gradient method of {mod}`lazy.interp` therefore
 passes them ({doc}`interpretability`): through a rotation or a crop, the
 attribution of a pixel goes back to where the pixel was, and a masked value
 gets none.

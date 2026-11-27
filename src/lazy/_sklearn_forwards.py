@@ -148,6 +148,9 @@ def _interpolated(x: Any, knots: Any, values: Any) -> Any:
     """
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
+    if knots.size == 1:
+        # One knot: the interpolant is constant, with no slope.
+        return x * 0 + float(values[0])
     points = x.detach().cpu().double().numpy()
     piece = np.clip(
         np.searchsorted(knots, points, side="right") - 1, 0, knots.size - 2

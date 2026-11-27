@@ -121,6 +121,15 @@ class _ImageEncoder(_base.BaseEncoder):
             return None
         return np.stack(pixels)
 
+    def _read_item(self, item: Any) -> Any:
+        """A file or a Pillow image as an array, in ``n_channels``' mode."""
+        if isinstance(item, (str, os.PathLike)):
+            with Image.open(item) as image:
+                return self._read_item(image)
+        if isinstance(item, Image.Image):
+            return np.asarray(self._converted(item))
+        return item
+
     def _converted(self, image: Image.Image) -> Image.Image:
         """A Pillow image in the mode of ``n_channels``.
 
@@ -484,6 +493,12 @@ class Pretrained(_pretrained.PretrainedEncoder):
         pixels = preprocess([_rgb(item) for item in items]).to(model.device)
         result = model(pixel_values=pixels)
         return getattr(result, self._recipe().output).float().cpu().numpy()
+
+    def _read_item(self, item: Any) -> Any:
+        """A file or a Pillow image as the 8-bit RGB array the network reads."""
+        if isinstance(item, (str, os.PathLike, Image.Image)):
+            return np.asarray(_rgb(item))
+        return item
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an image: of the file for a path, else its RGB."""

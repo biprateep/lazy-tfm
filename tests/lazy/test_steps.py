@@ -67,6 +67,13 @@ def test_a_forward_gives_what_transform_gives(transformer):
     )
 
 
+def test_a_quantile_transformer_of_one_quantile_is_constant():
+    X = _table()
+    transformer = preprocessing.QuantileTransformer(n_quantiles=1).fit(X)
+    got = _steps.forward(transformer, torch.tensor(X[:5]))
+    np.testing.assert_allclose(got.numpy(), transformer.transform(X[:5]))
+
+
 def test_box_cox_gives_what_transform_gives():
     X = np.abs(_table()) + 0.1
     transformer = preprocessing.PowerTransformer(method="box-cox").fit(X)

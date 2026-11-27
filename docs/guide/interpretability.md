@@ -198,8 +198,8 @@ a barrier too, although it still predicts as before.
 ### Stages
 
 A *stage* is the output of one step of a pipeline. `at` names the step, and
-the features are then that step's output columns, named by its
-`get_feature_names_out`:
+the features are then that step's output columns, named as the table it
+returns names them (`x0` onwards for a step that returns an array):
 
 ```python
 interp.explain(model, X_test, y_test, X_train, y_train, at="tabularizer")

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn import base as sklearn_base
+from sklearn import exceptions
 from sklearn import preprocessing
 import standins
 
@@ -178,6 +179,45 @@ def test_later_steps_are_trained_through_and_fitted_again(model, data):
     )
     with pytest.raises(ValueError, match="KBinsDiscretizer has no differenti"):
         blocked.fit(X, y)
+
+
+def test_a_failed_training_leaves_the_pipeline_unfitted(monkeypatch, data):
+    X, y = _as_images(data[0]), data[1]
+    fakes.install("tabpfn", monkeypatch)
+    # The default recipe has no differentiable pass.
+    model = lazy.LazyModel(
+        "tabpfn", n_estimators=2, device="cpu", progress=False
+    )
+    pipe = _pipeline(model, n_steps=1)
+    with pytest.raises(ValueError, match="an adaptive reducer"):
+        pipe.fit(X, y)
+    with pytest.raises(exceptions.NotFittedError):
+        pipe.predict(X)
+    with pytest.raises(exceptions.NotFittedError):
+        pipe[0].transform(X)
+
+
+def test_a_module_of_the_wrong_width_leaves_the_tabularizer_unfitted(data):
+    X = _as_images(data[0])
+    tab = lazy.Tabularizer(
+        {"curve": lazy.image.Pixels(size=1, n_channels=6)},
+        n_columns=None,
+        reducer=torch.nn.Linear(5, 3).double(),
+    )
+    with pytest.raises(RuntimeError):
+        tab.fit(X)
+    with pytest.raises(exceptions.NotFittedError):
+        tab.transform(X)
+
+
+def test_a_refit_at_a_stage_trains_the_reducer_through_the_model(model, data):
+    X, y, X_test = _as_images(data[0]), data[1], _as_images(data[2])
+    pipe = _pipeline(model, n_steps=30, learning_rate=1e-2)
+    fitted = sklearn_base.clone(pipe).fit(X, y)
+    assert fitted[0].best_step_ > 0
+    _, stage, context = interp._staged(pipe, "tabularizer", X_test, X, y, True)
+    np.testing.assert_allclose(context, fitted[0].transform(X))
+    np.testing.assert_allclose(stage, fitted[0].transform(X_test))
 
 
 def test_a_model_without_a_differentiable_pass_is_refused(data):

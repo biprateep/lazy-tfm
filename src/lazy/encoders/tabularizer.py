@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
 import copy
+import inspect
 from typing import Any
 
 import array_api_compat
@@ -125,9 +126,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             transformer transforms them, as in
             :class:`~sklearn.compose.ColumnTransformer`.
         random_state: The seed of the columns' augmentations: augmentation
-            ``j`` of column ``k`` is seeded from ``SeedSequence(
-            [random_state, k, j])``, whatever its own ``random_state``.
-            ``None`` leaves each augmentation its own seed.
+            ``j`` of column ``k`` whose own ``random_state`` is still its
+            default is seeded from ``SeedSequence([random_state, k, j])``;
+            one given another seed keeps it. ``None`` leaves each
+            augmentation its own seed.
         encoders_: The fitted encoder of each column of items, by the
             column's name, in the order of ``columns``.
         augmentations_: The fitted augmentations of each column of items,
@@ -279,7 +281,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             steps, encoders[column] = _steps_of(
                 column, spec, self.random_state, index
             )
-            items = frame.iloc[:, positions[index]]
+            items = _read(
+                encoders[column], steps, frame.iloc[:, positions[index]]
+            )
             for step in steps:
                 items = step.fit_transform(items)
             augmentations[column] = steps
@@ -295,16 +299,21 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self.remainder_ = remainder
         self._positions = positions
         self.__dict__.update(fitted)
-        self._n_reduced = int(self._reduced(blocks).shape[1])
-        if self.n_columns is not None and self._n_reduced > self.n_columns:
-            width = self._n_reduced
+        try:
+            self._n_reduced = int(self._reduced(blocks).shape[1])
+            if self.n_columns is not None and self._n_reduced > self.n_columns:
+                raise ValueError(
+                    f"the reducer's module gives {self._n_reduced} columns,"
+                    f" more than n_columns={self.n_columns}; set n_columns="
+                    f"{self._n_reduced} or None"
+                )
+            table = self._table(blocks, rest)
+        except Exception:
+            # A failed fit leaves the tabularizer unfitted.
             for name in _FITTED:
                 self.__dict__.pop(name, None)
-            raise ValueError(
-                f"the reducer's module gives {width} columns, more than"
-                f" n_columns={self.n_columns}; set n_columns={width} or None"
-            )
-        return self._table(blocks, rest)
+            raise
+        return table
 
     def _fit_reduction(
         self, blocks: list[_typing.FloatArray]
@@ -437,7 +446,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
 
     def _augmented(self, column: Hashable, items: Any) -> Any:
         """A column's items after its augmentations, in order."""
-        for step in self.augmentations_[column]:
+        steps = self.augmentations_[column]
+        items = _read(self.encoders_[column], steps, items)
+        for step in steps:
             items = step.transform(items)
         return items
 
@@ -583,19 +594,22 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 f"{label} needs X without missing or infinite values"
             )
         support = parts[0]
-        fitted = sklearn_base.clone(model).fit(start[support], y[support])
-        kept_network, history, self.best_step_ = _adaptive.train(
-            reducer,
-            weights,
-            features,
-            y,
-            parts,
-            differentiable.backend(fitted, label),
-            snapshot,
-        )
+        try:
+            fitted = sklearn_base.clone(model).fit(start[support], y[support])
+            kept_network, history, self.best_step_ = _adaptive.train(
+                reducer,
+                weights,
+                features,
+                y,
+                parts,
+                differentiable.backend(fitted, label),
+                snapshot,
+            )
+        finally:
+            if _adaptive.is_module(self.network_):
+                self.network_.eval()
         if _adaptive.is_module(self.network_):
             self.network_.load_state_dict(kept_network)
-            self.network_.eval()
         else:
             self.network_ = kept_network
         self.history_ = pd.DataFrame(
@@ -631,9 +645,11 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
 
         Returns:
             A tuple (leaves, through, barriers): the leaves; whether each
-            leaf of a column of items goes through its encoder, in the
-            order of ``columns``; and, if ``items`` is set, each encoder
-            that the gradient cannot cross, with the reason.
+            leaf goes through its encoder, in the order of ``columns``,
+            and then whether the last leaf goes through the transformer
+            of the other columns; and each encoder (if ``items`` is set)
+            or transformer that the gradient cannot cross, with the
+            reason.
 
         Raises:
             ValueError: If a column that passes through is not numeric.
@@ -683,6 +699,19 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 frame.drop(columns=frame.columns[self._positions])
                 for frame in frames
             ]
+            closed = _steps.barrier(f"{name}[remainder]", self.remainder_)
+            # Whether the leaf goes through the remainder's transformer.
+            through.append(closed is None)
+            if closed is not None:
+                # Attribution ends at what the transformer gives.
+                barriers.append(closed)
+                names = self._remainder_names()
+                rest = [
+                    pd.DataFrame(self.remainder_.transform(part)).set_axis(
+                        names, axis=1
+                    )
+                    for part in rest
+                ]
             other = rest[0].select_dtypes(exclude="number").columns
             if len(other):
                 raise ValueError(
@@ -725,7 +754,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             blocks.append(tensor)
         parts = [self._reduced(blocks)]
         if len(tensors) > len(blocks):
-            parts.append(_steps.forward(self.remainder_, tensors[-1]))
+            kept = tensors[-1]
+            parts.append(
+                _steps.forward(self.remainder_, kept) if through[-1] else kept
+            )
         return torch.cat(parts, dim=1)
 
     def _table(
@@ -884,6 +916,31 @@ def _position(frame: pd.DataFrame, column: Hashable) -> int:
     return position
 
 
+def _read(encoder: _base.BaseEncoder, steps: list[Any], items: Any) -> Any:
+    """A column's items as its augmentations take them.
+
+    The encoder reads each item first (``_read_item``), so that a file or
+    a Pillow image reaches an augmentation as the array the encoder would
+    read, in the encoder's own mode. A column without augmentations is
+    left to the encoder.
+
+    Args:
+        encoder: The column's encoder.
+        steps: The column's augmentations.
+        items: The column, as given.
+
+    Returns:
+        ``items`` itself without augmentations, else a list of the items
+        as read, a missing one as it is.
+    """
+    if not steps:
+        return items
+    return [
+        item if _base._is_missing(item) else encoder._read_item(item)  # noqa: SLF001 - the encoders' contract.
+        for item in _base._as_items(items)  # noqa: SLF001 - as above.
+    ]
+
+
 def _steps_of(
     column: Hashable, spec: object, random_state: int | None, index: int
 ) -> tuple[list[Any], _base.BaseEncoder]:
@@ -899,7 +956,7 @@ def _steps_of(
     Returns:
         A tuple (augmentations, encoder), all unfitted clones; augmentation
         ``j`` is seeded from ``SeedSequence([random_state, index, j])`` if
-        ``random_state`` is given and it takes a seed.
+        ``random_state`` is given and its own seed is still its default.
 
     Raises:
         TypeError: If an entry of a list but the last is no transformer,
@@ -919,7 +976,14 @@ def _steps_of(
                 f" encodes the column; got {type(given).__name__} first"
             )
         step = sklearn_base.clone(given)
-        if random_state is not None and "random_state" in step.get_params():
+        default = inspect.signature(type(step).__init__).parameters.get(
+            "random_state"
+        )
+        if (
+            random_state is not None
+            and default is not None
+            and step.get_params()["random_state"] == default.default
+        ):
             seed = np.random.SeedSequence([random_state, index, position])
             step.set_params(random_state=int(seed.generate_state(1)[0]))
         steps.append(step)

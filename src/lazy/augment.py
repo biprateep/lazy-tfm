@@ -17,8 +17,8 @@ pipelines that differ only in their seed, whose predictions pool:
 
 The augmentations, by the data they suit and their gradient kind:
 
-* numbers, in any array: :class:`Rescale` and :class:`Noise`
-  (differentiable);
+* numbers, in any array: :class:`Rescale` (differentiable) and
+  :class:`Noise` (a barrier);
 * images: :class:`Dihedral` and :class:`Crop` (index maps), and
   :class:`Mask` (a mask);
 * time series: :class:`Crop`, :class:`Mask`, :class:`Noise` and
@@ -143,10 +143,11 @@ class _Augmentation(
         """
 
     def fit(self, X: Any, y: Any = None) -> _Augmentation:  # noqa: GS030 - scikit-learn's X, y.
-        """Checks the parameters; learns nothing.
+        """Checks the parameters; learns nothing but a table's columns.
 
         Args:
-            X: A table of numbers or one column of items; not read.
+            X: A table of numbers or one column of items; only a table's
+                column names are read.
             y: Ignored; scikit-learn passes it.
 
         Returns:
@@ -156,8 +157,16 @@ class _Augmentation(
             ValueError: If a parameter is out of its range.
             TypeError: If a parameter is of the wrong type.
         """
-        del X, y  # Unused: an augmentation learns nothing.
+        del y  # Unused: an augmentation learns nothing.
+        # A failed fit leaves the augmentation unfitted.
+        for name in ("fitted_", "kept_", "n_features_in_", "feature_names_in_"):
+            self.__dict__.pop(name, None)
         self._check()
+        if isinstance(X, pd.DataFrame):
+            self.n_features_in_ = X.shape[1]
+            self.feature_names_in_ = np.asarray(X.columns, dtype=object)
+        elif isinstance(X, np.ndarray) and X.ndim == 2:
+            self.n_features_in_ = X.shape[1]
         self.fitted_ = True
         return self
 
@@ -223,18 +232,33 @@ class _Augmentation(
         """The names of a table's columns, which an augmentation keeps.
 
         Args:
-            input_features: The names of the input columns.
+            input_features: The names of the input columns; ``None`` for
+                those of the table given to ``fit``.
 
         Returns:
             Those names, shape (n_columns,).
+
+        Raises:
+            ValueError: If the names are not those of ``fit``, or ``fit``
+                was given no table.
         """
-        return np.asarray(input_features, dtype=object)
+        if not hasattr(self, "n_features_in_"):
+            raise ValueError(
+                f"{type(self).__name__} was fitted on no table, so it has"
+                " no column names"
+            )
+        return validation._check_feature_names_in(self, input_features)  # noqa: SLF001 - scikit-learn's own rule for these names.
 
 
 def _numeric(frame: pd.DataFrame) -> npt.NDArray[np.bool_]:
     """Which columns of a frame are numeric, shape (n_columns,)."""
+    # As select_dtypes("number") reads them: a bool column is not one.
     return np.array(
-        [pd.api.types.is_numeric_dtype(kind) for kind in frame.dtypes],
+        [
+            pd.api.types.is_numeric_dtype(kind)
+            and not pd.api.types.is_bool_dtype(kind)
+            for kind in frame.dtypes
+        ],
         dtype=bool,
     )
 
@@ -281,7 +305,9 @@ class Noise(_Augmentation):
 
     Each row, or item, draws its noise from the seed and its own values,
     so a row's noise does not depend on the rows that come with it, and
-    the same row always gets the same noise.
+    the same row always gets the same noise. A value that differs in its
+    last bit draws other noise, so the output is not one smooth function
+    of the input: the step is a barrier to gradients.
 
     Attributes:
         scale: The standard deviation of the noise: in units of each row's
@@ -293,6 +319,12 @@ class Noise(_Augmentation):
             before this one, or takes an absolute ``scale``.
         random_state: The seed, a non-negative integer.
     """
+
+    gradient_kind = "barrier"
+    barrier_reason = (
+        "its noise is drawn from each row's exact values, so it is not one"
+        " function of them"
+    )
 
     def __init__(  # noqa: D107 - arguments documented on the class.
         self,
@@ -458,7 +490,9 @@ class Mask(_Augmentation):
         """Which values of an item of ``shape`` stay, of that shape."""
         n_axes = min(2, len(shape))
         cells = tuple(-(-size // self.patch) for size in shape[:n_axes])
-        rng = np.random.default_rng([_seed(self.random_state), *shape])
+        # Keyed on the masked axes alone: a grey image masks alike with
+        # and without its axis of one channel.
+        rng = np.random.default_rng([_seed(self.random_state), *shape[:n_axes]])
         kept = rng.random(cells) >= _fraction("fraction", self.fraction)
         for axis in range(n_axes):
             kept = np.repeat(kept, self.patch, axis=axis)
@@ -527,6 +561,7 @@ class ColumnDropout(_Augmentation):
                 ``by="prefix"`` meets a table without column names.
         """
         super().fit(X, y)
+        del self.fitted_  # Fitted once the columns are drawn.
         names = list(getattr(X, "columns", range(np.shape(X)[1])))
         if self.by == "prefix":
             if not isinstance(X, pd.DataFrame):
@@ -542,7 +577,8 @@ class ColumnDropout(_Augmentation):
             for i in rng.choice(len(distinct), n_dropped, replace=False)
         }
         self.kept_ = np.flatnonzero([unit not in dropped for unit in units])
-        self.feature_names_in_ = np.asarray(names, dtype=object)
+        self._names = np.asarray(names, dtype=object)
+        self.fitted_ = True
         return self
 
     def transform(self, X: Any) -> Any:  # noqa: GS030 - scikit-learn's X.
@@ -579,7 +615,7 @@ class ColumnDropout(_Augmentation):
         """
         del input_features  # Unused: the names come from the fit.
         validation.check_is_fitted(self, "kept_")
-        return np.asarray(self.feature_names_in_[self.kept_], dtype=object)
+        return np.asarray(self._names[self.kept_], dtype=object)
 
 
 class _TextAugmentation(_Augmentation):

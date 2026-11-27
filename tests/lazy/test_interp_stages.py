@@ -358,3 +358,21 @@ def test_an_index_map_carries_the_gradient_back_to_the_pixels(backend, images):
         explanations[0].item_values["cutout"],
         atol=1e-6,
     )
+
+
+def test_a_remainder_that_is_a_barrier_ends_the_attribution_there(
+    backend, images
+):
+    X_context, y_context, X, y = images
+    tab = lazy.Tabularizer(
+        {"cutout": lazy.image.Pixels(size=2, n_channels=1)},
+        n_columns=None,
+        remainder=preprocessing.KBinsDiscretizer(3, encode="ordinal"),
+    )
+    model = lazy.make_pipeline(tab, backend()).fit(X_context, y_context)
+    with pytest.warns(lazy.LazyWarning, match=r"tabularizer\[remainder\]"):
+        explanation = interp.explain(
+            model, X, y, X_context, y_context, method="gradient"
+        )
+    assert explanation.feature_names == ("cutout", "remainder__number")
+    assert explanation.barriers[0].step == "tabularizer[remainder]"
