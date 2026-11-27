@@ -42,6 +42,7 @@ import sys
 import types
 from typing import Any, ClassVar, Literal, TypeGuard
 
+import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -631,15 +632,19 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         # Histograms, or quantiles under "quantile_average"; each member's
         # quantiles under a trim, which spans every member, as predicting.
         parts: list[Any] = []
-        for handle, group in zip(
-            self.handles_, self.member_groups_, strict=True
+        for handle, group, fitted, clipper in zip(
+            self.handles_,
+            self.member_groups_,
+            self.transformers_,
+            self.clippers_,
+            strict=True,
         ):
             rows = slice(None) if group.rows is None else group.rows
             args = (
                 handle,
-                self._prepare(X[rows], group, None),
+                self._prepare(X[rows], group, fitted, clipper),
                 y[rows],
-                self._prepare(query, group, None),
+                self._prepare(query, group, fitted, clipper),
                 group,
             )
             if trimmed:
@@ -664,24 +669,30 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     def _check_differentiable(self) -> None:
         """Refuses a fit whose prediction is not differentiable.
 
+        The transforms and the clip that lazy applies itself have forwards
+        (:mod:`lazy.models._transforms`), so they pass. What the model's own
+        package applies inside a member does not.
+
         Raises:
-            ValueError: If the fit ran a feature transform other than the
-                model's own ``"none"``, a clip, a categorical column, native
-                bagging, or a constant target.
+            ValueError: If the fit ran a feature transform of the model's
+                package other than its ``"none"``, a clip of the model's
+                package, a categorical column, native bagging, or a
+                constant target.
         """
         none = self.native_transforms.get("none")
         if hasattr(self, "constant_target_"):
             problem = "a target that is not constant"
         elif (
-            any(t is not None for t in self.transformers_)
-            or self.outlier_threshold_ is not None
-            or any(
-                g.native_transforms is None
-                or any(token != none for token in g.native_transforms)
-                for g in self.member_groups_
-            )
+            self.outlier_threshold_ is not None and self.native_outlier_clipping
+        ) or any(
+            g.native_transforms is None
+            or any(token != none for token in g.native_transforms)
+            for g in self.member_groups_
         ):
-            problem = "no feature transform or clip"
+            problem = (
+                f"no feature transform or clip that {self.display_name}'s own"
+                " package applies"
+            )
         elif self.is_categorical_.any():
             problem = "no categorical column"
         elif any(g.member_rows is not None for g in self.member_groups_):
@@ -1216,21 +1227,42 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
 
     def _prepare(
         self,
-        features: _typing.FloatArray,
+        features: Any,
         group: _members.MemberGroup,
         transformer: _transforms.ScaffoldTransform | None,
         clipper: _transforms.SoftClip | None = None,
-    ) -> _typing.FloatArray:
+    ) -> Any:
         """A group's view of some features: subset, transformed and permuted.
 
         The group's columns are taken first, then transformed, clipped and
-        permuted.
+        permuted. A torch tensor goes through the forwards of the transform
+        and of the clip, and keeps its gradient.
+
+        Args:
+            features: Features, a numpy array or a torch tensor of shape
+                (n_rows, n_features).
+            group: The member group.
+            transformer: Its fitted transform, or None.
+            clipper: Its fitted clip, or None.
+
+        Returns:
+            The view, of the kind of ``features``, shape (n_rows,
+            n_view_columns).
         """
+        on_graph = array_api_compat.is_torch_array(features)
         features = _subset(features, group)
         if transformer is not None:
-            features = transformer.transform(features)
+            features = (
+                transformer.forward(features)
+                if on_graph
+                else transformer.transform(features)
+            )
         if clipper is not None:
-            features = clipper.transform(features)
+            features = (
+                clipper.forward(features)
+                if on_graph
+                else clipper.transform(features)
+            )
         if group.permutation is None:
             return features
         return features[:, self._view_columns(group, features.shape[1])]

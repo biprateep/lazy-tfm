@@ -6,6 +6,7 @@ Each backend's own pass is tested beside it (``test_tabpfn.py``); here are
 the base class's checks and the torch densities.
 """
 
+import fakes
 import numpy as np
 import pytest
 import standins
@@ -14,6 +15,7 @@ from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
 from lazy.models import _differentiable
+from lazy.models import _transforms
 
 torch = pytest.importorskip("torch")
 
@@ -72,18 +74,72 @@ def test_a_backend_without_the_pass_says_so():
         model._differentiable_density(tensor, tensor, X[:, 0])
 
 
+def _fake(name, monkeypatch, **params):
+    """A backend's fake fitted on 40 rows, with 20 more as queries."""
+    rng = np.random.default_rng(1)
+    X = rng.lognormal(size=(60, 3))
+    y = X[:, 0] + 0.1 * rng.normal(size=60)
+    model = fakes.install(name, monkeypatch)(
+        n_estimators=4, device="cpu", progress=False, **params
+    ).fit(X[:40], y[:40])
+    return model, X[:40], y[:40], X[40:]
+
+
 @pytest.mark.parametrize(
-    ("params", "message"),
+    "params",
     [
-        ({"transforms": ("quantile",)}, "no feature transform or clip"),
-        ({"transforms": ("none",), "outlier_threshold": 3.0}, "or clip"),
+        {"transforms": "auto"},
+        {"transforms": ("none",), "outlier_threshold": 3.0},
     ],
 )
-def test_a_fit_that_is_not_differentiable_is_refused(params, message):
-    model, X = _fit(**params)
-    tensor = torch.tensor(X)
-    with pytest.raises(ValueError, match=message):
-        model._differentiable_density(tensor, tensor, X[:, 0])
+def test_what_the_models_own_package_applies_is_refused(monkeypatch, params):
+    model, X, y, queries = _fake("tabpfn", monkeypatch, **params)
+    with pytest.raises(ValueError, match="TabPFN.s own package applies"):
+        model._differentiable_density(torch.tensor(queries), torch.tensor(X), y)
+
+
+@pytest.mark.parametrize(
+    "transforms",
+    [
+        ("power",),
+        ("quantile", "quantile_uniform+original"),
+        ("robust", "quantile_rtdl", "none"),
+    ],
+)
+def test_the_pass_runs_through_the_transforms_that_lazy_applies(
+    monkeypatch, transforms
+):
+    model, X, y, queries = _fake(
+        "tabpfn", monkeypatch, transforms=transforms, outlier_threshold=None
+    )
+    assert any(t is not None for t in model.transformers_)
+    query = torch.tensor(queries, requires_grad=True)
+    density = model._differentiable_density(query, torch.tensor(X), y)
+    np.testing.assert_allclose(
+        density.mean().detach().numpy(),
+        model.predict_distribution(queries).mean(),
+        rtol=1e-4,
+    )
+    density.mean().sum().backward()
+    assert query.grad.isfinite().all() and query.grad.abs().sum() > 0
+
+
+def test_the_soft_clips_forward_gives_what_its_transform_gives():
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(50, 3))
+    X[:, 2] = np.nan  # No standard deviation: the column passes through.
+    queries = np.array([[0.0, 40.0, 1.0], [-30.0, 0.5, -7.0]])
+    clip = _transforms.SoftClip(2.0).fit(X)
+    point = torch.tensor(queries, requires_grad=True)
+    clipped = clip.forward(point)
+    np.testing.assert_allclose(
+        clipped.detach().numpy(), clip.transform(queries)
+    )
+    clipped.sum().backward()
+    # Beyond a bound, the slope is that of the logarithm of the magnitude.
+    assert point.grad[0, 1].item() == pytest.approx(1 / 41)
+    assert point.grad[1, 0].item() == pytest.approx(1 / 31)
+    assert point.grad[:, 2].tolist() == [1.0, 1.0]
 
 
 def test_a_context_of_another_size_is_refused():

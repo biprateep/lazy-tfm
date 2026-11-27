@@ -48,12 +48,14 @@ Typical usage example:
 
 from collections.abc import Sequence
 import dataclasses
+from typing import Any
 import warnings
 
 import numpy as np
 import numpy.typing as npt
 from sklearn import preprocessing
 
+from lazy import _steps
 from lazy import _typing
 
 __all__ = [
@@ -146,6 +148,9 @@ def _parse_one(name: str) -> TransformSpec:
 
 class ScaffoldTransform:
     """A transform applied by the package for a model that lacks it.
+
+    :meth:`forward` is :meth:`transform` on torch's autograd graph, so a
+    gradient passes through every transform of the vocabulary.
 
     Fitted on its member group's context rows only (see the module
     docstring), so a query row's features never depend on the other query
@@ -245,6 +250,39 @@ class ScaffoldTransform:
             out = np.hstack([out, np.asarray(features, dtype=np.float64)])
         return out
 
+    def forward(self, features: Any) -> Any:
+        """:meth:`transform` on a torch tensor, on the autograd graph.
+
+        The fitted parameters are constants: the gradient does not see how
+        they depend on the context.
+
+        Args:
+            features: Features, a float torch tensor of shape (n_rows,
+                n_features).
+
+        Returns:
+            What :meth:`transform` gives for the same values, to float
+            rounding, of the kind of ``features``.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        out = features
+        if self._transformer is not None:
+            columns = torch.as_tensor(
+                np.arange(features.shape[1])
+                if self._columns is None
+                else self._columns,
+                device=features.device,
+            )
+            out = features.index_copy(
+                1,
+                columns,
+                _steps.forward(self._transformer, features[:, columns]),
+            )
+        if self.spec.original:
+            out = torch.cat([out, features], dim=1)
+        return out
+
 
 class SoftClip:
     """The soft outlier clip the backends' models share, for any model.
@@ -335,6 +373,27 @@ class SoftClip:
             out = np.maximum(-np.log1p(np.abs(out)) + self._lower, out)
             out = np.minimum(np.log1p(np.abs(out)) + self._upper, out)
         return out
+
+    def forward(self, features: Any) -> Any:
+        """:meth:`transform` on a torch tensor, on the autograd graph.
+
+        Args:
+            features: Features, a float torch tensor of shape (n_rows,
+                n_features).
+
+        Returns:
+            The clipped features, of the kind of ``features``.
+        """
+        import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+        if self._lower is None or self._upper is None:
+            raise RuntimeError("SoftClip.forward before fit")
+        lower, upper = (
+            torch.as_tensor(bound, dtype=features.dtype, device=features.device)
+            for bound in (self._lower, self._upper)
+        )
+        out = torch.maximum(lower - torch.log1p(features.abs()), features)
+        return torch.minimum(upper + torch.log1p(out.abs()), out)
 
 
 def _quantile(
