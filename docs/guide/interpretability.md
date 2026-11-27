@@ -137,18 +137,92 @@ $$
 The sum approximates the integral of the gradient along the path, so the
 values of a row sum to what the path adds,
 $\sum_j \phi_{ij} \approx s(x_i) - s(b)$, with an error that falls as $1/m$.
-`explanation.full_values` and `explanation.base_values` hold the two terms.
-The cost is $m$ times that of `"gradient"`.
+`explanation.full_values` and `explanation.base_values` hold the two terms,
+and `explanation.sum_error` their difference from the sum, which shows whether
+`n_steps` is enough. The cost is $m$ times that of `"gradient"`.
 
-The forward pass is differentiable only when nothing between the features and
-the model's network is a step that has no gradient. The columns must be
-numeric. A transform or a clip that lazy applies itself for the backend has a
-gradient, such as `"quantile"` on TabPFN or TabICL; its fitted parameters are
-constants, so the gradient does not see how they depend on the context. A
-transform or a clip that the model's own package applies has none:
-`transforms=("none",)` and `outlier_threshold=None` always avoid them.
-`explain` refuses a fit without a differentiable pass, and any model with no
-such pass, such as a pipeline.
+### How far a gradient reaches
+
+A gradient passes from the predicted density back through the model, and then
+through each step before it. Each step has one gradient kind:
+
+| Kind | Meaning | Examples |
+|---|---|---|
+| `differentiable` | The gradient passes. | a logarithm, a scaling, PCA, a power or quantile transform |
+| `index_map` | The gradient passes to the input each output comes from. | a subset or a reordering of columns |
+| `mask` | The gradient passes, and a masked input gets none. | an imputed value |
+| `barrier` | The gradient stops at the step's output. | text hashing, a transformer that lazy does not know |
+
+The model itself is differentiable when its fit applied no transform or clip
+of the model's own package: `transforms=("none",)` and
+`outlier_threshold=None` always qualify, and so does any transform of the
+vocabulary that lazy applies for the backend, such as `"quantile"` on TabPFN
+or TabICL. The columns must be numeric. `explain` refuses any other fit, and
+names what stands in the way.
+
+In a {class}`~lazy.LazyPipeline`, lazy knows the forward of these fitted
+scikit-learn transformers, read from their fitted parameters:
+`StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`,
+`PowerTransformer`, `QuantileTransformer`, `PCA`, `TruncatedSVD`,
+`SimpleImputer` (a mask), `FunctionTransformer` with a numpy function such as
+`np.log1p` or `np.arcsinh`, and `Pipeline` and `ColumnTransformer` of these.
+The fitted parameters are constants: the gradient does not see how they
+depend on the context.
+
+A {class}`~lazy.Tabularizer` is entered column by column. Its reduction is
+differentiable, and so are the classical encoders of images and time series
+(`image_pixels`, `image_statistics`, `time_statistics`, `time_spectrum`), so
+the gradient reaches the pixels of an image or the values of a series when
+the items of a column have one shape. The value of such a column is the sum
+over its elements, and `explanation.item_values` keeps the value of each
+element, such as a map over the pixels:
+
+```python
+model = lazy.make_pipeline(
+    lazy.Tabularizer({"cutout": "image_pixels"}), lazy.LazyModel(...)
+)
+explanation = interp.explain(
+    model.fit(X_train, y_train), X_test, y_test, X_train, y_train,
+    method="integrated_gradients",
+)
+explanation.item_values["cutout"]  # (n_statistics, n_rows, height, width, channels)
+```
+
+A step that is a barrier ends the attribution: its output columns become the
+features. `explain` warns with the step's name and the reason, and lists them
+in `explanation.barriers`. The encoders of text are barriers, since characters
+have no gradient, and so are the pretrained encoders, whose networks lazy
+runs without gradients. A scikit-learn transformer that lazy does not know is
+a barrier too, although it still predicts as before.
+
+### Stages
+
+A *stage* is the output of one step of a pipeline. `at` names the step, and
+the features are then that step's output columns, named as the table it
+returns names them (`x0` onwards for a step that returns an array):
+
+```python
+interp.explain(model, X_test, y_test, X_train, y_train, at="tabularizer")
+```
+
+Every method takes `at`. A removal method runs the pipeline to the stage,
+removes or permutes the stage's columns, and runs the rest: Shapley values and
+`"loco"` refit the later steps and the model on the stage's columns, and
+`"permutation"` keeps them fitted. A gradient method takes the gradient in the
+stage's columns, so every later step needs a forward. Without `at`, a removal
+method works on the raw columns, and a gradient method goes as far back as the
+gradient reaches. `explanation.stage` records the stage.
+
+### Ensembles
+
+A {class}`~lazy.LazyEnsembleModel` that pools densities (`"geometric"` or
+`"linear"`) is one function of the input through every member. The gradient
+methods take one backward pass from the pooled density, which gives each
+member's path its share: a feature's value is the sum over the members, and
+each member's barriers are reported under `<member>__<step>`. A member that
+stops at a barrier contributes that stage's columns as features of their own,
+named `<member>__<column>`.
+`pooling="quantile"` has no differentiable pass.
 
 ## Groups of columns
 
@@ -181,7 +255,8 @@ explanation.top(5, "nll")  # each row's 5 most influential context rows
 `explanation.values` has one value per statistic, explained row and context
 row, and `explanation.context_rows` gives the positions of those context rows
 in `X_context`. `explanation.top(k)` lists, for each explained row, the $k$
-context rows with the largest absolute values.
+context rows with the largest absolute values, and
+`explanation.top(k, X_context=X_train)` adds each context row's features.
 
 Explain rows that are not in the context here too. A model recognizes its
 context rows, so the prediction of a row of the context rests on its own copy
@@ -209,6 +284,11 @@ backward pass of its own: the cost is one forward pass per 64 rows and three
 backward passes per row, each about as costly as a forward pass. The model must
 be fitted on `X_context` and `y_context` with a differentiable forward pass,
 as for the gradient methods of `explain`.
+
+On a pipeline, the gradient is taken in the columns that the gradient reaches,
+as above, except that it stops at the outputs of a Tabularizer's encoders:
+going through an encoder would encode the whole context on the autograd graph
+for every batch. `through_encoders=True` asks for it, and `at` names a stage.
 
 ### Leave one out
 

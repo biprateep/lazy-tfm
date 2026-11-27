@@ -13,6 +13,7 @@ import standins
 
 import lazy
 from lazy import encoders
+from lazy import interp
 
 torch = pytest.importorskip("torch")
 
@@ -149,6 +150,17 @@ def test_a_module_is_trained_as_the_reducer_and_the_given_one_is_not(
         ).fit(X)
 
 
+def test_a_gradient_method_passes_the_trained_reducer(model, data):
+    X, y, X_test, y_test = data
+    X, X_test = _as_images(X), _as_images(X_test)
+    fitted = _pipeline(model, n_steps=2).fit(X, y)
+    explanation = interp.explain(
+        fitted, X_test[:4], y_test[:4], X, y, method="gradient"
+    )
+    assert explanation.feature_names == ("curve", "number")
+    assert explanation.item_values["curve"].shape == (3, 4, 1, 1, 6)
+
+
 def test_later_steps_are_trained_through_and_fitted_again(model, data):
     X, y = _as_images(data[0]), data[1]
     tab = _pipeline(model, n_steps=5, learning_rate=1e-2)[0]
@@ -195,6 +207,16 @@ def test_a_module_of_the_wrong_width_leaves_the_tabularizer_unfitted(data):
         tab.fit(X)
     with pytest.raises(exceptions.NotFittedError):
         tab.transform(X)
+
+
+def test_a_refit_at_a_stage_trains_the_reducer_through_the_model(model, data):
+    X, y, X_test = _as_images(data[0]), data[1], _as_images(data[2])
+    pipe = _pipeline(model, n_steps=30, learning_rate=1e-2)
+    fitted = sklearn_base.clone(pipe).fit(X, y)
+    assert fitted[0].best_step_ > 0
+    _, stage, context = interp._staged(pipe, "tabularizer", X_test, X, y, True)
+    np.testing.assert_allclose(context, fitted[0].transform(X))
+    np.testing.assert_allclose(stage, fitted[0].transform(X_test))
 
 
 def test_a_model_with_a_transform_fitted_on_the_context_is_refused(

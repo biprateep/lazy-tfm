@@ -184,6 +184,11 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         self.remainder = remainder
         self.random_state = random_state
 
+    # To a tensor of a table; a path of gradients starts inside, at the
+    # leaves of :meth:`_leaves`.
+    gradient_kind = "barrier"
+    barrier_reason = "a Tabularizer takes a table of items, not their columns"
+
     @property
     def trains_through_model(self) -> bool:
         """Whether a pipeline trains this step through its model.
