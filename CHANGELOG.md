@@ -255,7 +255,9 @@ change the API.
   model with 20,000 rows and a grid of 500 bins, on a CPU, the CDE-loss
   scorer took 1.1 to 1.3 s instead of 2.2 to 2.9 s, and the NLL scorer
   0.9 s instead of 2.4 s; the CRPS scorer, whose own score is most of the
-  cost, did not change measurably.
+  cost, did not change measurably. It now needs a lazy model or a
+  `LazyPipeline`, and raises `TypeError` for any other estimator, which it
+  scored before through that estimator's `evaluate`.
 - A row of a `HistogramDistribution` with no mass is a uniform density over
   its buckets, as `Grid.normalize` makes a row with no mass: each bucket's
   probability is its share of the total width. It was uniform in
