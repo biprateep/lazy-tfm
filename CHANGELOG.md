@@ -250,6 +250,12 @@ change the API.
 
 ### Changed
 
+- `lazy.metrics.density_scorer` computes only the score it returns, not
+  the whole table of `evaluate`. Its values are unchanged. On a stand-in
+  model with 20,000 rows and a grid of 500 bins, on a CPU, the CDE-loss
+  scorer took 1.1 to 1.3 s instead of 2.2 to 2.9 s, and the NLL scorer
+  0.9 s instead of 2.4 s; the CRPS scorer, whose own score is most of the
+  cost, did not change measurably.
 - A row of a `HistogramDistribution` with no mass is a uniform density over
   its buckets, as `Grid.normalize` makes a row with no mass: each bucket's
   probability is its share of the total width. It was uniform in

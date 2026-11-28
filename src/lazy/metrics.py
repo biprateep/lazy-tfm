@@ -76,7 +76,7 @@ Typical usage example::
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import dataclasses
 import functools
 import operator
@@ -115,8 +115,6 @@ NLL_DENSITY_FLOOR = 1e-12
 zero density at the truth (a truth off the grid, an empty bin) then scores
 ``-log(1e-12) ~ 27.6`` rather than infinity.
 """
-DENSITY_SCORES: tuple[str, ...] = ("cde_loss", "crps", "nll")
-"""The scores :func:`density_scorer` accepts, each lower-is-better."""
 AD_CUTS = ((0.05, 0.95), (0.01, 0.99))
 """The two Anderson-Darling cut ranges that DC1 tabulates (AD1, AD2). DC1's
 script also computed (0.1, 0.9), which the paper does not quote.
@@ -841,21 +839,8 @@ def per_object_scores(
         A tuple (cde_terms, pit) -- ``integral p_i^2 - 2 p_i(z_true_i)`` per
         object, shape (n,), and the PIT values, shape (n,).
     """
-    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
-        y_true, y_grid, pdfs, bin_edges=bin_edges
-    )
-    return _cde_terms(grid, density, pdf_at_truth, bin_edges), pit
-
-
-def _cde_terms(
-    grid: _typing.FloatArray,
-    density: _typing.FloatArray,
-    pdf_at_truth: _typing.FloatArray,
-    bin_edges: npt.ArrayLike | None,
-) -> _typing.FloatArray:
-    """``integral p_i^2 - 2 p_i(y_true_i)`` of each normalized row."""
-    return _integral_of_square(grid, density, bin_edges) - 2.0 * pdf_at_truth
+    rows = _checked_rows(y_true, y_grid, pdfs, bin_edges)
+    return _cde_terms(rows), rows.pit
 
 
 def crps(
@@ -919,12 +904,7 @@ def per_object_crps(
     Returns:
         The score of each object, shape (n,), in the target's units.
     """
-    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    truth = np.asarray(y_true, dtype=float)
-    grid, density, _, _ = evaluate_grid_at_truth(
-        truth, y_grid, pdfs, bin_edges=bin_edges
-    )
-    return _crps_terms(truth, grid, density, bin_edges)
+    return _crps_terms(_checked_rows(y_true, y_grid, pdfs, bin_edges))
 
 
 def nll(
@@ -995,10 +975,7 @@ def per_object_nll(
         ``-log max(p_i(y_true_i), floor)`` for each object, shape (n,).
     """
     _check_floor(floor)
-    _, _, pdf_at_truth, _ = evaluate_grid_at_truth(
-        y_true, y_grid, pdfs, bin_edges=bin_edges
-    )
-    return _nll_terms(pdf_at_truth, floor)
+    return _nll_terms(_checked_rows(y_true, y_grid, pdfs, bin_edges, floor))
 
 
 def per_object_metrics(
@@ -1035,17 +1012,8 @@ def per_object_metrics(
         A tuple (cde_terms, pit, crps_terms, nll_terms), each of shape (n,).
     """
     _check_floor(floor)
-    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
-    truth = np.asarray(y_true, dtype=float)
-    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
-        truth, y_grid, pdfs, bin_edges=bin_edges
-    )
-    return (
-        _cde_terms(grid, density, pdf_at_truth, bin_edges),
-        pit,
-        _crps_terms(truth, grid, density, bin_edges),
-        _nll_terms(pdf_at_truth, floor),
-    )
+    rows = _checked_rows(y_true, y_grid, pdfs, bin_edges, floor)
+    return _cde_terms(rows), rows.pit, _crps_terms(rows), _nll_terms(rows)
 
 
 def _check_floor(floor: float) -> None:
@@ -1054,31 +1022,85 @@ def _check_floor(floor: float) -> None:
         raise ValueError(f"floor must be positive and finite: {floor=}")
 
 
-def _nll_terms(
-    pdf_at_truth: _typing.FloatArray, floor: float
-) -> _typing.FloatArray:
-    """``-log max(p, floor)`` elementwise, for numpy's or torch's ``p``."""
-    xp = array_api_compat.array_namespace(pdf_at_truth)
-    return -xp.log(xp.where(pdf_at_truth < floor, floor, pdf_at_truth))
+@dataclasses.dataclass(frozen=True)
+class _Rows:
+    """Normalized densities on a grid, and what the metrics read of them.
 
+    The arrays are numpy's or torch's, of the densities' kind.
 
-def _crps_terms(
-    truth: _typing.FloatArray,
-    grid: _typing.FloatArray,
-    density: _typing.FloatArray,
-    bin_edges: npt.ArrayLike | None,
-) -> _typing.FloatArray:
-    """The CRPS of each normalized row, by its grid's convention.
-
-    For numpy's or torch's densities, of their kind.
+    Attributes:
+        truth: Finite true values, shape (n,).
+        centers: Strictly increasing bin centers, shape (g,).
+        density: Normalized densities at the centers, shape (n, g).
+        pdf_at_truth: The density at each truth, shape (n,), as
+            :func:`evaluate_grid_at_truth` reads it.
+        pit: The PIT value of each truth, shape (n,).
+        edges: The edges of a histogram grid, shape (g + 1,), or None for
+            a trapezoid grid.
+        floor: The NLL's density floor, in the target's inverse units.
     """
-    if bin_edges is None:
+
+    truth: _typing.FloatArray
+    centers: _typing.FloatArray
+    density: Any
+    pdf_at_truth: Any
+    pit: Any
+    edges: npt.ArrayLike | None
+    floor: float
+
+
+def _checked_rows(
+    y_true: npt.ArrayLike,
+    y_grid: grid_lib.Grid | npt.ArrayLike,
+    pdfs: npt.ArrayLike,
+    bin_edges: npt.ArrayLike | None,
+    floor: float = NLL_DENSITY_FLOOR,
+) -> _Rows:
+    """The rows of a public metric's arguments, once they are checked.
+
+    Args:
+        y_true: Finite true values, one per PDF, shape (n,).
+        y_grid: Bin centers, shape (g,), or a :class:`~lazy.grid.Grid`.
+        pdfs: Densities at the centers, shape (n, g); a copy is normalized.
+        bin_edges: Deprecated; see the module docstring.
+        floor: The NLL's density floor, already checked.
+
+    Returns:
+        The rows, as numpy arrays.
+    """
+    y_grid, bin_edges = _split_grid(y_grid, bin_edges)
+    truth = np.asarray(y_true, dtype=float)
+    grid, density, pdf_at_truth, pit = evaluate_grid_at_truth(
+        truth, y_grid, pdfs, bin_edges=bin_edges
+    )
+    return _Rows(truth, grid, density, pdf_at_truth, pit, bin_edges, floor)
+
+
+def _cde_terms(rows: _Rows) -> Any:
+    """``integral p_i^2 - 2 p_i(y_true_i)`` of each row, shape (n,)."""
+    return (
+        _integral_of_square(rows.centers, rows.density, rows.edges)
+        - 2.0 * rows.pdf_at_truth
+    )
+
+
+def _nll_terms(rows: _Rows) -> Any:
+    """``-log max(p_i(y_true_i), floor)`` of each row, shape (n,)."""
+    xp = array_api_compat.array_namespace(rows.pdf_at_truth)
+    p = rows.pdf_at_truth
+    return -xp.log(xp.where(p < rows.floor, rows.floor, p))
+
+
+def _crps_terms(rows: _Rows) -> Any:
+    """The CRPS of each row, by its grid's convention, shape (n,)."""
+    truth, centers, density = rows.truth, rows.centers, rows.density
+    if rows.edges is None:
         return _crps_piecewise_linear(
-            truth, grid, _grid_cdf(grid, None, density)
+            truth, centers, _grid_cdf(centers, None, density)
         )
     xp = array_api_compat.array_namespace(density)
-    edges = np.asarray(bin_edges, dtype=float)
-    mass = density * xp.asarray(_bin_widths(edges, grid.size))
+    edges = np.asarray(rows.edges, dtype=float)
+    mass = density * xp.asarray(_bin_widths(edges, centers.size))
     cdf = xp.cumulative_sum(mass, axis=1, include_initial=True)
     return _crps_piecewise_linear(truth, edges, cdf)
 
@@ -1145,31 +1167,61 @@ def _crps_piecewise_linear(
     )
 
 
-def _grid_scores(
-    truth: _typing.FloatArray, grid: grid_lib.Grid, density: Any
-) -> tuple[Any, Any]:
-    """The CRPS and NLL terms of densities on a grid, numpy's or torch's.
+_METRICS: dict[str, Callable[[_Rows], Any]] = {
+    "cde_loss": _cde_terms,
+    "crps": _crps_terms,
+    "nll": _nll_terms,
+}
+"""Each score of densities on a grid, by name: the function of each row's
+term, whose mean is the score, lower is better. :func:`_row_terms` computes
+the terms from here; :func:`summarize_scores` names its columns itself."""
 
-    What :func:`per_object_metrics` gives for the CRPS and the NLL, with
-    the default floor; on a torch tensor, they keep its autograd graph.
+DENSITY_SCORES: tuple[str, ...] = tuple(_METRICS)
+"""The scores :func:`density_scorer` accepts, each lower-is-better."""
+
+
+def _row_terms(
+    truth: _typing.FloatArray,
+    grid: grid_lib.Grid,
+    density: Any,
+    names: Sequence[str],
+) -> tuple[Any, dict[str, Any]]:
+    """The PIT values and the named scores' terms of densities on a grid.
 
     Args:
         truth: Finite true values, shape (n,).
         grid: The grid the densities are on.
-        density: Densities at its centers, shape (n, grid.n_bins);
-            normalized here, in place if it is a numpy array.
+        density: Densities at its centers, shape (n, grid.n_bins): a numpy
+            array, of which a float64 copy is normalized, or a torch tensor,
+            whose autograd graph the terms keep.
+        names: Keys of :data:`_METRICS`.
 
     Returns:
-        A tuple (crps_terms, nll_terms), each of ``density``'s kind and
+        A tuple (pit, terms): the PIT values, and each named score's terms
+        by name, with the default NLL floor, each of ``density``'s kind and
         shape (n,).
     """
+    if not array_api_compat.is_torch_array(density):
+        density = np.array(density, dtype=np.float64)
     centers, edges = grid.centers, grid.histogram_edges
     density = _normalized(centers, edges, density)
-    pdf_at_truth, _ = _at_truth(truth, centers, edges, density)
-    return (
-        _crps_terms(truth, centers, density, edges),
-        _nll_terms(pdf_at_truth, NLL_DENSITY_FLOOR),
+    pdf_at_truth, pit = _at_truth(truth, centers, edges, density)
+    rows = _Rows(
+        truth, centers, density, pdf_at_truth, pit, edges, NLL_DENSITY_FLOOR
     )
+    return pit, {name: _METRICS[name](rows) for name in names}
+
+
+def _negated_mean(terms: _typing.FloatArray) -> float:
+    """Minus the mean of a score's terms, so that higher is better.
+
+    Args:
+        terms: Each row's term of a lower-is-better score, shape (n,).
+
+    Returns:
+        Minus their mean.
+    """
+    return -float(np.mean(terms))
 
 
 # --------------------------------------------------------------------------
@@ -1190,8 +1242,8 @@ def density_scorer(
             model, X, y, scoring=metrics.density_scorer("crps")
         )
 
-    Each call of the scorer runs the estimator's ``evaluate`` once, so the
-    estimator must have that method: a model or a
+    Each call of the scorer predicts ``X`` once, and computes only its own
+    score. The estimator must be a model or a
     :class:`~lazy.pipeline.LazyPipeline`, not a scikit-learn ``Pipeline``
     or a search object around one.
 
@@ -1227,13 +1279,14 @@ def _negative_score(
     score: str,
     y_grid: grid_lib.GridLike,
 ) -> float:
-    """Minus one column of ``estimator.evaluate(X, y)``."""
-    if not hasattr(estimator, "evaluate"):
+    """Minus ``estimator``'s ``score`` of ``X`` and ``y``."""
+    if not hasattr(estimator, "_row_scores"):
         raise TypeError(
-            "density_scorer needs an estimator with an evaluate method (a"
-            f" lazy model or a LazyPipeline): got {estimator!r}"
+            "density_scorer needs a lazy model or a LazyPipeline: got"
+            f" {estimator!r}"
         )
-    return -float(estimator.evaluate(X, y, y_grid=y_grid)[score].iloc[0])
+    rows = estimator._row_scores(X, y, y_grid, (score,))  # noqa: SLF001 - lazy's own estimators.
+    return _negated_mean(rows.terms[score])
 
 
 # --------------------------------------------------------------------------
@@ -1647,14 +1700,16 @@ def _bin_widths(bin_edges: npt.ArrayLike, n_bins: int) -> _typing.FloatArray:
 
 
 def _integral_of_square(
-    grid: _typing.FloatArray,
-    density: _typing.FloatArray,
-    bin_edges: npt.ArrayLike | None,
-) -> _typing.FloatArray:
-    """The integral of p(y)^2 per row, by each grid convention."""
+    grid: _typing.FloatArray, density: Any, bin_edges: npt.ArrayLike | None
+) -> Any:
+    """The integral of p(y)^2 per row, by each grid convention.
+
+    For numpy's or torch's densities, of their kind.
+    """
     if bin_edges is None:
         return _trapezoid(density**2, grid)
-    return (density**2) @ _bin_widths(bin_edges, grid.size)
+    xp = array_api_compat.array_namespace(density)
+    return (density**2) @ xp.asarray(_bin_widths(bin_edges, grid.size))
 
 
 def _histogram_at_truth(

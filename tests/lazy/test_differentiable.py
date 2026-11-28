@@ -280,23 +280,37 @@ def test_torch_densities_have_the_grid_statistics_of_their_numpy_twins(grid):
     for density, twin, _ in _twins():
         y = np.linspace(-2.0, 6.0, density.mean().shape[0])
         on_grid = density.on_grid(grid)
-        crps, nll = metrics._grid_scores(y, grid, on_grid)
-        expected = twin.on_grid(grid)
-        _, _, expected_crps, expected_nll = metrics.per_object_metrics(
-            y, grid, expected
+        pit, terms = metrics._row_terms(
+            y, grid, on_grid, metrics.DENSITY_SCORES
         )
+        expected = twin.on_grid(grid)
+        cde, twin_pit, crps, nll = metrics.per_object_metrics(y, grid, expected)
         np.testing.assert_allclose(on_grid.detach().numpy(), expected)
         np.testing.assert_allclose(density.mean().detach().numpy(), twin.mean())
-        np.testing.assert_allclose(crps.detach().numpy(), expected_crps)
-        np.testing.assert_allclose(nll.detach().numpy(), expected_nll)
+        for ours, twin_terms in [
+            (terms["cde_loss"], cde),
+            (pit, twin_pit),
+            (terms["crps"], crps),
+            (terms["nll"], nll),
+        ]:
+            np.testing.assert_allclose(
+                ours.detach().numpy(), twin_terms, atol=1e-12
+            )
 
 
 @pytest.mark.parametrize("grid", _GRIDS, ids=["trapezoid", "own", "inner"])
 def test_the_grid_statistics_of_torch_densities_have_gradients(grid):
     for density, _, leaves in _twins():
         y = np.linspace(0.7, 2.8, density.mean().shape[0])
-        crps, nll = metrics._grid_scores(y, grid, density.on_grid(grid))
-        for statistic in (crps, nll, density.mean()):
+        _, terms = metrics._row_terms(
+            y, grid, density.on_grid(grid), metrics.DENSITY_SCORES
+        )
+        for statistic in (
+            terms["cde_loss"],
+            terms["crps"],
+            terms["nll"],
+            density.mean(),
+        ):
             gradients = torch.autograd.grad(
                 statistic.sum(), leaves, retain_graph=True, allow_unused=True
             )

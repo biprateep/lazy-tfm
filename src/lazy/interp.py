@@ -42,7 +42,6 @@ import numbers
 import typing
 from typing import Any
 
-import array_api_compat
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -956,7 +955,7 @@ def _statistics(
 
 def _scores(
     distribution: Any, y: _typing.FloatArray, grid: grid_lib.Grid
-) -> tuple[Any, Any, Any]:
+) -> tuple[Any, ...]:
     """The statistics of numpy's or torch's distributions, in order.
 
     Args:
@@ -970,12 +969,9 @@ def _scores(
         The statistics, in the order of :data:`STATISTICS`, each of the
         distribution's array kind and shape (n,).
     """
-    densities = distribution.on_grid(grid)
-    if not array_api_compat.is_torch_array(densities):
-        # A copy, as per_object_metrics takes: _grid_scores normalizes it.
-        densities = np.array(densities, dtype=np.float64)
-    crps, nll = metrics._grid_scores(y, grid, densities)  # noqa: SLF001 - per_object_metrics's code, for torch too.
-    return -crps, -nll, distribution.mean()
+    scores = STATISTICS[:-1]
+    _, terms = metrics._row_terms(y, grid, distribution.on_grid(grid), scores)  # noqa: SLF001 - the metric registry, for torch too.
+    return *(-terms[name] for name in scores), distribution.mean()
 
 
 def _refit_values(  # noqa: GS030 - scikit-learn's X, y.
