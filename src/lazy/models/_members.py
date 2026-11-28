@@ -24,12 +24,14 @@ The rules, in order:
   members in one group and is handed each member's bag; every scaffolded
   member, and every member of a model without row subsampling, is a group
   of its own, restricted to its bag and given an explicit column
-  permutation, so that its transform is fitted on its own rows;
+  permutation (or left to shuffle its columns itself, for a model that
+  shuffles a member that runs on its own), so that its transform is fitted
+  on its own rows;
 * with ``max_features`` below every column, every member is a group of its
   own that sees its own random subset of the columns, drawn as the bags
   are (:func:`draw_bags`) from a seed of their own, transformed on its own
-  and then permuted when columns are shuffled, as a scaffolded bagged
-  member is;
+  and then permuted when columns are shuffled (or left to shuffle them
+  itself), as a scaffolded bagged member is;
 * a group is seeded by its first member, and member ``i``'s seed is drawn
   from ``SeedSequence([random_state, i])`` (:func:`member_seed`), so that no
   member of one ``random_state`` shares a seed with any member of another.
@@ -292,6 +294,7 @@ def plan(
     supports_native_bagging: bool,
     auto_tokens: Sequence[Any] | None = None,
     n_kept: int | None = None,
+    native_feature_shuffle: bool = False,
 ) -> tuple[MemberGroup, ...]:
     """Splits an ensemble into the groups the model is called with.
 
@@ -314,6 +317,9 @@ def plan(
         n_kept: The feature columns each member sees (``max_features``);
             None, or ``n_features``, for all. Fewer makes every member a
             group of its own, with its own subset.
+        native_feature_shuffle: Whether, under ``feature_shuffle``, the
+            model itself shuffles the columns of a member that gets a call
+            of its own; if not, the plan gives that member a permutation.
 
     Returns:
         The groups, in order.
@@ -364,7 +370,7 @@ def plan(
     n_view = n_features if subsets is None else subsets[0].size
     permutations = (
         feature_permutations(n_estimators, n_view, entropy)
-        if feature_shuffle and alone
+        if feature_shuffle and alone and not native_feature_shuffle
         else None
     )
     groups = list(
@@ -375,6 +381,7 @@ def plan(
             subsets,
             random_state,
             auto_tokens,
+            feature_shuffle and native_feature_shuffle,
         )
     )
     alone_indices = {member.index for member in alone}
@@ -477,6 +484,7 @@ def _one_group_per_member(
     subsets: list[_typing.IntArray] | None,
     random_state: int,
     auto_tokens: Sequence[Any] | None,
+    native_shuffle: bool,
 ) -> tuple[MemberGroup, ...]:
     """One group per member, restricted to its rows and its columns.
 
@@ -490,6 +498,8 @@ def _one_group_per_member(
         random_state: The ensemble's seed.
         auto_tokens: The model's own recipe as tokens, cycled under
             ``"auto"``.
+        native_shuffle: Whether the model shuffles each member's columns
+            itself.
 
     Returns:
         The groups, in member order.
@@ -519,7 +529,7 @@ def _one_group_per_member(
                 permutation=(
                     None if permutations is None else permutations[member.index]
                 ),
-                feature_shuffle=False,
+                feature_shuffle=native_shuffle,
                 rows=member.rows,
                 columns=None if subsets is None else subsets[member.index],
             )

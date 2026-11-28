@@ -88,12 +88,10 @@ def test_chunking_changes_nothing(name, data):
     chunked = _fit(name, data, chunk_size=7, kv_cache=False)
     whole_pdfs = whole.predict_proba(X_test, lazy.datasets.DC1_GRID)
     chunked_pdfs = chunked.predict_proba(X_test, lazy.datasets.DC1_GRID)
-    if lazy.ESTIMATORS[name].exact_chunking:
-        np.testing.assert_array_equal(whole_pdfs, chunked_pdfs)
-    else:  # independent of the chunk, but batched differently: rounding
-        np.testing.assert_allclose(
-            whole_pdfs, chunked_pdfs, rtol=1e-4, atol=1e-4 * whole_pdfs.max()
-        )
+    # Independent of the chunk, but batched differently: float rounding.
+    np.testing.assert_allclose(
+        whole_pdfs, chunked_pdfs, rtol=1e-4, atol=1e-4 * whole_pdfs.max()
+    )
 
 
 @pytest.mark.checkpoint

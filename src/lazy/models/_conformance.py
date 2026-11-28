@@ -136,12 +136,20 @@ def _declaration_problems(
     if cls.native_output not in ("histogram", "quantiles"):
         found.append(f"native_output {cls.native_output!r} is not known")
     found.extend(_combination_problems(cls))
+    # Removed from the contract: a backend that still sets one would be
+    # ignored without a word.
+    for removed, instead in (
+        ("exact_chunking", "every backend's chunking is checked to rounding"),
+        ("member_trim_fraction", "override _member_trim_fraction instead"),
+    ):
+        if hasattr(cls, removed):
+            found.append(f"{removed} was removed; {instead}")
     for flag in (
         "supports_native_bagging",
-        "exact_chunking",
         "chunks_queries",
         "has_softmax",
         "native_outlier_clipping",
+        "native_feature_shuffle",
         "native_categorical",
         "cpu_friendly",
     ):
@@ -184,15 +192,6 @@ def _combination_problems(
         found.append(
             f"{cls.member_combination} needs native_output='quantiles'"
         )
-    if not 0.0 <= cls.member_trim_fraction < 0.5:
-        found.append("member_trim_fraction must be in [0, 0.5)")
-    if cls.member_trim_fraction and (
-        cls.member_combination != "quantile_trimmed_average"
-    ):
-        found.append(
-            "member_trim_fraction needs "
-            "member_combination='quantile_trimmed_average'"
-        )
     # The default _predict_members only raises.
     inherited = vars(_ensemble.ContextEnsembleEstimator)["_predict_members"]
     if (
@@ -200,4 +199,10 @@ def _combination_problems(
         and cls._predict_members is inherited
     ):
         found.append("quantile_trimmed_average needs _predict_members")
+    trim = vars(_ensemble.ContextEnsembleEstimator)["_member_trim_fraction"]
+    if (
+        cls.member_combination != "quantile_trimmed_average"
+        and cls._member_trim_fraction is not trim
+    ):
+        found.append("_member_trim_fraction needs quantile_trimmed_average")
     return found

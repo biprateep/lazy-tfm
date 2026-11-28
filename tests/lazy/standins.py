@@ -195,7 +195,9 @@ class TrimmedQuantileStandIn(QuantileStandIn):
     """The same, its members combined by a trimmed average, as Kumo's are."""
 
     member_combination = "quantile_trimmed_average"
-    member_trim_fraction = 0.2
+
+    def _member_trim_fraction(self):
+        return 0.2
 
     def _predict_members(self, handle, X):
         return [
@@ -208,7 +210,7 @@ class TrimmedQuantileStandIn(QuantileStandIn):
 
     def _predict_group(self, handle, X):
         return distributions.QuantileDistribution.trimmed_average(
-            self._predict_members(handle, X), self.member_trim_fraction
+            self._predict_members(handle, X), self._member_trim_fraction()
         )
 
 

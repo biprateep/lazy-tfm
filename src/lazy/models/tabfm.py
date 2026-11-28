@@ -482,9 +482,6 @@ class TabFMHistogram(_ensemble.ContextEnsembleEstimator):
     supports_native_bagging = True
     native_outlier_clipping = True
     native_categorical = False
-    # Chunking changes the float rounding even on a CPU, and in bfloat16 on
-    # CUDA it and the cache change it far more (see kv_cache above).
-    exact_chunking = False
     # Float rounding in float32 on CUDA.
     kv_cache_rtol = 1e-4
     chunks_queries = False

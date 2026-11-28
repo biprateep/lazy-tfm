@@ -289,7 +289,6 @@ class KumoQuantile(
     auto_tokens = AUTO_TRANSFORMS
     supports_native_bagging = False
     member_combination = "quantile_trimmed_average"
-    member_trim_fraction = AUTO_TRIM_FRACTION
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
@@ -301,10 +300,6 @@ class KumoQuantile(
         "was pretrained on tables of up to {limit:,} rows, beyond which its "
         "accuracy has not been measured"
     )
-    # Not bit for bit on a CPU: a one-row chunk takes a different
-    # matrix-multiply path, cached or not, and lands about 6e-6 of the
-    # quantiles' spread away.
-    exact_chunking = False
     # On a 4-core x86 CPU the cached and uncached densities on the DC1 grid
     # differ by up to 2.2e-4 of a density, and 1.2e-4 of the peak.
     kv_cache_rtol = 1e-3

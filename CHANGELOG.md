@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- `native_feature_shuffle`, a class attribute of `ContextEnsembleEstimator`
+  for authors of a backend: a model that sets it shuffles the columns of a
+  member that runs on its own, which the base class otherwise permutes.
+  LimiX-2 sets it. No output changes.
 - `weights=` on `LazyEnsembleModel`: one finite, non-negative weight per
   member, normalized at `fit`. The geometric pool raises each member's
   density to its weight, the linear pool mixes the members with these
@@ -342,6 +346,13 @@ change the API.
   with the default, `prior_shift=None`, are unchanged. A correction that
   every backend shares is planned in
   [#300](https://github.com/biprateep/lazy-tfm/issues/300).
+- The backend contract on `ContextEnsembleEstimator` is smaller, for authors
+  of a backend. The class attribute `exact_chunking`, which no backend set to
+  `True`, is gone: every backend's chunking is checked to float rounding. The
+  class attribute `member_trim_fraction` is gone too; a backend that trims
+  its members overrides `_member_trim_fraction`, as Kumo Tabular did
+  already. Registering a backend that still sets either attribute fails
+  with a message that names the replacement. No output changes.
 
 ### Fixed
 

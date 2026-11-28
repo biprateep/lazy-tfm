@@ -364,3 +364,31 @@ def test_no_seed_draws_a_fresh_ensemble_each_fit(monkeypatch, data):
     assert [g.seed for g in first.member_groups_] != [
         g.seed for g in second.member_groups_
     ]
+
+
+@pytest.mark.parametrize("supports_native_bagging", [True, False])
+@pytest.mark.parametrize("native_feature_shuffle", [True, False])
+def test_a_model_that_shuffles_columns_itself_gets_no_permutation(
+    supports_native_bagging, native_feature_shuffle
+):
+    groups = _members.plan(
+        n_estimators=4,
+        transforms=_transforms.parse(("none", "robust")),
+        native_transforms={"none": "none"},
+        feature_shuffle=True,
+        bag_rows=10,
+        n_rows=20,
+        n_features=3,
+        random_state=SEED,
+        supports_native_bagging=supports_native_bagging,
+        native_feature_shuffle=native_feature_shuffle,
+    )
+    lone = [group for group in groups if group.rows is not None]
+    assert lone
+    for group in lone:
+        assert (group.permutation is None) == native_feature_shuffle
+        assert group.feature_shuffle == native_feature_shuffle
+    for group in groups:
+        if group.rows is None:
+            assert group.permutation is None
+            assert group.feature_shuffle

@@ -201,7 +201,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     found it. A backend whose members combine by a trimmed average
     (``member_combination="quantile_trimmed_average"``) also implements
     :meth:`_predict_members`, which answers for each member of a group
-    separately, so that the trim spans the whole ensemble. After ``_fit``,
+    separately, so that the trim spans the whole ensemble, and
+    :meth:`_member_trim_fraction`, the fraction it trims. After ``_fit``,
     ``provenance_`` holds every key in ``REQUIRED_PROVENANCE``:
     :meth:`_load_checkpoint` records the checkpoint's and :meth:`_recipe` the
     ensemble's.
@@ -265,10 +266,8 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             groups' densities, ``"quantile_average"`` of groups' quantile
             functions weighted by their members, or
             ``"quantile_trimmed_average"`` of every member's quantile
-            function, trimmed by ``member_trim_fraction`` (the members come
-            from :meth:`_predict_members`).
-        member_trim_fraction: The fraction of members dropped from each tail
-            under ``"quantile_trimmed_average"``, in [0, 0.5).
+            function, trimmed by :meth:`_member_trim_fraction` (the members
+            come from :meth:`_predict_members`).
         kv_cache_modes: The accepted ``kv_cache`` values.
         kv_cache_rtol: How closely cached and uncached outputs agree on a
             CPU; under mixed precision on a GPU they agree to that
@@ -281,11 +280,6 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             name, with ``{limit}`` standing for ``recommended_max_context``;
             empty for "degrades on contexts larger than about {limit:,}
             rows", which suits a limit that was measured.
-        exact_chunking: Whether chunking the queries is exact bit for bit
-            on a CPU; if not, a query's answer still does not depend on the
-            others in its chunk, but differs from an unchunked one by float
-            rounding. Under mixed precision on a GPU it differs by that
-            precision's rounding on every model.
         chunks_queries: Whether the base class chunks the queries, or the
             model does it itself.
         has_softmax: Whether the model's output passes through a softmax,
@@ -297,6 +291,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         native_outlier_clipping: Whether the model applies the soft outlier
             clip itself, given a threshold; if not, the base class applies
             it to the features before the model sees them.
+        native_feature_shuffle: Whether, under ``feature_shuffle``, the
+            model itself shuffles the columns of a member that gets a call
+            of its own (bagged, or under ``max_features``); if not, the base
+            class permutes that member's columns. Every backend shuffles
+            the columns of members that share a call.
         cpu_friendly: Whether the model runs at a usable speed on a CPU; if
             not, a fit that falls back to the CPU under ``device="auto"``
             warns.
@@ -327,15 +326,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     member_combination: ClassVar[
         Literal["mixture", "quantile_average", "quantile_trimmed_average"]
     ] = "mixture"
-    member_trim_fraction: ClassVar[float] = 0.0
     kv_cache_modes: ClassVar[tuple[bool | str, ...]] = (True, False)
     kv_cache_rtol: ClassVar[float] = 1e-5
     recommended_max_context: ClassVar[int | None] = None
     context_limit_note: ClassVar[str] = ""
-    exact_chunking: ClassVar[bool] = True
     chunks_queries: ClassVar[bool] = True
     has_softmax: ClassVar[bool] = True
     native_outlier_clipping: ClassVar[bool] = False
+    native_feature_shuffle: ClassVar[bool] = False
     native_categorical: ClassVar[bool | None] = None
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
@@ -417,11 +415,11 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         """The fraction of members a trimmed average drops from each tail.
 
         Read at every prediction under
-        ``member_combination="quantile_trimmed_average"`` and recorded in
-        ``provenance_``. The default is the class's ``member_trim_fraction``;
-        a backend whose recipe sets it per version reads it from there.
+        ``member_combination="quantile_trimmed_average"``, in [0, 0.5). The
+        default trims none; a backend that trims overrides it, reading the
+        fraction from its recipe, say.
         """
-        return self.member_trim_fraction
+        return 0.0
 
     def _check_backend_params(self) -> None:
         """Validates the backend's own parameters; raises ValueError.
@@ -992,6 +990,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
             supports_native_bagging=self.supports_native_bagging,
             auto_tokens=self.auto_tokens,
             n_kept=n_kept,
+            native_feature_shuffle=self.native_feature_shuffle,
         )
         features = X.to_numpy(dtype=np.float64)
         self.transformers_: list[_transforms.ScaffoldTransform | None] = []
