@@ -166,7 +166,11 @@ things.
    sets `pads_items` to the side it aligns them on, `"left"` or `"right"`:
    its `_array` gives `NaN` for a missing element, and `_stacked` pads each
    array with `NaN` on that side to the longest along the first axis, as
-   `lazy.time.Pretrained` does on the left.
+   `lazy.time.Pretrained` does on the left. An encoder whose `_array` maps an
+   item through a function of all its values, as `lazy.image.Pretrained`
+   stretches an image that is not 8-bit, returns `False` from
+   `_keeps_values(item)` for such an item: behind augmentations, whose
+   forwards run on the arrays, its column is then a barrier.
 3. It implements `forward(items)`: the embeddings of the stacked array as a
    torch tensor, on the autograd graph. It must give what `transform` gives for
    the same items, to float rounding, with the type and on the device of

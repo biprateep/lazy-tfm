@@ -849,17 +849,13 @@ class Pretrained(_pretrained.PretrainedEncoder, _SeriesEncoder):
         """
         if self.gradient_kind == "barrier":
             raise _steps.BarrierError(self.barrier_reason)
-        import torch  # noqa: PLC0415 - an optional, heavy extra.
-
         items = self._stack(items)
         network = self._network()
-        size = _base.positive_integer("batch_size", self.batch_size)
         series = [_trimmed(row) for row in items]
-        passes = [
-            self._embedded(network, series[start : start + size])
-            for start in range(0, len(series), size)
-        ]
-        return torch.cat(passes).to(items)
+        embeddings = self._in_passes(
+            series, lambda part: self._embedded(network, part)
+        )
+        return embeddings.to(items)
 
     def _embedded(self, network: Any, series: list[Any]) -> Any:
         """The embeddings of series, on torch's autograd graph.

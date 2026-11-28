@@ -852,7 +852,8 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             stacked = None
             if items and found is None:
                 # Stacked together, so that padded items share one length.
-                both = encoder._stacked(pd.concat(given, ignore_index=True))  # noqa: SLF001 - the encoders' contract.
+                joined = pd.concat(given, ignore_index=True)
+                both = encoder._stacked(joined)  # noqa: SLF001 - the encoders' contract.
                 if both is None:
                     found = _steps.Barrier(
                         label, "its items do not all have one shape"
@@ -862,6 +863,17 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                         label,
                         "its items are padded, or lack some elements, which"
                         " its augmentations' forwards do not read",
+                    )
+                elif self.augmentations_[column] and not all(
+                    encoder._keeps_values(item)  # noqa: SLF001 - the encoders' contract.
+                    for item in self._augmented(column, joined)
+                ):
+                    found = _steps.Barrier(
+                        label,
+                        "its encoder reads some of its augmented items"
+                        " through a function of all their values, such as"
+                        " a stretch, which its augmentations' forwards"
+                        " cannot come before",
                     )
                 else:
                     stacked = [both[: len(given[0])], both[len(given[0]) :]]

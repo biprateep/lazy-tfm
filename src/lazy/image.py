@@ -27,9 +27,11 @@ Typical usage example:
 from __future__ import annotations
 
 import abc
+from collections.abc import Callable
 import dataclasses
 import functools
 import itertools
+import math
 import os
 import pathlib
 from typing import Any
@@ -38,6 +40,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
+from lazy import _arrays
 from lazy import _steps
 from lazy import _typing
 from lazy.encoders import _base
@@ -104,12 +107,7 @@ class _ImageEncoder(_base.BaseEncoder):
 
     def _read_item(self, item: Any) -> Any:
         """A file or a Pillow image as an array, in ``n_channels``' mode."""
-        if isinstance(item, (str, os.PathLike)):
-            with Image.open(item) as image:
-                return self._read_item(image)
-        if isinstance(item, Image.Image):
-            return np.asarray(self._converted(item))
-        return item
+        return _read(item, self._converted)
 
     def _array(self, item: Any) -> _typing.FloatArray | None:
         """One image as an array, shape (height, width, n_channels)."""
@@ -175,6 +173,29 @@ class _ImageEncoder(_base.BaseEncoder):
 def _is_deep(image: Image.Image) -> bool:
     """Whether a Pillow image is one band of more than 8 bits."""
     return image.mode in ("I", "F") or image.mode.startswith("I;16")
+
+
+def _read(item: Any, convert: Callable[[Image.Image], Image.Image]) -> Any:
+    """A file or a Pillow image as an array; any other item as it is.
+
+    Args:
+        item: One image.
+        convert: What makes of a Pillow image the one that is read.
+
+    Returns:
+        The array of the converted image, or ``item`` itself.
+    """
+    if isinstance(item, (str, os.PathLike)):
+        with Image.open(item) as image:
+            return _read(image, convert)
+    if isinstance(item, Image.Image):
+        return np.asarray(convert(item))
+    return item
+
+
+def _rgb(image: Image.Image) -> Image.Image:
+    """A Pillow image as RGB, unless it is one band of more than 8 bits."""
+    return image if _is_deep(image) else image.convert("RGB")
 
 
 def _finite(pixels: npt.NDArray[Any]) -> npt.NDArray[Any]:
@@ -380,28 +401,214 @@ def _area_weights(n_in: int, n_out: int) -> _typing.FloatArray:
     return np.asarray(np.clip(overlap, 0, None) * n_out / n_in)
 
 
+def _bilinear(x: _typing.FloatArray) -> _typing.FloatArray:
+    """Pillow's bilinear (triangle) kernel, at distances ``x`` in pixels."""
+    return np.clip(1.0 - np.abs(x), 0.0, None)
+
+
+def _bicubic(x: _typing.FloatArray) -> _typing.FloatArray:
+    """Pillow's bicubic kernel (Keys, a = -0.5), at distances ``x``."""
+    a = -0.5
+    x = np.abs(x)
+    near = ((a + 2) * x - (a + 3)) * x * x + 1
+    far = (((x - 5) * x + 8) * x - 4) * a
+    return np.where(x < 1, near, np.where(x < 2, far, 0.0))
+
+
+# Each resampling filter of the processors, as Pillow defines it
+# (Resample.c): its support at unit scale, in pixels, and its kernel.
+_FILTERS = {"bilinear": (1.0, _bilinear), "bicubic": (2.0, _bicubic)}
+
+
+def _resampling(
+    n_in: int, start: float, stop: float, n_out: int, resample: str
+) -> tuple[npt.NDArray[np.int64], _typing.FloatArray]:
+    """The weights that resample a span of one axis as Pillow does.
+
+    They are those of Pillow's ``Image.resize`` with a ``box``, in float:
+    the span [start, stop) of ``n_in`` pixels becomes ``n_out`` pixels,
+    and a kernel widened by the reduction smooths as it shrinks. Each
+    output pixel reads only the input pixels in Pillow's window around
+    it, so the weights form a sparse matrix.
+
+    Args:
+        n_in: The number of pixels along the axis.
+        start: Where the span starts, in pixels.
+        stop: Where it stops, in pixels.
+        n_out: The number of output pixels.
+        resample: A key of :data:`_FILTERS`.
+
+    Returns:
+        A tuple (indices, weights): the (output, input) index of each
+        weight that is not 0, shape (2, n_weights), in row-major order,
+        and the weights, shape (n_weights,). The weights of each output
+        pixel sum to 1.
+    """
+    support, kernel = _FILTERS[resample]
+    scale = (stop - start) / n_out
+    stretch = max(scale, 1.0)
+    centre = start + (np.arange(n_out) + 0.5) * scale
+    # Pillow's window: from the first input pixel whose centre is within
+    # the widened support, as wide as Pillow allocates; the kernel is 0
+    # beyond its support.
+    reach = support * stretch
+    first = np.maximum(np.trunc(centre - reach + 0.5), 0).astype(np.int64)
+    pixel = first[:, None] + np.arange(2 * math.ceil(reach) + 1)
+    distance = (pixel + 0.5 - centre[:, None]) / stretch
+    weights = np.where(pixel < n_in, kernel(distance), 0.0)
+    weights /= weights.sum(axis=1, keepdims=True)
+    kept = weights != 0
+    return np.stack([np.nonzero(kept)[0], pixel[kept]]), weights[kept]
+
+
+@functools.lru_cache(maxsize=64)
+def _sparse_resampling(recipe: _Recipe, n: int, short: int, dtype: Any) -> Any:
+    """The resampling of an axis by a recipe, a sparse torch tensor.
+
+    Args:
+        recipe: The recipe, which sets the span and the filter.
+        n: The number of pixels along the axis.
+        short: The number along the image's shorter axis.
+        dtype: The torch type of the weights.
+
+    Returns:
+        The weights of :func:`_resampling`, a COO tensor of shape
+        (recipe.side, n) on the CPU, which no caller changes.
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    indices, values = _resampling(
+        n, *recipe.span(n, short), recipe.side, recipe.resample
+    )
+    # Not an inference tensor, even when first built by a transform: a
+    # forward on the autograd graph reuses it.
+    with torch.inference_mode(False):
+        return torch.sparse_coo_tensor(
+            torch.from_numpy(indices),
+            torch.from_numpy(values).to(dtype),
+            size=(recipe.side, n),
+            # Built in row-major order, with no repeated index.
+            check_invariants=False,
+            is_coalesced=True,
+        )
+
+
 @dataclasses.dataclass(frozen=True)
 class _Recipe:
     """How one model turns an image into an embedding.
+
+    The preprocessing is the processor's saved with the weights
+    (``preprocessor_config.json``), pinned here: the image is resampled
+    to ``side`` by ``side`` pixels, its 8-bit values scaled to [0, 1],
+    then normalized by ``mean`` and ``std``.
 
     Attributes:
         width: The width of the embedding.
         network: The class of transformers that loads the network.
         output: The output of the network that is the embedding.
-        size: ``None`` to preprocess as the processor saved with the
-            weights says; else the side, in pixels, of the square that
-            :func:`_centred` cuts and scales.
-        zoom: How much :func:`_centred` magnifies the centre of an image.
+        resample: The filter, a key of :data:`_FILTERS`.
+        side: The side of the square the network reads, in pixels.
+        shortest_edge: If set, the image is resized for its shorter side
+            to have this many pixels, and the central square of ``side``
+            is cut, as transformers' processors do.
+        zoom: If set, the central square of ``1 / zoom`` of the shorter
+            side is resized to ``side``; with neither, the whole image is.
+        mean: The mean of each channel, subtracted after scaling.
+        std: The standard deviation of each channel, divided by last.
         requires: The packages the network runs on besides transformers.
     """
 
     width: int
     network: str = "AutoModel"
     output: str = "pooler_output"
-    size: int | None = None
-    zoom: float = 1.0
+    resample: str = "bicubic"
+    side: int = 224
+    shortest_edge: int | None = None
+    zoom: float | None = None
+    mean: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    std: tuple[float, float, float] = (1.0, 1.0, 1.0)
     requires: tuple[str, ...] = ()
 
+    def span(self, n: int, short: int) -> tuple[float, float]:
+        """The span of an axis that becomes the ``side`` pixels read.
+
+        Args:
+            n: The number of pixels along the axis.
+            short: The number along the image's shorter axis.
+
+        Returns:
+            A tuple (start, stop), in pixels.
+        """
+        if self.shortest_edge is not None:
+            # transformers' get_resize_output_image_size and center_crop.
+            resized = (
+                self.shortest_edge
+                if n == short
+                else int(self.shortest_edge * n / short)
+            )
+            top = (resized - self.side) // 2
+            return top * n / resized, (top + self.side) * n / resized
+        if self.zoom is not None:
+            half = short / self.zoom / 2
+            return n / 2 - half, n / 2 + half
+        return 0.0, float(n)
+
+    def pixels(self, images: Any) -> Any:
+        """What the network reads of images, on torch's autograd graph.
+
+        ``torch.sparse.mm`` may not run on every device, such as Apple's
+        MPS, so the images are resampled on the CPU; the gradient follows
+        them there and back.
+
+        Args:
+            images: Images of one size, a float torch tensor of shape (n,
+                height, width) or (n, height, width, 3), with 8-bit values
+                (0 to 255).
+
+        Returns:
+            The pixels, a tensor of shape (n, 3, side, side), of the type
+            of ``images``, on the CPU.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        grey = images.ndim == 3
+        images = images.cpu()
+        if grey:
+            images = images[..., None]
+        n, height, width, channels = images.shape
+        rows, columns = (
+            _sparse_resampling(self, axis, min(height, width), images.dtype)
+            for axis in (height, width)
+        )
+        # Pillow resamples each row, then each column, and clips each pass
+        # to the 8-bit range, which the overshoot of the bicubic kernel
+        # leaves. Each pass is (side, axis) @ (axis, the rest).
+        across = torch.sparse.mm(columns, images.permute(2, 0, 1, 3).flatten(1))
+        across = across.clamp(0, 255).unflatten(1, (n, height, channels))
+        square = torch.sparse.mm(rows, across.permute(2, 1, 0, 3).flatten(1))
+        square = square.clamp(0, 255).unflatten(1, (n, self.side, channels))
+        # (side, n, side, channels) -> (n, channels, side, side).
+        square = square.permute(1, 3, 0, 2)
+        if grey:
+            square = square.expand(-1, 3, -1, -1)
+        mean, std = (
+            _arrays.constant(np.array(values)[:, None, None], square)
+            for values in (self.mean, self.std)
+        )
+        return (square / 255 - mean) / std
+
+
+# The normalization of DINOv2's and of CLIP's processors.
+_IMAGENET = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+_OPENAI = (
+    (0.48145466, 0.4578275, 0.40821073),
+    (0.26862954, 0.26130258, 0.27577711),
+)
+
+# The version of Pretrained's preprocessing, in its cache identity, so
+# that a cache filed before a change to it is not read: bump it with
+# every change to what the networks read of an image.
+_PREPROCESSING = 2
 
 # The stretch of an image that is not 8-bit: the percentiles of each band
 # that map to 0 and 1, and the softening of the asinh that follows.
@@ -424,6 +631,10 @@ class Pretrained(_pretrained.PretrainedEncoder):
     :doc:`/guide/encoders` lists the networks and gives the evidence behind
     the choice.
 
+    The preprocessing runs in torch, in float64: the image is resampled
+    with the filter of the network's processor, with Pillow's weights,
+    without rounding to 8 bits in between.
+
     The networks read 8-bit RGB. A file, a Pillow image or a ``uint8``
     array of one, three or four (RGBA, whose alpha is dropped) channels is
     read as such. An array of another type, or
@@ -433,6 +644,11 @@ class Pretrained(_pretrained.PretrainedEncoder):
     \operatorname{asinh}(20)`, clipped to [0, 1], maps to 0 to 255. The
     stretch keeps the contrast of an image but not its brightness, which a
     table column can carry.
+
+    A gradient passes every network: ``forward`` gives the embeddings of
+    images of one size on torch's autograd graph, without the cache, so
+    that an attribution reaches each pixel. It reaches the values of an
+    8-bit image, and the stretched values of an image that is stretched.
 
     Attributes:
         model: The network; ``"dinov2-with-registers-small"`` by default.
@@ -444,18 +660,36 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     modality = "image"
     package = "transformers"
+    gradient_kind = "differentiable"
+    # Each processor's settings, from its preprocessor_config.json at the
+    # pinned commit. CLIP's omits the scale, whose default is 1 / 255.
     recipes = {
-        "dinov2-with-registers-small": _Recipe(384),
-        "dinov2-large": _Recipe(1024),
-        "siglip2-base-patch16-224": _Recipe(768, "SiglipVisionModel"),
+        "dinov2-with-registers-small": _Recipe(
+            384, shortest_edge=256, mean=_IMAGENET[0], std=_IMAGENET[1]
+        ),
+        "dinov2-large": _Recipe(
+            1024, shortest_edge=256, mean=_IMAGENET[0], std=_IMAGENET[1]
+        ),
+        "siglip2-base-patch16-224": _Recipe(
+            768,
+            "SiglipVisionModel",
+            resample="bilinear",
+            mean=(0.5, 0.5, 0.5),
+            std=(0.5, 0.5, 0.5),
+        ),
         "clip-vit-base-patch16": _Recipe(
-            512, "CLIPVisionModelWithProjection", "image_embeds"
+            512,
+            "CLIPVisionModelWithProjection",
+            "image_embeds",
+            shortest_edge=224,
+            mean=_OPENAI[0],
+            std=_OPENAI[1],
         ),
         # Zoobot's preprocessing at test time, from galaxy-datasets'
         # minimal_view_config: no normalization, which its config.json,
         # copied from ImageNet's ConvNeXt, would wrongly apply.
         "zoobot-encoder-convnext_nano": _Recipe(
-            640, size=224, zoom=1.2, requires=("timm",)
+            640, resample="bilinear", zoom=1.2, requires=("timm",)
         ),
     }
 
@@ -473,38 +707,92 @@ class Pretrained(_pretrained.PretrainedEncoder):
         self.cache = cache
 
     def _load(self, path: os.PathLike[str], device: str) -> Any:
-        """The preprocessing of images to pixels, and the network."""
+        """The network, on ``device``."""
         import transformers  # noqa: PLC0415 - an optional, heavy extra.
 
-        recipe = self._recipe()
-        network = getattr(transformers, recipe.network)
-        if recipe.size is None:
-            # Pillow's resampling, pinned: with torchvision installed the
-            # default would be torchvision's, whose pixels differ.
-            processor = transformers.AutoImageProcessor.from_pretrained(
-                path, backend="pil"
-            )
-            preprocess = functools.partial(_processed, processor)
-        else:
-            preprocess = functools.partial(
-                _centred, size=recipe.size, zoom=recipe.zoom
-            )
+        network = getattr(transformers, self._recipe().network)
         # A checkpoint of two towers holds the text tower's weights too.
-        model = _pretrained.load_quietly(network, path)
-        return preprocess, model.to(device)
+        return _pretrained.load_quietly(network, path).to(device)
+
+    def _identity_head(self) -> list[str]:
+        """The base's, and the version of the preprocessing."""
+        return [*super()._identity_head(), f"preprocessing {_PREPROCESSING}"]
+
+    def _array(self, item: Any) -> _typing.FloatArray | None:
+        """One image as the network reads it; see :func:`_image`."""
+        return _image(item)
+
+    def _keeps_values(self, item: Any) -> bool:
+        """Whether the image is 8-bit, which the network reads unstretched."""
+        return bool(np.asarray(self._read_item(item)).dtype == np.uint8)
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
-        """The embedding of each image, as the recipe names it."""
-        preprocess, model = network
-        pixels = preprocess([_rgb(item) for item in items]).to(model.device)
-        result = model(pixel_values=pixels)
-        return getattr(result, self._recipe().output).float().cpu().numpy()
+        """The embedding of each image, as the recipe names it.
+
+        Each image is resampled as it is read, so that one image at a time
+        is held at its full size in float64.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        recipe = self._recipe()
+        pixels = torch.cat(
+            [
+                recipe.pixels(torch.from_numpy(_image(item))[None])
+                for item in items
+            ]
+        )
+        return self._embedded(network, pixels).float().cpu().numpy()
+
+    def forward(self, items: Any) -> Any:
+        """The embeddings of stacked images, on torch's autograd graph.
+
+        It runs the network on its ``device``, without the cache, in
+        passes of at most ``batch_size`` images.
+
+        Args:
+            items: Images of one size, grey or RGB, with values from 0 to
+                255 (stretched, for an image that is not 8-bit): a float
+                torch tensor of shape (n, height, width) or (n, height,
+                width, 3).
+
+        Returns:
+            What ``transform`` gives, shape (n, width), of the type and on
+            the device of ``items``.
+
+        Raises:
+            lazy._steps.BarrierError: If ``items`` has another shape.
+        """
+        if items.ndim not in (3, 4) or items.ndim == 4 and items.shape[3] != 3:
+            raise _steps.BarrierError(
+                "Pretrained has a forward only for images of one size, grey"
+                f" or RGB; got a tensor of shape {tuple(items.shape)}"
+            )
+        network, recipe = self._network(), self._recipe()
+        embeddings = self._in_passes(
+            items, lambda part: self._embedded(network, recipe.pixels(part))
+        )
+        return embeddings.to(items)
+
+    def _embedded(self, network: Any, pixels: Any) -> Any:
+        """The embeddings of what the network reads, on the autograd graph.
+
+        Args:
+            network: What :meth:`_load` returned.
+            pixels: What :meth:`_Recipe.pixels` gives, shape (n, 3, side,
+                side).
+
+        Returns:
+            The embeddings, a tensor of shape (n, width) on the device of
+            the network.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        result = network(pixel_values=pixels.to(network.device, torch.float32))
+        return getattr(result, self._recipe().output)
 
     def _read_item(self, item: Any) -> Any:
-        """A file or a Pillow image as the 8-bit RGB array the network reads."""
-        if isinstance(item, (str, os.PathLike, Image.Image)):
-            return np.asarray(_rgb(item))
-        return item
+        """A file or a Pillow image as an array: RGB, or a deep band."""
+        return _read(item, _rgb)
 
     def _item_bytes(self, item: Any) -> bytes:
         """The content of an image: of the file for a path, else its RGB."""
@@ -513,61 +801,20 @@ class Pretrained(_pretrained.PretrainedEncoder):
         return _image_bytes(item) or super()._item_bytes(item)
 
 
-def _processed(processor: Any, images: list[Image.Image]) -> Any:
-    """The pixels that a processor saved with the weights makes of images.
+def _image(item: Any) -> _typing.FloatArray:
+    """One image as a network reads it, before it is resampled.
 
-    Args:
-        processor: A transformers image processor.
-        images: RGB images.
-
-    Returns:
-        A torch tensor, shape (len(images), 3, height, width).
-    """
-    return processor(images=images, return_tensors="pt")["pixel_values"]
-
-
-def _centred(images: list[Image.Image], size: int, zoom: float) -> Any:
-    """The centre of each image, magnified, as Zoobot reads a galaxy.
-
-    The square at the centre of an image, of ``1 / zoom`` of its shorter
-    side, is resized to ``size`` by ``size`` pixels (bilinear, which
-    smooths as it shrinks), and its 8-bit values are scaled to [0, 1].
-
-    Args:
-        images: RGB images.
-        size: The side of the square, in pixels.
-        zoom: How much the centre is magnified.
+    An image of 8 bits keeps its values; any other is stretched to them
+    (:func:`_stretch`).
 
     Returns:
-        A float32 torch tensor, shape (len(images), 3, size, size).
-    """
-    import torch  # noqa: PLC0415 - an optional, heavy extra.
-
-    squares = []
-    for image in images:
-        width, height = image.size
-        side = min(width, height) / zoom
-        left, top = (width - side) / 2, (height - side) / 2
-        box = (left, top, left + side, top + side)
-        square = image.resize((size, size), Image.Resampling.BILINEAR, box=box)
-        squares.append(np.asarray(square))
-    pixels = np.stack(squares).transpose(0, 3, 1, 2) / 255
-    return torch.as_tensor(pixels, dtype=torch.float32)
-
-
-def _rgb(item: Any) -> Image.Image:
-    """One image as 8-bit RGB, for a network.
+        Values from 0 to 255, shape (height, width) or (height, width, 3).
 
     Raises:
         ValueError: If an array has neither 1 nor 3 channels (nor 4, for
             8-bit RGBA), no pixel, or a value that is not finite.
     """
-    if isinstance(item, (str, os.PathLike)):
-        with Image.open(item) as image:
-            return _rgb(image)
-    if isinstance(item, Image.Image) and not _is_deep(item):
-        return item.convert("RGB")
-    array = np.asarray(item)
+    array = np.asarray(_read(item, _rgb))
     if array.ndim == 3 and array.shape[2] == 1:
         array = array[:, :, 0]
     if array.ndim == 3 and array.shape[2] == 4 and array.dtype == np.uint8:
@@ -577,19 +824,20 @@ def _rgb(item: Any) -> Image.Image:
             "an image for a pretrained network has the shape (height,"
             f" width) or (height, width, 3); got {array.shape}"
         )
-    if array.dtype != np.uint8:
-        array = _stretch(_finite(array.astype(float)))
-    return Image.fromarray(_finite(array)).convert("RGB")
+    pixels = _finite(array).astype(float)
+    return pixels if array.dtype == np.uint8 else _stretch(pixels)
 
 
-def _stretch(pixels: _typing.FloatArray) -> npt.NDArray[np.uint8]:
-    """An image of any range as 8 bits, band by band; see :class:`Pretrained`.
+def _stretch(pixels: _typing.FloatArray) -> _typing.FloatArray:
+    """An image of any range on the 8-bit scale, band by band.
+
+    See :class:`Pretrained`; the values are not rounded.
 
     Args:
         pixels: Finite values, shape (height, width) or (height, width, 3).
 
     Returns:
-        The stretched image, of the same shape.
+        The stretched image, from 0 to 255, of the same shape.
     """
     bands = pixels.reshape(*pixels.shape[:2], -1)
     low, high = np.percentile(bands, (_LOW, _HIGH), axis=(0, 1))
@@ -597,4 +845,4 @@ def _stretch(pixels: _typing.FloatArray) -> npt.NDArray[np.uint8]:
     span = np.where(high > low, high - low, 1.0)
     scaled = np.arcsinh(_SOFTENING * (bands - low) / span)
     unit = np.clip(scaled / np.arcsinh(_SOFTENING), 0.0, 1.0)
-    return np.rint(unit * 255).astype(np.uint8).reshape(pixels.shape)
+    return (unit * 255).reshape(pixels.shape)

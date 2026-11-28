@@ -3,8 +3,8 @@
 """Fake upstream objects for the pretrained encoders.
 
 The fakes replace what each encoder loads from ``transformers``,
-``chronos``, ``timesfm3`` and ``tirex`` (a tokenizer and a network, an
-image processor and a network, a Chronos pipeline, TimesFM's and TiRex's
+``chronos``, ``timesfm3`` and ``tirex`` (a tokenizer and a network, a
+network of images, a Chronos pipeline, TimesFM's and TiRex's
 networks) and the checkpoint download, so
 that an encoder's own code (its ``_load``, its pooling, its padding, its
 reading of items) runs on a CPU in milliseconds with nothing downloaded.
@@ -94,33 +94,27 @@ class TextModel(Network):
         return types.SimpleNamespace(last_hidden_state=states)
 
 
-class ImageProcessor:
-    """The mean of each RGB image's channels, as its 'pixels'."""
-
-    def __call__(self, images, return_tensors):
-        import torch  # noqa: PLC0415
-
-        assert return_tensors == "pt"
-        assert all(image.mode == "RGB" for image in images)
-        means = [np.asarray(image, float).mean(axis=(0, 1)) for image in images]
-        return {"pixel_values": torch.tensor(np.array(means))}
-
-
 class ImageModel(Network):
-    """An embedding that is a fixed function of the channel means.
+    """An embedding that is a fixed function of weighted channel means.
 
-    It reads the means of :class:`ImageProcessor`, or the means of the
-    pixels that lazy itself prepares, in [0, 1], for Zoobot.
+    It reads the pixels that lazy prepares, shape (n, 3, height, width),
+    and weighs each by a ramp down the rows and across the columns, so
+    that a turned image gives another embedding.
     """
 
     def __call__(self, pixel_values):
         import torch  # noqa: PLC0415
 
-        if pixel_values.ndim == 4:
-            pixel_values = pixel_values.double().mean(dim=(2, 3)) * 255
+        assert pixel_values.dtype == torch.float32
+        height, width = pixel_values.shape[2:]
+        ramp = (
+            torch.linspace(1, 2, height)[:, None]
+            + 2 * torch.linspace(1, 2, width)[None, :]
+        )
+        means = (pixel_values.double() * ramp).mean(dim=(2, 3))
         waves = torch.arange(1, self.width // 3 + 2, dtype=torch.float64)
-        token = torch.sin(pixel_values[:, :, None] * waves / 255)
-        token = token.reshape(len(pixel_values), -1)[:, : self.width]
+        token = torch.sin(means[:, :, None] * waves)
+        token = token.reshape(len(means), -1)[:, : self.width]
         return types.SimpleNamespace(pooler_output=token, image_embeds=token)
 
 
@@ -392,11 +386,6 @@ def install(monkeypatch, tmp_path):
         transformers.AutoTokenizer,
         "from_pretrained",
         lambda path: Tokenizer(),
-    )
-    monkeypatch.setattr(
-        transformers.AutoImageProcessor,
-        "from_pretrained",
-        lambda path, backend: ImageProcessor(),
     )
     monkeypatch.setattr(
         chronos.BaseChronosPipeline, "from_pretrained", pipeline

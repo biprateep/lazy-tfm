@@ -53,6 +53,11 @@ change the API.
   Integrated gradients keep a missing value missing along the whole path, and
   the baseline is the mean of the values that the context has. The
   embeddings do not change.
+- Gradients through the pretrained encoders of images. Every network of
+  `lazy.image.Pretrained` has a forward on torch's autograd graph, which
+  skips the cache, so a gradient method of `lazy.interp` reaches each pixel
+  of an image of 8 bits, and the stretched values of an image that is
+  stretched. It runs in passes of at most `batch_size` images.
 - `at=` on `lazy.interp.explain`, for every method, and on
   `explain_context`: the name of a step of a `LazyPipeline` whose output
   columns are the features. Shapley values, `"loco"` and `"permutation"` run
@@ -271,6 +276,21 @@ change the API.
 
 ### Changed
 
+- `explain` on a pipeline with `lazy.image.Pretrained` attributes to the
+  pixels of each image, through the network, and no longer to the columns
+  of its embedding: its `feature_names`, `values` and `item_values` change.
+  A column whose images are stretched, behind augmentations, stays a barrier.
+- The image embeddings of `lazy.image.Pretrained` change, for every network.
+  Its preprocessing now runs in torch, in float64, with the settings of each
+  network's processor pinned in lazy: Pillow's resampling weights, the crop,
+  the scale and the normalization. Pillow, which transformers' processor
+  ran, rounded the resized image to 8 bits after each of its two passes,
+  and the stretch of an image that is not 8-bit rounded to 8 bits; lazy
+  rounds neither. On the golden items, on a CPU, an 8-bit RGB image's
+  embedding moved by at most 3e-3 (Zoobot) to 1.0e-1 (DINOv2-small with
+  registers), 0.1% to 2% of its length, and the stretched image of fluxes,
+  which is mostly near 0, by 1.0e-1 (Zoobot) to 1.2 (DINOv2-small with
+  registers), 3% to 30% of its length.
 - `lazy.metrics.density_scorer` computes only the score it returns, not
   the whole table of `evaluate`. Its values are unchanged. On a stand-in
   model with 20,000 rows and a grid of 500 bins, on a CPU, the CDE-loss
