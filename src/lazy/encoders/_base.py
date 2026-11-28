@@ -106,6 +106,16 @@ class BaseEncoder(
     keeps their gradient. An encoder that cannot, such as one of text,
     may say why in ``barrier_reason``.
 
+    An encoder whose items differ in length, or may lack some of their
+    elements, sets ``pads_items`` to the side on which its items are
+    aligned, ``"left"`` or ``"right"``. Its :meth:`_array` then gives
+    ``NaN`` for a missing element, and :meth:`_stacked` pads each item's
+    array with ``NaN`` on that side to the longest along the first axis.
+    Its ``forward`` reads a ``NaN`` as a missing element: it gives what
+    :meth:`transform` gives for the item without the padding, and the
+    gradient in a missing element is 0, with no ``NaN`` on the autograd
+    graph.
+
     With ``cache`` set, the embedding of each item is filed on disk under
     the content of the item (:meth:`_item_bytes`) and the identity of the
     encoder (:meth:`_cache_identity`), and an item that is filed is not
@@ -115,6 +125,9 @@ class BaseEncoder(
     Attributes:
         modality: What the encoder reads, one of
             :data:`~lazy.encoders.MODALITIES`.
+        pads_items: ``""`` if :meth:`_stacked` stacks only items of one
+            shape with every element; else the side, ``"left"`` or
+            ``"right"``, on which it pads them with ``NaN``.
         batch_size: The most items one call of :meth:`_encode` gets.
         cache: ``False`` for no cache, ``True`` for the default one, under
             :func:`lazy.datasets.data_home`, or the directory to use.
@@ -123,6 +136,7 @@ class BaseEncoder(
     modality: ClassVar[str] = ""
     gradient_kind: ClassVar[str] = "barrier"
     barrier_reason: ClassVar[str] = ""
+    pads_items: ClassVar[str] = ""
 
     # The parameters that do not change an embedding, left out of the
     # identity of the cache.
@@ -206,7 +220,9 @@ class BaseEncoder(
 
         Returns:
             The array, or ``None`` if the encoder has no forward, or the
-            item has none: a series with a gap, say.
+            item has none: a series with a gap, say, unless the encoder
+            pads its items, whose array holds ``NaN`` for a missing
+            element.
         """
         del item  # Unused: by default, an encoder has no forward.
         return None
@@ -223,9 +239,13 @@ class BaseEncoder(
         Returns:
             The items' arrays (:meth:`_array`), shape (n, ...), or ``None``
             if an item is missing or has no array, or they do not all have
-            one shape. It stops reading at the first such item.
+            one shape: with ``pads_items``, the arrays padded with ``NaN``
+            to the longest, which then need one shape beyond the first
+            axis. It stops reading at the first such item.
         """
         items = _as_items(X)
+        if self.pads_items:
+            return self._padded(items)
         stacked = None
         for index, item in enumerate(items):
             array = None if _is_missing(item) else self._array(item)
@@ -238,6 +258,35 @@ class BaseEncoder(
             ):
                 return None
             stacked[index] = array
+        return stacked
+
+    def _padded(self, items: Any) -> _typing.FloatArray | None:
+        """Items' arrays padded with ``NaN`` to the longest, and stacked.
+
+        Args:
+            items: The items, as :func:`_as_items` gives them.
+
+        Returns:
+            The arrays, aligned on the side ``pads_items`` names, shape (n,
+            longest, ...); ``None`` as :meth:`_stacked` says.
+        """
+        arrays: list[_typing.FloatArray] = []
+        for item in items:
+            array = None if _is_missing(item) else self._array(item)
+            if array is None or (
+                arrays and array.shape[1:] != arrays[0].shape[1:]
+            ):
+                return None
+            arrays.append(array)
+        if not arrays:
+            return None
+        longest = max(len(array) for array in arrays)
+        stacked = np.full((len(arrays), longest, *arrays[0].shape[1:]), np.nan)
+        for row, array in zip(stacked, arrays, strict=True):
+            if self.pads_items == "left":
+                row[longest - len(array) :] = array
+            else:
+                row[: len(array)] = array
         return stacked
 
     def _item_bytes(self, item: Any) -> bytes:

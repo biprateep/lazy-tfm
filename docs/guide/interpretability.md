@@ -188,12 +188,32 @@ explanation = interp.explain(
 explanation.item_values["cutout"]  # (n_statistics, n_rows, height, width, channels)
 ```
 
+The networks of `lazy.time.Pretrained`, but Chronos-T5, also take series of
+different lengths, and series with missing values. The series of a column
+are padded on the left with `NaN` to the longest of the rows and the context,
+and the network reads a `NaN` as a missing value, whose attribution is 0.
+`item_values` then has shape (n_statistics, n_rows, longest), and the
+attributions of a series of `k` values, from its first finite value to its
+last, are the last `k`:
+
+```python
+values = explanation.item_values["curve"]
+own = values[:, row, -len(series):]  # one per value of the row's series
+```
+
+Integrated gradients keep a missing value missing along the whole path. The
+baseline of a column of items is the mean of the context's items, value by
+value, over the values that the context has.
+
 A step that is a barrier ends the attribution: its output columns become the
 features. `explain` warns with the step's name and the reason, and lists them
 in `explanation.barriers`. The encoders of text are barriers, since characters
-have no gradient, and so are the pretrained encoders, whose networks lazy
-runs without gradients. A scikit-learn transformer that lazy does not know is
-a barrier too, although it still predicts as before.
+have no gradient, and so is Chronos-T5, which reads each value of a series as
+one of a set of tokens. The other networks of `lazy.time.Pretrained` pass the
+gradient to each value of a series; the pretrained encoders of images and of
+text are still barriers, whose networks lazy runs without gradients. A
+scikit-learn transformer that lazy does not know is a barrier too, although it
+still predicts as before.
 
 ### Stages
 

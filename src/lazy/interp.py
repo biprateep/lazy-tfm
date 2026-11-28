@@ -159,8 +159,12 @@ class Explanation:
             of items spread over the items' elements, such as the pixels
             of an image: the column's name -> an array of shape
             (n_statistics, n_rows, ...) that sums to the column's
-            ``values`` over its trailing axes. ``None`` if no feature is a
-            column of items.
+            ``values`` over its trailing axes. Items of other lengths are
+            padded, as their encoder's ``pads_items`` says, to the longest
+            of the rows and the context, and a padded or missing element
+            gets 0: for series padded on the left, the attributions of a
+            series of length ``k`` are the last ``k`` along the axis.
+            ``None`` if no feature is a column of items.
     """
 
     method: str
@@ -1409,12 +1413,17 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
             for start in range(0, len(y), _QUERY_BUDGET):
                 rows = slice(start, start + _QUERY_BUDGET)
                 with torch.no_grad():
+                    # An element a row lacks stays missing at its baseline.
                     at_origin = path.table(
                         [
-                            torch.tensor(origin).expand(
-                                len(y[rows]), *origin.shape
+                            torch.tensor(
+                                np.where(
+                                    np.isnan(leaf.queries[rows]), np.nan, origin
+                                )
                             )
-                            for origin in origins
+                            for leaf, origin in zip(
+                                path.leaves, origins, strict=True
+                            )
                         ]
                     )
                     scores = _scores(
@@ -1423,7 +1432,8 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                 base[:, rows] = torch.stack(scores).numpy()
     for held, delta in zip(gradients, deltas, strict=True):
         held /= n_steps
-        held *= delta
+        # A missing element, NaN on the whole line, gets 0.
+        held *= np.nan_to_num(delta)
     _, values, item_values = _by_feature(path.leaves, gradients)
     # A feature's attribution is the sum of its columns'.
     one_hot = feature_of[:, None] == np.arange(len(names))
@@ -1482,6 +1492,10 @@ def _origins(
 ) -> list[_typing.FloatArray]:
     """The baseline of each leaf: the point that stands in for no feature.
 
+    The mean of the context skips a missing element, ``NaN`` in the leaf of
+    a column of padded items; an element that no context row has takes the
+    mean of all the elements that the context's rows have.
+
     Args:
         leaves: The leaves of a path.
         baseline: A checked row of numbers, or ``None`` for the mean of
@@ -1495,7 +1509,7 @@ def _origins(
             table of its width.
     """
     if baseline is None:
-        return [leaf.context.mean(axis=0) for leaf in leaves]
+        return [_observed_mean(leaf.context) for leaf in leaves]
     # The members of an ensemble each have a leaf of the same table.
     one_table = all(
         leaf.per_column and leaf.names == leaves[0].names for leaf in leaves
@@ -1511,6 +1525,26 @@ def _origins(
             f"baseline must be finite, of shape ({n_columns},): got {baseline}"
         )
     return [baseline] * len(leaves)
+
+
+def _observed_mean(context: _typing.FloatArray) -> _typing.FloatArray:
+    """The mean of a leaf's context rows over the elements they have.
+
+    Args:
+        context: A leaf's context, shape (n_context, ...), with ``NaN`` for
+            a missing element.
+
+    Returns:
+        The mean, shape (...); where no row has an element, the mean of
+        every element the rows have.
+    """
+    observed = np.isfinite(context)
+    if observed.all():
+        return context.mean(axis=0)
+    count = observed.sum(axis=0)
+    total = np.where(observed, context, 0.0).sum(axis=0)
+    fallback = total.sum() / max(count.sum(), 1)
+    return np.where(count > 0, total / np.maximum(count, 1), fallback)
 
 
 def _by_feature(
@@ -1615,7 +1649,8 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     differentiable.refuse_inference_mode(label)
     origins = _origins(path.leaves, baseline)
     offsets = [
-        torch.tensor(leaf.context - origin)
+        # A missing element of a context row gets 0.
+        torch.tensor(np.nan_to_num(leaf.context - origin))
         for leaf, origin in zip(path.leaves, origins, strict=True)
     ]
     contexts = [

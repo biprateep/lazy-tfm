@@ -154,19 +154,29 @@ barrier to gradients by default: a gradient taken through a pipeline ends at
 its embedding. To let a gradient reach the items, an encoder does three
 things.
 
-1. It declares `gradient_kind = "differentiable"` on the class.
+1. It declares `gradient_kind = "differentiable"` on the class, or as a
+   property where the kind depends on a parameter, as `lazy.time.Pretrained`'s
+   does on `model`.
 2. It implements `_array(item)`: one item as a float64 array, or `None` for an
    item that has none, such as a series with a gap. The base class stacks the
    arrays of a column (`_stacked`) when no item is missing and all have one
    shape. The attribution is then to the elements of that array. If a column
    does not stack, attribution ends at the encoder's embedding, as at a
-   barrier.
+   barrier. An encoder whose items differ in length, or lack some elements,
+   sets `pads_items` to the side it aligns them on, `"left"` or `"right"`:
+   its `_array` gives `NaN` for a missing element, and `_stacked` pads each
+   array with `NaN` on that side to the longest along the first axis, as
+   `lazy.time.Pretrained` does on the left.
 3. It implements `forward(items)`: the embeddings of the stacked array as a
    torch tensor, on the autograd graph. It must give what `transform` gives for
    the same items, to float rounding, with the type and on the device of
    `items`, and a test should check it against `transform`. It refuses a
    tensor that `_stacked` would not give, with `lazy._steps.BarrierError`. The
-   caller chooses how many items one call holds.
+   caller chooses how many items one call holds. With `pads_items`, it reads
+   a `NaN` as a missing element: it gives what `transform` gives for the item
+   without its padding, and the gradient in a `NaN` is 0. No `NaN` may enter
+   the arithmetic on the graph, whose backward pass would then multiply it by
+   0 and give `NaN`: select with `torch.where` first.
 
 An encoder that cannot have a forward, such as one of text, may say why in
 `barrier_reason`. A subclass that changes the embedding of an encoder with a

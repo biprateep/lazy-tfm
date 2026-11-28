@@ -11,7 +11,9 @@ request.
 from importlib import metadata
 import json
 import sys
+import types
 
+import fakes as backend_fakes
 from fakes import encoders as fake_encoders
 import golden_data
 import numpy as np
@@ -20,6 +22,7 @@ from PIL import Image
 import pytest
 
 import lazy
+from lazy import _steps as steps
 from lazy import encoders
 from lazy.encoders import _pretrained
 
@@ -482,12 +485,14 @@ def test_tirex_pools_as_its_authors_embed_a_series():
     reference.data_augmentation = False
     series = golden_data.encoder_items()["time"][0]
     with torch.inference_mode():
-        ours = encoder._recipe().pooled(network, [series])
+        ours = encoder._recipe().pooled(network, [torch.tensor(series)])
         theirs = reference(
             torch.tensor(series, dtype=torch.float32)[None, None]
         )
     # Measured: identical in float32.
-    np.testing.assert_allclose(ours, theirs.numpy(), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(
+        ours.numpy(), theirs.numpy(), rtol=1e-6, atol=1e-6
+    )
 
 
 @pytest.mark.parametrize(
@@ -533,3 +538,314 @@ def test_long_texts_are_split_into_passes_under_the_token_budget(
     np.testing.assert_allclose(alone, whole, rtol=1e-6)
     with pytest.raises(ValueError, match="max_batch_tokens must be a posit"):
         lazy.text.Pretrained(max_batch_tokens=0, device="cpu").fit(texts)
+
+
+# -- the forwards, on torch's autograd graph ----------------------------------
+
+DIFFERENTIABLE = [
+    _needing_its_package(key)
+    for key in sorted(encoders.CHECKPOINTS)
+    if key.startswith("time:")
+    and not lazy.time.Pretrained.recipes[key.partition(":")[2]].quantized
+]
+"""Each network whose embedding has a forward, as ``"<modality>:<model>"``."""
+
+
+def _forward_and_transform(encoder, items):
+    """An encoder's forward and transform of the same items.
+
+    Returns:
+        A tuple (forward, transform, gradient): the forward, a numpy array;
+        the transform; and the gradient of a weighted sum of the forward
+        in the items, shape (n_items, length).
+    """
+    torch = pytest.importorskip("torch")
+    stacked = encoder.fit(items)._stacked(items)
+    tensor = torch.tensor(stacked, requires_grad=True)
+    embedding = encoder.forward(tensor)
+    weights = torch.tensor(
+        np.random.default_rng(1).normal(size=embedding.shape[1])
+    )
+    (embedding * weights).sum().backward()
+    return embedding.detach().numpy(), encoder.transform(items), tensor.grad
+
+
+def _series():
+    """Four series of one length: one constant, one constant at first.
+
+    The fourth opens with 40 equal values, more than a patch of TimesFM or
+    TiRex, which normalize by the values up to each patch.
+    """
+    generator = np.random.default_rng(2)
+    t = np.arange(70)
+    return [
+        np.sin(2 * np.pi * t / 25) + 0.1 * generator.normal(size=70),
+        generator.normal(size=70).cumsum(),
+        np.full(70, 2.5),
+        np.append(np.full(40, -1.0), generator.normal(size=30).cumsum()),
+    ]
+
+
+@pytest.mark.parametrize("key", DIFFERENTIABLE)
+def test_a_forward_gives_what_transform_gives_and_has_gradients(fakes, key):
+    forward, transform, gradient = _forward_and_transform(
+        _encoder(key), _series()
+    )
+    np.testing.assert_allclose(forward, transform, rtol=1e-6, atol=1e-6)
+    assert gradient.isfinite().all()
+    assert (gradient.abs().sum(dim=1) > 0).all()
+
+
+def _ragged():
+    """Four series of other lengths, with gaps and trailing padding.
+
+    The last is constant but for a gap.
+    """
+    generator = np.random.default_rng(6)
+    gappy = generator.normal(size=70).cumsum()
+    gappy[[10, 11, 40]] = np.nan
+    trailing = np.append(generator.normal(size=50).cumsum(), [np.nan] * 2)
+    steady = np.full(30, 1.0)
+    steady[5] = np.inf
+    return [gappy, generator.normal(size=45).cumsum(), trailing, steady]
+
+
+@pytest.mark.parametrize("key", DIFFERENTIABLE)
+def test_a_forward_reads_padding_and_gaps_as_missing_values(fakes, key):
+    encoder = _encoder(key)
+    stacked = encoder.fit(_ragged())._stacked(_ragged())
+    # Padded on the left to the longest, NaN where a value is missing.
+    assert stacked.shape == (4, 70)
+    assert np.isnan(stacked[1, :25]).all() and np.isnan(stacked[0, 10])
+    forward, transform, gradient = _forward_and_transform(encoder, _ragged())
+    np.testing.assert_allclose(forward, transform, rtol=1e-6, atol=1e-6)
+    assert gradient.isfinite().all()
+    missing = _tensor(np.isnan(stacked))
+    assert (gradient[missing] == 0).all()
+    assert (gradient.abs().sum(dim=1) > 0).all()
+
+
+def _tensor(array):
+    """``array`` as a torch tensor."""
+    return pytest.importorskip("torch").from_numpy(array)
+
+
+def test_a_forward_runs_in_passes_of_at_most_batch_size_series(
+    fakes, monkeypatch
+):
+    torch = pytest.importorskip("torch")
+    encoder = _encoder("time:chronos-bolt-small", batch_size=3)
+    passes = []
+    embedded = type(encoder)._embedded
+
+    def recorded(self, network, series):
+        passes.append(len(series))
+        return embedded(self, network, series)
+
+    monkeypatch.setattr(type(encoder), "_embedded", recorded)
+    items = [*_series(), *_series()[:3]]
+    forward = encoder.fit(items).forward(torch.tensor(encoder._stacked(items)))
+    assert passes == [3, 3, 1]
+    np.testing.assert_allclose(forward.numpy(), encoder.transform(items))
+
+
+def test_a_loaded_network_keeps_no_gradient_on_its_weights():
+    torch = pytest.importorskip("torch")
+    network = torch.nn.Linear(2, 1)
+    pipeline = types.SimpleNamespace(model=torch.nn.Linear(2, 1))
+    loaded = ("a preprocessor", network)
+    assert _pretrained._frozen(loaded) is loaded
+    assert _pretrained._frozen(pipeline) is pipeline
+    for module in (network, pipeline.model):
+        assert not any(p.requires_grad for p in module.parameters())
+
+
+def test_chronos_t5_is_a_barrier_to_gradients(fakes):
+    torch = pytest.importorskip("torch")
+    encoder = _encoder("time:chronos-t5-tiny").fit(_series())
+    barrier = steps.barrier("chronos", encoder)
+    assert "Chronos-T5 reads each value as one of a set of tokens" in (
+        barrier.reason
+    )
+    with pytest.raises(steps.BarrierError, match="Chronos-T5"):
+        encoder.forward(torch.tensor(encoder._stacked(_series())))
+
+
+def test_tirex_scales_its_windows_as_its_tokenizer_does():
+    torch = pytest.importorskip("torch")
+    tirex = pytest.importorskip("tirex")
+    context = torch.tensor(np.random.default_rng(3).normal(size=(3, 64)))
+    context[:, :20] = np.nan
+    context[1, 40] = np.nan
+    context[2, 20:] = 2.5
+    recipe = lazy.time.Pretrained.recipes["tirex"]
+    tokenizer = tirex.models.patcher.PatchedTokenizer(recipe.patch)
+    expected, _ = tokenizer.input_transform(context)
+    torch.testing.assert_close(
+        recipe._scaled(context), expected, equal_nan=True, rtol=0, atol=0
+    )
+
+
+def test_a_gradient_reaches_each_value_of_a_series_through_its_network(
+    monkeypatch, tmp_path
+):
+    generator = np.random.default_rng(4)
+    curves = [generator.normal(size=40).cumsum() for _ in range(30)]
+    X = pd.DataFrame({"curve": curves})
+    y = np.array([curve[-1] for curve in curves])
+    model = _series_pipeline(monkeypatch, tmp_path).fit(X[:24], y[:24])
+    explanation = lazy.interp.explain(
+        model, X[24:], y[24:], X[:24], y[:24], method="gradient"
+    )
+    assert explanation.feature_names == ("curve",)
+    assert explanation.barriers == ()
+    values = explanation.item_values["curve"]
+    assert values.shape == (3, 6, 40)
+    np.testing.assert_allclose(values.sum(axis=-1), explanation.values[..., 0])
+
+
+def test_integrated_gradients_reach_series_of_other_lengths_with_gaps(
+    monkeypatch, tmp_path
+):
+    generator = np.random.default_rng(7)
+    curves = [
+        generator.normal(size=generator.integers(20, 40)).cumsum()
+        for _ in range(30)
+    ]
+    for curve in curves[::4]:
+        curve[3] = np.nan
+    # An explained series longer than every series of the context.
+    curves[-1] = generator.normal(size=50).cumsum()
+    X = pd.DataFrame({"curve": curves})
+    y = np.array([np.nanmean(curve) for curve in curves])
+    model = _series_pipeline(monkeypatch, tmp_path).fit(X[:24], y[:24])
+    explanation = lazy.interp.explain(
+        model,
+        X[24:],
+        y[24:],
+        X[:24],
+        y[:24],
+        method="integrated_gradients",
+        n_steps=128,
+    )
+    assert explanation.barriers == ()
+    values = explanation.item_values["curve"]
+    # Padded on the left to the longest series; padding and gaps get 0.
+    assert values.shape == (3, 6, 50)
+    for row, curve in enumerate(curves[24:]):
+        own = values[:, row, 50 - len(curve) :]
+        assert (values[:, row, : 50 - len(curve)] == 0).all()
+        assert (own[:, np.isnan(curve)] == 0).all()
+    np.testing.assert_allclose(values.sum(axis=-1), explanation.values[..., 0])
+    # Completeness: a right Riemann sum of 128 steps is within 5% of the
+    # largest gain.
+    gained = explanation.full_values - explanation.base_values
+    np.testing.assert_allclose(
+        explanation.values.sum(axis=-1),
+        gained,
+        atol=0.05 * np.abs(gained).max(),
+    )
+    # The context's series too, with their padding and gaps.
+    context = lazy.interp.explain_context(
+        model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
+    )
+    assert np.isfinite(context.values).all()
+
+
+def test_padded_series_behind_an_augmentation_are_a_barrier(fakes):
+    tab = lazy.Tabularizer(
+        {
+            "curve": [
+                lazy.augment.Rescale(),
+                _encoder("time:chronos-bolt-small"),
+            ]
+        },
+        remainder="drop",
+    )
+    X = pd.DataFrame({"curve": _ragged()})
+    tab.fit(X)
+    _, through, barriers = tab._leaves(X, X, True, "tabularizer")
+    assert through == [False]
+    assert "its items are padded, or lack some elements" in barriers[0].reason
+
+
+def test_chronos_normalizes_as_its_instance_norm_without_nan_gradients():
+    torch = pytest.importorskip("torch")
+    chronos_bolt = pytest.importorskip("chronos.chronos_bolt")
+    context = torch.tensor(
+        np.random.default_rng(8).normal(size=(4, 48)), dtype=torch.float32
+    )
+    context[:, :10] = np.nan
+    context[1, 30] = np.nan
+    context[2, 10:] = 2.5
+    context[3] = np.nan
+    for use_arcsinh in (False, True):
+        upstream = chronos_bolt.InstanceNorm(use_arcsinh=use_arcsinh)
+        masked = lazy.time._masked_norm(upstream)
+        expected, (loc, scale) = upstream(context)
+        leaf = context.clone().requires_grad_()
+        found, (found_loc, found_scale) = masked(leaf)
+        torch.testing.assert_close(
+            found, expected, equal_nan=True, rtol=0, atol=0
+        )
+        torch.testing.assert_close(found_loc, loc, rtol=0, atol=0)
+        torch.testing.assert_close(found_scale, scale, rtol=0, atol=0)
+        torch.nan_to_num(found).sum().backward()
+        assert leaf.grad.isfinite().all()
+        assert (leaf.grad[context.isnan()] == 0).all()
+
+
+def _series_pipeline(monkeypatch, tmp_path):
+    """A Tabularizer of Chronos-Bolt's fake before TabPFN's fake, unfitted."""
+    pytest.importorskip("torch")
+    backend = backend_fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    )
+    # After the backend's, whose download the encoders' replaces.
+    fake_encoders.install(monkeypatch, tmp_path)
+    tab = lazy.Tabularizer(
+        {"curve": _encoder("time:chronos-bolt-small")},
+        n_columns=8,
+        remainder="drop",
+    )
+    return lazy.make_pipeline(tab, backend)
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("items", [_series, _ragged])
+@pytest.mark.parametrize("key", DIFFERENTIABLE)
+def test_the_real_weights_give_a_forward_equal_to_transform(key, items):
+    encoder = _encoder(key)
+    stacked = encoder.fit(items())._stacked(items())
+    with golden_data.pinned_threads():
+        forward, transform, gradient = _forward_and_transform(encoder, items())
+    np.testing.assert_allclose(forward, transform, rtol=1e-5, atol=1e-5)
+    assert gradient.isfinite().all()
+    assert (gradient[_tensor(np.isnan(stacked))] == 0).all()
+    assert (gradient.abs().sum(dim=1) > 0).all()
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize(
+    "key",
+    [
+        key
+        for key in DIFFERENTIABLE
+        if lazy.time.Pretrained.recipes[key.values[0][5:]].context <= 8192
+    ],
+)
+def test_a_constant_window_of_a_varying_series_has_a_finite_gradient(key):
+    """The network normalizes the window it reads, not the whole series."""
+    context = lazy.time.Pretrained.recipes[key.partition(":")[2]].context
+    walk = np.random.default_rng(5).normal(size=context + 30).cumsum()
+    steady = np.append(walk[:30], np.full(context, 2.0))
+    with golden_data.pinned_threads():
+        forward, transform, gradient = _forward_and_transform(
+            _encoder(key), [steady, walk]
+        )
+    np.testing.assert_allclose(forward, transform, rtol=1e-5, atol=1e-5)
+    assert gradient.isfinite().all()

@@ -135,6 +135,29 @@ def detached(array: Any) -> _typing.FloatArray:
     return np.asarray(array)
 
 
+def deviation(variance: Any, at_zero: Any) -> Any:
+    """The square root of a variance, and ``at_zero`` where it is 0.
+
+    The square root's gradient at 0 is infinite, and a ``where`` that does
+    not take that branch still multiplies it by 0, which gives NaN; so the
+    root is taken of 1 there, and the gradient of a zero variance is 0.
+
+    Args:
+        variance: Non-negative variances, a numpy array or a torch tensor.
+        at_zero: What a zero variance gives: a number, or an array
+            broadcastable to ``variance``'s shape.
+
+    Returns:
+        The standard deviations, of ``variance``'s shape and namespace.
+    """
+    xp = array_api_compat.array_namespace(variance)
+    positive = variance > 0
+    root = xp.sqrt(xp.where(positive, variance, xp.ones_like(variance)))
+    if isinstance(at_zero, (int, float)):
+        at_zero = xp.full_like(variance, at_zero)
+    return xp.where(positive, root, at_zero)
+
+
 def constant(values: Any, like: Any) -> Any:
     """Fixed values as an array of the kind, type and device of another.
 

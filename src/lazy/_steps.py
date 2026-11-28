@@ -87,12 +87,17 @@ class Leaf:
             (n_context, ...).
         per_column: Whether each column is a feature, as in a table; if
             not, the whole of each item is one feature.
+        padded: Whether ``NaN`` marks an element that an item lacks or
+            that pads it, which the path's forward reads as missing and
+            whose gradient is 0; only for a column of items whose encoder
+            pads them.
     """
 
     names: tuple[str, ...]
     queries: Any
     context: Any
     per_column: bool = True
+    padded: bool = False
 
 
 class BarrierError(ValueError):

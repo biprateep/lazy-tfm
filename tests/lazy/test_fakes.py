@@ -28,6 +28,10 @@ STAND_INS = {
     "chronos.ChronosPipeline": fake_encoders.Chronos,
     "chronos.ChronosBoltPipeline": fake_encoders.Chronos,
     "chronos.Chronos2Pipeline": fake_encoders.Chronos2,
+    "chronos.chronos_bolt.ChronosBoltModelForForecasting": (
+        fake_encoders.ChronosModel
+    ),
+    "chronos.chronos2.model.Chronos2Model": fake_encoders.ChronosModel,
     "transformers.TimesFmModel": fake_encoders.TimesFM,
     "transformers.TimesFm2_5Model": fake_encoders.TimesFM,
     "timesfm3.torch.TimesFM3Torch": fake_encoders.TimesFM3,

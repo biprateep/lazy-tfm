@@ -32,6 +32,7 @@ import numpy as np
 from lazy import _typing
 from lazy.encoders import _base
 from lazy.models import _device
+from lazy.models import _differentiable
 from lazy.models import _ensemble
 from lazy.models import _hub
 from lazy.models import _weights
@@ -147,6 +148,12 @@ class PretrainedEncoder(_base.BaseEncoder):
     def _encode(self, items: list[Any]) -> _typing.FloatArray:
         """The embeddings of a batch, from the network of this process."""
         torch = self._import()
+        network = self._network()
+        with torch.inference_mode():
+            return np.asarray(self._embed(network, items), dtype=float)
+
+    def _network(self) -> Any:
+        """What :meth:`_load` returns, loaded once per process and device."""
         device = _device.resolve_device(self.device)
         checkpoint = self._checkpoint()
         path = checkpoint.download()
@@ -159,9 +166,7 @@ class PretrainedEncoder(_base.BaseEncoder):
             "float32",
             type(self),
         )
-        network = _weights.network(key, lambda: self._load(path, device))
-        with torch.inference_mode():
-            return np.asarray(self._embed(network, items), dtype=float)
+        return _weights.network(key, lambda: _frozen(self._load(path, device)))
 
     def _import(self) -> Any:
         """Imports the packages; returns torch.
@@ -198,6 +203,29 @@ class PretrainedEncoder(_base.BaseEncoder):
             checkpoint.repo_id,
             checkpoint.revision or "",
         ]
+
+
+def _frozen(loaded: Any) -> Any:
+    """What :meth:`PretrainedEncoder._load` returned, its weights frozen.
+
+    A backward pass through a network that the encoders of the process
+    share then leaves no gradient on its weights. The network is what was
+    returned, an item of the tuple returned, or its ``model``, as a
+    Chronos pipeline holds it.
+
+    Args:
+        loaded: What ``_load`` returned.
+
+    Returns:
+        ``loaded`` itself.
+    """
+    for part in loaded if isinstance(loaded, tuple) else (loaded,):
+        # Not ``or``: a torch container of no modules is falsy.
+        if not hasattr(part, "requires_grad_"):
+            part = getattr(part, "model", None)
+        if hasattr(part, "requires_grad_"):
+            _differentiable.frozen(part)
+    return loaded
 
 
 def load_quietly(network: Any, path: os.PathLike[str]) -> Any:
