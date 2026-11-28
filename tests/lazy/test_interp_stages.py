@@ -183,6 +183,20 @@ def test_gradients_reach_the_pixels_through_the_tabularizer(backend, images):
     )
 
 
+@pytest.mark.parametrize("method", ["gradient", "integrated_gradients"])
+def test_a_table_of_items_alone_is_attributed_to_its_pixels(
+    backend, images, method
+):
+    X_context, y_context, X, y = images
+    only = [frame[["cutout"]] for frame in (X_context, X)]
+    model = _tabularized(backend, n_columns=3).fit(only[0], y_context)
+    explanation = interp.explain(
+        model, only[1], y, only[0], y_context, method=method
+    )
+    assert explanation.feature_names == ("cutout",)
+    assert explanation.item_values["cutout"].shape == (3, N_ROWS, 4, 4, 1)
+
+
 def test_an_encoder_that_is_a_barrier_gives_its_columns_as_features(
     backend, items
 ):
