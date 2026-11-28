@@ -33,7 +33,7 @@ reducer of :class:`~lazy.encoders.Tabularizer` is such a step.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -48,6 +48,7 @@ from sklearn.utils import validation
 from lazy import _inputs
 from lazy import _typing
 from lazy import _warnings
+from lazy import base
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
@@ -449,6 +450,19 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].score(self._features(X), y, y_grid)
+
+    @metaestimators.available_if(_last_step_has("_row_scores"))
+    def _row_scores(  # noqa: GS030 - scikit-learn's X, y.
+        self,
+        X: _Features,
+        y: npt.ArrayLike,
+        y_grid: grid_lib.GridLike,
+        names: Sequence[str],
+    ) -> base.RowScores:
+        """The model's per-row scores of ``X``, for ``density_scorer``."""
+        return self.steps[-1][1]._row_scores(  # noqa: SLF001 - delegate.
+            self._features(X), y, y_grid, names
+        )
 
 
 def make_pipeline(

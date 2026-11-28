@@ -9,8 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy import stats
+from sklearn import preprocessing
 import standins
 
+import lazy
 from lazy import grid as grid_lib
 from lazy import metrics
 
@@ -608,6 +610,28 @@ def test_a_density_scorer_is_minus_the_score_of_the_densities(score):
     np.testing.assert_allclose(scorer(model, X, y), -direct, rtol=1e-12)
 
 
+def test_a_density_scorer_computes_only_its_own_score(monkeypatch):
+    rng = np.random.default_rng(4)
+    X = rng.normal(size=(30, 2))
+    y = X[:, 0] + rng.normal(0.0, 0.1, 30)
+    pipe = lazy.make_pipeline(
+        preprocessing.StandardScaler(),
+        standins.HistogramStandIn(n_estimators=1, progress=False),
+    ).fit(X, y)
+    expected = -pipe.evaluate(X, y, method="mode")["nll"].iloc[0]
+    asked = []
+    row_terms = metrics._row_terms
+
+    def recorded(truth, grid, density, names):
+        asked.append(tuple(names))
+        return row_terms(truth, grid, density, names)
+
+    monkeypatch.setattr(metrics, "_row_terms", recorded)
+    monkeypatch.setattr(metrics, "summarize_scores", None)
+    assert metrics.density_scorer("nll")(pipe, X, y) == expected
+    assert set(asked) == {("nll",)}
+
+
 def test_an_unknown_density_score_is_refused():
     with pytest.raises(ValueError, match="score must be one of"):
         metrics.density_scorer("mae")
@@ -622,9 +646,9 @@ def test_a_density_scorer_refuses_a_bad_grid_before_any_scoring():
         metrics.density_scorer("crps", "bogus")
 
 
-def test_a_density_scorer_names_an_estimator_without_evaluate():
+def test_a_density_scorer_names_an_estimator_it_cannot_score():
     scorer = metrics.density_scorer("crps")
-    with pytest.raises(TypeError, match="needs an estimator with an evaluate"):
+    with pytest.raises(TypeError, match="needs a lazy model or a LazyPipeline"):
         scorer(object(), np.zeros((2, 1)), np.zeros(2))
 
 

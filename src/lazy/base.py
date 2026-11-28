@@ -46,9 +46,9 @@ estimator can implement the same protocol.
 from __future__ import annotations
 
 import abc
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 import numbers
-from typing import Any, ClassVar, TypeAlias
+from typing import Any, ClassVar, NamedTuple, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -92,6 +92,25 @@ The ``method`` argument of :meth:`BaseDensityRegressor.predict` accepts these.
 # (arrays, structured arrays, DataFrames, astropy Tables, to_pandas()
 # objects). Tables from optional packages have no common type, hence Any.
 _Features: TypeAlias = Any
+
+
+class RowScores(NamedTuple):
+    """Each row's scores of a model's densities, as ``_row_scores`` gives.
+
+    Package-internal, so not in ``__all__``. Arrays have shape (n_samples,).
+
+    Attributes:
+        y: The checked true targets.
+        point: The point estimates, or ``None`` if none was asked for.
+        pit: The PIT values.
+        terms: Each named score's terms, by name, lower is better.
+    """
+
+    y: _typing.FloatArray
+    point: _typing.FloatArray | None
+    pit: _typing.FloatArray
+    terms: dict[str, _typing.FloatArray]
+
 
 # predict, score and evaluate reduce each row's density as they go, a block
 # of rows at a time, so that no more than about this many bytes of float64
@@ -598,15 +617,8 @@ class BaseDensityRegressor(
             sklearn.exceptions.NotFittedError: If the model is not fitted.
             ValueError: If ``X`` has no rows.
         """
-        validation.check_is_fitted(self)
-        grid = self._resolve_grid(y_grid)
-        X = self._check_features(X)
-        y = _inputs.check_target(y, len(X))
-        terms = [
-            metrics.per_object_scores(y[rows], grid, density)[0]
-            for rows, density in self._density_blocks(X, grid)
-        ]
-        return -float(np.mean(np.concatenate(terms)))
+        rows = self._row_scores(X, y, y_grid, ("cde_loss",))
+        return metrics._negated_mean(rows.terms["cde_loss"])  # noqa: SLF001 - the metric registry.
 
     def evaluate(  # noqa: GS030 - scikit-learn's X, y.
         self,
@@ -654,29 +666,72 @@ class BaseDensityRegressor(
         )
         if scale not in metrics.SCALES:
             raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
-        grid = self._resolve_grid(y_grid)
-        X = self._check_features(X)
-        y = _inputs.check_target(y, len(X))
-        y_pred, scores = [], []
-        for rows, density in self._density_blocks(X, grid):
-            y_pred.append(metrics.grid_point_estimate(grid, density, method))
-            scores.append(metrics.per_object_metrics(y[rows], grid, density))
-        cde_terms, pit, crps_terms, nll_terms = (
-            np.concatenate(parts) for parts in zip(*scores, strict=True)
-        )
+        rows = self._row_scores(X, y, y_grid, metrics.DENSITY_SCORES, method)
+        assert rows.point is not None
         return metrics.summarize_scores(
-            y,
-            np.concatenate(y_pred),
-            cde_terms,
-            pit,
+            rows.y,
+            rows.point,
+            rows.terms["cde_loss"],
+            rows.pit,
             point=method,
             label=self.name_,
             scale=scale,
-            crps_terms=crps_terms,
-            nll_terms=nll_terms,
+            crps_terms=rows.terms["crps"],
+            nll_terms=rows.terms["nll"],
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _row_scores(  # noqa: GS030 - scikit-learn's X, y.
+        self,
+        X: _Features,
+        y: npt.ArrayLike,
+        y_grid: grid_lib.GridLike,
+        names: Sequence[str],
+        method: str | None = None,
+    ) -> RowScores:
+        """Each row's terms of the named scores, a block of rows at a time.
+
+        :meth:`score`, :meth:`evaluate` and
+        :func:`lazy.metrics.density_scorer` all score through this.
+
+        Args:
+            X: Features, shape (n_samples, n_features).
+            y: Finite true target values, shape (n_samples,).
+            y_grid: The grid to score on; ``None`` for this model's default.
+            names: Names of scores, as :data:`lazy.metrics.DENSITY_SCORES`
+                lists them.
+            method: A checked point estimate to add, or ``None``.
+
+        Returns:
+            The rows' scores; ``point`` is ``None`` without ``method``.
+
+        Raises:
+            sklearn.exceptions.NotFittedError: If the model is not fitted.
+            ValueError: If ``X`` has no rows.
+        """
+        validation.check_is_fitted(self)
+        grid = self._resolve_grid(y_grid)
+        X = self._check_features(X)
+        y = _inputs.check_target(y, len(X))
+        pits, terms, points = [], [], []
+        for rows, density in self._density_blocks(X, grid):
+            pit, block = metrics._row_terms(y[rows], grid, density, names)  # noqa: SLF001 - the metric registry.
+            pits.append(pit)
+            terms.append(block)
+            if method is not None:
+                points.append(
+                    metrics.grid_point_estimate(grid, density, method)
+                )
+        return RowScores(
+            y=y,
+            point=np.concatenate(points) if points else None,
+            pit=np.concatenate(pits),
+            terms={
+                name: np.concatenate([block[name] for block in terms])
+                for name in names
+            },
+        )
 
     def _distribution_chunks(
         self, X: pd.DataFrame

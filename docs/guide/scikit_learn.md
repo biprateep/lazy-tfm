@@ -76,8 +76,8 @@ scikit-learn's named scorers score `predict`, one number per row.
 {func}`~lazy.metrics.density_scorer` returns a scorer for the predicted
 distributions: minus the CDE loss, the CRPS or the NLL, so that higher is
 better. It works wherever scikit-learn takes `scoring=`, on a LAZY model or
-a `LazyPipeline`; it needs the estimator's `evaluate`, which a scikit-learn
-`Pipeline` or a search object does not have:
+a `LazyPipeline`, and computes only the score it returns. It does not work
+on a scikit-learn `Pipeline` or a search object:
 
 ```python
 from sklearn import inspection
