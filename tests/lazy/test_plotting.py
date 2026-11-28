@@ -183,9 +183,10 @@ def test_a_point_estimate_left_out_of_the_panel_warns_once(predictions):
     centers = lazy.datasets.DC1_GRID.centers
     with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
         plotting.diagnostic_panel(y_true, centers, pdfs)
-    assert len(record) == 1
-    assert "point was not passed" in str(record[0].message)
-    assert record[0].filename == __file__
+    # Older matplotlib releases add warnings of their own.
+    ours = [w for w in record if "point was not passed" in str(w.message)]
+    assert len(ours) == 1
+    assert ours[0].filename == __file__
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
         plotting.diagnostic_panel(y_true, centers, pdfs, point="mode")
