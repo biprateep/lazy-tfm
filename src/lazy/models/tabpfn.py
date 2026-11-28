@@ -877,11 +877,11 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ),
         )
         _differentiable.frozen(*regressor.models_)
-        n_steps = _differentiable.rank_smoothing()
+        n_points = _differentiable.rank_smoothing()
         smoothing = (
             None
-            if n_steps is None or not self._ranks_queries()
-            else (len(X), len(query), n_steps)
+            if n_points is None or not self._ranks_queries()
+            else (len(X), len(query), n_points)
         )
         # use_inference_mode picks upstream's standard path; with
         # differentiable_input it keeps the graph.
@@ -913,7 +913,7 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
 
 
 # The forward passes' rank smoothing in this context: their numbers of
-# context and query rows and their n_steps, or None for exact ranks.
+# context and query rows and their n_points, or None for exact ranks.
 _SOFT_RANKS: contextvars.ContextVar[tuple[int, int, int] | None] = (
     contextvars.ContextVar("lazy_tabpfn_soft_ranks", default=None)
 )
@@ -925,7 +925,7 @@ def _soft_query_ranks(smoothing: tuple[int, int, int] | None) -> Iterator[None]:
 
     Args:
         smoothing: The numbers of context and query rows and the
-            ``n_steps`` of :func:`lazy.models._differentiable.smoothed_ranks`,
+            ``n_points`` of :func:`lazy.models._differentiable.smoothed_ranks`,
             or None for exact ranks.
 
     Yields:
@@ -986,7 +986,7 @@ def _ranked(upstream: Callable[..., Any], cells: Any, ecdf_context: Any) -> Any:
     smoothing = _SOFT_RANKS.get()
     if smoothing is None:
         return ranks
-    n_context, n_queries, n_steps = smoothing
+    n_context, n_queries, n_points = smoothing
     if cells.shape[1] != n_context + n_queries:
         raise RuntimeError(
             "TabPFN ranked other rows than the context's and the queries':"
@@ -1002,7 +1002,7 @@ def _ranked(upstream: Callable[..., Any], cells: Any, ecdf_context: Any) -> Any:
         values < first, 0.0, torch.where(values > last, 1.0, exact)
     )
     offsets = _differentiable.soft_rank_offsets(
-        values, edges, below, at_most, n_steps
+        values, edges, below, at_most, n_points
     )
     soft = torch.clamp(
         unheld + offsets / n_context, held[..., :1], held[..., 1:]

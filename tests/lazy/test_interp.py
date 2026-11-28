@@ -13,6 +13,7 @@ import pytest
 from sklearn import base as sklearn_base
 from sklearn import dummy
 from sklearn import exceptions
+from sklearn import preprocessing
 import standins
 
 import lazy
@@ -384,6 +385,45 @@ def test_integrated_gradients_of_ranks_sum_to_the_smoothed_gain(
             y,
             X_context,
             y_context,
+            method="integrated_gradients",
+            n_steps=n_steps,
+        )
+        gain = explanation.full_values - explanation.base_values
+        errors.append(np.abs(explanation.sum_error).max())
+    assert errors[1] < errors[0] / 4
+    assert errors[1] < 0.02 * np.abs(gain).max()
+
+
+def test_integrated_gradients_of_ranks_converge_behind_a_nonlinear_step(
+    monkeypatch,
+):
+    pytest.importorskip("torch")
+    monkeypatch.setattr(interp, "_QUERY_BUDGET", 768)
+    rng = np.random.default_rng(2)
+    X = pd.DataFrame(rng.normal(size=(60, 2)), columns=["a", "b"])
+    y = X["a"].to_numpy() + 0.1 * rng.normal(size=60)
+    # exp moves the model's input unevenly along the straight path in X:
+    # the last steps cross the context's sparse upper tail in few, long
+    # strides, which the bandwidth must span.
+    model = lazy.make_pipeline(
+        preprocessing.FunctionTransformer(np.exp),
+        fakes.install("tabpfn", monkeypatch)(
+            n_estimators=1,
+            device="cpu",
+            progress=False,
+            transforms=("none",),
+            outlier_threshold=None,
+            version="v3.5",
+        ),
+    ).fit(X[:40], y[:40])
+    errors = []
+    for n_steps in (32, 256):
+        explanation = interp.explain(
+            model,
+            X[40:],
+            y[40:],
+            X[:40],
+            y[:40],
             method="integrated_gradients",
             n_steps=n_steps,
         )

@@ -807,9 +807,10 @@ def test_integrated_gradients_reach_series_of_other_lengths_with_gaps(
     curves[-1] = generator.normal(size=50).cumsum()
     X = pd.DataFrame({"curve": curves})
     y = np.array([np.nanmean(curve) for curve in curves])
-    # TabPFN v3, as integrated gradients through v3.5's smoothed ranks
-    # converge too slowly behind an encoder (#446).
-    model = _series_pipeline(monkeypatch, tmp_path, version="v3")
+    model = _series_pipeline(monkeypatch, tmp_path)
+    # The fake's embeddings span 3 directions; more columns would be float
+    # noise, which TabPFN v3.5 ranks as any other column.
+    model[0].set_params(n_columns=3)
     model.fit(X[:24], y[:24])
     explanation = lazy.interp.explain(
         model,
@@ -838,9 +839,11 @@ def test_integrated_gradients_reach_series_of_other_lengths_with_gaps(
         atol=0.05 * np.abs(gained).max(),
     )
     # The context's series too, with their padding and gaps.
-    context = lazy.interp.explain_context(
-        model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
-    )
+    # TabPFN v3.5's ranks of the context rows stay exact.
+    with pytest.warns(lazy.LazyWarning, match="exact ranks"):
+        context = lazy.interp.explain_context(
+            model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
+        )
     assert np.isfinite(context.values).all()
 
 
@@ -1215,14 +1218,11 @@ def test_a_leaf_of_texts_has_the_baselines_of_the_side_it_differentiates(
     )
 
 
-def _text_pipeline(monkeypatch, tmp_path, models=("e5-small-v2",)):
+def _text_pipeline(monkeypatch, tmp_path, models=("e5-small-v2",), **params):
     """A Tabularizer of a text fake before TabPFN's fake, unfitted.
 
     With several models, an ensemble of one such pipeline per model, each
-    seeded on its own. The fake is of TabPFN v3, whose network does not
-    rank the cells: from a baseline of padding tokens, far outside the
-    context's columns, integrated gradients through smoothed ranks
-    converge slowly in ``n_steps``.
+    seeded on its own. ``params`` are more parameters of the backend's fake.
     """
     pytest.importorskip("torch")
     backend = backend_fakes.install("tabpfn", monkeypatch)
@@ -1242,7 +1242,7 @@ def _text_pipeline(monkeypatch, tmp_path, models=("e5-small-v2",)):
                 transforms=("none",),
                 outlier_threshold=None,
                 random_state=seed,
-                version="v3",
+                **params,
             ),
         )
         for seed, model in enumerate(models)
@@ -1276,7 +1276,9 @@ def test_an_ensemble_adds_up_the_tokens_of_encoders_that_read_alike(
     notes, _ = _notes(20)
     X = pd.DataFrame({"note": notes})
     y = np.array([len(note) for note in notes], dtype=float)
-    model = _text_pipeline(monkeypatch, tmp_path, models)
+    # TabPFN v3, whose network does not rank: smoothed ranks, and their
+    # warning of ties, are not under test here.
+    model = _text_pipeline(monkeypatch, tmp_path, models, version="v3")
     model.fit(X[:16], y[:16])
     explanation = lazy.interp.explain(
         model, X[16:], y[16:], X[:16], y[:16], method="gradient"
@@ -1336,9 +1338,11 @@ def test_integrated_gradients_reach_each_token_of_texts_of_other_lengths(
     words, sums = encoder.word_values(notes[-1], values[0, -1])
     assert words == list(vocabulary)
     np.testing.assert_allclose(sums.sum(), explanation.values[0, -1, 0])
-    context = lazy.interp.explain_context(
-        model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
-    )
+    # TabPFN v3.5's ranks of the context rows stay exact.
+    with pytest.warns(lazy.LazyWarning, match="exact ranks"):
+        context = lazy.interp.explain_context(
+            model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
+        )
     assert np.isfinite(context.values).all()
 
 

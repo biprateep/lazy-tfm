@@ -108,9 +108,11 @@ A network that ranks each query cell among the context's values of its
 column, as TabPFN v3.5 does, has a zero gradient in the query between those
 values. Its backend lists those versions in `ranking_versions`, and its
 `_forward_group` smooths the query rows' ranks while
-`_differentiable.rank_smoothing()` returns an `n_steps`, adding
-`_differentiable.soft_rank_offsets` to the exact counts. The interpretability
-guide gives the smoothed rank and its bandwidth.
+`_differentiable.rank_smoothing()` returns an `n_points`, adding
+`_differentiable.soft_rank_offsets` to the exact counts. Its query rows
+are then `n_points` blocks of the same rows, one point of each row's path per
+block, from which `soft_rank_offsets` sizes each row's bandwidth. The
+interpretability guide gives the smoothed rank and its bandwidth.
 
 Every prediction reaches the model through those two methods. The base class
 cuts the queries into chunks, under one progress bar per call, and works

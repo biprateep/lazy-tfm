@@ -420,15 +420,15 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
 
     ``"gradient"`` runs the model's differentiable forward pass once, and
     three backward passes through it, one per statistic, for each batch of
-    64 rows; ``"integrated_gradients"`` takes ``n_steps`` points on the
-    path to each row, so it runs ``n_steps`` times as many batches, and
-    runs the pass once more per row, at the baseline. Both also predict
+    64 rows; ``"integrated_gradients"`` takes ``n_steps + 1`` points on
+    the path to each row, the baseline included, so it runs about
+    ``n_steps + 1`` times as many batches. Both also predict
     the rows once, all together and before the first batch, to check that
     ``X_context`` is the model's context and that every step's forward
     gives what its ``transform`` gives, so that a wrong one fails after
     the first batch.
     Neither refits, and each pass's autograd graph holds one batch of
-    about 64 points, or of one row's ``n_steps`` points if there are more.
+    about 64 points, or of one row's points if there are more.
 
     The gradient methods take the gradient as far back as it reaches
     (:mod:`lazy._steps`). Through a :class:`~lazy.pipeline.LazyPipeline`
@@ -457,14 +457,17 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     its column, as TabPFN v3.5 does, is a step function of the query: its
     gradient is zero between the context's values. The gradient methods
     then attribute a smoothed model, whose rank replaces the step at each
-    context value by a normal CDF of width ``min(1/2, d / (2 n_steps))``
-    times the median gap between the column's ``d`` distinct context
-    values (``n_steps`` is 1 for ``"gradient"``); the ranks of the context
-    rows stay exact. ``Explanation.smoothing_gap`` reports how far the
-    smoothed model's statistics are from the model's own, at the cost of
-    one more pass per batch of 64 rows. A warning names the ties where
-    the smoothed model departs most: a column of the model's input in
-    which one value fills at least a tenth of the context rows.
+    context value by a normal CDF of width ``h = max(min(1/2, d / (2
+    n_steps)) g, s / 2)``: ``g`` is the median gap between the column's
+    ``d`` distinct context values, ``s`` the largest step that the row's
+    own path takes in the values the network ranks, and ``n_steps`` is 1
+    for ``"gradient"``, whose ``s`` is 0. The interpretability guide gives
+    the reason for this width. The ranks of the context rows stay exact.
+    ``Explanation.smoothing_gap`` reports how far the smoothed model's
+    statistics are from the model's own, at the cost of one more pass per
+    batch of 64 rows. A warning names the ties where the smoothed model
+    departs most: a column of the model's input in which one value fills
+    at least a tenth of the context rows.
 
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
@@ -1362,8 +1365,13 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
     for ``k = 1, ..., m``: at ``x`` alone for ``"gradient"``, whose ``m`` is
     1. Every leaf moves along its own line at once. Each point's statistics
     depend only on its own row, so the gradient of their sum over a batch
-    of points is each point's gradient. A batch holds the ``m`` points of
-    each of about ``_QUERY_BUDGET / m`` rows.
+    of points is each point's gradient. For ``"integrated_gradients"`` the
+    baseline, ``k = 0``, goes in the same pass, which gives its statistics:
+    a model that smooths its ranks sizes them by each row's whole path
+    (:func:`lazy.models._differentiable.soft_rank_offsets`). A batch holds
+    the ``n`` points of each of about ``_QUERY_BUDGET / n`` rows, where
+    ``n`` is ``m + 1`` for ``"integrated_gradients"`` and 1 for
+    ``"gradient"``.
 
     Args:
         model: A model fitted on ``X_context`` and ``y_context``.
@@ -1418,8 +1426,12 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
         leaf.queries - origin
         for leaf, origin in zip(path.leaves, origins, strict=True)
     ]
-    fractions = np.arange(1, n_steps + 1) / n_steps
-    chunk = max(1, _QUERY_BUDGET // n_steps)
+    # The baseline is the first point of integrated gradients' paths, and
+    # takes no part in the sum of the gradients.
+    n_baseline = int(method == "integrated_gradients")
+    fractions = np.arange(1 - n_baseline, n_steps + 1) / n_steps
+    n_points = len(fractions)
+    chunk = max(1, _QUERY_BUDGET // n_points)
     # One attribution per element: the axes that hold one are summed.
     element_axes = [
         tuple(range(delta.ndim - leaf.element_ndim, delta.ndim))
@@ -1448,7 +1460,10 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
         )
         _check_context(method, y_context, first[-1], predicted[rows])
     # Inside torch.no_grad() too, which would build no graph.
-    with torch.enable_grad(), differentiable.smoothed_ranks(n_steps):
+    with (
+        torch.enable_grad(),
+        differentiable.smoothed_ranks(n_points),
+    ):
         for start in range(0, len(y), chunk):
             rows = slice(start, start + chunk)
             # Counted, not inferred: an empty leaf has no -1 to infer.
@@ -1456,17 +1471,18 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
             points = []
             for origin, delta in zip(origins, deltas, strict=True):
                 steps = fractions.reshape(-1, *[1] * delta.ndim) * delta[rows]
+                # A missing element, NaN in delta, stays missing at k = 0.
                 line = (origin[rows] + steps).reshape(
-                    n_steps * count, *delta.shape[1:]
+                    n_points * count, *delta.shape[1:]
                 )
                 points.append(torch.from_numpy(line).requires_grad_())
             density = path.density(path.table(points), context)
-            statistics = _scores(density, np.tile(y[rows], n_steps), grid)
-            # The last step, k = m, is the row itself.
+            statistics = _scores(density, np.tile(y[rows], n_points), grid)
+            # The last point, k = m, is the row itself.
             at_points = torch.stack(statistics).detach().numpy()
-            full[:, rows] = at_points.reshape(len(STATISTICS), n_steps, -1)[
-                :, -1
-            ]
+            at_points = at_points.reshape(len(STATISTICS), n_points, -1)
+            full[:, rows] = at_points[:, -1]
+            base[:, rows] = at_points[:, 0]
             # The three backward passes share one forward pass's graph,
             # which the last of them frees.
             for index, statistic in enumerate(statistics):
@@ -1481,8 +1497,8 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                 ):
                     if gradient is not None:
                         summed = gradient.numpy().reshape(
-                            n_steps, count, *delta.shape[1:]
-                        ).sum(axis=0) * np.nan_to_num(delta[rows])
+                            n_points, count, *delta.shape[1:]
+                        )[n_baseline:].sum(axis=0) * np.nan_to_num(delta[rows])
                         # A missing element, NaN on the line, gets 0.
                         held[index, rows] = (
                             summed.sum(axis=axes) if axes else summed
@@ -1490,26 +1506,6 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
             if exact is None:
                 _check_context(
                     method, y_context, full[-1, rows], predicted[rows]
-                )
-        if method == "integrated_gradients":
-            # The baseline is one point; each row scores it at its own
-            # target.
-            for start in range(0, len(y), _QUERY_BUDGET):
-                rows = slice(start, start + _QUERY_BUDGET)
-                # An element a row lacks stays missing at its baseline.
-                base[:, rows] = _pass_statistics(
-                    path,
-                    context,
-                    [
-                        np.where(
-                            np.isnan(leaf.queries[rows]), np.nan, origin[rows]
-                        )
-                        for leaf, origin in zip(
-                            path.leaves, origins, strict=True
-                        )
-                    ],
-                    y[rows],
-                    grid,
                 )
     for held in gradients:
         held /= n_steps
