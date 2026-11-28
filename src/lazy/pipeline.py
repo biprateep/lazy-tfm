@@ -24,10 +24,11 @@ with ``memory``, and the ``<step>__<parameter>`` names a search uses.
 ``fit`` adds one thing to scikit-learn's. A step that must train through
 the model after it, which a scikit-learn step never sees, declares
 ``trains_through_model`` and implements ``_fit_through(X, y, later,
-model)``; :meth:`LazyPipeline.fit` calls it once every step is fitted, and
-then fits the later steps and the model again on what the trained step
-gives. The adaptive reducer of :class:`~lazy.encoders.Tabularizer` is such
-a step.
+model)``. :meth:`LazyPipeline.fit` fits the steps, calls the hook on the
+context as the step takes it, then fits the later steps again and the
+model on what the trained step gives. Unless ``fit`` is given parameters,
+the model is fitted only then, not also before the training. The adaptive
+reducer of :class:`~lazy.encoders.Tabularizer` is such a step.
 """
 
 from __future__ import annotations
@@ -99,6 +100,10 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
     def fit(self, X: _Features, y: Any = None, **params: Any) -> LazyPipeline:  # noqa: GS030 - scikit-learn's X, y.
         """Fits every step, then each step that trains through the model.
 
+        If a step trains through the model, ``y`` is checked first, and,
+        unless ``params`` are given, the model is fitted once, after the
+        training, on what the trained step gives.
+
         Args:
             X: Features as the first step takes them, n_samples rows.
             y: The targets, shape (n_samples,).
@@ -111,35 +116,52 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             The pipeline itself.
 
         Raises:
-            ValueError: As a step that trains through the model raises it:
-                a later step with no forward, say, or a model with no
-                differentiable forward pass.
+            ValueError: If a step trains through the model and ``y`` is
+                not finite target values, one per row; or as such a step
+                raises it: a later step with no forward, say, or a model
+                with no differentiable forward pass.
         """
-        super().fit(X, y, **params)
-        for index, (_, step) in enumerate(self.steps[:-1]):
-            if not getattr(step, "trains_through_model", False):
-                continue
-            stage = self._through(X, index)
-            later = [
-                inner
-                for _, inner in self.steps[index + 1 : -1]
-                if inner is not None and inner != "passthrough"
-            ]
+        trained = [
+            index
+            for index, (_, step) in enumerate(self.steps[:-1])
+            if getattr(step, "trains_through_model", False)
+        ]
+        if not trained:
+            return super().fit(X, y, **params)
+        # As the model checks it, before any training.
+        targets = _inputs.check_target(y, len(X))
+        model = self.steps[-1]
+        try:
+            if not params:
+                # The model is fitted once, after the training. Metadata
+                # routed to it needs it in place.
+                self.steps[-1] = (model[0], "passthrough")
             try:
-                table = step._fit_through(stage, y, later, self.steps[-1][1])  # noqa: SLF001 - the hook of such a step.
-                for inner in later:
-                    table = inner.fit_transform(table, y)
-                self.steps[-1][1].fit(table, y)
-            except Exception:
-                # A failed fit leaves the pipeline unfitted: this step and
-                # the later ones are replaced by unfitted copies.
-                self.steps[index:] = [
-                    (name, sklearn_base.clone(inner))
-                    if hasattr(inner, "get_params")
-                    else (name, inner)
-                    for name, inner in self.steps[index:]
+                super().fit(X, y, **params)
+            finally:
+                self.steps[-1] = model
+            for index in trained:
+                later = [
+                    inner
+                    for _, inner in self.steps[index + 1 : -1]
+                    if inner is not None and inner != "passthrough"
                 ]
-                raise
+                table = self.steps[index][1]._fit_through(  # noqa: SLF001 - the hook of such a step.
+                    self._through(X, index), targets, later, model[1]
+                )
+                for inner in later:
+                    table = inner.fit_transform(table, targets)
+            model[1].fit(table, targets)
+        except Exception:
+            # A failed fit leaves the pipeline unfitted: the steps from the
+            # first trained one on are replaced by unfitted copies.
+            self.steps[trained[0] :] = [
+                (name, sklearn_base.clone(inner))
+                if hasattr(inner, "get_params")
+                else (name, inner)
+                for name, inner in self.steps[trained[0] :]
+            ]
+            raise
         return self
 
     def get_metadata_routing(self) -> metadata_routing.MetadataRouter:

@@ -28,10 +28,11 @@ to change one: `reducer=AdaptiveReducer(n_steps=500)`. A search reaches them
 as `tabularizer__reducer__n_steps`.
 
 A scikit-learn step is fitted before the model and never sees it. So the
-training is part of {meth}`LazyPipeline.fit <lazy.pipeline.LazyPipeline.fit>`: it fits every step, trains
-the reducer through the model, then fits the later steps and the model again
-on the trained reducer's columns. A Tabularizer fitted on its own, outside a
-`LazyPipeline`, keeps the network as it starts, which is PCA.
+training is part of {meth}`LazyPipeline.fit <lazy.pipeline.LazyPipeline.fit>`:
+it fits every step but the model, trains the reducer through the model, then
+fits the later steps again and the model on the trained reducer's columns. A
+Tabularizer fitted on its own, outside a `LazyPipeline`, keeps the network as
+it starts, which is PCA.
 
 ## The network
 
@@ -100,10 +101,10 @@ each step, and `best_step_` the step kept.
 
 - Each step runs the model's forward pass twice: on the training queries, with
   the autograd graph of the support rows and the queries held in memory, and
-  on the validation queries, without one. `fit` also fits the model three
-  times: on the whole context, as every pipeline does; on the support rows,
-  for the forward pass; and on the whole context again, mapped by the kept
-  network.
+  on the validation queries, without one. `fit` also fits the model twice: on
+  the support rows, for the forward pass, and on the whole context, mapped by
+  the kept network. Given parameters, as metadata routing passes them, it
+  also fits the model with them on the whole context before the training.
 - The items are encoded once, and the network trains on their embeddings, in
   float64 on the CPU. The model's pass runs on the model's device.
 - The model needs a differentiable forward pass, and every step between the
