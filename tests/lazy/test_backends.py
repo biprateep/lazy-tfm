@@ -372,7 +372,7 @@ class TestTabFM:
         generator = np.random.default_rng(0)
         X = generator.normal(size=(360, 3))
         z = -1.0 + 0.3 * (X[:, 0] + 0.3 * generator.normal(size=360))
-        grid = lazy.Grid.linear(-2.5, 0.5, 301)
+        grid = lazy.Grid.linear(-2.5, 0.5, 301, normalization="trapezoid")
 
         def run(**options):
             est = tabfm.TabFMHistogram(
@@ -1089,7 +1089,9 @@ class TestTabICL:
             est._predict_pdf(X, est.native_grid_)
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
-            est._predict_pdf(X, lazy.Grid.linear(-1.0, 1.0, 10))
+            est._predict_pdf(
+                X, lazy.Grid.linear(-1.0, 1.0, 10, normalization="trapezoid")
+            )
 
     def test_targets_are_standardised_in_float64(self):
         """float32 cannot resolve 0.01 of spread about 1e4; float64 can."""
@@ -1329,7 +1331,7 @@ class TestTabPFN:
                 "b": generator.normal(size=160),
             }
         )
-        grid = lazy.Grid.linear(0.0, 2.0, 200)
+        grid = lazy.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
 
         model = lazy.LazyModel(
             "tabpfn", version=version, n_estimators=2, device="cpu"
@@ -1363,7 +1365,7 @@ class TestTabPFN:
         )
         X_ctx, X_q = X.iloc[:200], X.iloc[200:].reset_index(drop=True)
 
-        grid = lazy.Grid.linear(0.0, 2.0, 2000)
+        grid = lazy.Grid.linear(0.0, 2.0, 2000, normalization="trapezoid")
         model = lazy.get_estimator("tabpfn", n_estimators=2, device="cpu").fit(
             X_ctx, z[:200]
         )

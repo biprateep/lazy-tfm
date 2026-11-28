@@ -71,7 +71,8 @@ own, or ``ValueError`` is raised.
 Typical usage example::
 
   pdfs = model.predict_proba(X_test)
-  table = metrics.summarize(y_true, model.grid_, pdfs, label="tabfm")
+  table = metrics.summarize(
+      y_true, model.grid_, pdfs, point="mode", label="tabfm")
 """
 
 from __future__ import annotations
@@ -1233,7 +1234,8 @@ def _negative_score(
             "density_scorer needs an estimator with an evaluate method (a"
             f" lazy model or a LazyPipeline): got {estimator!r}"
         )
-    return -float(estimator.evaluate(X, y, y_grid=y_grid)[score].iloc[0])
+    table = estimator.evaluate(X, y, method="mode", y_grid=y_grid)
+    return -float(table[score].iloc[0])
 
 
 # --------------------------------------------------------------------------
@@ -1425,7 +1427,7 @@ def evaluate_grid_pdfs(
     y_true: npt.ArrayLike,
     y_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
-    point: str = "mode",
+    point: str = _warnings.POINT_DEFAULT,
     *,
     bin_edges: npt.ArrayLike | None = None,
     scale: Scale = "none",
@@ -1439,7 +1441,9 @@ def evaluate_grid_pdfs(
         pdfs: Densities at those centers, shape (n, g); normalized here.
         point: The reduction to score as the point estimate: a key of
             :func:`grid_point_estimates` (``"mode"``, ``"peak_mean"``,
-            ``"mean"`` or ``"median"``).
+            ``"mean"`` or ``"median"``). The default is ``"mode"`` until
+            lazy 0.8.0, which changes it to ``"median"``; leaving it out
+            warns.
         bin_edges: Deprecated; see the module docstring.
         scale: How the point metrics scale residuals: ``"none"`` (the
             default) or ``"1+y"`` (DC1's); see :func:`point_metrics`.
@@ -1449,6 +1453,7 @@ def evaluate_grid_pdfs(
         the chosen reduction, the PDF metric bundle and the per-object PIT
         values, shape (n,).
     """
+    point = _warnings.resolve_default(point, "point", "median")
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     estimate = _checked_point_estimate(y_grid, pdfs, point, bin_edges)
     distribution, pit = pdf_metrics(y_true, y_grid, pdfs, bin_edges=bin_edges)
@@ -1463,7 +1468,7 @@ def summarize(
     y_true: npt.ArrayLike,
     y_grid: grid_lib.Grid | npt.ArrayLike,
     pdfs: npt.ArrayLike,
-    point: str = "mode",
+    point: str = _warnings.POINT_DEFAULT,
     label: str | None = None,
     *,
     bin_edges: npt.ArrayLike | None = None,
@@ -1480,7 +1485,7 @@ def summarize(
             :class:`~lazy.grid.Grid` itself (see the module docstring).
         pdfs: Densities at those centers, shape (n, g); normalized here.
         point: The point-estimate reduction, as in
-            :func:`evaluate_grid_pdfs`.
+            :func:`evaluate_grid_pdfs`, with the same default and warning.
         label: Model name for a leading ``model`` column; no such column
             when ``None``.
         bin_edges: Deprecated; see the module docstring.
@@ -1498,11 +1503,13 @@ def summarize(
         >>> y = np.array([0.5, 1.0])
         >>> grid = np.linspace(0.005, 1.995, 200)
         >>> pdfs = np.ones((2, 200))
-        >>> summarize(y, grid, pdfs, label="uniform")["model"].tolist()
+        >>> table = summarize(y, grid, pdfs, point="mode", label="uniform")
+        >>> table["model"].tolist()
         ['uniform']
     """
     if scale not in SCALES:
         raise ValueError(f"scale must be one of {SCALES}: {scale=}")
+    point = _warnings.resolve_default(point, "point", "median")
     y_grid, bin_edges = _split_grid(y_grid, bin_edges)
     estimate = _checked_point_estimate(y_grid, pdfs, point, bin_edges)
     cde_terms, pit, crps_terms, nll_terms = per_object_metrics(

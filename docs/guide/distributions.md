@@ -78,7 +78,9 @@ from lazy import Grid
 from lazy.datasets import DC1_GRID
 
 model.predict_proba(X_test)                     # the model's native grid
-model.predict_proba(X_test, Grid.linear(0.0, 3.0, 300))
+model.predict_proba(
+    X_test, Grid.linear(0.0, 3.0, 300, normalization="trapezoid")
+)
 model.predict_proba(X_test, DC1_GRID)           # the Data Challenge's grid
 model.predict_proba(X_test, np.linspace(0.005, 2.995, 300))   # bin centers
 ```
@@ -121,9 +123,12 @@ A density on a grid can be normalized in two ways, and a
 {class}`~lazy.grid.Grid` records which one it uses. The default,
 **`"trapezoid"`**, is the DC1 convention, with unit trapezoid mass over the bin
 centers, `np.trapezoid(pdf, grid.centers) == 1`.
-Every grid built with `Grid.linear`, `from_edges` or `from_centers` uses it,
-and so does {data}`~lazy.datasets.DC1_GRID`, so the numbers computed on those
-grids are directly comparable with the Data Challenge. Under
+It is the default of `Grid`, `Grid.linear` and `Grid.from_edges` until lazy
+0.8.0, which changes it to `"histogram"`; a grid built without `normalization`
+warns. `from_centers` always builds a trapezoid grid, and
+{data}`~lazy.datasets.DC1_GRID` is one, so they keep the trapezoid rule after
+0.8.0 and the numbers computed on them are directly comparable with the Data
+Challenge. Under
 **`"histogram"`**, the density is constant across each bin,
 `(pdf * grid.widths).sum() == 1`. The native grids use this normalization,
 because their bins are far from uniform and the trapezoid rule would misplace
@@ -211,15 +216,15 @@ numbers.
 {func}`~lazy.metrics.summarize` scores densities that the user already has,
 from any method, and returns every metric as a one-row table, with `crps` and
 `nll` columns beside the CDE loss and the PIT statistics. For one fitted model,
-`model.evaluate(X, y)` returns the same table:
+`model.evaluate(X, y, method="mode")` returns the same table:
 
 ```python
 import pandas as pd
 from lazy.metrics import summarize
 
 table = pd.concat([
-    summarize(y_true, grid, pdfs_a, label="TabPFN"),
-    summarize(y_true, grid, pdfs_b, label="TabICL"),
+    summarize(y_true, grid, pdfs_a, point="mode", label="TabPFN"),
+    summarize(y_true, grid, pdfs_b, point="mode", label="TabICL"),
 ])
 ```
 

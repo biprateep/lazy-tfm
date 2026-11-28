@@ -3,6 +3,7 @@
 """LazyPipeline, on a stand-in model."""
 
 import inspect
+import warnings
 
 import numpy as np
 import pytest
@@ -15,7 +16,7 @@ import standins
 
 import lazy
 
-GRID = lazy.Grid.linear(-6.0, 6.0, 40)
+GRID = lazy.Grid.linear(-6.0, 6.0, 40, normalization="trapezoid")
 
 # The methods that return arrays or a table, with the arguments after X, by
 # position.
@@ -197,3 +198,19 @@ def test_a_search_routes_metadata_to_fit_and_scores_without_it(regression):
     assert np.isfinite(result["test_score"]).all()
     fold = result["estimator"][0][0].weights_
     assert len(fold) == 30 and set(fold) <= set(weights)
+
+
+@pytest.mark.parametrize("name", ["predict", "evaluate"])
+def test_a_pipeline_warns_once_of_a_point_estimate_left_out(
+    fitted, regression, name
+):
+    piped, _, _ = fitted
+    X, y = regression
+    args = (X, y) if name == "evaluate" else (X,)
+    with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
+        getattr(piped, name)(*args)
+    assert len(record) == 1
+    assert record[0].filename == __file__
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        getattr(piped, name)(*args, method="mode")

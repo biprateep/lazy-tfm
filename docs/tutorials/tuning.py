@@ -101,7 +101,9 @@ X.head()
 # [From model output to distribution](https://lazy-tfm.readthedocs.io/en/latest/guide/distributions.html).
 
 # %%
-GRID = lazy.Grid.linear(y.min() - 0.3, y.max() + 0.3, 600)
+GRID = lazy.Grid.linear(
+    y.min() - 0.3, y.max() + 0.3, 600, normalization="trapezoid"
+)
 
 
 def measure(

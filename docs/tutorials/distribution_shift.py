@@ -166,7 +166,9 @@ ax_hist.legend()
 # [From model output to distribution](https://lazy-tfm.readthedocs.io/en/latest/guide/distributions.html)).
 
 # %%
-GRID = lazy.Grid.from_edges(np.linspace(0.0, 5.5, 221))
+GRID = lazy.Grid.from_edges(
+    np.linspace(0.0, 5.5, 221), normalization="trapezoid"
+)
 COLUMNS = ["crps", "coverage_68", "pit_ks", "bias"]
 
 
@@ -175,7 +177,7 @@ def score(
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Scores a fitted model on the test set; returns (table, pit)."""
     pdfs = model.predict_proba(X_test, GRID)
-    table = metrics.summarize(y_test, GRID, pdfs, label=label)
+    table = metrics.summarize(y_test, GRID, pdfs, point="mode", label=label)
     _, pit = metrics.per_object_scores(y_test, GRID, pdfs)
     table["coverage_68"] = np.mean(np.abs(pit - 0.5) <= 0.34)
     return table, pit

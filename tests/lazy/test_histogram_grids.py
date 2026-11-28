@@ -94,13 +94,13 @@ def test_histogram_cdf_at_centres_is_exact(bar):
 def test_summarize_scores_a_histogram_grid_exactly(bar):
     edges, masses, truth = bar
     grid = lazy.Grid.from_edges(edges, normalization="histogram")
-    row = metrics.summarize(truth, grid, masses / grid.widths)
+    row = metrics.summarize(truth, grid, masses / grid.widths, point="mode")
     expected, _ = _native_scores(edges, masses, truth)
     np.testing.assert_allclose(row["cde_loss"].iloc[0], expected.mean())
 
 
 def test_normalization_is_part_of_grid_identity():
-    trapezoid = lazy.Grid.linear(0.0, 2.0, 10)
+    trapezoid = lazy.Grid.linear(0.0, 2.0, 10, normalization="trapezoid")
     histogram = lazy.Grid.linear(0.0, 2.0, 10, normalization="histogram")
     assert trapezoid != histogram
     assert trapezoid.histogram_edges is None

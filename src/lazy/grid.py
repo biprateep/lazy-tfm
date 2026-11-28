@@ -15,16 +15,18 @@ internally, never the grid you ask for output on (:mod:`lazy.models.tabfm`).
 The LSST DESC Data Challenge's own grid, which its published numbers need,
 is :data:`lazy.datasets.DC1_GRID`.
 
-Normalization is trapezoidal over the bin centers by default. That is the
-``qp`` and DC1 convention and it is what :func:`lazy.metrics.cde_loss`
-integrates with. Native grids, whose bins are far from uniform, are
-``"histogram"``-normalized instead (constant density across each bin);
-pass the :class:`Grid` itself to the :mod:`lazy.metrics` functions and they
-score its densities by its own convention.
+Normalization is trapezoidal over the bin centers by default, until lazy
+0.8.0 changes the default to ``"histogram"``: a :class:`Grid` built without
+``normalization`` warns. Trapezoidal is the ``qp`` and DC1 convention, and
+it is what :func:`lazy.metrics.cde_loss` integrates with. Native grids,
+whose bins are far from uniform, are ``"histogram"``-normalized instead
+(constant density across each bin); pass the :class:`Grid` itself to the
+:mod:`lazy.metrics` functions and they score its densities by its own
+convention.
 
 Typical usage example:
 
-  grid = Grid.linear(0.0, 3.0, 300)
+  grid = Grid.linear(0.0, 3.0, 300, normalization="trapezoid")
   densities = grid.normalize(raw_densities)
 """
 
@@ -82,24 +84,26 @@ class Grid:
         edges: The bin edges, strictly increasing and finite, shape
             (n_bins + 1,). Stored read-only.
         normalization: How a density on the grid integrates to one.
-            ``"trapezoid"`` (the default, the DC1 and qp convention): the
-            trapezoid rule over the bin centers. ``"histogram"``: each bin's
-            density is constant across the bin, so ``sum(p * widths) == 1``
-            -- exact for the strongly non-uniform native grids of the
-            bar-distribution models, where the trapezoid rule is not.
+            ``"trapezoid"`` (the default until lazy 0.8.0, which changes it
+            to ``"histogram"``; leaving it out warns): the DC1 and qp
+            convention, the trapezoid rule over the bin centers.
+            ``"histogram"``: each bin's density is constant across the bin,
+            so ``sum(p * widths) == 1`` -- exact for the strongly non-uniform
+            native grids of the bar-distribution models, where the
+            trapezoid rule is not.
 
     Two grids are equal when their normalizations match and their edges
     agree to 1e-12 of the largest edge's magnitude, and to 1e-6 of the
     narrowest bin's width.
 
     Examples:
-        >>> grid = Grid.linear(0.0, 2.0, 200)
+        >>> grid = Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
         >>> grid.n_bins, float(grid.centers[0]), float(grid.centers[-1])
         (200, 0.005, 1.995)
     """
 
     edges: _typing.FloatArray
-    normalization: Normalization = "trapezoid"
+    normalization: Normalization = _warnings.NORMALIZATION_DEFAULT
 
     def __post_init__(self) -> None:
         edges = np.array(self.edges, dtype=float)
@@ -111,13 +115,17 @@ class Grid:
             raise ValueError("edges must be strictly increasing")
         if not np.isfinite(edges).all():
             raise ValueError("edges must all be finite")
-        if self.normalization not in NORMALIZATIONS:
+        normalization = _warnings.resolve_default(
+            self.normalization, "normalization", "histogram"
+        )
+        if normalization not in NORMALIZATIONS:
             raise ValueError(
                 f"normalization must be one of {NORMALIZATIONS}: "
-                f"{self.normalization=}"
+                f"{normalization=}"
             )
         edges.setflags(write=False)
         object.__setattr__(self, "edges", edges)
+        object.__setattr__(self, "normalization", normalization)
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restores the fields and keeps the edges read-only."""
@@ -133,7 +141,7 @@ class Grid:
         y_max: float,
         n_bins: int,
         *,
-        normalization: Normalization = "trapezoid",
+        normalization: Normalization = _warnings.NORMALIZATION_DEFAULT,
     ) -> Grid:
         """``n_bins`` equal-width bins spanning ``[y_min, y_max]``.
 
@@ -142,6 +150,7 @@ class Grid:
             y_max: Right edge of the last bin, above ``y_min``.
             n_bins: Number of bins, at least 2.
             normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
+                Leaving it out warns that the default changes in 0.8.0.
 
         Returns:
             The grid.
@@ -154,7 +163,7 @@ class Grid:
         cls,
         edges: npt.ArrayLike,
         *,
-        normalization: Normalization = "trapezoid",
+        normalization: Normalization = _warnings.NORMALIZATION_DEFAULT,
     ) -> Grid:
         """A grid from explicit bin edges (any spacing).
 
@@ -162,6 +171,7 @@ class Grid:
             edges: Strictly increasing, finite bin edges, shape (n_bins + 1,)
                 with n_bins >= 2.
             normalization: ``"trapezoid"`` or ``"histogram"``; see the class.
+                Leaving it out warns that the default changes in 0.8.0.
 
         Returns:
             The grid.
@@ -186,7 +196,7 @@ class Grid:
             The grid.
 
         Examples:
-            >>> grid = Grid.linear(0.0, 2.0, 200)
+            >>> grid = Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
             >>> Grid.from_centers(grid.centers) == grid
             True
         """
@@ -207,7 +217,8 @@ class Grid:
                     inner,
                     [centers[-1] + (centers[-1] - inner[-1])],
                 ]
-            )
+            ),
+            "trapezoid",
         )
         # Midpoint edges move the centers of a non-uniform grid; refuse
         # rather than hand back a grid whose centers are not the input.
@@ -264,14 +275,9 @@ class Grid:
         return hash((self.n_bins, self.normalization))
 
     def __repr__(self) -> str:
-        extra = (
-            ""
-            if self.normalization == "trapezoid"
-            else f", normalization={self.normalization!r}"
-        )
         return (
             f"Grid(n_bins={self.n_bins}, y_min={self.y_min:g},"
-            f" y_max={self.y_max:g}{extra})"
+            f" y_max={self.y_max:g}, normalization={self.normalization!r})"
         )
 
     @property

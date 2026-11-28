@@ -138,7 +138,7 @@ def test_shapley_values_sum_to_what_the_features_add(data, model):
 
 def test_loco_is_the_loss_of_a_refit_without_the_feature(data, model):
     X_context, y_context, X, y = data
-    grid = lazy.Grid.linear(-12.0, 12.0, 300)
+    grid = lazy.Grid.linear(-12.0, 12.0, 300, normalization="trapezoid")
     explanation = interp.explain(
         model, X, y, X_context, y_context, method="loco", y_grid=grid
     )
@@ -362,7 +362,7 @@ def test_gradient_times_input_is_the_derivative_times_the_offset(
     differentiable,
 ):
     model, X_context, y_context, X, y = differentiable
-    grid = lazy.Grid.linear(-4.0, 4.0, 200)
+    grid = lazy.Grid.linear(-4.0, 4.0, 200, normalization="trapezoid")
     baseline = np.array([0.5, -1.0, 2.0])
     explanation = interp.explain(
         model,
@@ -407,7 +407,10 @@ def test_a_context_other_than_the_fits_is_refused(differentiable):
 def test_gradients_are_taken_inside_no_grad(differentiable):
     torch = pytest.importorskip("torch")
     model, X_context, y_context, X, y = differentiable
-    options = {"method": "gradient", "y_grid": lazy.Grid.linear(-4, 4, 50)}
+    options = {
+        "method": "gradient",
+        "y_grid": lazy.Grid.linear(-4, 4, 50, normalization="trapezoid"),
+    }
     plain = interp.explain(model, X, y, X_context, y_context, **options)
     with torch.no_grad():
         inside = interp.explain(model, X, y, X_context, y_context, **options)
@@ -440,7 +443,10 @@ def test_reordered_columns_keep_their_gradients(differentiable):
 
 def test_a_group_takes_the_sum_of_its_columns_gradients(differentiable):
     model, X_context, y_context, X, y = differentiable
-    options = {"method": "gradient", "y_grid": lazy.Grid.linear(-4, 4, 50)}
+    options = {
+        "method": "gradient",
+        "y_grid": lazy.Grid.linear(-4, 4, 50, normalization="trapezoid"),
+    }
     plain = interp.explain(model, X, y, X_context, y_context, **options)
     grouped = interp.explain(
         model, X, y, X_context, y_context, groups={"ac": ["a", "c"]}, **options
@@ -521,7 +527,7 @@ def test_leaving_a_context_row_out_is_what_a_refit_without_it_loses(
 ):
     X_context, y_context, X, y = data
     X_context, y_context = X_context[:30], y_context[:30]
-    grid = lazy.Grid.linear(-12.0, 12.0, 300)
+    grid = lazy.Grid.linear(-12.0, 12.0, 300, normalization="trapezoid")
     explanation = interp.explain_context(
         model,
         X,
@@ -587,7 +593,7 @@ def test_context_gradients_are_the_derivative_along_the_rows_offset(
     differentiable,
 ):
     model, X_context, y_context, X, y = differentiable
-    grid = lazy.Grid.linear(-4.0, 4.0, 200)
+    grid = lazy.Grid.linear(-4.0, 4.0, 200, normalization="trapezoid")
     baseline = np.array([0.5, -1.0, 2.0])
     explanation = interp.explain_context(
         model, X, y, X_context, y_context, baseline=baseline, y_grid=grid

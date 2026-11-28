@@ -144,7 +144,12 @@ records = []
 skipped = set()
 for name, (X_train, X_test, y_train, y_test) in splits.items():
     pad = 0.2 * np.ptp(y_train)
-    grid = lazy.Grid.linear(y_train.min() - pad, y_train.max() + pad, 1000)
+    grid = lazy.Grid.linear(
+        y_train.min() - pad,
+        y_train.max() + pad,
+        1000,
+        normalization="trapezoid",
+    )
     for template in MODELS:
         if template.name_ in skipped:
             continue

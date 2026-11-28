@@ -120,7 +120,7 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
-DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200)
+DC1_GRID = grid_lib.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
 """The LSST DESC PZ Data Challenge output format, 200 bins of width 0.01 over
 ``0 < z < 2``. The published DC1 numbers are on this grid; pass it as ``y_grid``
 to reproduce them.

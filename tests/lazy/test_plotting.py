@@ -25,7 +25,7 @@ def predictions():
         np.exp(-0.5 * ((z - centers[:, None]) / 0.08) ** 2)
     )
     _, _, pit = metrics.evaluate_grid_pdfs(
-        y_true, lazy.datasets.DC1_GRID.centers, pdfs
+        y_true, lazy.datasets.DC1_GRID.centers, pdfs, point="mode"
     )
     return y_true, pdfs, pit
 
@@ -84,7 +84,11 @@ def test_pdf_examples_make_one_axes_per_galaxy(predictions):
 def test_diagnostic_panel_has_four_populated_axes(predictions):
     y_true, pdfs, _ = predictions
     fig = plotting.diagnostic_panel(
-        y_true, lazy.datasets.DC1_GRID.centers, pdfs, label="dummy"
+        y_true,
+        lazy.datasets.DC1_GRID.centers,
+        pdfs,
+        point="mode",
+        label="dummy",
     )
     assert len(fig.axes) == 4
     assert fig._suptitle.get_text() == "dummy"
@@ -174,12 +178,30 @@ def test_bin_edges_stand_in_for_the_grid(native):
     )
 
 
+def test_a_point_estimate_left_out_of_the_panel_warns_once(predictions):
+    y_true, pdfs, _ = predictions
+    centers = lazy.datasets.DC1_GRID.centers
+    with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
+        plotting.diagnostic_panel(y_true, centers, pdfs)
+    # Older matplotlib releases add warnings of their own.
+    ours = [w for w in record if "point was not passed" in str(w.message)]
+    assert len(ours) == 1
+    assert ours[0].filename == __file__
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        plotting.diagnostic_panel(y_true, centers, pdfs, point="mode")
+
+
 def test_bin_edges_score_the_callers_centres_without_a_warning():
     pdfs = np.array([[0.1, 0.2, 0.9], [0.9, 0.2, 0.1]])
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
         fig = plotting.diagnostic_panel(
-            [5.0, 0.5], [0.2, 1.5, 5.9], pdfs, bin_edges=[0, 1, 3, 6]
+            [5.0, 0.5],
+            [0.2, 1.5, 5.9],
+            pdfs,
+            point="mode",
+            bin_edges=[0, 1, 3, 6],
         )
     # The one-to-one line spans the modes, 5.9 and 0.2, which are the
     # caller's centres and not the edges' midpoints, 4.5 and 0.5.
@@ -194,15 +216,19 @@ def test_bare_non_uniform_centres_are_refused(native, plot):
     y_true, native_grid, pdfs = native
     with pytest.raises(ValueError, match="bin_edges"):
         if plot == "diagnostic_panel":
-            plotting.diagnostic_panel(y_true, native_grid.centers, pdfs)
+            plotting.diagnostic_panel(
+                y_true, native_grid.centers, pdfs, point="mode"
+            )
         else:
             plot(native_grid.centers, pdfs)
 
 
 def test_the_panel_scores_a_native_grid_by_its_histograms(native):
     y_true, native_grid, pdfs = native
-    fig = plotting.diagnostic_panel(y_true, native_grid, pdfs)
-    _, _, pit = metrics.evaluate_grid_pdfs(y_true, native_grid, pdfs)
+    fig = plotting.diagnostic_panel(y_true, native_grid, pdfs, point="mode")
+    _, _, pit = metrics.evaluate_grid_pdfs(
+        y_true, native_grid, pdfs, point="mode"
+    )
     np.testing.assert_allclose(fig.axes[2].lines[0].get_ydata(), np.sort(pit))
     assert fig.axes[3].get_xlim()[1] < 2.5
 

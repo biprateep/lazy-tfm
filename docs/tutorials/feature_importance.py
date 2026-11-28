@@ -103,7 +103,7 @@ model.fit(X_train, y_train)
 
 low, high = model.predict_interval(X_test, coverage=0.68).T
 coverage = np.mean((y_test >= low) & (y_test <= high))
-scores = model.evaluate(X_test, y_test)
+scores = model.evaluate(X_test, y_test, method="mode")
 print(f"CRPS: {scores['crps'].iloc[0]:.2f} MPa")
 print(f"68% interval coverage: {coverage:.0%}")
 print(f"Median width of the 68% interval: {np.median(high - low):.1f} MPa")
@@ -272,7 +272,7 @@ smooth = lazy.LazyModel(
     progress=False,
 )
 smooth.fit(X_train, y_train)
-smooth_crps = smooth.evaluate(X_test, y_test)["crps"].iloc[0]
+smooth_crps = smooth.evaluate(X_test, y_test, method="mode")["crps"].iloc[0]
 print(f"CRPS without transforms or clip: {smooth_crps:.2f} MPa")
 
 # %% [markdown]

@@ -316,11 +316,11 @@ def test_numeric_strings_still_work_and_warn_once_in_every_entry_point(
     assert len(_deprecations(fit)) == 1
     assert fit[0].filename == __file__
     for call in (
-        model.predict,
+        lambda X: model.predict(X, method="mode"),
         model.predict_proba,
         model.predict_quantiles,
         lambda X: model.score(X, y[:30]),
-        lambda X: model.evaluate(X, y[:30]),
+        lambda X: model.evaluate(X, y[:30], method="mode"),
     ):
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
@@ -427,7 +427,7 @@ def test_codes_at_prediction_follow_the_fit_whatever_the_order():
             "x": [5.0, 6.0, 7.0],
         }
     )
-    model.predict(queries)
+    model.predict(queries, method="mode")
     # Columns follow the fit's order; an unseen category is missing.
     np.testing.assert_array_equal(model.queried_["kind"], [np.nan, 1, 0])
     np.testing.assert_array_equal(model.queried_["x"], [5, 6, 7])
@@ -484,7 +484,9 @@ def test_a_model_pickled_before_categorical_columns_still_predicts(table):
     old.__setstate__(state)
     assert old.get_params()["categorical_features"] == "from_dtype"
     assert old.categories_ == [None, None]
-    np.testing.assert_array_equal(old.predict(frame), model.predict(frame))
+    np.testing.assert_array_equal(
+        old.predict(frame, method="mode"), model.predict(frame, method="mode")
+    )
 
 
 def test_a_masked_text_entry_is_a_missing_category():

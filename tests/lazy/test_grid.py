@@ -3,6 +3,7 @@
 
 import copy
 import pickle
+import warnings
 
 import numpy as np
 import pytest
@@ -26,24 +27,24 @@ def test_from_centers_round_trips_a_uniform_grid():
 
 def test_edges_must_increase():
     with pytest.raises(ValueError, match="strictly increasing"):
-        lazy.Grid(np.array([0.0, 1.0, 0.5]))
+        lazy.Grid(np.array([0.0, 1.0, 0.5]), normalization="trapezoid")
 
 
 def test_edges_are_immutable():
-    grid = lazy.Grid.linear(0.0, 1.0, 4)
+    grid = lazy.Grid.linear(0.0, 1.0, 4, normalization="trapezoid")
     with pytest.raises(ValueError):
         grid.edges[0] = -1.0
 
 
 def test_normalize_gives_unit_trapezoid_mass():
-    grid = lazy.Grid.linear(0.0, 2.0, 200)
+    grid = lazy.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
     pdfs = np.random.default_rng(0).uniform(size=(5, 200))
     mass = np.trapezoid(grid.normalize(pdfs), grid.centers, axis=1)
     assert np.allclose(mass, 1.0)
 
 
 def test_normalize_rescues_a_zero_row_instead_of_returning_nan():
-    grid = lazy.Grid.linear(0.0, 2.0, 200)
+    grid = lazy.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
     pdfs = np.zeros((2, 200))
     pdfs[1] = 1.0
     out = grid.normalize(pdfs)
@@ -54,8 +55,8 @@ def test_normalize_rescues_a_zero_row_instead_of_returning_nan():
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_conserves_mass_onto_a_coarser_grid():
     """The whole point of rebin: no probability is created or lost."""
-    fine = lazy.Grid.linear(0.0, 2.0, 1000)
-    coarse = lazy.Grid.linear(0.0, 2.0, 50)
+    fine = lazy.Grid.linear(0.0, 2.0, 1000, normalization="trapezoid")
+    coarse = lazy.Grid.linear(0.0, 2.0, 50, normalization="trapezoid")
     probs = np.random.default_rng(0).uniform(size=(4, 1000))
     probs /= probs.sum(axis=1, keepdims=True)
     density = coarse.rebin(probs, fine.edges)
@@ -68,7 +69,9 @@ def test_rebin_keeps_mass_from_bins_narrower_than_the_output_bin():
 
     Equal-mass bins are routinely narrower than an output bin.
     """
-    output = lazy.Grid.linear(0.0, 1.0, 2)  # two 0.5-wide bins
+    output = lazy.Grid.linear(
+        0.0, 1.0, 2, normalization="trapezoid"
+    )  # two 0.5-wide bins
     # Two bins 500x narrower than the output bin, then two that align with it.
     narrow_edges = np.array([0.0, 0.001, 0.002, 0.5, 1.0])
     probs = np.array([[0.4, 0.4, 0.1, 0.1]])
@@ -80,14 +83,14 @@ def test_rebin_keeps_mass_from_bins_narrower_than_the_output_bin():
 
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_rejects_mismatched_edges():
-    grid = lazy.Grid.linear(0.0, 1.0, 4)
+    grid = lazy.Grid.linear(0.0, 1.0, 4, normalization="trapezoid")
     with pytest.raises(ValueError, match="one more entry"):
         grid.rebin(np.ones((2, 5)), np.linspace(0, 1, 5))
 
 
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_from_quantiles_recovers_a_known_uniform_distribution():
-    grid = lazy.Grid.linear(0.0, 1.0, 100)
+    grid = lazy.Grid.linear(0.0, 1.0, 100, normalization="trapezoid")
     levels = np.linspace(0.0, 1.0, 101)[1:-1]
     values = np.tile(levels, (3, 1))  # CDF of U(0, 1) is the identity
     density = grid.from_quantiles(values, levels)
@@ -96,7 +99,7 @@ def test_from_quantiles_recovers_a_known_uniform_distribution():
 
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_from_quantiles_conserves_mass_for_a_narrow_distribution():
-    grid = lazy.Grid.linear(0.0, 2.0, 200)
+    grid = lazy.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
     levels = np.linspace(0.0, 1.0, 101)[1:-1]
     values = np.tile(0.5 + 1e-3 * (levels - 0.5), (2, 1))  # all mass in one bin
     density = grid.from_quantiles(values, levels)
@@ -104,7 +107,7 @@ def test_from_quantiles_conserves_mass_for_a_narrow_distribution():
 
 
 def test_cdf_starts_at_zero_and_ends_at_one():
-    grid = lazy.Grid.linear(0.0, 2.0, 200)
+    grid = lazy.Grid.linear(0.0, 2.0, 200, normalization="trapezoid")
     density = grid.normalize(np.ones((3, 200)))
     cdf = grid.cdf(density)
     assert np.allclose(cdf[:, 0], 0.0)
@@ -112,7 +115,7 @@ def test_cdf_starts_at_zero_and_ends_at_one():
 
 
 def test_as_grid_accepts_centers_and_a_grid_but_not_none():
-    grid = lazy.Grid.linear(0.0, 3.0, 30)
+    grid = lazy.Grid.linear(0.0, 3.0, 30, normalization="trapezoid")
     assert lazy.as_grid(grid) is grid
     assert lazy.as_grid(np.linspace(0.05, 2.95, 30)) == grid
     with pytest.raises(ValueError, match="only the model knows"):
@@ -120,7 +123,7 @@ def test_as_grid_accepts_centers_and_a_grid_but_not_none():
 
 
 def test_bin_index_clips_outside_the_grid():
-    grid = lazy.Grid.linear(0.0, 1.0, 10)
+    grid = lazy.Grid.linear(0.0, 1.0, 10, normalization="trapezoid")
     assert grid.bin_index([-5.0, 0.05, 0.95, 5.0]).tolist() == [0, 0, 9, 9]
 
 
@@ -157,13 +160,15 @@ def test_rebin_refuses_what_a_histogram_distribution_refuses(
     probs, edges, match
 ):
     with pytest.raises(ValueError, match=match):
-        lazy.Grid.linear(0.0, 2.0, 10).rebin(probs, edges)
+        lazy.Grid.linear(0.0, 2.0, 10, normalization="trapezoid").rebin(
+            probs, edges
+        )
 
 
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
 def test_rebin_accepts_zero_width_input_bins_without_mass():
     edges = [0.0, 0.5, 0.5, 1.5, 2.0]
-    density = lazy.Grid.linear(0.0, 2.0, 10).rebin(
+    density = lazy.Grid.linear(0.0, 2.0, 10, normalization="trapezoid").rebin(
         [[1.0, 0.0, 1.0, 1.0]], edges
     )
     assert np.isfinite(density).all()
@@ -172,7 +177,7 @@ def test_rebin_accepts_zero_width_input_bins_without_mass():
 def test_cdf_column_zero_follows_the_normalisation_convention():
     """Zero by the trapezoid rule; half the first bin on a histogram grid."""
     density = np.random.default_rng(1).uniform(size=(3, 8))
-    trapezoid = lazy.Grid.linear(0.0, 2.0, 8)
+    trapezoid = lazy.Grid.linear(0.0, 2.0, 8, normalization="trapezoid")
     np.testing.assert_array_equal(trapezoid.cdf(density)[:, 0], 0.0)
     histogram = lazy.Grid.linear(0.0, 2.0, 8, normalization="histogram")
     np.testing.assert_allclose(
@@ -182,8 +187,8 @@ def test_cdf_column_zero_follows_the_normalisation_convention():
 
 
 def test_equal_grids_hash_alike():
-    grid = lazy.Grid.linear(0.0, 2.0, 20)
-    nudged = lazy.Grid.from_edges(grid.edges + 1e-13)
+    grid = lazy.Grid.linear(0.0, 2.0, 20, normalization="trapezoid")
+    nudged = lazy.Grid.from_edges(grid.edges + 1e-13, normalization="trapezoid")
     assert nudged == grid
     assert hash(nudged) == hash(grid)
     assert len({grid, nudged}) == 1
@@ -191,27 +196,31 @@ def test_equal_grids_hash_alike():
 
 def test_a_grid_leaves_the_callers_edges_writeable():
     edges = np.linspace(0.0, 1.0, 11)
-    grid = lazy.Grid.from_edges(edges)
+    grid = lazy.Grid.from_edges(edges, normalization="trapezoid")
     assert edges.flags.writeable
     assert not grid.edges.flags.writeable
 
 
 def test_a_rebuilt_grid_equals_itself_far_from_zero():
-    grid = lazy.Grid.linear(1e7, 1e7 + 10.0, 100)
+    grid = lazy.Grid.linear(1e7, 1e7 + 10.0, 100, normalization="trapezoid")
     assert lazy.Grid.from_centers(grid.centers) == grid
 
 
 def test_grids_whose_narrow_bins_differ_are_not_equal_far_from_zero():
     edges = np.array([0.0, 1e-7, 2e-7, 1.0])
     moved = np.array([0.0, 9e-7, 9.5e-7, 1.0])
-    assert lazy.Grid.from_edges(1e6 + edges) != lazy.Grid.from_edges(
-        1e6 + moved
-    )
+    assert lazy.Grid.from_edges(
+        1e6 + edges, normalization="trapezoid"
+    ) != lazy.Grid.from_edges(1e6 + moved, normalization="trapezoid")
 
 
 def test_grids_of_tiny_values_that_differ_are_not_equal():
-    tiny = lazy.Grid.from_edges([0.0, 1e-14, 2e-14, 3e-14])
-    assert tiny != lazy.Grid.from_edges(10 * tiny.edges)
+    tiny = lazy.Grid.from_edges(
+        [0.0, 1e-14, 2e-14, 3e-14], normalization="trapezoid"
+    )
+    assert tiny != lazy.Grid.from_edges(
+        10 * tiny.edges, normalization="trapezoid"
+    )
 
 
 @pytest.mark.filterwarnings("ignore:Grid.*deprecated:FutureWarning")
@@ -257,3 +266,42 @@ def test_a_copied_or_unpickled_grid_keeps_its_edges_read_only(route):
     duplicate = route(grid)
     assert duplicate == grid
     assert not duplicate.edges.flags.writeable
+
+
+_EDGES = np.linspace(0.0, 1.0, 5)
+_BUILDERS = {
+    "Grid": lambda **kwargs: lazy.Grid(_EDGES, **kwargs),
+    "linear": lambda **kwargs: lazy.Grid.linear(0.0, 1.0, 4, **kwargs),
+    "from_edges": lambda **kwargs: lazy.Grid.from_edges(_EDGES, **kwargs),
+}
+
+
+@pytest.mark.parametrize("build", _BUILDERS.values(), ids=_BUILDERS)
+def test_a_grid_built_without_normalization_warns_once_and_stays_trapezoid(
+    build,
+):
+    with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
+        grid = build()
+    assert len(record) == 1
+    assert "normalization was not passed" in str(record[0].message)
+    assert "'trapezoid' to 'histogram'" in str(record[0].message)
+    assert "normalization='trapezoid' to keep" in str(record[0].message)
+    assert record[0].filename == __file__
+    assert grid.normalization == "trapezoid"
+
+
+@pytest.mark.parametrize("normalization", ["trapezoid", "histogram"])
+@pytest.mark.parametrize("build", _BUILDERS.values(), ids=_BUILDERS)
+def test_a_grid_built_with_normalization_does_not_warn(build, normalization):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        grid = build(normalization=normalization)
+    assert grid.normalization == normalization
+
+
+def test_the_grids_lazy_builds_for_itself_do_not_warn():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        lazy.as_grid(np.linspace(0.05, 0.95, 10))
+        lazy.base.default_grid(0.0, 1.0)
+        copy.deepcopy(lazy.datasets.DC1_GRID)

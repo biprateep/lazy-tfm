@@ -269,9 +269,9 @@ def _twins():
 
 
 _GRIDS = [
-    grid_lib.Grid.linear(-1.0, 5.0, 6),
+    grid_lib.Grid.linear(-1.0, 5.0, 6, normalization="trapezoid"),
     grid_lib.Grid.linear(-1.0, 5.0, 6, normalization="histogram"),
-    grid_lib.Grid.linear(0.5, 3.0, 9),
+    grid_lib.Grid.linear(0.5, 3.0, 9, normalization="trapezoid"),
 ]
 
 
