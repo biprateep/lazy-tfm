@@ -83,8 +83,28 @@ def test_histogram_ppf_inverts_the_cdf(histogram):
         )
 
 
-def test_an_empty_histogram_row_is_uniform_in_probability(histogram):
-    np.testing.assert_allclose(histogram.probabilities[2], 1 / 30)
+def test_an_empty_row_is_a_uniform_density_even_on_huge_buckets():
+    bins = [-1e308, 0.0, 1e308, 1.7e308]
+    dist = distributions.HistogramDistribution(bins, [[0.0, 0.0, 0.0]])
+    density = dist.probabilities[0] / np.diff(np.asarray(bins) / 1e308)
+    np.testing.assert_allclose(density, density[0])
+
+
+@pytest.mark.parametrize("n_bins", [3, 40])
+def test_an_empty_row_is_on_a_grid_what_the_grid_makes_of_an_empty_row(
+    n_bins,
+):
+    edges = [0.0, 0.1, 0.5, 2.0]
+    dist = distributions.HistogramDistribution(edges, np.zeros((1, 3)))
+    # The buckets' own edges, and a finer grid that reads the CDF.
+    grid = (
+        lazy.Grid.from_edges(edges, normalization="histogram")
+        if n_bins == 3
+        else lazy.Grid.linear(0.0, 2.0, n_bins, normalization="histogram")
+    )
+    np.testing.assert_allclose(
+        dist.on_grid(grid), grid.normalize(np.zeros((1, n_bins)))
+    )
 
 
 def test_an_empty_row_puts_no_probability_on_a_zero_width_bucket():
