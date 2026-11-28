@@ -129,12 +129,13 @@ class Chronos:
 
     A token's state is the mean of its observed values times a ramp, and
     the summary token's is the mean of the series; a padded or wholly
-    missing token's is 1e6.
+    missing token's is 1e6. Its ``model`` encodes the same way.
     """
 
     def __init__(self, width, patch):
         self.width = width
         self.patch = patch
+        self.model = ChronosModel(self)
 
     def embed(self, context):
         import torch  # noqa: PLC0415
@@ -165,6 +166,34 @@ class Chronos2(Chronos):
         states, _ = super().embed(inputs)
         output = torch.full((len(inputs), 1, self.width), PAD)
         return list(torch.cat([states, output], dim=1)[:, None]), None
+
+
+class ChronosModel:
+    """The ``encode`` of a Chronos-Bolt or Chronos-2 pipeline's model.
+
+    It reads float32 series padded on the left with ``NaN``, and gives
+    the states of its pipeline's ``embed``: as a tensor for Chronos-Bolt,
+    and in an output of the encoder for Chronos-2.
+    """
+
+    def __init__(self, pipeline):
+        import torch  # noqa: PLC0415
+
+        self.pipeline = pipeline
+        self.device = torch.device("cpu")
+
+    def encode(self, context):
+        import torch  # noqa: PLC0415
+
+        assert context.dtype == torch.float32
+        # A series starts at its first finite value; the rest is padding.
+        series = [row[int(row.isfinite().int().argmax()) :] for row in context]
+        states, _ = Chronos.embed(self.pipeline, series)
+        if not isinstance(self.pipeline, Chronos2):
+            return states, None
+        output = torch.full((len(series), 1, self.pipeline.width), PAD)
+        states = torch.cat([states, output], dim=1)
+        return types.SimpleNamespace(last_hidden_state=states), None
 
 
 class TimesFM(Network):

@@ -60,7 +60,7 @@ _QUARTILES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
 class _SeriesEncoder(_base.BaseEncoder):
-    """What the classical encoders of series share: their forward's input.
+    """What the encoders of series share: their forward's input.
 
     Their embeddings are differentiable in the values of a series.
     """
@@ -71,8 +71,8 @@ class _SeriesEncoder(_base.BaseEncoder):
     def _array(self, item: Any) -> _typing.FloatArray | None:
         """One series as an array, shape (length,); ``None`` with a gap.
 
-        ``transform`` drops the values that are not finite, so a series
-        with one has no array whose elements line up with its values.
+        ``transform`` drops or masks the values that are not finite, so a
+        series with one has no array whose elements line up with its values.
         """
         series = np.asarray(item, dtype=float)
         if series.ndim != 1 or not series.size or not np.isfinite(series).all():
@@ -89,11 +89,14 @@ class _SeriesEncoder(_base.BaseEncoder):
             ``items`` itself.
 
         Raises:
-            lazy._steps.BarrierError: If a value is not finite. ``transform``
-                drops such a value, which no function of the tensor's
-                elements does.
+            lazy._steps.BarrierError: If the tensor is not of that shape,
+                or, unless the encoder pads its items, a value is not
+                finite: ``transform`` drops such a value, which no function
+                of the tensor's elements does.
         """
-        if items.ndim != 2 or not bool(items.isfinite().all()):
+        if items.ndim != 2 or not (
+            self.pads_items or bool(items.isfinite().all())
+        ):
             raise _steps.BarrierError(
                 f"{type(self).__name__} has a forward only for series of"
                 " one length whose values are all finite"
@@ -327,12 +330,15 @@ class _Recipe:
         states: The width of the pooled states.
         patch: The number of values in one token.
         context: The most values of a series, its last ones, that it reads.
+        quantized: Whether the network reads each value as one of a set of
+            tokens, which have no gradient: Chronos-T5's.
         package: The module that loads the network.
     """
 
     states: int
     patch: int
     context: int
+    quantized: ClassVar[bool] = False
     package: ClassVar[str]
 
     @property
@@ -344,18 +350,20 @@ class _Recipe:
         """The network, on ``device``, in float32."""
         raise NotImplementedError
 
-    def pooled(
-        self, network: Any, series: list[_typing.FloatArray]
-    ) -> _typing.FloatArray:
+    def pooled(self, network: Any, series: list[Any]) -> Any:
         """The mean state over the observed tokens of each series' window.
+
+        It keeps torch's autograd graph, unless the network is quantized.
 
         Args:
             network: What :meth:`load` returned.
-            series: The whole series, with ``NaN`` for a missing value;
-                none starts or ends with one.
+            series: The whole series, float torch tensors of shape
+                (length,), with ``NaN`` for a missing value; none starts or
+                ends with one.
 
         Returns:
-            The pooled states, shape (len(series), states).
+            The pooled states, a float torch tensor of shape (len(series),
+            states).
         """
         raise NotImplementedError
 
@@ -363,6 +371,10 @@ class _Recipe:
 @dataclasses.dataclass(frozen=True)
 class _Chronos(_Recipe):
     """A Chronos pipeline, which masks a missing value.
+
+    Chronos-Bolt and Chronos-2 read the series through their model's
+    ``encode``, as the pipeline's ``embed`` does, but on torch's autograd
+    graph.
 
     Attributes:
         outputs: The tokens that the network puts after the summary token,
@@ -384,30 +396,73 @@ class _Chronos(_Recipe):
             settings = _pretrained.PINNED
         else:
             settings = {"torch_dtype": torch.float32}
-        return chronos.BaseChronosPipeline.from_pretrained(
+        pipeline = chronos.BaseChronosPipeline.from_pretrained(
             path, device_map=device, **settings
         )
+        norm = getattr(getattr(pipeline, "model", None), "instance_norm", None)
+        if isinstance(norm, chronos.chronos_bolt.InstanceNorm):
+            pipeline.model.instance_norm = _masked_norm(norm)
+        return pipeline
 
-    def pooled(
-        self, network: Any, series: list[_typing.FloatArray]
-    ) -> _typing.FloatArray:
+    def pooled(self, network: Any, series: list[Any]) -> Any:
         """The mean state over the observed tokens and the summary token."""
         import torch  # noqa: PLC0415 - an optional, heavy extra.
 
-        windows = [values[-self.context :] for values in series]
-        states, _ = network.embed(
-            [torch.as_tensor(values, dtype=torch.float32) for values in windows]
-        )
-        rows = np.empty((len(windows), self.states))
-        for row, values, state in zip(rows, windows, states, strict=True):
-            # Chronos-2 gives each series its own tensor, of one variate.
-            tokens = state.float().numpy().reshape(-1, self.states)
+        # The model's instance norm takes the square root of a constant
+        # window's variance, 0, whose gradient is not finite: such a window
+        # reaches the network without one, as in the classical encoders.
+        windows = [
+            _steady(values[-self.context :].float()) for values in series
+        ]
+        states = self._states(network, windows)
+        rows = []
+        for values, state in zip(windows, states, strict=True):
+            # Chronos-2 gives each series' states as one variate.
+            tokens = state.float().reshape(-1, self.states)
             # A batch pads on the left: a series' own tokens and its one
             # summary token come last, before the output tokens.
-            observed = np.append(_tokens(values, self.patch), True)
+            flags = _tokens(_arrays.detached(values), self.patch)
+            observed = torch.as_tensor(np.append(flags, True))
             end = len(tokens) - self.outputs
-            row[:] = tokens[end - len(observed) : end][observed].mean(axis=0)
-        return rows
+            own = tokens[end - len(observed) : end]
+            rows.append(own[observed.to(own.device)].mean(dim=0))
+        return torch.stack(rows)
+
+    def _states(self, network: Any, windows: list[Any]) -> Any:
+        """The token states of each window, on torch's autograd graph.
+
+        Args:
+            network: What :meth:`load` returned.
+            windows: The windows, float32 torch tensors of shape (length,),
+                with ``NaN`` for a missing value.
+
+        Returns:
+            Each window's states, padded on the left to the batch's longest
+            window: a tensor of shape (len(windows), tokens, states), or a
+            sequence of len(windows) tensors with ``tokens * states``
+            values each.
+        """
+        model = network.model
+        context = _left_padded(windows, max(map(len, windows)))
+        states = model.encode(context=context.to(model.device))[0]
+        # Chronos-2 gives the states in an output of the encoder.
+        return getattr(states, "last_hidden_state", states)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ChronosT5(_Chronos):
+    """A Chronos-T5 pipeline, which reads each value as one of its tokens.
+
+    The tokens have no gradient, so it reads the series through the
+    pipeline's ``embed``.
+    """
+
+    quantized: ClassVar[bool] = True
+
+    def _states(self, network: Any, windows: list[Any]) -> Any:
+        """The token states of each window, from the pipeline's ``embed``."""
+        states, _ = network.embed([values.cpu() for values in windows])
+        return states
 
 
 @dataclasses.dataclass(frozen=True)
@@ -440,43 +495,43 @@ class _TimesFm(_Recipe):
         network = _pretrained.load_quietly(transformers.AutoModel, path)
         return network.to(device)
 
-    def pooled(
-        self, network: Any, series: list[_typing.FloatArray]
-    ) -> _typing.FloatArray:
+    def pooled(self, network: Any, series: list[Any]) -> Any:
         """The mean state over the observed patches, pooled on the device."""
         import torch  # noqa: PLC0415 - an optional, heavy extra.
 
+        # Filled before the window is cut, so that a missing value at its
+        # start is filled from the value before it.
         filled = [_interpolated(values)[-self.context :] for values in series]
         length = self.patch * max(-(-len(v) // self.patch) for v in filled)
-        values = np.zeros((len(filled), length), dtype=np.float32)
         padding = np.ones((len(filled), length), dtype=np.float32)
-        for row, pad, own in zip(values, padding, filled, strict=True):
-            scale = float(own.std()) or 1.0
-            row[length - len(own) :] = (own - own.mean()) / scale
+        rows = []
+        for pad, own in zip(padding, filled, strict=True):
+            mean, scale = _spread(own, constant=1.0)
+            rows.append(((own - mean) / scale).float())
             pad[length - len(own) :] = 0
-        windows = [values[-self.context :] for values in series]
+        windows = [
+            _arrays.detached(values[-self.context :]) for values in series
+        ]
         observed = _observed_tokens(windows, self.patch, length // self.patch)
+        values = _left_padded(rows, length, fill=0.0)
         states = self._states(network, values, padding)
         # Summed in float64, except on an Apple GPU, which has none.
         dtype = torch.float32 if states.device.type == "mps" else torch.float64
         states = states.to(dtype)
         mask = torch.as_tensor(observed, dtype=dtype, device=states.device)
         mask = mask[..., None]
-        pooled = (states * mask).sum(dim=1) / mask.sum(dim=1)
-        return pooled.cpu().numpy()
+        return (states * mask).sum(dim=1) / mask.sum(dim=1)
 
     def _states(
-        self,
-        network: Any,
-        values: npt.NDArray[np.float32],
-        padding: npt.NDArray[np.float32],
+        self, network: Any, values: Any, padding: npt.NDArray[np.float32]
     ) -> Any:
         """The decoder's final states over the patches of each series.
 
         Args:
             network: What :meth:`load` returned.
             values: The standardized series, padded on the left to whole
-                patches of the longest, shape (n_series, length).
+                patches of the longest, a float32 torch tensor of shape
+                (n_series, length).
             padding: 1 where ``values`` is padding, else 0; the same shape.
 
         Returns:
@@ -486,7 +541,7 @@ class _TimesFm(_Recipe):
         import torch  # noqa: PLC0415 - an optional, heavy extra.
 
         inputs = {
-            "past_values": torch.from_numpy(values),
+            "past_values": values,
             "past_values_padding": torch.from_numpy(padding),
         }
         if self.freq is not None:
@@ -524,10 +579,7 @@ class _TimesFm3(_TimesFm):
         return network.to(device, torch.float32).eval()
 
     def _states(
-        self,
-        network: Any,
-        values: npt.NDArray[np.float32],
-        padding: npt.NDArray[np.float32],
+        self, network: Any, values: Any, padding: npt.NDArray[np.float32]
     ) -> Any:
         """The final states over each series' patches, read from the start."""
         import torch  # noqa: PLC0415 - an optional, heavy extra.
@@ -537,11 +589,13 @@ class _TimesFm3(_TimesFm):
         # Each series moves left by its whole patches of padding.
         shifts = padding.argmin(axis=1) // self.patch
         order = (np.arange(length) + self.patch * shifts[:, None]) % length
-        values = np.take_along_axis(values, order, axis=1)
+        values = torch.take_along_dim(
+            values, torch.as_tensor(order, device=values.device), dim=1
+        )
         padded = np.take_along_axis(padding.astype(bool), order, axis=1)
         device = next(network.parameters()).device
         _, outputs = network.decode(
-            torch.from_numpy(values)[:, None].to(device),
+            values[:, None].to(device),
             horizon=1,
             mask=torch.from_numpy(padded).to(device),
             return_aux_outputs=True,
@@ -585,26 +639,24 @@ class _TiRex(_Recipe):
         apple = torch.device(device).type == "mps"
         return network.to(torch.float32 if apple else torch.float64).eval()
 
-    def pooled(
-        self, network: Any, series: list[_typing.FloatArray]
-    ) -> _typing.FloatArray:
+    def pooled(self, network: Any, series: list[Any]) -> Any:
         """Each layer's mean state over the observed patches, normalized."""
         import torch  # noqa: PLC0415 - an optional, heavy extra.
 
-        windows = [values[-self.context :] for values in series]
-        batch = np.full((len(windows), self.context), np.nan)
-        for row, values in zip(batch, windows, strict=True):
-            row[len(row) - len(values) :] = values
-        observed = _observed_tokens(
-            windows, self.patch, self.context // self.patch
-        )
         weight = next(network.parameters())
-        context = torch.as_tensor(
-            batch, dtype=weight.dtype, device=weight.device
+        windows = [
+            values[-self.context :].to(weight.device, weight.dtype)
+            for values in series
+        ]
+        context = _left_padded(windows, self.context)
+        observed = _observed_tokens(
+            [_arrays.detached(values) for values in windows],
+            self.patch,
+            self.context // self.patch,
         )
         # As TiRex's _prepare_context_for_embedding: the tokenizer
         # standardizes the window, and the network reads each patch's mask.
-        tokens, _ = network.tokenizer.input_transform(context)
+        tokens = self._scaled(context)
         mask = tokens.isfinite().to(tokens.dtype)
         tokens = torch.nan_to_num(tokens, nan=network.config.nan_mask_value)
         _, states = network._forward_model(  # noqa: SLF001 - TiRexEmbedding's.
@@ -615,11 +667,40 @@ class _TiRex(_Recipe):
         weights = weights.to(states.device)[..., None, None]
         means = (states * weights).sum(dim=1) / weights.sum(dim=1)
         means = torch.nn.functional.normalize(means, dim=-1).flatten(1)
-        rows = torch.nn.functional.layer_norm(means, means.shape[-1:])
-        return rows.cpu().double().numpy()
+        return torch.nn.functional.layer_norm(means, means.shape[-1:])
+
+    def _scaled(self, context: Any) -> Any:
+        """The patches of standardized values that TiRex's tokenizer gives.
+
+        It computes what ``PatchedTokenizer.input_transform`` of tirex-ts
+        does, with no ``NaN`` on the autograd graph, whose gradient would
+        then be ``NaN`` everywhere; the gradient of a constant window is
+        finite too.
+
+        Args:
+            context: The windows, padded on the left with ``NaN``, a float
+                torch tensor of shape (n_series, context).
+
+        Returns:
+            The standardized values, ``NaN`` where missing, shape
+            (n_series, context // patch, patch).
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        observed = context.isfinite()
+        values = torch.where(observed, context, 0.0)
+        count = observed.sum(dim=1, keepdim=True)
+        loc = values.sum(dim=1, keepdim=True) / count
+        centred = torch.where(observed, values - loc, 0.0)
+        variance = centred.square().sum(dim=1, keepdim=True) / count
+        # tirex-ts's StandardScaler: a constant window is scaled by its
+        # level, plus its epsilon.
+        scale = _arrays.deviation(variance, loc.abs() + 1e-5)
+        scaled = torch.where(observed, centred / scale, np.nan)
+        return scaled.unfold(-1, self.patch, self.patch)
 
 
-class Pretrained(_pretrained.PretrainedEncoder):
+class Pretrained(_pretrained.PretrainedEncoder, _SeriesEncoder):
     """The embedding of each time series, from a frozen pretrained network.
 
     ``model`` picks one of the networks of ``recipes``, each pinned to a
@@ -647,6 +728,13 @@ class Pretrained(_pretrained.PretrainedEncoder):
     it, and TimesFM reads it filled in by linear interpolation, as
     TimesFM's own forecasts fill it.
 
+    The encoder's ``forward`` gives the embeddings of series on torch's
+    autograd graph, without the cache, so that an attribution reaches each
+    value. Series of other lengths are stacked padded on the left with
+    ``NaN``, which, as a missing value, has no gradient. It does so for
+    every network but Chronos-T5, which reads each value as one of a set of
+    tokens and is a barrier to gradients.
+
     Attributes:
         model: The network; ``"chronos-t5-tiny"`` by default.
         device: ``"auto"``, or a torch device such as ``"cpu"``.
@@ -657,10 +745,15 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     modality = "time"
     package = "chronos"
+    pads_items = "left"
+    barrier_reason = (
+        "Chronos-T5 reads each value as one of a set of tokens, which have"
+        " no gradient"
+    )
     recipes = {
-        "chronos-t5-tiny": _Chronos(256, 1, 512),
-        "chronos-t5-mini": _Chronos(384, 1, 512),
-        "chronos-t5-small": _Chronos(512, 1, 512),
+        "chronos-t5-tiny": _ChronosT5(256, 1, 512),
+        "chronos-t5-mini": _ChronosT5(384, 1, 512),
+        "chronos-t5-small": _ChronosT5(512, 1, 512),
         "chronos-bolt-small": _Chronos(512, 16, 2048),
         "chronos-2": _Chronos(768, 16, 8192, outputs=1, pinned=True),
         # Each TimesFM's patch and context come from its config.json. The
@@ -711,27 +804,241 @@ class Pretrained(_pretrained.PretrainedEncoder):
         """The network of ``model``, on ``device``, in float32."""
         return self._recipe().load(path, device)
 
+    @property
+    def gradient_kind(self) -> str:  # type: ignore[override]  # By model.
+        """``"barrier"`` for Chronos-T5, else ``"differentiable"``."""
+        quantized = self._recipe().quantized
+        return "barrier" if quantized else "differentiable"
+
+    def _array(self, item: Any) -> _typing.FloatArray | None:
+        """One series, from its first finite value to its last.
+
+        Returns:
+            The series, ``NaN`` for a missing value, shape (length,);
+            ``None`` if it has no finite value.
+        """
+        try:
+            return _observed(item)
+        except ValueError:
+            return None
+
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
         """The mean state over each series' observed tokens, mean, scale."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        series = [torch.from_numpy(_observed(item)) for item in items]
+        return self._embedded(network, series).cpu().numpy()
+
+    def forward(self, items: Any) -> Any:
+        """The embeddings of stacked series, on torch's autograd graph.
+
+        It runs the network on its ``device``, without the cache, in
+        passes of at most ``batch_size`` series.
+
+        Args:
+            items: Series padded on the left with ``NaN``, which is also a
+                missing value, a float torch tensor of shape (n, length).
+
+        Returns:
+            What ``transform`` gives for the series without their padding,
+            shape (n, width), of the type and on the device of ``items``.
+
+        Raises:
+            lazy._steps.BarrierError: If ``model`` is Chronos-T5, ``items``
+                has another shape, or a series has no finite value.
+        """
+        if self.gradient_kind == "barrier":
+            raise _steps.BarrierError(self.barrier_reason)
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        items = self._stack(items)
+        network = self._network()
+        size = _base.positive_integer("batch_size", self.batch_size)
+        series = [_trimmed(row) for row in items]
+        passes = [
+            self._embedded(network, series[start : start + size])
+            for start in range(0, len(series), size)
+        ]
+        return torch.cat(passes).to(items)
+
+    def _embedded(self, network: Any, series: list[Any]) -> Any:
+        """The embeddings of series, on torch's autograd graph.
+
+        Args:
+            network: What :meth:`_load` returned.
+            series: Float torch tensors of shape (length,), with ``NaN``
+                for a missing value; none starts or ends with one.
+
+        Returns:
+            The embeddings, a float64 tensor of shape (len(series), width)
+            on the device of ``series``.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
         recipe = self._recipe()
-        series = [_observed(item) for item in items]
-        windows = [values[-recipe.context :] for values in series]
-        means = [(np.nanmean(v), np.nanstd(v)) for v in windows]
-        return np.hstack([recipe.pooled(network, series), means])
+        spread = torch.stack(
+            [
+                torch.stack(_spread(values[-recipe.context :], constant=0.0))
+                for values in series
+            ]
+        ).double()
+        pooled = recipe.pooled(network, series)
+        return torch.cat([pooled.to(spread), spread], dim=1)
 
 
-def _interpolated(values: _typing.FloatArray) -> _typing.FloatArray:
-    """A series with each missing value filled linearly from its neighbours.
+def _spread(values: Any, constant: float) -> tuple[Any, Any]:
+    """The mean and the standard deviation of a series' finite values.
 
     Args:
-        values: The series, with ``NaN`` for a missing value; it starts and
-            ends with a finite one.
+        values: A float torch tensor of shape (length,), with at least one
+            finite value.
+        constant: The standard deviation to give a constant series.
+
+    Returns:
+        Two tensors of shape (): the mean and the population standard
+        deviation, whose gradient is finite for a constant series too.
+    """
+    observed = values[values.isfinite()]
+    variance = observed.var(correction=0)
+    return observed.mean(), _arrays.deviation(variance, constant)
+
+
+def _steady(values: Any) -> Any:
+    """A window, detached from the autograd graph if its values are equal.
+
+    Args:
+        values: The window a network normalizes, a float torch tensor of
+            shape (length,), with ``NaN`` for a missing value.
+
+    Returns:
+        ``values``, without a gradient if its finite values are all equal.
+    """
+    observed = values[values.isfinite()]
+    return values.detach() if bool((observed == observed[0]).all()) else values
+
+
+def _left_padded(windows: list[Any], length: int, fill: float = np.nan) -> Any:
+    """Series padded on the left with ``fill`` to ``length`` and stacked.
+
+    Args:
+        windows: Float torch tensors of shape (at most ``length``,).
+        length: The length of each padded series.
+        fill: The value of the padding.
+
+    Returns:
+        A tensor of shape (len(windows), length).
+    """
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    return torch.stack(
+        [
+            torch.cat([values.new_full((length - len(values),), fill), values])
+            for values in windows
+        ]
+    )
+
+
+def _interpolated(values: Any) -> Any:
+    """A series with each missing value filled linearly from its neighbours.
+
+    It computes what ``np.interp`` does, on torch's autograd graph: a
+    filled value's gradient goes to its two neighbours.
+
+    Args:
+        values: The series, a float torch tensor of shape (length,), with
+            ``NaN`` for a missing value; it starts and ends with a finite
+            one.
 
     Returns:
         The filled series, of the same shape.
     """
-    known = np.flatnonzero(np.isfinite(values))
-    return np.interp(np.arange(values.size), known, values[known])
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    finite = values.isfinite()
+    if bool(finite.all()):
+        return values
+    known = np.flatnonzero(_arrays.detached(finite))
+    position = np.arange(len(values))
+    # The known values on either side of each position, as np.interp's.
+    right = np.clip(np.searchsorted(known, position, side="right"), 1, None)
+    left = known[right - 1]
+    right = known[np.minimum(right, len(known) - 1)]
+    start = values[torch.as_tensor(left, device=values.device)]
+    end = values[torch.as_tensor(right, device=values.device)]
+    span = values.new_tensor(np.maximum(right - left, 1))
+    offset = values.new_tensor(position - left)
+    filled = (end - start) / span * offset + start
+    return torch.where(finite, values, filled)
+
+
+def _trimmed(row: Any) -> Any:
+    """A padded series from its first finite value to its last.
+
+    Args:
+        row: A float torch tensor of shape (length,), with ``NaN`` for
+            padding or a missing value.
+
+    Returns:
+        The series, a view of ``row`` that keeps its gradient.
+
+    Raises:
+        lazy._steps.BarrierError: If it has no finite value.
+    """
+    finite = np.flatnonzero(np.isfinite(_arrays.detached(row)))
+    if not finite.size:
+        raise _steps.BarrierError("a series has no finite value")
+    return row[finite[0] : finite[-1] + 1]
+
+
+def _masked_norm(norm: Any) -> Any:
+    """Chronos's instance norm, with no ``NaN`` on the autograd graph.
+
+    Args:
+        norm: A ``chronos.chronos_bolt.InstanceNorm``.
+
+    Returns:
+        An instance norm that gives what ``norm`` gives, but whose gradient
+        is finite where the context has a missing value, and for a
+        constant window.
+    """
+    import chronos  # noqa: PLC0415 - an optional, heavy extra.
+    import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+    class MaskedNorm(chronos.chronos_bolt.InstanceNorm):
+        """``InstanceNorm`` whose statistics skip a missing value."""
+
+        def forward(
+            self, x: Any, loc_scale: tuple[Any, Any] | None = None
+        ) -> tuple[Any, tuple[Any, Any]]:
+            """Standardizes ``x``, as ``InstanceNorm.forward`` does.
+
+            Its ``(x - loc).square().nanmean()`` and division multiply a
+            ``NaN`` by a zero gradient, which gives ``NaN``; here a
+            missing value takes no part in the arithmetic.
+            """
+            if loc_scale is not None:
+                return super().forward(x, loc_scale)
+            dtype = x.dtype
+            x = x.to(torch.float32)
+            observed = x.isfinite()
+            values = torch.where(observed, x, 0.0)
+            count = observed.sum(dim=-1, keepdim=True)
+            # A window with no observed value: loc 0 and scale 1, as
+            # upstream's nan_to_num gives.
+            some = count > 0
+            count = torch.where(some, count, 1)
+            loc = values.sum(dim=-1, keepdim=True) / count
+            centred = torch.where(observed, values - loc, 0.0)
+            variance = centred.square().sum(dim=-1, keepdim=True) / count
+            scale = _arrays.deviation(variance, self.eps)
+            scale = torch.where(some, scale, 1.0)
+            scaled = centred / scale
+            if self.use_arcsinh:
+                scaled = torch.arcsinh(scaled)
+            scaled = torch.where(observed, scaled, np.nan)
+            return scaled.to(dtype), (loc, scale)
+
+    return MaskedNorm(eps=norm.eps, use_arcsinh=norm.use_arcsinh)
 
 
 def _observed_tokens(

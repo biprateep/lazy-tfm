@@ -36,6 +36,19 @@ change the API.
   its output, `explain` warns with the reason, and `Explanation.barriers`
   lists them. Through an ensemble, one backward pass from the pooled density
   gives each member its share.
+- Gradients through the pretrained encoders of time series. Every network of
+  `lazy.time.Pretrained` but Chronos-T5 has a forward on torch's autograd
+  graph, which skips the cache, so a gradient method of `lazy.interp`
+  reaches each value of a series. Chronos-T5 reads each value as one of a set
+  of tokens, so it stays a barrier. Since query-side gradients go through the
+  encoders, `explain` on a pipeline with such an encoder now attributes to
+  the values of each series, not to the columns of its embedding. Series of
+  other lengths, or with missing values, are padded on the left with `NaN`,
+  which the forward reads as missing: `Explanation.item_values` then has the
+  length of the longest series, and a padded or missing value gets 0.
+  Integrated gradients keep a missing value missing along the whole path, and
+  the baseline is the mean of the values that the context has. The
+  embeddings do not change.
 - `at=` on `lazy.interp.explain`, for every method, and on
   `explain_context`: the name of a step of a `LazyPipeline` whose output
   columns are the features. Shapley values, `"loco"` and `"permutation"` run

@@ -385,8 +385,9 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
         )
         barriers.extend(closed)
         for leaf in leaves:
-            _finite(leaf.queries, "X", label)
-            _finite(leaf.context, "X_context", label)
+            if not leaf.padded:
+                _finite(leaf.queries, "X", label)
+                _finite(leaf.context, "X_context", label)
 
         def enter(tensors: Sequence[Any]) -> Any:
             """The Tabularizer's columns, from its leaves."""
