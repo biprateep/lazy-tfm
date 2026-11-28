@@ -236,7 +236,7 @@ ax = plotting.plot_pit(pit)
 # page defines every column.
 
 # %%
-model.evaluate(X_test, y_test).T
+model.evaluate(X_test, y_test, method="mode").T
 
 # %% [markdown]
 # `score` returns a single number, minus the CDE loss, so that higher is

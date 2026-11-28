@@ -17,7 +17,9 @@ def test_mass_outside_counts_a_tail_beyond_the_grid_exactly():
         levels, np.linspace(0.0, 1.0, 99)[None]
     )
     spacing = 1.0 / 98
-    grid = lazy.Grid.linear(-0.5 * spacing, 1.0 + 0.25 * spacing, 10)
+    grid = lazy.Grid.linear(
+        -0.5 * spacing, 1.0 + 0.25 * spacing, 10, normalization="trapezoid"
+    )
     outside = dist._bin_densities_and_outside(grid)[1]
     np.testing.assert_allclose(outside, [0.005 + 0.0075], rtol=1e-12)
     np.testing.assert_allclose(
@@ -32,7 +34,9 @@ def test_no_mass_is_outside_a_grid_that_holds_the_tails(pad):
         levels, np.linspace(0.0, 1.0, 9)[None]
     )
     low, high = dist.ppf([0.0, 1.0])[0]
-    grid = lazy.Grid.linear(low - pad, high + pad, 10)
+    grid = lazy.Grid.linear(
+        low - pad, high + pad, 10, normalization="trapezoid"
+    )
     np.testing.assert_array_equal(dist._bin_densities_and_outside(grid)[1], 0)
 
 

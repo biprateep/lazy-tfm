@@ -136,7 +136,9 @@ ax.legend()
 model = lazy.LazyModel(random_state=SEED)
 model.fit(X_train, y_train)
 
-grid = lazy.Grid.from_edges(np.linspace(0, 65_000, 651))
+grid = lazy.Grid.from_edges(
+    np.linspace(0, 65_000, 651), normalization="trapezoid"
+)
 pdfs = model.predict_proba(X_test, grid)
 pdfs.shape
 

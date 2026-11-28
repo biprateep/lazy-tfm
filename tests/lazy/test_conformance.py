@@ -450,6 +450,11 @@ def test_quantiles_invert_the_distribution(cls, data):
         )
 
 
+def _point(method):
+    """The point-estimate argument that ``method`` needs, if any."""
+    return {"method": "mode"} if method == "evaluate" else {}
+
+
 def _refuse(*args, **kwargs):
     """A network load or group fit that a constant target must not reach."""
     raise AssertionError("a constant target ran the model")
@@ -497,7 +502,9 @@ def test_a_constant_target_answers_every_block_of_a_long_query(
     X, _, X_test = data
     model = cls(n_estimators=1, chunk_size=4).fit(X, np.full(len(X), 0.3))
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * model.grid_.n_bins)
-    np.testing.assert_allclose(model.predict(X_test), 0.3, rtol=1e-15)
+    np.testing.assert_allclose(
+        model.predict(X_test, method="mode"), 0.3, rtol=1e-15
+    )
     assert np.isfinite(model.score(X_test, np.full(len(X_test), 0.3)))
 
 
@@ -550,7 +557,8 @@ def test_predict_cdf_at_a_quantile_returns_its_level(cls, data):
             # The middle bin's centre is the quantile, up to one ulp.
             edges = value + np.array([-3e-6, -1e-6, 1e-6, 3e-6])
             cdf = model.predict_cdf(
-                X_test[row : row + 1], lazy.Grid.from_edges(edges)
+                X_test[row : row + 1],
+                lazy.Grid.from_edges(edges, normalization="trapezoid"),
             )
             # ppf and cdf invert each other up to float rounding, as in
             # test_quantiles_invert_the_distribution.
@@ -560,7 +568,11 @@ def test_predict_cdf_at_a_quantile_returns_its_level(cls, data):
 @pytest.mark.parametrize("bag_size", [None, 40], ids=["unbagged", "bagged"])
 @pytest.mark.parametrize(
     "y_grid",
-    [lazy.datasets.DC1_GRID, lazy.Grid.linear(0.5, 1.2, 40), "native"],
+    [
+        lazy.datasets.DC1_GRID,
+        lazy.Grid.linear(0.5, 1.2, 40, normalization="trapezoid"),
+        "native",
+    ],
     ids=["dc1", "cut", "native"],
 )
 def test_predict_proba_is_the_distribution_on_the_grid(
@@ -1479,7 +1491,7 @@ def test_only_uniform_layer_backends_can_register():
 @pytest.mark.parametrize(
     "call",
     [
-        lambda m, X, z: m.predict(X),
+        lambda m, X, z: m.predict(X, method="mode"),
         lambda m, X, z: m.predict_proba(X),
         lambda m, X, z: m.predict_pdf(X),
         lambda m, X, z: m.predict_cdf(X),
@@ -1511,7 +1523,7 @@ def test_scoring_no_query_rows_is_refused(cls, data, method):
     X, z, X_test = data
     model = cls(n_estimators=2, progress=False).fit(X, z)
     with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
-        getattr(model, method)(X_test[:0], z[:0])
+        getattr(model, method)(X_test[:0], z[:0], **_point(method))
 
 
 def test_fitting_no_rows_is_refused(cls, data):
@@ -1535,7 +1547,11 @@ def test_blocked_scoring_matches_the_whole_array(
         "predict": lazy.metrics.grid_point_estimates(grid, pdfs)["peak_mean"],
         "score": -lazy.metrics.cde_loss(z_test, grid, pdfs),
         "evaluate": lazy.metrics.summarize(
-            z_test, grid, pdfs, point="peak_mean", label=model.name_
+            z_test,
+            grid,
+            pdfs,
+            point="peak_mean",
+            label=model.name_,
         ),
     }
     calls = []
@@ -1590,9 +1606,9 @@ def test_predict_score_and_evaluate_show_one_progress_bar_over_all_blocks(
     monkeypatch.setattr(_progress, "bar", counting)
     # About seven rows of densities per block, so three blocks.
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 7 * 8 * model.grid_.n_bins)
-    model.predict(X_test)
+    model.predict(X_test, method="mode")
     model.score(X_test, z_test)
-    model.evaluate(X_test, z_test)
+    model.evaluate(X_test, z_test, method="mode")
     assert totals == [len(X_test)] * 3
 
 

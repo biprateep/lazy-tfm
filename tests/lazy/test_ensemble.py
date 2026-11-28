@@ -276,19 +276,19 @@ def test_predictions_have_the_documented_shapes(
     pdfs = model.predict_proba(X[:7])
     assert pdfs.shape == (7, grid.n_bins)
     np.testing.assert_allclose((pdfs * grid.widths).sum(axis=1), 1.0)
-    trapezoid = lazy.Grid.linear(-4.0, 4.0, 300)
+    trapezoid = lazy.Grid.linear(-4.0, 4.0, 300, normalization="trapezoid")
     on_grid = model.predict_proba(X[:7], trapezoid)
     np.testing.assert_allclose(
         np.trapezoid(on_grid, trapezoid.centers, axis=1), 1.0
     )
-    assert model.predict(X[:7]).shape == (7,)
+    assert model.predict(X[:7], method="mode").shape == (7,)
     assert model.predict_quantiles(X[:7]).shape == (7, 3)
     assert model.predict_interval(X[:7], 0.68).shape == (7, 2)
     pit = model.predict_pit(X[:7], y[:7])
     assert pit.shape == (7,)
     assert np.all((pit >= 0) & (pit <= 1))
     assert np.isfinite(model.score(X, y))
-    table = model.evaluate(X, y)
+    table = model.evaluate(X, y, method="mode")
     assert table["model"].iloc[0] == model.name_
     assert model.name_ == f"{pooling}(tabpfn:v0, tabicl:v0)"
 
@@ -338,7 +338,11 @@ def test_the_pooling_grid_covers_the_targets_with_a_margin(gaussian_data):
 
 def test_the_pooling_grid_stops_where_every_member_does(gaussian_data):
     X, y, _ = gaussian_data
-    member = Gaussian(0.0, 0.5, y_grid=lazy.Grid.linear(-3.2, 3.2, 100))
+    member = Gaussian(
+        0.0,
+        0.5,
+        y_grid=lazy.Grid.linear(-3.2, 3.2, 100, normalization="trapezoid"),
+    )
     member.fit(X, y)
     # A member without a native grid answers on its default grid.
     del member.native_grid_
@@ -405,7 +409,7 @@ def test_pool_bins_sets_the_resolution(gaussian_data):
 
 def test_y_grid_is_the_default_output_grid(standin_backends, data):
     X, y = data
-    grid = lazy.Grid.linear(-5.0, 5.0, 80)
+    grid = lazy.Grid.linear(-5.0, 5.0, 80, normalization="trapezoid")
     model = lazy.LazyEnsembleModel(["tabpfn", "tabicl"], y_grid=grid)
     model.fit(X, y)
     assert model.grid_ == grid
@@ -413,7 +417,7 @@ def test_y_grid_is_the_default_output_grid(standin_backends, data):
     assert model.predict_proba(X[:3], "native").shape[1] == (
         model.native_grid_.n_bins
     )
-    other = lazy.Grid.linear(-5.0, 5.0, 40)
+    other = lazy.Grid.linear(-5.0, 5.0, 40, normalization="trapezoid")
     assert model.predict_proba(X[:3], other).shape == (3, 40)
 
 

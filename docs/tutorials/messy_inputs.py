@@ -155,7 +155,7 @@ print("Score per fold:", np.round(scores, 4))
 
 
 # %%
-grid = lazy.Grid.from_edges(np.linspace(0, 800, 401))
+grid = lazy.Grid.from_edges(np.linspace(0, 800, 401), normalization="trapezoid")
 
 
 def scores_on(
@@ -258,13 +258,14 @@ lazy_model.feature_names_in_[:5]
 X_encoded = model[:-1].transform(X_test)
 reversed_columns = X_encoded[X_encoded.columns[::-1]]
 same = np.array_equal(
-    lazy_model.predict(X_encoded), lazy_model.predict(reversed_columns)
+    lazy_model.predict(X_encoded, method="mode"),
+    lazy_model.predict(reversed_columns, method="mode"),
 )
 print("Same predictions with the columns reversed:", same)
 
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
-    lazy_model.predict(X_encoded.to_numpy())
+    lazy_model.predict(X_encoded.to_numpy(), method="mode")
 print(caught[-1].message)
 
 # %% [markdown]

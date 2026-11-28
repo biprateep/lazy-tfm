@@ -153,7 +153,7 @@ def _histogram_case():
 
 
 def test_a_trapezoid_grid_scores_like_its_centres():
-    grid = grid_lib.Grid.linear(0.0, 2.0, 100)
+    grid = grid_lib.Grid.linear(0.0, 2.0, 100, normalization="trapezoid")
     rng = np.random.default_rng(4)
     pdfs = rng.gamma(2.0, size=(10, 100))
     y_true = rng.uniform(0.0, 2.0, 10)
@@ -164,7 +164,7 @@ def test_a_trapezoid_grid_scores_like_its_centres():
 
 def test_explicit_bin_edges_must_agree_with_the_grid():
     grid, pdfs, y_true = _histogram_case()
-    trapezoid = grid_lib.Grid.from_edges(grid.edges)
+    trapezoid = grid_lib.Grid.from_edges(grid.edges, normalization="trapezoid")
     # Matching edges win, and score a trapezoid grid as a histogram.
     with pytest.warns(FutureWarning, match="bin_edges is deprecated"):
         matching = metrics.cde_loss(
@@ -207,10 +207,10 @@ def test_point_metrics_leave_residuals_unscaled_by_default():
 
 def test_the_summary_table_records_the_residual_scale():
     grid, pdfs, y_true = _histogram_case()
-    table = metrics.summarize(y_true, grid, pdfs, scale="1+y")
+    table = metrics.summarize(y_true, grid, pdfs, scale="1+y", point="mode")
     assert table.columns[:2].tolist() == ["point_estimate", "scale"]
     assert table["scale"].iloc[0] == "1+y"
-    plain = metrics.summarize(y_true, grid, pdfs)
+    plain = metrics.summarize(y_true, grid, pdfs, point="mode")
     assert plain["scale"].iloc[0] == "none"
     y_pred = metrics.grid_point_estimates(grid, pdfs)["mode"]
     assert plain["bias"].iloc[0] == np.median(y_pred - y_true)
@@ -445,7 +445,7 @@ def test_per_object_metrics_equals_the_three_functions_to_the_bit(histogram):
 
 def test_the_summary_table_adds_crps_and_nll():
     grid, pdfs, y_true = _histogram_case()
-    table = metrics.summarize(y_true, grid, pdfs)
+    table = metrics.summarize(y_true, grid, pdfs, point="mode")
     assert table.columns[-2:].tolist() == ["crps", "nll"]
     assert table["crps"].iloc[0] == metrics.crps(y_true, grid, pdfs)
     assert table["nll"].iloc[0] == metrics.nll(y_true, grid, pdfs)
@@ -564,6 +564,8 @@ def test_bin_edges_warns_once_and_means_a_histogram_grid(name, has_truth):
     grid, pdfs, y_true = _histogram_case()
     function = getattr(metrics, name)
     extra = {"method": "mean"} if name == "grid_point_estimate" else {}
+    if name in ("evaluate_grid_pdfs", "summarize"):
+        extra = {"point": "mode"}
     if name in ("grid_cdf", "peak_mean", "normalization_error"):
         pdfs = grid.normalize(pdfs)
     args = (y_true,) if has_truth else ()
@@ -602,7 +604,7 @@ def test_a_density_scorer_is_minus_the_score_of_the_densities(score):
     y = 2.0 * X[:, 0] + rng.normal(0.0, 0.1, 60)
     model = standins.HistogramStandIn(n_estimators=2, progress=False)
     model.fit(X, y)
-    grid = grid_lib.Grid.linear(-6.0, 6.0, 40)
+    grid = grid_lib.Grid.linear(-6.0, 6.0, 40, normalization="trapezoid")
     scorer = pickle.loads(pickle.dumps(metrics.density_scorer(score, grid)))
     direct = getattr(metrics, score)(y, grid, model.predict_proba(X, grid))
     np.testing.assert_allclose(scorer(model, X, y), -direct, rtol=1e-12)
@@ -616,7 +618,7 @@ def test_a_density_scorer_computes_only_its_own_score(monkeypatch):
         preprocessing.StandardScaler(),
         standins.HistogramStandIn(n_estimators=1, progress=False),
     ).fit(X, y)
-    expected = -pipe.evaluate(X, y)["nll"].iloc[0]
+    expected = -pipe.evaluate(X, y, method="mode")["nll"].iloc[0]
     asked = []
     row_terms = metrics._row_terms
 
@@ -648,3 +650,20 @@ def test_a_density_scorer_names_an_estimator_it_cannot_score():
     scorer = metrics.density_scorer("crps")
     with pytest.raises(TypeError, match="needs a lazy model or a LazyPipeline"):
         scorer(object(), np.zeros((2, 1)), np.zeros(2))
+
+
+@pytest.mark.parametrize(
+    "function", [metrics.summarize, metrics.evaluate_grid_pdfs]
+)
+def test_a_point_estimate_left_out_of_a_summary_warns_once(function):
+    grid, pdfs, y_true = _histogram_case()
+    with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
+        function(y_true, grid, pdfs)
+    assert len(record) == 1
+    assert "point was not passed" in str(record[0].message)
+    assert "'mode' to 'median'" in str(record[0].message)
+    assert "point='mode' to keep" in str(record[0].message)
+    assert record[0].filename == __file__
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        function(y_true, grid, pdfs, point="mode")

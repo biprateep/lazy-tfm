@@ -118,6 +118,8 @@ def _expected_failures(estimator):
     ],
     expected_failed_checks=_expected_failures,
 )
+# scikit-learn calls predict(X), which cannot pass method.
+@pytest.mark.filterwarnings("ignore:method was not passed:FutureWarning")
 def test_scikit_learns_whole_suite(estimator, check):
     check(estimator)
 

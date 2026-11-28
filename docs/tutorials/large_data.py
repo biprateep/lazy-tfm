@@ -89,7 +89,9 @@ order = rng.permutation(len(y))
 test, pool = order[:2_000], order[2_000:]
 X_test, y_test = X.iloc[test], y[test]
 
-grid = lazy.Grid.linear(0.0, 21.0, 420)  # RMSD in [Å]
+grid = lazy.Grid.linear(
+    0.0, 21.0, 420, normalization="trapezoid"
+)  # RMSD in [Å]
 print(f"{len(pool):,} rows to draw contexts from, {len(test):,} test rows")
 X.head()
 

@@ -377,7 +377,7 @@ plt.close(fig)
 # the main peak, while the mean falls between the peaks.
 
 # %%
-y_grid = lazy.Grid.linear(0.0, 2.0, 400)
+y_grid = lazy.Grid.linear(0.0, 2.0, 400, normalization="trapezoid")
 pdf = 0.6 * stats.skewnorm.pdf(
     y_grid.centers, 3, loc=0.35, scale=0.25
 ) + 0.4 * stats.norm.pdf(y_grid.centers, loc=1.45, scale=0.15)
@@ -492,7 +492,10 @@ skewed = stats.skewnorm(4, loc=0.5, scale=1.0)
 dist = distributions.HistogramDistribution(
     buckets, np.diff(skewed.cdf(buckets))[None, :]
 )
-wide, short = lazy.Grid.linear(0.0, 3.5, 140), lazy.Grid.linear(0.0, 1.5, 60)
+wide, short = (
+    lazy.Grid.linear(0.0, 3.5, 140, normalization="trapezoid"),
+    lazy.Grid.linear(0.0, 1.5, 60, normalization="trapezoid"),
+)
 y_true = 2.2
 fig, ax = plt.subplots(
     figsize=(TEXT_WIDTH, 0.32 * TEXT_WIDTH), layout="constrained"

@@ -182,13 +182,13 @@ def test_repr_names_the_backend_and_only_non_default_parameters():
 
 
 def test_repr_shows_a_grid_other_than_the_native_one():
-    grid = lazy.Grid.linear(0.0, 3.0, 37)
+    grid = lazy.Grid.linear(0.0, 3.0, 37, normalization="trapezoid")
     model = lazy.LazyModel("tabfm", y_grid=grid, n_dither=3)
     assert repr(model) == f"LazyModel('tabfm', y_grid={grid!r}, n_dither=3)"
 
 
 def test_the_grid_default_is_carried_down_to_the_backend():
-    grid = lazy.Grid.linear(0.0, 3.0, 37)
+    grid = lazy.Grid.linear(0.0, 3.0, 37, normalization="trapezoid")
     model = lazy.LazyModel("tabicl", y_grid=grid)
     assert model.y_grid is grid
     assert model._build().y_grid is grid
@@ -235,10 +235,13 @@ def test_a_call_time_grid_overrides_the_default(registered):
     X = np.random.default_rng(0).normal(size=(5, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 5)
     model = lazy.LazyModel(
-        registered, y_grid=lazy.Grid.linear(0.0, 2.0, 50)
+        registered,
+        y_grid=lazy.Grid.linear(0.0, 2.0, 50, normalization="trapezoid"),
     ).fit(X, z)
     assert model.predict_proba(X).shape == (5, 50)
-    assert model.predict_proba(X, lazy.Grid.linear(0.0, 3.0, 11)).shape == (
+    assert model.predict_proba(
+        X, lazy.Grid.linear(0.0, 3.0, 11, normalization="trapezoid")
+    ).shape == (
         5,
         11,
     )
@@ -247,7 +250,7 @@ def test_a_call_time_grid_overrides_the_default(registered):
 def test_evaluate_labels_the_row_with_the_backend_name(registered):
     X = np.random.default_rng(0).normal(size=(30, 2))
     z = np.random.default_rng(1).uniform(0.2, 1.8, 30)
-    table = lazy.LazyModel(registered).fit(X, z).evaluate(X, z)
+    table = lazy.LazyModel(registered).fit(X, z).evaluate(X, z, method="mode")
     assert table["model"].iloc[0] == "uniform"
 
 
@@ -346,5 +349,5 @@ def test_predict_shows_the_backends_one_progress_bar_over_all_blocks(
     monkeypatch.setattr(_progress, "bar", counting)
     # About eight rows of densities per block, so five blocks.
     monkeypatch.setattr(lazy.base, "_BLOCK_BYTES", 8 * 8 * model.grid.n_bins)
-    model.predict(X)
+    model.predict(X, method="mode")
     assert totals == [len(X)]

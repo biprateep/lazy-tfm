@@ -384,7 +384,7 @@ def mixture(histogram):
 def test_mixture_on_grid_is_the_normalized_weighted_average(mixture):
     # The grid cuts the components' tails unequally, so normalizing the
     # average differs from averaging the normalized components.
-    grid = lazy.Grid.linear(0.2, 3.0, 40)
+    grid = lazy.Grid.linear(0.2, 3.0, 40, normalization="trapezoid")
     first, second = mixture.components
     masses = 0.3 * first.histogramize(grid.edges).masses
     masses += 0.7 * second.histogramize(grid.edges).masses
