@@ -157,7 +157,7 @@ things.
 1. It declares `gradient_kind = "differentiable"` on the class, or as a
    property where the kind depends on a parameter, as `lazy.time.Pretrained`'s
    does on `model`.
-2. It implements `_array(item)`: one item as a float64 array, or `None` for an
+2. It implements `_array(item)`: one item as a float array, or `None` for an
    item that has none, such as a series with a gap. The base class stacks the
    arrays of a column (`_stacked`) when no item is missing and all have one
    shape. The attribution is then to the elements of that array. If a column
@@ -182,6 +182,16 @@ things.
    the arithmetic on the graph, whose backward pass would then multiply it by
    0 and give `NaN`: select with `torch.where` first.
 
-An encoder that cannot have a forward, such as one of text, may say why in
-`barrier_reason`. A subclass that changes the embedding of an encoder with a
-forward must give its own `forward`, or set `gradient_kind = "barrier"`.
+An encoder whose element is a vector, such as `lazy.text.Pretrained`, whose
+forward takes each token's input embedding, sets `element_ndim` to the number
+of trailing axes that hold it, and an element's attribution is the sum over
+them. An attribution measures each element against a baseline, by default
+the mean of the context's items. An encoder that knows the item of no content
+implements `_baseline(X, stacked)`: the baselines of stacked items, of their
+shape, as `lazy.text.Pretrained` puts the padding token in place of each of a
+text's own tokens.
+
+An encoder that cannot have a forward, such as one of the characters of a
+text, may say why in `barrier_reason`. A subclass that changes the embedding
+of an encoder with a forward must give its own `forward`, or set
+`gradient_kind = "barrier"`.

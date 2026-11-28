@@ -168,10 +168,15 @@ class Explanation:
             (n_statistics, n_rows, ...) that sums to the column's
             ``values`` over its trailing axes. Items of other lengths are
             padded, as their encoder's ``pads_items`` says, to the longest
-            of the rows and the context, and a padded or missing element
+            of the explained rows, and a padded or missing element
             gets 0: for series padded on the left, the attributions of a
-            series of length ``k`` are the last ``k`` along the axis.
-            ``None`` if no feature is a column of items.
+            series of length ``k`` are the last ``k`` along the axis. An
+            element whose encoder reads it as a vector, as
+            :class:`lazy.text.Pretrained` reads a token, gets one value,
+            the sum over the vector: for texts, an array of shape
+            (n_statistics, n_rows, longest), padded on the right, of each
+            token that the network reads, in the order of its
+            ``token_spans``. ``None`` if no feature is a column of items.
         smoothing_gap: For a gradient method on a model whose network
             ranks each query value among the context's values of its
             column (TabPFN v3.5), each statistic of the smoothed model
@@ -436,7 +441,17 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     Through a :class:`~lazy.models.ensemble.LazyEnsembleModel` that pools
     densities, one backward pass from the pooled density gives each
     member's path its share, and a feature's attribution is the sum over
-    the members.
+    the members. A column of items whose members' encoders read the items
+    differently, such as two networks of text, is a feature per member,
+    named ``<member>__<column>``.
+
+    The context takes no gradient: its columns come from each step's
+    ``transform``, and those of a ``Tabularizer`` from its encoders', with
+    their cache. A column of items holds the explained rows' items, which
+    a network of text holds as the input embeddings of its tokens, in
+    float32: ``4 * hidden`` bytes a token of the longest row, 1.5 kB for
+    a hidden width of 384. Each batch also holds its points' items in
+    float64, and their gradients.
 
     A network that ranks each query value among the context's values of
     its column, as TabPFN v3.5 does, is a step function of the query: its
@@ -496,8 +511,10 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
             :data:`DEFAULT_STEPS`.
         baseline: For the gradient methods, the finite row that stands in
             for no feature at all, shape (n_columns,); ``None`` for the mean
-            of ``X_context``, or of the context's stage or items. A row can
-            be given only when the features are the columns of one table.
+            of ``X_context``, or of the context's stage or items, or for
+            the item of no content that an encoder gives, such as a text of
+            padding tokens. A row can be given only when the features are
+            the columns of one table.
         at: The name of a step of a :class:`~lazy.pipeline.LazyPipeline`
             before its model: the features are that step's output columns,
             named as the table it returns names them, or ``x0`` onwards
@@ -668,7 +685,8 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
             the rows and of the context.
         baseline: For ``"gradient"``, the finite row from which each context
             row's offset is measured, shape (n_columns,); ``None`` for the
-            mean of ``X_context``.
+            mean of ``X_context``, or the item of no content that an
+            encoder gives, as :func:`explain` says.
         rows: For ``"loo"``, the context rows to explain: a number of them,
             drawn without replacement, or their distinct positions in
             ``X_context``, shape (n_context_rows_explained,). ``None`` for
@@ -1356,8 +1374,8 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
         y: Their true targets, shape (n,).
         named: Whether the caller named the columns; see :func:`_table`.
         grid: The grid on which the CRPS and the NLL are computed.
-        baseline: The baseline ``b``, checked, or ``None`` for the mean of
-            the context's leaves.
+        baseline: The baseline ``b``, checked, or ``None`` for each leaf's
+            own baselines or else the mean of its context (:func:`_origins`).
         n_steps: The steps ``m``; 1 for ``"gradient"``.
         at: The stage to start at, or ``None``; see :func:`explain`.
         groups: Features to treat as one each, or ``None``.
@@ -1381,15 +1399,13 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
         y_context,
         label=label,
         at=at,
+        context_rows=False,
     )
     _warn_of_barriers(path, label)
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
     differentiable.refuse_inference_mode(label)
-    with torch.no_grad():
-        context = path.table(
-            [torch.tensor(leaf.context) for leaf in path.leaves]
-        )
+    context = path.context
     ranked = path.ranked(context)
     _warn_of_ties(ranked, label)
     origins = _origins(path.leaves, baseline)
@@ -1404,7 +1420,15 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
     ]
     fractions = np.arange(1, n_steps + 1) / n_steps
     chunk = max(1, _QUERY_BUDGET // n_steps)
-    gradients = [np.zeros((len(STATISTICS), *delta.shape)) for delta in deltas]
+    # One attribution per element: the axes that hold one are summed.
+    element_axes = [
+        tuple(range(delta.ndim - leaf.element_ndim, delta.ndim))
+        for leaf, delta in zip(path.leaves, deltas, strict=True)
+    ]
+    gradients = [
+        np.zeros((len(STATISTICS), *delta.shape[: delta.ndim - len(axes)]))
+        for delta, axes in zip(deltas, element_axes, strict=True)
+    ]
     full = np.empty((len(STATISTICS), len(y)))
     base = np.empty_like(full)
     distribution = model.predict_distribution(_table(X, named))
@@ -1432,7 +1456,7 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
             points = []
             for origin, delta in zip(origins, deltas, strict=True):
                 steps = fractions.reshape(-1, *[1] * delta.ndim) * delta[rows]
-                line = (origin + steps).reshape(
+                line = (origin[rows] + steps).reshape(
                     n_steps * count, *delta.shape[1:]
                 )
                 points.append(torch.from_numpy(line).requires_grad_())
@@ -1452,14 +1476,16 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                     retain_graph=index < len(statistics) - 1,
                     allow_unused=True,
                 )
-                for gradient, delta, held in zip(
-                    found, deltas, gradients, strict=True
+                for gradient, delta, held, axes in zip(
+                    found, deltas, gradients, element_axes, strict=True
                 ):
                     if gradient is not None:
+                        summed = gradient.numpy().reshape(
+                            n_steps, count, *delta.shape[1:]
+                        ).sum(axis=0) * np.nan_to_num(delta[rows])
+                        # A missing element, NaN on the line, gets 0.
                         held[index, rows] = (
-                            gradient.numpy()
-                            .reshape(n_steps, count, *delta.shape[1:])
-                            .sum(axis=0)
+                            summed.sum(axis=axes) if axes else summed
                         )
             if exact is None:
                 _check_context(
@@ -1475,7 +1501,9 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                     path,
                     context,
                     [
-                        np.where(np.isnan(leaf.queries[rows]), np.nan, origin)
+                        np.where(
+                            np.isnan(leaf.queries[rows]), np.nan, origin[rows]
+                        )
                         for leaf, origin in zip(
                             path.leaves, origins, strict=True
                         )
@@ -1483,10 +1511,8 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                     y[rows],
                     grid,
                 )
-    for held, delta in zip(gradients, deltas, strict=True):
+    for held in gradients:
         held /= n_steps
-        # A missing element, NaN on the whole line, gets 0.
-        held *= np.nan_to_num(delta)
     _, values, item_values = _by_feature(path.leaves, gradients)
     # A feature's attribution is the sum of its columns'.
     one_hot = feature_of[:, None] == np.arange(len(names))
@@ -1526,7 +1552,7 @@ def _pass_statistics(
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
     with torch.no_grad():
-        query = path.table([torch.tensor(points) for points in leaves])
+        query = path.table([_paths.tensor(points) for points in leaves])
         return torch.stack(
             _scores(path.density(query, context), y, grid)
         ).numpy()
@@ -1601,28 +1627,42 @@ def _check_baseline(
 
 
 def _origins(
-    leaves: Sequence[_steps.Leaf], baseline: _typing.FloatArray | None
+    leaves: Sequence[_steps.Leaf],
+    baseline: _typing.FloatArray | None,
+    context: bool = False,
 ) -> list[_typing.FloatArray]:
-    """The baseline of each leaf: the point that stands in for no feature.
+    """The baseline of each row of each leaf: the point of no feature.
 
-    The mean of the context skips a missing element, ``NaN`` in the leaf of
-    a column of padded items; an element that no context row has takes the
-    mean of all the elements that the context's rows have.
+    Without ``baseline``, a leaf's own baselines, if it has them, or else
+    the mean of its context. The mean skips a missing element, ``NaN`` in
+    the leaf of a column of padded items; an element that no context row
+    has takes the mean of all the elements that the context's rows have.
 
     Args:
         leaves: The leaves of a path.
-        baseline: A checked row of numbers, or ``None`` for the mean of
-            each leaf over the context.
+        baseline: A checked row of numbers, or ``None`` as above.
+        context: Whether the baselines are those of the context rows, which
+            the path differentiates, not of the rows to explain.
 
     Returns:
-        One array per leaf, of the leaf's trailing shape.
+        One array per leaf, of the shape of its rows to explain, or of its
+        context rows with ``context``; a read-only view where every row
+        has one baseline.
 
     Raises:
         ValueError: If a baseline is given and the leaves are not one
             table of its width.
     """
     if baseline is None:
-        return [_observed_mean(leaf.context) for leaf in leaves]
+        return [
+            np.broadcast_to(
+                _observed_mean(leaf.context),
+                (leaf.context if context else leaf.queries).shape,
+            )
+            if leaf.baselines is None
+            else leaf.baselines
+            for leaf in leaves
+        ]
     # The members of an ensemble each have a leaf of the same table.
     one_table = all(
         leaf.per_column and leaf.names == leaves[0].names for leaf in leaves
@@ -1637,7 +1677,12 @@ def _origins(
         raise ValueError(
             f"baseline must be finite, of shape ({n_columns},): got {baseline}"
         )
-    return [baseline] * len(leaves)
+    return [
+        np.broadcast_to(
+            baseline, (leaf.context if context else leaf.queries).shape
+        )
+        for leaf in leaves
+    ]
 
 
 def _observed_mean(context: _typing.FloatArray) -> _typing.FloatArray:
@@ -1672,7 +1717,7 @@ def _by_feature(
     Args:
         leaves: The leaves of a path.
         values: Each leaf's attributions, shape (n_statistics, n_rows, ...)
-            with the leaf's trailing shape.
+            with the leaf's trailing shape, an element's axes summed.
 
     Returns:
         A tuple (names, values, item_values): the distinct feature names,
@@ -1728,8 +1773,8 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
         y: Their true targets, shape (n,).
         named: Whether the caller named the columns; see :func:`_table`.
         grid: The grid on which the CRPS and the NLL are computed.
-        baseline: The baseline ``b``, checked, or ``None`` for the mean of
-            the context's leaves.
+        baseline: The baseline ``b``, checked, or ``None`` for each leaf's
+            own baselines or else the mean of its context (:func:`_origins`).
         at: The stage to differentiate in, or ``None``; see
             :func:`explain_context`.
         through_encoders: Whether the gradient goes through the encoders
@@ -1762,7 +1807,7 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     differentiable.refuse_inference_mode(label)
     with torch.no_grad():
         ranked = path.ranked(
-            path.table([torch.tensor(leaf.context) for leaf in path.leaves])
+            path.table([_paths.tensor(leaf.context) for leaf in path.leaves])
         )
     if ranked:
         _warnings.warn(
@@ -1773,14 +1818,14 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
             " predictions too much",
             _warnings.LazyWarning,
         )
-    origins = _origins(path.leaves, baseline)
+    origins = _origins(path.leaves, baseline, context=True)
     offsets = [
         # A missing element of a context row gets 0.
-        torch.tensor(np.nan_to_num(leaf.context - origin))
+        torch.from_numpy(np.nan_to_num(leaf.context - origin))
         for leaf, origin in zip(path.leaves, origins, strict=True)
     ]
     contexts = [
-        torch.tensor(leaf.context, requires_grad=True) for leaf in path.leaves
+        _paths.tensor(leaf.context).requires_grad_() for leaf in path.leaves
     ]
     n_context = len(y_context)
     values = np.zeros((len(STATISTICS), len(y), n_context))
@@ -1792,7 +1837,7 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
             rows = slice(start, start + _QUERY_BUDGET)
             with torch.no_grad():
                 query = path.table(
-                    [torch.tensor(leaf.queries[rows]) for leaf in path.leaves]
+                    [_paths.tensor(leaf.queries[rows]) for leaf in path.leaves]
                 )
             density = path.density(query, path.table(contexts))
             statistics = torch.stack(_scores(density, y[rows], grid))

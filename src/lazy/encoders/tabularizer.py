@@ -813,7 +813,12 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         return self._table(reduced.numpy(), rest)
 
     def _leaves(  # noqa: GS030 - scikit-learn's X.
-        self, X: Any, X_context: Any, items: bool, name: str
+        self,
+        X: Any,
+        X_context: Any,
+        items: bool,
+        name: str,
+        context_rows: bool = True,
     ) -> tuple[list[_steps.Leaf], list[bool], list[_steps.Barrier]]:
         """What a gradient method differentiates of two tables.
 
@@ -827,6 +832,9 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             X_context: The context rows.
             items: Whether to go through the encoders to the items.
             name: The name of this step in its pipeline, for the barriers.
+            context_rows: Whether the context rows are differentiated too.
+                If not, a leaf of items holds no context, and its baselines
+                are those of the rows to explain.
 
         Returns:
             A tuple (leaves, through, barriers): the leaves; whether each
@@ -849,46 +857,15 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             found = _steps.barrier(label, encoder)
             for step in self.augmentations_[column]:
                 found = found or _steps.barrier(label, step)
-            stacked = None
             if items and found is None:
-                # Stacked together, so that padded items share one length.
-                joined = pd.concat(given, ignore_index=True)
-                both = encoder._stacked(joined)  # noqa: SLF001 - the encoders' contract.
-                if both is None:
-                    found = _steps.Barrier(
-                        label, "its items do not all have one shape"
-                    )
-                elif self.augmentations_[column] and np.isnan(both).any():
-                    found = _steps.Barrier(
-                        label,
-                        "its items are padded, or lack some elements, which"
-                        " its augmentations' forwards do not read",
-                    )
-                elif self.augmentations_[column] and not all(
-                    encoder._keeps_values(item)  # noqa: SLF001 - the encoders' contract.
-                    for item in self._augmented(column, joined)
-                ):
-                    found = _steps.Barrier(
-                        label,
-                        "its encoder reads some of its augmented items"
-                        " through a function of all their values, such as"
-                        " a stretch, which its augmentations' forwards"
-                        " cannot come before",
-                    )
+                leaf = self._item_leaf(column, given, context_rows)
+                if isinstance(leaf, str):
+                    found = _steps.Barrier(label, leaf)
                 else:
-                    stacked = [both[: len(given[0])], both[len(given[0]) :]]
-            through.append(found is None and items)
-            if stacked is not None and found is None:
-                leaves.append(
-                    _steps.Leaf(
-                        (str(column),),
-                        stacked[0],
-                        stacked[1],
-                        per_column=False,
-                        padded=bool(encoder.pads_items),
-                    )
-                )
-                continue
+                    through.append(True)
+                    leaves.append(leaf)
+                    continue
+            through.append(False)
             if items and found is not None:
                 barriers.append(found)
             leaves.append(
@@ -927,6 +904,75 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 )
             )
         return leaves, through, barriers
+
+    def _item_leaf(
+        self, column: Hashable, given: list[Any], context_rows: bool
+    ) -> _steps.Leaf | str:
+        """The leaf of a column of items, or why there is none.
+
+        Args:
+            column: The column, whose encoder has a forward.
+            given: Its items in the rows to explain and in the context.
+            context_rows: Whether the context rows are differentiated too;
+                see :meth:`_leaves`.
+
+        Returns:
+            The leaf, or the reason the gradient stops at the embedding.
+        """
+        encoder = self.encoders_[column]
+        parts: list[Any]
+        if context_rows:
+            # Stacked together, so that padded items share one length.
+            both = encoder._stacked(pd.concat(given, ignore_index=True))  # noqa: SLF001 - the encoders' contract.
+            parts = [None] if both is None else np.split(both, [len(given[0])])
+        else:
+            parts = [encoder._stacked(given[0]), None]  # noqa: SLF001 - the encoders' contract.
+        if parts[0] is None:
+            return "its items do not all have one shape"
+        if self.augmentations_[column] and any(
+            np.isnan(part).any() for part in parts if part is not None
+        ):
+            return (
+                "its items are padded, or lack some elements, which its"
+                " augmentations' forwards do not read"
+            )
+        # The items that a forward reads; the context's go through
+        # transform when they take no gradient.
+        read = pd.concat(given, ignore_index=True) if context_rows else given[0]
+        if self.augmentations_[column] and not all(
+            encoder._keeps_values(item)  # noqa: SLF001 - the encoders' contract.
+            for item in self._augmented(column, read)
+        ):
+            return (
+                "its encoder reads some of its augmented items through a"
+                " function of all their values, such as a stretch, which its"
+                " augmentations' forwards cannot come before"
+            )
+        side = 1 if context_rows else 0
+        baselines = encoder._baseline(given[side], parts[side])  # noqa: SLF001 - the encoders' contract.
+        if baselines is None and not context_rows:
+            mean = _context_mean(encoder, given[1], parts[0].shape[1:])
+            if mean is None:
+                return "its items do not all have one shape"
+            baselines = np.broadcast_to(mean, parts[0].shape)
+        params = encoder.get_params(deep=False)
+        return _steps.Leaf(
+            (str(column),),
+            parts[0],
+            parts[1],
+            per_column=False,
+            padded=bool(encoder.pads_items),
+            baselines=baselines,
+            element_ndim=encoder.element_ndim,
+            source=(
+                type(encoder),
+                {
+                    key: value
+                    for key, value in params.items()
+                    if key not in encoder._UNKEYED  # noqa: SLF001 - the encoders' contract.
+                },
+            ),
+        )
 
     def _forward_leaves(
         self, tensors: Sequence[Any], through: Sequence[bool]
@@ -1055,6 +1101,55 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
             return list(self.remainder_.get_feature_names_out())
         kept = self._kept(rest)
         return [] if kept is None else list(kept.columns)
+
+
+# How many context items :func:`_context_mean` stacks at once.
+_MEAN_CHUNK = 256
+
+
+def _context_mean(
+    encoder: _base.BaseEncoder, items: Any, shape: tuple[int, ...]
+) -> _typing.FloatArray | None:
+    """The mean of a column's context items over the elements they have.
+
+    It stacks the items a chunk at a time, so that the whole context is
+    never in memory. An element that no item has takes the mean of all
+    the elements that the items have.
+
+    Args:
+        encoder: The column's encoder, which has a forward.
+        items: The context's items.
+        shape: The trailing shape of the rows to explain. A padded item is
+            aligned with them on its encoder's side and cut to their
+            length; the elements it loses are beyond every row to explain.
+
+    Returns:
+        The mean, float64, of shape ``shape``; ``None`` if an item is
+        missing or has no array, or the items do not stack with that
+        shape.
+    """
+    total, count = np.zeros(shape), np.zeros(shape)
+    for start in range(0, len(items), _MEAN_CHUNK):
+        part = encoder._stacked(items.iloc[start : start + _MEAN_CHUNK])  # noqa: SLF001 - the encoders' contract.
+        if part is None or part.shape[2:] != shape[1:]:
+            return None
+        if encoder.pads_items:
+            length = min(part.shape[1], shape[0])
+            aligned = np.full((len(part), *shape), np.nan)
+            if encoder.pads_items == "left":
+                aligned[:, shape[0] - length :] = part[
+                    :, part.shape[1] - length :
+                ]
+            else:
+                aligned[:, :length] = part[:, :length]
+            part = aligned
+        elif part.shape[1:] != shape:
+            return None
+        observed = np.isfinite(part)
+        total += np.where(observed, part, 0.0).sum(axis=0)
+        count += observed.sum(axis=0)
+    fallback = total.sum() / max(count.sum(), 1)
+    return np.where(count > 0, total / np.maximum(count, 1), fallback)
 
 
 def _principal_components(

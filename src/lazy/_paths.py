@@ -46,7 +46,7 @@ from lazy import pipeline
 from lazy.models import _differentiable as differentiable
 from lazy.models import ensemble
 
-__all__ = ["Path", "build"]
+__all__ = ["Path", "build", "tensor"]
 
 # From one tensor per leaf to the table a model reads, on the graph.
 _Table = Callable[[Sequence[Any]], Any]
@@ -75,6 +75,9 @@ class Path:
             function of the query that it smooths under
             :func:`lazy.models._differentiable.smoothed_ranks`: a list of
             tensors, empty if no backend on the path ranks.
+        context: What the model reads of the context rows, as ``table``
+            returns it, without gradients, when the path does not
+            differentiate them; ``None`` when it does.
     """
 
     leaves: tuple[_steps.Leaf, ...]
@@ -83,6 +86,7 @@ class Path:
     table: _Table
     density: Callable[[Any, Any], differentiable.TorchDensity]
     ranked: Callable[[Any], list[Any]]
+    context: Any = None
 
 
 def build(  # noqa: GS030 - scikit-learn's X, y.
@@ -94,6 +98,7 @@ def build(  # noqa: GS030 - scikit-learn's X, y.
     label: str,
     at: str | None = None,
     items: bool = True,
+    context_rows: bool = True,
 ) -> Path:
     """The path of a gradient through a fitted model.
 
@@ -109,6 +114,10 @@ def build(  # noqa: GS030 - scikit-learn's X, y.
             ``None`` for as far back as a gradient reaches.
         items: Whether a path that reaches a ``Tabularizer`` goes through
             its encoders to the items; if not, it starts at the embeddings.
+        context_rows: Whether the context rows are differentiated too. If
+            not, the path's ``context`` holds what the model reads of
+            them, which the encoders of a ``Tabularizer`` give with
+            ``transform``, and a leaf of items holds no context.
 
     Returns:
         The path.
@@ -122,9 +131,13 @@ def build(  # noqa: GS030 - scikit-learn's X, y.
     """
     validation.check_is_fitted(model)
     if isinstance(model, ensemble.LazyEnsembleModel):
-        return _pooled(model, X, X_context, y_context, label, at, items)
+        return _pooled(
+            model, X, X_context, y_context, label, at, items, context_rows
+        )
     if isinstance(model, pipeline.LazyPipeline):
-        return _piped(model, X, X_context, y_context, label, at, items)
+        return _piped(
+            model, X, X_context, y_context, label, at, items, context_rows
+        )
     if at is not None:
         raise no_steps(model, at)
     backend = differentiable.backend(model, label)
@@ -145,6 +158,7 @@ def build(  # noqa: GS030 - scikit-learn's X, y.
         lambda tensors: tensors[0][:, order],
         _pass(backend, label, y_context),
         _ranked(backend),
+        None if context_rows else tensor(leaf.context)[:, order],
     )
 
 
@@ -251,6 +265,30 @@ def _floats(
             f"{label} needs numeric columns; {name} has others: {list(other)}"
         )
     return _finite(frame.to_numpy(dtype=np.float64), name, label, hint)
+
+
+def tensor(values: Any) -> Any:
+    """Values as a float64 torch tensor, sharing their memory if they can.
+
+    Args:
+        values: A float array, or a table of numbers.
+
+    Returns:
+        The tensor, on the CPU; read-only values, which torch cannot
+        share, are copied.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    array = np.asarray(values, dtype=np.float64)
+    return torch.from_numpy(array if array.flags.writeable else array.copy())
+
+
+def _without_gradient(function: Callable[[Any], Any], value: Any) -> Any:
+    """``function(value)``, computed without an autograd graph."""
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    with torch.no_grad():
+        return function(value)
 
 
 def _finite(
@@ -378,6 +416,7 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
     label: str,
     at: str | None,
     items: bool,
+    context_rows: bool,
 ) -> Path:
     """The path through a fitted pipeline; see :func:`build`."""
     steps, model = _flattened(pipe)
@@ -395,13 +434,17 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
     if tail and _opens(tail[0]):
         first = tail.pop(0)
         leaves, through, closed = first._leaves(  # noqa: SLF001 - lazy's own step.
-            queries, context, items, steps[start][0]
+            queries, context, items, steps[start][0], context_rows
         )
         barriers.extend(closed)
         for leaf in leaves:
             if not leaf.padded:
                 _finite(leaf.queries, "X", label)
-                _finite(leaf.context, "X_context", label)
+                if leaf.context is not None:
+                    _finite(leaf.context, "X_context", label)
+        # The encoders' own transform, cached and batched, for a context
+        # that takes no gradient.
+        entered = None if context_rows else tensor(first.transform(context))
 
         def enter(tensors: Sequence[Any]) -> Any:
             """The Tabularizer's columns, from its leaves."""
@@ -423,12 +466,17 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
             """The one leaf, a table, its columns in the order of the fit."""
             return tensors[0] if order is None else tensors[0][:, order]
 
-    def table(tensors: Sequence[Any]) -> Any:
-        """The model's columns, through every step after the leaves."""
-        columns = enter(tensors)
+        entered = None if context_rows else enter([tensor(leaves[0].context)])
+
+    def after(columns: Any) -> Any:
+        """The model's columns, through every step after the entry."""
         for step in tail:
             columns = _steps.forward(step, columns)
         return columns
+
+    def table(tensors: Sequence[Any]) -> Any:
+        """The model's columns, through every step after the leaves."""
+        return after(enter(tensors))
 
     backend = differentiable.backend(model, label)
     return Path(
@@ -438,6 +486,7 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
         table,
         _pass(backend, label, y_context),
         _ranked(backend),
+        None if context_rows else _without_gradient(after, entered),
     )
 
 
@@ -449,6 +498,7 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
     label: str,
     at: str | None,
     items: bool,
+    context_rows: bool,
 ) -> Path:
     """The path through a fitted ensemble; see :func:`build`.
 
@@ -479,6 +529,7 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
             label=label,
             at=at,
             items=items,
+            context_rows=context_rows,
         )
         for member, queries, context in zip(members, *tables, strict=True)
     ]
@@ -499,6 +550,7 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
         )
         for name, path in zip(model.named_estimators_, paths, strict=True)
     ]
+    paths = _apart(list(model.named_estimators_), paths)
     counts = np.cumsum([0, *(len(path.leaves) for path in paths)])
 
     def table(tensors: Sequence[Any]) -> list[Any]:
@@ -534,7 +586,46 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
         table,
         density,
         ranked,
+        None if context_rows else [path.context for path in paths],
     )
+
+
+def _apart(names: list[str], paths: list[Path]) -> list[Path]:
+    """Members' paths, a column of items named per member where it must be.
+
+    The leaves of a column of items add up element by element, which
+    holds only if their encoders read the items alike, as seeded copies
+    of one pipeline do. Where two members' encoders differ, or stack the
+    items to other shapes, each member's leaf of the column is named
+    ``<member>__<column>``, a feature of its own.
+
+    Args:
+        names: The members' names.
+        paths: Their paths, in the same order.
+
+    Returns:
+        The paths.
+    """
+    seen: dict[str, Any] = {}
+    apart = set()
+    for path in paths:
+        for leaf in path.leaves:
+            if not leaf.per_column:
+                key = (leaf.source, leaf.queries.shape[1:])
+                if seen.setdefault(leaf.names[0], key) != key:
+                    apart.add(leaf.names[0])
+    return [
+        dataclasses.replace(
+            path,
+            leaves=tuple(
+                dataclasses.replace(leaf, names=(f"{name}__{leaf.names[0]}",))
+                if not leaf.per_column and leaf.names[0] in apart
+                else leaf
+                for leaf in path.leaves
+            ),
+        )
+        for name, path in zip(names, paths, strict=True)
+    ]
 
 
 def _named_barriers(
