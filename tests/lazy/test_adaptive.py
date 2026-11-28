@@ -90,10 +90,10 @@ def test_training_keeps_the_step_with_the_lowest_validation_nll(model, data):
     assert nll[fitted[0].best_step_] < nll[0] - 0.3
     # The model was fitted again on what the trained reducer gives.
     np.testing.assert_allclose(
-        fitted.predict(X[:5]),
+        fitted.predict(X[:5], method="mode"),
         sklearn_base.clone(model)
         .fit(fitted[0].transform(X), y)
-        .predict(fitted[0].transform(X[:5])),
+        .predict(fitted[0].transform(X[:5]), method="mode"),
     )
 
 
@@ -276,7 +276,7 @@ def test_routed_metadata_reaches_a_model_behind_a_trained_reducer(model, data):
     # after it.
     np.testing.assert_array_equal(seen[0], weights)
     assert seen[1:] == [None, None]
-    assert np.isfinite(pipe.predict(X)).all()
+    assert np.isfinite(pipe.predict(X, method="mode")).all()
 
 
 def test_later_steps_are_trained_through_and_fitted_again(model, data):
@@ -309,7 +309,7 @@ def test_a_failed_training_leaves_the_pipeline_unfitted(monkeypatch, data):
     with pytest.raises(ValueError, match="an adaptive reducer"):
         pipe.fit(X, y)
     with pytest.raises(exceptions.NotFittedError):
-        pipe.predict(X)
+        pipe.predict(X, method="mode")
     with pytest.raises(exceptions.NotFittedError):
         pipe[0].transform(X)
 
@@ -406,7 +406,7 @@ def test_the_network_reads_a_mask_and_a_missing_item_stays_nan(model, data):
     assert not np.allclose(
         out.loc[0, right], fitted[0].transform(whole).loc[0, right]
     )
-    assert fitted.predict(X_test).shape == (len(X_test),)
+    assert fitted.predict(X_test, method="mode").shape == (len(X_test),)
 
 
 def test_a_bad_reducer_and_a_missing_number_are_refused(model, data):
