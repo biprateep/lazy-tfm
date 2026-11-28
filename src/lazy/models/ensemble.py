@@ -112,7 +112,9 @@ SMALL_CONTEXT_ROWS = 3_000
 
 # A bagged member's mixture is inverted exactly on the union of its
 # components' edges, unless there are more than this many; it is then read
-# at the pooling grid's resolution, so that its quantiles fit in memory.
+# at the pooling grid's resolution, since the exact inverse costs time in
+# proportion to the components times the union's edges, which grows as the
+# square of the number of bags.
 _EXACT_PPF_MAX_EDGES = 20_000
 
 # The parameters the ensemble passes on to members that keep their default.
@@ -802,7 +804,16 @@ def _pooled_sum(
 def _masses(
     part: distributions.Distribution, edges: _typing.FloatArray
 ) -> _typing.FloatArray:
-    """A member's masses in the pooling grid's bins, shape (n_rows, n_bins)."""
+    """A member's masses in the pooling grid's bins, shape (n_rows, n_bins).
+
+    A histogram on the pooling grid's own edges gives its renormalized
+    masses directly, without the CDF's cumulative sums, which lose a small
+    bin's precision.
+    """
+    if isinstance(part, distributions.HistogramDistribution) and np.array_equal(
+        part.bins, edges
+    ):
+        return part.probabilities
     return part.histogramize(edges).masses
 
 
@@ -810,7 +821,7 @@ def _log_density(
     part: distributions.Distribution, grid: grid_lib.Grid, floor: float
 ) -> _typing.FloatArray:
     """A member's log density on the pooling grid, floored at ``floor``."""
-    density = part.histogramize(grid.edges).masses / grid.widths
+    density = _masses(part, grid.edges) / grid.widths
     density += floor
     return np.log(density, out=density)
 
