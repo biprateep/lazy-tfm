@@ -116,6 +116,14 @@ class BaseEncoder(
     gradient in a missing element is 0, with no ``NaN`` on the autograd
     graph.
 
+    An attribution measures each element of an item against a baseline,
+    by default the mean of the context's items. An encoder that knows the
+    item of no content, such as a text of padding tokens, gives the
+    baselines of stacked items in :meth:`_baseline`. An encoder whose
+    element is a vector, such as a token's embedding, sets
+    ``element_ndim`` to the number of trailing axes that hold it, and an
+    element's attribution is the sum over them.
+
     With ``cache`` set, the embedding of each item is filed on disk under
     the content of the item (:meth:`_item_bytes`) and the identity of the
     encoder (:meth:`_cache_identity`), and an item that is filed is not
@@ -128,6 +136,9 @@ class BaseEncoder(
         pads_items: ``""`` if :meth:`_stacked` stacks only items of one
             shape with every element; else the side, ``"left"`` or
             ``"right"``, on which it pads them with ``NaN``.
+        element_ndim: The number of trailing axes of an item's array that
+            hold one element, such as the vector of a token's embedding; 0
+            when each number is an element.
         batch_size: The most items one call of :meth:`_encode` gets.
         cache: ``False`` for no cache, ``True`` for the default one, under
             :func:`lazy.datasets.data_home`, or the directory to use.
@@ -137,6 +148,7 @@ class BaseEncoder(
     gradient_kind: ClassVar[str] = "barrier"
     barrier_reason: ClassVar[str] = ""
     pads_items: ClassVar[str] = ""
+    element_ndim: ClassVar[int] = 0
 
     # The parameters that do not change an embedding, left out of the
     # identity of the cache.
@@ -213,7 +225,7 @@ class BaseEncoder(
         return item
 
     def _array(self, item: Any) -> _typing.FloatArray | None:
-        """One item as the float64 array that :meth:`forward` takes.
+        """One item as the float array that :meth:`forward` takes.
 
         Args:
             item: One item, not missing.
@@ -245,11 +257,29 @@ class BaseEncoder(
         del item  # Unused: by default, the array holds the item's values.
         return True
 
+    def _baseline(  # noqa: GS030 - scikit-learn's X.
+        self, X: Any, stacked: _typing.FloatArray
+    ) -> _typing.FloatArray | None:
+        """The items of no content that stand in for stacked items.
+
+        Args:
+            X: One column of items, none missing.
+            stacked: What :meth:`_stacked` gives for them.
+
+        Returns:
+            The baseline of each item for an attribution, of the shape and
+            type of ``stacked``; ``None``, by default, for the mean of the
+            context's items.
+        """
+        del X, stacked  # Unused: by default, the context's mean.
+        return None
+
     def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
         """The items of a column as one array, for :meth:`forward`.
 
         The caller chooses the rows: the array holds every item given, in
-        float64, so a column of large items is stacked in parts.
+        the type of the items' arrays, so a column of large items is
+        stacked in parts.
 
         Args:
             X: One column of items, n of them.
@@ -268,7 +298,7 @@ class BaseEncoder(
         for index, item in enumerate(items):
             array = None if _is_missing(item) else self._array(item)
             if stacked is None and array is not None:
-                stacked = np.empty((len(items), *array.shape))
+                stacked = np.empty((len(items), *array.shape), array.dtype)
             if (
                 array is None
                 or stacked is None
@@ -299,7 +329,8 @@ class BaseEncoder(
         if not arrays:
             return None
         longest = max(len(array) for array in arrays)
-        stacked = np.full((len(arrays), longest, *arrays[0].shape[1:]), np.nan)
+        shape = (len(arrays), longest, *arrays[0].shape[1:])
+        stacked = np.full(shape, np.nan, arrays[0].dtype)
         for row, array in zip(stacked, arrays, strict=True):
             if self.pads_items == "left":
                 row[longest - len(array) :] = array

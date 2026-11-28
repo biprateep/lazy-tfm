@@ -478,3 +478,31 @@ def test_outside_a_pipeline_the_mlp_stays_pca_and_pickles():
     )
     again = pickle.loads(pickle.dumps(tab))
     pd.testing.assert_frame_equal(again.transform(X), tab.transform(X))
+
+
+class _LeftPaddedStatistics(lazy.time.Statistics):
+    """Series statistics whose forward reads series padded on the left."""
+
+    pads_items = "left"
+
+    def _array(self, item):
+        """One series, ``NaN`` for a missing value."""
+        return np.asarray(item, dtype=float)
+
+
+def test_a_leaf_of_series_without_context_rows_has_their_mean_as_baseline():
+    generator = np.random.default_rng(10)
+    series = [generator.normal(size=n).cumsum() for n in (20, 30, 25, 40, 12)]
+    series[1][4] = np.nan
+    X = pd.DataFrame({"curve": series[:2]})
+    context = pd.DataFrame({"curve": series[2:]})
+    tab = lazy.Tabularizer(
+        {"curve": _LeftPaddedStatistics()}, remainder="drop"
+    ).fit(context)
+    (stacked,), _, _ = tab._leaves(X, context, True, "t", True)
+    (leaf,), _, _ = tab._leaves(X, context, True, "t", False)
+    assert stacked.context.shape == (3, 40) and stacked.baselines is None
+    assert leaf.context is None and leaf.queries.shape == (2, 30)
+    # The mean that the stacked context gives, at the rows' 30 positions.
+    mean = lazy.interp._observed_mean(stacked.context)[-30:]
+    np.testing.assert_allclose(leaf.baselines, np.broadcast_to(mean, (2, 30)))

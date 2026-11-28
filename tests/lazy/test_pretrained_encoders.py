@@ -139,7 +139,8 @@ def test_text_is_pooled_as_its_model_says_and_scaled_to_unit_length(
     np.testing.assert_allclose(np.linalg.norm(rows, axis=1), 1, rtol=1e-6)
     prefix = [6] if model == "e5-small-v2" else []  # "query:" is a word.
     codes = np.array([101, *prefix, 1, 4, 5, 102])
-    states = np.cos(codes[:, None] * np.arange(1, encoder._width() + 1))
+    inputs = np.cos(codes[:, None] * np.arange(1, encoder._width() + 1))
+    states = np.tanh(inputs + inputs.mean(axis=0))
     # The first text is padded: its last token is not the batch's last.
     pooled = {
         "mean": states.mean(axis=0),
@@ -564,9 +565,11 @@ def test_long_texts_are_split_into_passes_under_the_token_budget(
     shapes = []
     call = fake_encoders.TextModel.__call__
 
-    def recording(self, input_ids, attention_mask):
-        shapes.append(tuple(input_ids.shape))
-        return call(self, input_ids, attention_mask)
+    def recording(self, inputs_embeds, attention_mask):
+        shapes.append(tuple(inputs_embeds.shape[:2]))
+        return call(
+            self, inputs_embeds=inputs_embeds, attention_mask=attention_mask
+        )
 
     monkeypatch.setattr(fake_encoders.TextModel, "__call__", recording)
     settings = {"model": model, "device": "cpu", "cache": False}
@@ -580,8 +583,9 @@ def test_long_texts_are_split_into_passes_under_the_token_budget(
     # Each pass fits the budget, padded; the six short texts share one.
     assert all(n * length <= 50 for n, length in shapes) and len(shapes) == 3
     assert sorted(n for n, _ in shapes) == [1, 1, 6]
-    # A padded state is 1e6, so pooling that read other padding would show.
-    np.testing.assert_allclose(split, whole, rtol=1e-6)
+    # A padded state is 1e6, so pooling that read other padding would show;
+    # the fake's mean over a text's tokens moves by float32 rounding.
+    np.testing.assert_allclose(split, whole, rtol=1e-6, atol=1e-7)
     # A text longer than the budget is a pass of its own.
     shapes.clear()
     alone = lazy.text.Pretrained(max_batch_tokens=10, **settings).fit_transform(
@@ -589,7 +593,7 @@ def test_long_texts_are_split_into_passes_under_the_token_budget(
     )
     assert all(n == 1 or n * length <= 10 for n, length in shapes)
     assert whole.dtype == alone.dtype == np.float64
-    np.testing.assert_allclose(alone, whole, rtol=1e-6)
+    np.testing.assert_allclose(alone, whole, rtol=1e-6, atol=1e-7)
     with pytest.raises(ValueError, match="max_batch_tokens must be a posit"):
         lazy.text.Pretrained(max_batch_tokens=0, device="cpu").fit(texts)
 
@@ -803,7 +807,10 @@ def test_integrated_gradients_reach_series_of_other_lengths_with_gaps(
     curves[-1] = generator.normal(size=50).cumsum()
     X = pd.DataFrame({"curve": curves})
     y = np.array([np.nanmean(curve) for curve in curves])
-    model = _series_pipeline(monkeypatch, tmp_path).fit(X[:24], y[:24])
+    # TabPFN v3, as integrated gradients through v3.5's smoothed ranks
+    # converge too slowly behind an encoder (#446).
+    model = _series_pipeline(monkeypatch, tmp_path, version="v3")
+    model.fit(X[:24], y[:24])
     explanation = lazy.interp.explain(
         model,
         X[24:],
@@ -927,8 +934,11 @@ def test_chronos_normalizes_as_its_instance_norm_without_nan_gradients():
         assert (leaf.grad[context.isnan()] == 0).all()
 
 
-def _series_pipeline(monkeypatch, tmp_path):
-    """A Tabularizer of Chronos-Bolt's fake before TabPFN's fake, unfitted."""
+def _series_pipeline(monkeypatch, tmp_path, **params):
+    """A Tabularizer of Chronos-Bolt's fake before TabPFN's fake, unfitted.
+
+    ``params`` are more parameters of the backend's fake.
+    """
     pytest.importorskip("torch")
     backend = backend_fakes.install("tabpfn", monkeypatch)(
         n_estimators=2,
@@ -936,6 +946,7 @@ def _series_pipeline(monkeypatch, tmp_path):
         progress=False,
         transforms=("none",),
         outlier_threshold=None,
+        **params,
     )
     # After the backend's, whose download the encoders' replaces.
     fake_encoders.install(monkeypatch, tmp_path)
@@ -1064,3 +1075,314 @@ def test_images_are_preprocessed_as_the_pinned_processor_does(model):
         std = torch.tensor(recipe.std)[:, None, None]
         levels = (pixels - expected["pixel_values"][0]) * std * 255
         assert levels.abs().max() <= 1.13
+
+
+# -- the forward of text, through the tokens' input embeddings ---------------
+
+TEXT = [f"text:{model}" for model in lazy.text.Pretrained.recipes]
+"""Each network of text, as ``"<modality>:<model>"``."""
+
+TEXTS = ["a lazy model", "frozen tabular foundation models of rows", "", "x"]
+"""Texts of other lengths, one of no word."""
+
+
+def _own(encoder, texts, length):
+    """Which positions of each stacked text are the text's own tokens."""
+    own = np.zeros((len(texts), length), dtype=bool)
+    for row, text in enumerate(texts):
+        spans = encoder.token_spans(text)
+        own[row, : len(spans)] = spans[:, 0] >= 0
+    return own
+
+
+@pytest.mark.parametrize("key", TEXT)
+def test_a_text_forward_gives_what_transform_gives_for_other_lengths(
+    fakes, key
+):
+    encoder = _encoder(key, batch_size=3)
+    stacked = encoder.fit(TEXTS)._stacked(TEXTS)
+    prefix = 1 if key == "text:e5-small-v2" else 0  # "query:" is a word.
+    # Padded on the right with NaN to the longest, its first and last token.
+    assert stacked.shape == (4, 8 + prefix, encoder._width())
+    assert np.isnan(stacked[0, 5 + prefix :]).all()
+    assert np.isfinite(stacked[1]).all()
+    forward, transform, gradient = _forward_and_transform(encoder, TEXTS)
+    np.testing.assert_allclose(forward, transform, rtol=1e-6, atol=1e-6)
+    assert gradient.isfinite().all()
+    assert (gradient[_tensor(np.isnan(stacked))] == 0).all()
+    own = _tensor(_own(encoder, TEXTS, stacked.shape[1]))
+    assert (gradient.abs().sum(dim=2)[own] > 0).all()
+
+
+def test_a_text_forward_refuses_what_its_stack_would_not_give(fakes):
+    torch = pytest.importorskip("torch")
+    encoder = _encoder("text:bge-small-en-v1.5").fit(TEXTS)
+    stacked = torch.tensor(encoder._stacked(TEXTS))
+    gap = stacked.clone()
+    gap[1, 2] = np.nan  # A token after padding.
+    partial = stacked.clone()
+    partial[1, 2, 0] = np.nan
+    for items in (stacked[..., :5], stacked[:, :, 0], gap, partial):
+        with pytest.raises(steps.BarrierError, match="input embeddings"):
+            encoder.forward(items)
+
+
+def test_a_texts_baseline_pads_its_own_tokens_and_keeps_the_rest(fakes):
+    encoder = _encoder("text:e5-small-v2")
+    text = "lazy  models, frozen"
+    spans = encoder.token_spans(text)
+    # The first token, the prefix "query:" and the last are not the text's.
+    np.testing.assert_array_equal(
+        spans, [[-1, -1], [-1, -1], [0, 4], [6, 13], [14, 20], [-1, -1]]
+    )
+    stacked = encoder._stacked([text, "a"])
+    baseline = encoder._baseline([text, "a"], stacked)
+    assert baseline.dtype == stacked.dtype == np.float32
+    own = np.zeros(stacked.shape[:2], dtype=bool)
+    own[0, 2:5] = own[1, 2] = True
+    np.testing.assert_array_equal(baseline[~own], stacked[~own])
+    padding = encoder._looked_up(np.array([0]))
+    np.testing.assert_array_equal(baseline[own], np.repeat(padding, 4, 0))
+
+
+def test_word_values_sum_each_words_tokens(fakes):
+    encoder = _encoder("text:bge-small-en-v1.5")
+    words, sums = encoder.word_values("lazy  models", [9.0, 1.0, 2.0, 9.0, 0])
+    assert words == ["lazy", "models"]
+    np.testing.assert_array_equal(sums, [1.0, 2.0])
+    with pytest.raises(ValueError, match="one per token of the text, at"):
+        encoder.word_values("lazy models", [1.0, 2.0])
+
+
+def test_word_values_give_a_token_to_the_word_of_its_first_visible_character(
+    monkeypatch,
+):
+    # As a SentencePiece tokenizer gives them: a token may start with the
+    # space before its word, or be whitespace alone.
+    spans = np.array(
+        [[-1, -1], [0, 2], [2, 4], [4, 6], [6, 13], [13, 15], [-1, -1]]
+    )
+    monkeypatch.setattr(
+        lazy.text.Pretrained, "token_spans", lambda self, text: spans
+    )
+    encoder = lazy.text.Pretrained()
+    values = [100.0, 1.0, 2.0, 4.0, 8.0, 16.0, 100.0, 1000.0]
+    words, sums = encoder.word_values("  lazy models  ", values)
+    assert words == ["lazy", "models"]
+    np.testing.assert_array_equal(sums, [7.0, 24.0])
+    words, sums = encoder.word_values("   ", values)
+    assert words == [] and sums.shape == (0,)
+    with pytest.raises(ValueError, match="must be 1-D"):
+        encoder.word_values("lazy", [values])
+
+
+def test_a_leafs_own_baselines_replace_the_context_mean():
+    queries, context = np.ones((2, 3)), np.zeros((4, 3))
+    leaf = steps.Leaf(("a",), queries, context, baselines=-queries)
+    plain = steps.Leaf(("a",), queries, context + 1)
+    origins = lazy.interp._origins([leaf, plain], None)
+    np.testing.assert_array_equal(origins[0], -queries)
+    np.testing.assert_array_equal(origins[1], np.ones((2, 3)))
+    origins = lazy.interp._origins([plain], None, context=True)
+    np.testing.assert_array_equal(origins[0], np.ones((4, 3)))
+
+
+@pytest.mark.parametrize("context_rows", [False, True])
+def test_a_leaf_of_texts_has_the_baselines_of_the_side_it_differentiates(
+    fakes, context_rows
+):
+    X = pd.DataFrame({"note": ["a lazy model", "x"]})
+    context = pd.DataFrame({"note": ["frozen tabular foundation models", "y"]})
+    tab = lazy.Tabularizer(
+        {"note": _encoder("text:bge-small-en-v1.5")}, remainder="drop"
+    ).fit(context)
+    (leaf,), through, _ = tab._leaves(X, context, True, "t", context_rows)
+    assert through == [True]
+    side = context if context_rows else X
+    expected = tab.encoders_["note"]._stacked(side["note"])
+    if context_rows:
+        # Stacked together with the rows to explain, to one length.
+        assert leaf.context.shape == (2, 6, 384)
+    else:
+        assert leaf.context is None and leaf.queries.shape == (2, 5, 384)
+    assert (
+        leaf.baselines.shape
+        == (leaf.context if context_rows else leaf.queries).shape
+    )
+    np.testing.assert_array_equal(
+        leaf.baselines[:, : expected.shape[1]],
+        tab.encoders_["note"]._baseline(side["note"], expected),
+    )
+
+
+def _text_pipeline(monkeypatch, tmp_path, models=("e5-small-v2",)):
+    """A Tabularizer of a text fake before TabPFN's fake, unfitted.
+
+    With several models, an ensemble of one such pipeline per model, each
+    seeded on its own. The fake is of TabPFN v3, whose network does not
+    rank the cells: from a baseline of padding tokens, far outside the
+    context's columns, integrated gradients through smoothed ranks
+    converge slowly in ``n_steps``.
+    """
+    pytest.importorskip("torch")
+    backend = backend_fakes.install("tabpfn", monkeypatch)
+    # After the backend's, whose download the encoders' replaces.
+    fake_encoders.install(monkeypatch, tmp_path)
+    pipes = [
+        lazy.make_pipeline(
+            lazy.Tabularizer(
+                {"note": _encoder(f"text:{model}")},
+                n_columns=8,
+                remainder="drop",
+            ),
+            backend(
+                n_estimators=2,
+                device="cpu",
+                progress=False,
+                transforms=("none",),
+                outlier_threshold=None,
+                random_state=seed,
+                version="v3",
+            ),
+        )
+        for seed, model in enumerate(models)
+    ]
+    if len(pipes) == 1:
+        return pipes[0]
+    return lazy.LazyEnsembleModel(pipes, pooling="geometric")
+
+
+def _notes(n=30, seed=9):
+    """Texts of one to five words, and a target, their length."""
+    generator = np.random.default_rng(seed)
+    vocabulary = np.array(["a", "lazy", "frozen", "tabular", "model", "of"])
+    notes = [
+        " ".join(generator.choice(vocabulary, generator.integers(1, 6)))
+        for _ in range(n)
+    ]
+    return notes, vocabulary
+
+
+@pytest.mark.parametrize(
+    ("models", "names"),
+    [
+        (("e5-small-v2", "e5-small-v2"), None),
+        (("e5-small-v2", "bge-small-en-v1.5"), 2),
+    ],
+)
+def test_an_ensemble_adds_up_the_tokens_of_encoders_that_read_alike(
+    monkeypatch, tmp_path, models, names
+):
+    notes, _ = _notes(20)
+    X = pd.DataFrame({"note": notes})
+    y = np.array([len(note) for note in notes], dtype=float)
+    model = _text_pipeline(monkeypatch, tmp_path, models)
+    model.fit(X[:16], y[:16])
+    explanation = lazy.interp.explain(
+        model, X[16:], y[16:], X[:16], y[:16], method="gradient"
+    )
+    if names is None:
+        # Seeded copies of one pipeline: one feature, its tokens summed.
+        assert explanation.feature_names == ("note",)
+    else:
+        # E5 reads a prefix that BGE does not: a feature per member.
+        assert len(explanation.feature_names) == names
+        assert all(
+            name.endswith("__note") for name in explanation.feature_names
+        )
+    for position, name in enumerate(explanation.feature_names):
+        np.testing.assert_allclose(
+            explanation.item_values[name].sum(axis=-1),
+            explanation.values[..., position],
+        )
+
+
+def test_integrated_gradients_reach_each_token_of_texts_of_other_lengths(
+    monkeypatch, tmp_path
+):
+    notes, vocabulary = _notes()
+    # An explained text longer than every text of the context.
+    notes[-1] = " ".join(vocabulary)
+    X = pd.DataFrame({"note": notes})
+    y = np.array([len(note) for note in notes], dtype=float)
+    model = _text_pipeline(monkeypatch, tmp_path).fit(X[:24], y[:24])
+    explanation = lazy.interp.explain(
+        model,
+        X[24:],
+        y[24:],
+        X[:24],
+        y[:24],
+        method="integrated_gradients",
+        n_steps=128,
+    )
+    assert explanation.barriers == ()
+    values = explanation.item_values["note"]
+    # A token each: the first, the prefix, six words and the last.
+    assert values.shape == (3, 6, 9)
+    encoder = model[0].encoders_["note"]
+    own = _own(encoder, notes[24:], 9)
+    # The padding, the first and last tokens and the prefix get 0.
+    assert (values[:, ~own] == 0).all()
+    assert (values[:, own] != 0).any(axis=0).all()
+    np.testing.assert_allclose(values.sum(axis=-1), explanation.values[..., 0])
+    # Completeness: a right Riemann sum of 128 steps is within 5% of the
+    # largest gain, from a baseline of padding tokens.
+    gained = explanation.full_values - explanation.base_values
+    np.testing.assert_allclose(
+        explanation.values.sum(axis=-1),
+        gained,
+        atol=0.05 * np.abs(gained).max(),
+    )
+    words, sums = encoder.word_values(notes[-1], values[0, -1])
+    assert words == list(vocabulary)
+    np.testing.assert_allclose(sums.sum(), explanation.values[0, -1, 0])
+    context = lazy.interp.explain_context(
+        model, X[24:], y[24:], X[:24], y[:24], through_encoders=True
+    )
+    assert np.isfinite(context.values).all()
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize("key", TEXT)
+def test_the_real_weights_give_a_text_forward_equal_to_transform(key):
+    encoder = _encoder(key)
+    texts = [*TEXTS, "Hello  world, naïve tokenisation!"]
+    stacked = encoder.fit(texts)._stacked(texts)
+    with golden_data.pinned_threads():
+        forward, transform, gradient = _forward_and_transform(encoder, texts)
+    np.testing.assert_allclose(forward, transform, rtol=1e-5, atol=1e-5)
+    assert gradient.isfinite().all()
+    assert (gradient[_tensor(np.isnan(stacked))] == 0).all()
+    own = _tensor(_own(encoder, texts, stacked.shape[1]))
+    assert (gradient.abs().sum(dim=2)[own] > 0).all()
+
+
+@pytest.mark.parametrize("kind", ["text", "series"])
+def test_a_context_without_gradients_is_read_as_its_forward_reads_it(
+    monkeypatch, tmp_path, kind
+):
+    torch = pytest.importorskip("torch")
+    if kind == "text":
+        items, _ = _notes()
+        model = _text_pipeline(monkeypatch, tmp_path)
+    else:
+        generator = np.random.default_rng(11)
+        items = [
+            generator.normal(size=generator.integers(20, 40)).cumsum()
+            for _ in range(30)
+        ]
+        model = _series_pipeline(monkeypatch, tmp_path)
+    X = pd.DataFrame({"note" if kind == "text" else "curve": items})
+    y = np.arange(30, dtype=float)
+    model.fit(X[:24], y[:24])
+    args = (model, X[24:], X[:24], y[:24])
+    encoded = lazy._paths.build(*args, label="x", context_rows=False)
+    leaves = lazy._paths.build(*args, label="x")
+    assert all(
+        leaf.context is None for leaf in encoded.leaves if not leaf.per_column
+    )
+    with torch.no_grad():
+        forward = leaves.table(
+            [lazy._paths.tensor(leaf.context) for leaf in leaves.leaves]
+        )
+    np.testing.assert_allclose(encoded.context, forward, rtol=1e-6, atol=1e-6)

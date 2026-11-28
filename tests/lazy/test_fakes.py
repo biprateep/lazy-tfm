@@ -32,6 +32,9 @@ STAND_INS = {
         fake_encoders.ChronosModel
     ),
     "chronos.chronos2.model.Chronos2Model": fake_encoders.ChronosModel,
+    "transformers.BertModel": fake_encoders.TextModel,
+    "transformers.Qwen3Model": fake_encoders.TextModel,
+    "transformers.PreTrainedTokenizerFast": fake_encoders.Tokenizer,
     "transformers.TimesFmModel": fake_encoders.TimesFM,
     "transformers.TimesFm2_5Model": fake_encoders.TimesFM,
     "timesfm3.torch.TimesFM3Torch": fake_encoders.TimesFM3,

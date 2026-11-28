@@ -16,6 +16,7 @@ and the packages of the ``encoders`` extra.
 import importlib
 import importlib.util
 import pathlib
+import re
 import types
 
 import numpy as np
@@ -41,15 +42,40 @@ class Tokens(dict):
 
 
 class Tokenizer:
-    """One token per word between a first and a last, padded on a side."""
+    """One token per word between a first and a last, padded on a side.
+
+    A word's id is its number of characters, and its offsets are where it
+    is in the text; the first and the last tokens, 101 and 102, span no
+    character, and truncation keeps them, as upstream's does.
+    """
 
     padding_side = "right"
+    pad_token_id = 0
 
-    def __call__(self, text, padding, truncation, max_length, return_tensors):
+    def __call__(
+        self,
+        text,
+        padding=False,
+        truncation=False,
+        max_length=None,
+        return_tensors=None,
+        return_offsets_mapping=False,
+        return_special_tokens_mask=False,
+    ):
         import torch  # noqa: PLC0415 - collected without torch installed.
 
-        assert (padding, truncation, return_tensors) == (True, True, "pt")
-        codes = [[101, *map(len, t.split()), 102][:max_length] for t in text]
+        assert truncation
+        if isinstance(text, str):
+            assert not padding and return_tensors is None
+            codes, offsets = _tokens(text, max_length)
+            tokens = {"input_ids": codes, "attention_mask": [1] * len(codes)}
+            if return_offsets_mapping:
+                tokens["offset_mapping"] = offsets
+            if return_special_tokens_mask:
+                tokens["special_tokens_mask"] = [1, *[0] * (len(codes) - 2), 1]
+            return tokens
+        assert (padding, return_tensors) == (True, "pt")
+        codes = [_tokens(t, max_length)[0] for t in text]
         width = max(map(len, codes))
         ids = torch.zeros((len(text), width), dtype=torch.long)
         mask = torch.zeros((len(text), width), dtype=torch.long)
@@ -62,6 +88,14 @@ class Tokenizer:
             ids[row, held] = torch.tensor(code)
             mask[row, held] = 1
         return Tokens(input_ids=ids, attention_mask=mask)
+
+
+def _tokens(text, max_length):
+    """The ids of a text's tokens, and their offsets, as a list each."""
+    words = [match.span() for match in re.finditer(r"\S+", text)]
+    words = words[: max_length - 2]
+    codes = [101, *(end - start for start, end in words), 102]
+    return codes, [(0, 0), *words, (0, 0)]
 
 
 class Network:
@@ -83,14 +117,38 @@ class Network:
 
 
 class TextModel(Network):
-    """Token states that depend on each token alone; padding is 1e6."""
+    """States that mix each token with its text; padding is 1e6.
 
-    def __call__(self, input_ids, attention_mask):
+    A token's input embedding is a row of cosines of its id, and its state
+    is the hyperbolic tangent of that embedding plus the mean embedding of
+    the tokens of its text, which the mask names: as upstream's attention
+    does, a padded position changes no other.
+    """
+
+    def __init__(self, width):
         import torch  # noqa: PLC0415
 
-        waves = torch.arange(1, self.width + 1, dtype=torch.float32)
-        states = torch.cos(input_ids[..., None] * waves)
-        states[attention_mask == 0] = PAD
+        super().__init__(width)
+        waves = torch.arange(1, width + 1, dtype=torch.float32)
+        table = torch.cos(torch.arange(1024)[:, None] * waves)
+        self.embeddings = torch.nn.Embedding.from_pretrained(table)
+
+    def get_input_embeddings(self):
+        """The lookup of the tokens' input embeddings."""
+        return self.embeddings
+
+    def __call__(self, input_ids=None, attention_mask=None, inputs_embeds=None):
+        import torch  # noqa: PLC0415
+
+        assert (input_ids is None) != (inputs_embeds is None)
+        if inputs_embeds is None:
+            inputs_embeds = self.embeddings(input_ids)
+        assert inputs_embeds.dtype == torch.float32
+        held = attention_mask[..., None] == 1
+        weights = held.to(inputs_embeds.dtype)
+        mean = (inputs_embeds * weights).sum(dim=1, keepdim=True)
+        mean = mean / weights.sum(dim=1, keepdim=True)
+        states = torch.where(held, torch.tanh(inputs_embeds + mean), PAD)
         return types.SimpleNamespace(last_hidden_state=states)
 
 

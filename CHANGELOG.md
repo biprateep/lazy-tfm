@@ -58,6 +58,27 @@ change the API.
   skips the cache, so a gradient method of `lazy.interp` reaches each pixel
   of an image of 8 bits, and the stretched values of an image that is
   stretched. It runs in passes of at most `batch_size` images.
+- Gradients through the pretrained encoders of text. Every network of
+  `lazy.text.Pretrained` has a forward on torch's autograd graph that takes
+  the input embeddings of the tokens it reads of each text, padded on the
+  right with `NaN`, so a gradient method of `lazy.interp` reaches each token.
+  Since query-side gradients go through the encoders, `explain` on a pipeline
+  with such an encoder now attributes to the tokens of each text, not to the
+  columns of its embedding. `Explanation.item_values` holds one value per
+  token, summed over its input embedding, in the order of the new
+  `token_spans`, which locates each token in the text; the new `word_values`
+  sums them by word. The baseline of a text is its own tokens replaced by the
+  padding token, with its special tokens and prefix kept, which therefore
+  get 0. An encoder can now give such a baseline for its items, and
+  `element_ndim` declares an element that is a vector. The embeddings do not
+  change.
+- `explain`'s gradient methods read the context through each step's
+  `transform`, and the encoders' with their cache, since the context takes
+  no gradient; only the explained rows' items are stacked. A column of items
+  in `item_values` is therefore padded to the longest of the explained rows,
+  no longer to the longest of the rows and the context. Through an ensemble
+  whose members' encoders read a column of items differently, the column is
+  a feature per member, `<member>__<column>`.
 - `at=` on `lazy.interp.explain`, for every method, and on
   `explain_context`: the name of a step of a `LazyPipeline` whose output
   columns are the features. Shapley values, `"loco"` and `"permutation"` run

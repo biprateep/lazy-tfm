@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import string
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from sklearn.feature_extraction import text as sklearn_text
 
+from lazy import _steps
 from lazy import _typing
 from lazy.encoders import _base
 from lazy.encoders import _pretrained
@@ -241,6 +244,18 @@ class Pretrained(_pretrained.PretrainedEncoder):
     texts do not exhaust a GPU. A text's embedding is the same either way,
     up to float rounding.
 
+    A token has no gradient, but its input embedding, the vector the
+    network looks it up as, does. The encoder's ``forward`` takes the
+    input embeddings of the tokens that the network reads of each text,
+    shape (n, longest, hidden), padded on the right with ``NaN``, and
+    gives the embeddings on torch's autograd graph, without the cache. A
+    gradient method of :mod:`lazy.interp` then attributes to each token,
+    summed over its vector. The baseline of a text is the same tokens with
+    each of the text's own replaced by the padding token, so that the
+    special tokens and the prefix, which the baseline keeps, get no
+    attribution. :meth:`token_spans` locates each token in the text, and
+    :meth:`word_values` sums the attributions to a text's tokens by word.
+
     Attributes:
         model: The network; ``"e5-small-v2"`` by default.
         max_batch_tokens: The most tokens, padding included, in one forward
@@ -258,6 +273,9 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     modality = "text"
     package = "transformers"
+    gradient_kind = "differentiable"
+    pads_items = "right"
+    element_ndim = 1
     # The split of a batch moves an embedding by float rounding at most.
     _UNKEYED = (*_base.BASE_PARAMS, "device", "max_batch_tokens")
     recipes = {
@@ -306,8 +324,6 @@ class Pretrained(_pretrained.PretrainedEncoder):
 
     def _embed(self, network: Any, items: list[Any]) -> _typing.FloatArray:
         """The unit-length pooled token states of each text."""
-        import torch  # noqa: PLC0415 - an optional, heavy extra.
-
         tokenizer, model = network
         recipe = self._recipe()
         tokens = tokenizer(
@@ -317,27 +333,287 @@ class Pretrained(_pretrained.PretrainedEncoder):
             max_length=recipe.max_tokens,
             return_tensors="pt",
         )
-        mask = tokens["attention_mask"]
-        embeddings = torch.empty(
-            (len(items), recipe.width), dtype=torch.float32
+        embeddings = self._embedded(
+            model, tokens["input_ids"], tokens["attention_mask"]
         )
+        return embeddings.numpy()
+
+    def forward(self, items: Any) -> Any:
+        """The embeddings of texts' input embeddings, on the autograd graph.
+
+        It runs the network on its ``device``, without the cache, in
+        passes of at most ``batch_size`` texts, which ``max_batch_tokens``
+        may split. The texts are taken in order of their number of tokens,
+        as ``transform`` takes them in order of length, so that a pass pads
+        little.
+
+        Args:
+            items: The input embeddings of each text's tokens, as
+                :meth:`_array` gives them, padded on the right with
+                ``NaN``: a float torch tensor of shape (n, length, hidden).
+
+        Returns:
+            What ``transform`` gives for the texts, shape (n, width), of
+            the type and on the device of ``items``.
+
+        Raises:
+            lazy._steps.BarrierError: If ``items`` has another shape, a
+                text has no token, or a token's vector is partly ``NaN`` or
+                follows padding.
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        _, model = self._network()
+        present = self._stack(items, model)
+        # Selected, so that no NaN of the padding enters the graph.
+        vectors = torch.where(present[..., None], items, 0.0)
+        mask = present.long()
+        order = torch.argsort(mask.sum(dim=1), stable=True)
+        embeddings = self._in_passes(
+            order,
+            lambda rows: self._embedded(model, vectors[rows], mask[rows]),
+        )
+        # Back in the order of the items.
+        return embeddings[torch.argsort(order)].to(items)
+
+    def _stack(self, items: Any, model: Any) -> Any:
+        """Which positions of stacked input embeddings hold a token.
+
+        Args:
+            items: The input embeddings, a float torch tensor that should be
+                of shape (n, length, hidden), each text's tokens first and
+                then its padding, ``NaN``.
+            model: The network, whose input embeddings are ``hidden`` long.
+
+        Returns:
+            A boolean tensor of shape (n, length).
+
+        Raises:
+            lazy._steps.BarrierError: If ``items`` is not of that shape, a
+                text has no token, or a token's vector is partly ``NaN`` or
+                follows padding.
+        """
+        hidden = model.get_input_embeddings().embedding_dim
+        if items.ndim == 3 and items.shape[2] == hidden:
+            finite = items.isfinite()
+            present = finite.all(dim=2)
+            if (
+                bool(present[:, 0].all())
+                and bool((finite.any(dim=2) == present).all())
+                and not bool((present[:, 1:] > present[:, :-1]).any())
+            ):
+                return present
+        raise _steps.BarrierError(
+            f"{type(self).__name__} has a forward only for the input"
+            f" embeddings of texts' tokens, shape (n, length, {hidden}),"
+            " each text's tokens first and then its padding, NaN"
+        )
+
+    def _embedded(self, model: Any, inputs: Any, mask: Any) -> Any:
+        """The unit-length pooled token states of texts, on the graph.
+
+        Args:
+            model: The network.
+            inputs: The token ids, an integer torch tensor of shape (n,
+                length), which it looks up pass by pass, or their input
+                embeddings, a float one of shape (n, length, hidden).
+            mask: Which positions hold a token, an integer tensor of shape
+                (n, length); the padding may be on either side.
+
+        Returns:
+            The embeddings, a float32 tensor on the CPU, shape (n, width).
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        pooled = []
         for rows in _token_batches(
             mask.sum(dim=1).tolist(), self.max_batch_tokens
         ):
             # The columns that hold a token of these texts: padding beyond
             # their longest is cut, on either side.
             columns = mask[rows].any(dim=0)
-            batch = {
-                name: values[rows][:, columns].to(model.device)
-                for name, values in tokens.items()
-            }
+            kept = mask[rows][:, columns].to(model.device)
+            vectors = inputs[rows][:, columns]
+            if vectors.is_floating_point():
+                # In float32 first: Apple's MPS has no float64.
+                vectors = vectors.float().to(model.device)
+            else:
+                vectors = model.get_input_embeddings()(vectors.to(model.device))
+            states = model(
+                inputs_embeds=vectors, attention_mask=kept
+            ).last_hidden_state
             # Pooled at once, so that no pass's states outlive it.
-            embeddings[rows] = _pooled(
-                model(**batch).last_hidden_state,
-                batch["attention_mask"],
-                recipe.pooling,
+            pooled.append(_pooled(states, kept, self._recipe().pooling))
+        return torch.cat(pooled)
+
+    def _array(self, item: Any) -> _typing.FloatArray:
+        """The input embeddings of the tokens the network reads of a text.
+
+        Returns:
+            The vectors, float32 as the network reads them, shape
+            (n_tokens, hidden): its special tokens, the prefix and its own
+            tokens, in the order the network reads them.
+
+        Raises:
+            TypeError: If ``item`` is not a ``str``.
+        """
+        ids, _ = self._tokens(item)
+        return self._looked_up(ids)
+
+    def _baseline(  # noqa: GS030 - scikit-learn's X.
+        self, X: Any, stacked: _typing.FloatArray
+    ) -> _typing.FloatArray:
+        """Texts of padding tokens, with their special and prefix tokens.
+
+        Args:
+            X: The texts, a sequence or a pandas Series.
+            stacked: Their tokens' input embeddings, from :meth:`_stacked`.
+
+        Returns:
+            ``stacked``, with the padding token's input embedding in place
+            of each of a text's own tokens.
+        """
+        tokenizer, _ = self._network()
+        own = np.zeros(stacked.shape[:2], dtype=bool)
+        for row, text in enumerate(X):
+            spans = self._tokens(text)[1]
+            own[row, : len(spans)] = spans[:, 0] >= 0
+        baselines = stacked.copy()
+        baselines[own] = self._looked_up(np.array([tokenizer.pad_token_id]))
+        return baselines
+
+    def _tokens(self, text: Any) -> tuple[_typing.IntArray, _typing.IntArray]:
+        """The tokens the network reads of one text, and where they are.
+
+        Args:
+            text: One text.
+
+        Returns:
+            A tuple (ids, spans): the token ids, shape (n_tokens,), and as
+            :meth:`token_spans` gives them.
+
+        Raises:
+            TypeError: If ``text`` is not a ``str``.
+        """
+        tokenizer, _ = self._network()
+        recipe = self._recipe()
+        tokens = tokenizer(
+            recipe.prefix + _texts([text])[0],
+            truncation=True,
+            max_length=recipe.max_tokens,
+            return_offsets_mapping=True,
+            return_special_tokens_mask=True,
+        )
+        spans = np.array(tokens["offset_mapping"]).reshape(-1, 2)
+        spans -= len(recipe.prefix)
+        # A special token spans no character, and the prefix's end before
+        # the text.
+        own = (np.array(tokens["special_tokens_mask"]) == 0) & (spans[:, 1] > 0)
+        spans = np.where(own[:, None], np.maximum(spans, 0), -1)
+        return np.array(tokens["input_ids"]), spans
+
+    def _looked_up(self, ids: _typing.IntArray) -> Any:
+        """The input embeddings of token ids, float32, shape (n, hidden)."""
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        _, model = self._network()
+        with torch.no_grad():
+            vectors = model.get_input_embeddings()(
+                torch.as_tensor(ids, device=model.device)
             )
-        return embeddings.numpy()
+        return vectors.float().cpu().numpy()
+
+    def token_spans(self, text: str) -> _typing.IntArray:
+        """Where each token that the network reads of a text is in the text.
+
+        The tokens are in the order of ``forward``'s input and of the
+        attributions to a text in :attr:`lazy.interp.Explanation.item_values`.
+        It loads the network with its tokenizer, once per process and
+        device, and downloads them on first use.
+
+        Args:
+            text: One text.
+
+        Returns:
+            Each token's first character and the one after its last, as
+            positions in ``text``, shape (n_tokens, 2); -1 for a token
+            that is not the text's own, a special token or one of the
+            prefix.
+
+        Raises:
+            TypeError: If ``text`` is not a ``str``.
+            UnknownNameError: If ``model`` is not one of ``recipes``.
+            ImportError: If the extra of ``model`` is not installed.
+            RuntimeError: If ``device`` names an accelerator that is not
+                there.
+        """
+        _texts([text])
+        self._import()
+        return self._tokens(text)[1]
+
+    def word_values(
+        self, text: str, values: npt.ArrayLike
+    ) -> tuple[list[str], _typing.FloatArray]:
+        """The attributions to a text's tokens, summed over each word.
+
+        A word is a run of characters between whitespace. A token belongs
+        to the word of its first character that is not whitespace, and a
+        token of whitespace alone to the word before it (the first word if
+        none is). Special and prefix tokens belong to none: their
+        attributions are 0.
+
+        Args:
+            text: One text.
+            values: The attributions to its tokens, in the order of
+                :meth:`token_spans`, shape (n,) with ``n`` at least its
+                number of tokens: one statistic of one row of
+                :attr:`lazy.interp.Explanation.item_values`, whose
+                positions beyond the text's tokens are padding.
+
+        Returns:
+            The words, and the sum of the values of each word's tokens,
+            shape (n_words,), as a tuple (words, sums).
+
+        Raises:
+            TypeError: If ``text`` is not a ``str``.
+            UnknownNameError: If ``model`` is not one of ``recipes``.
+            ImportError: If the extra of ``model`` is not installed.
+            RuntimeError: If ``device`` names an accelerator that is not
+                there.
+        """
+        values = np.asarray(values, dtype=np.float64)
+        if values.ndim != 1:
+            raise ValueError(
+                f"values must be 1-D, one per token: got shape {values.shape}"
+            )
+        spans = self.token_spans(text)
+        if len(values) < len(spans):
+            raise ValueError(
+                f"values must hold one per token of the text, at least"
+                f" {len(spans)}: got {len(values)}"
+            )
+        words = np.array(
+            [match.span() for match in re.finditer(r"\S+", text)], dtype=int
+        ).reshape(-1, 2)
+        kept = spans[:, 0] >= 0
+        if not len(words) or not kept.any():
+            return [], np.zeros(len(words))
+        start, end = spans[kept].T
+        # A token's first character that is not whitespace, if it has
+        # one, else its last; then the word that starts at or before it.
+        filled = np.array([not character.isspace() for character in text])
+        visible = np.flatnonzero(filled)
+        after = visible[
+            np.minimum(np.searchsorted(visible, start), len(visible) - 1)
+        ]
+        anchor = np.where((after >= start) & (after < end), after, end - 1)
+        word = np.searchsorted(words[:, 0], anchor, side="right") - 1
+        sums = np.bincount(
+            np.maximum(word, 0),
+            weights=values[: len(spans)][kept],
+            minlength=len(words),
+        )
+        return [text[a:b] for a, b in words], sums
 
 
 def _pooled(states: Any, mask: Any, pooling: str) -> Any:
@@ -372,10 +648,10 @@ def _pooled(states: Any, mask: Any, pooling: str) -> Any:
 def _token_batches(lengths: list[int], budget: int) -> list[slice]:
     """The texts of each forward pass, under a budget of padded tokens.
 
-    The texts are taken in their order, which is that of their length in
-    characters, and a pass ends before its texts, padded to its longest,
-    would exceed the budget; a text longer than the budget is a pass of
-    its own. Texts that fit together are therefore one pass.
+    The texts are taken in their order, which the callers sort by length,
+    and a pass ends before its texts, padded to its longest, would exceed
+    the budget; a text longer than the budget is a pass of its own. Texts
+    in order of length that fit together are therefore one pass.
 
     Args:
         lengths: Each text's number of tokens.

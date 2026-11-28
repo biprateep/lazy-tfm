@@ -82,15 +82,25 @@ class Leaf:
         names: The features of the block: one per column for a table, and
             one for a column of items.
         queries: The rows to explain, float64, shape (n_rows, n_columns)
-            for a table and (n_rows, ...) for items.
+            for a table and (n_rows, ...) for items, which may be float32.
         context: The context rows, of the same trailing shape, shape
-            (n_context, ...).
+            (n_context, ...); ``None`` for a column of items whose context
+            the path does not differentiate.
         per_column: Whether each column is a feature, as in a table; if
             not, the whole of each item is one feature.
         padded: Whether ``NaN`` marks an element that an item lacks or
             that pads it, which the path's forward reads as missing and
             whose gradient is 0; only for a column of items whose encoder
             pads them.
+        baselines: The baseline of each row of the side that the path
+            differentiates, the rows to explain or else the context rows,
+            of that side's shape; ``None`` for the mean of ``context``.
+        element_ndim: The number of trailing axes of an item that hold one
+            element, such as a token's embedding; 0 when each number is
+            one.
+        source: What sets the elements of an item, such as its encoder's
+            class and parameters; leaves of one name add up element by
+            element only if their sources and shapes agree.
     """
 
     names: tuple[str, ...]
@@ -98,6 +108,9 @@ class Leaf:
     context: Any
     per_column: bool = True
     padded: bool = False
+    baselines: Any = None
+    element_ndim: int = 0
+    source: Any = None
 
 
 class BarrierError(ValueError):

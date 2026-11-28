@@ -245,7 +245,7 @@ explanation.item_values["cutout"]  # (n_statistics, n_rows, height, width, chann
 
 The networks of `lazy.time.Pretrained`, but Chronos-T5, also take series of
 different lengths, and series with missing values. The series of a column
-are padded on the left with `NaN` to the longest of the rows and the context,
+are padded on the left with `NaN` to the longest of the explained rows,
 and the network reads a `NaN` as a missing value, whose attribution is 0.
 `item_values` then has shape (n_statistics, n_rows, longest), and the
 attributions of a series of `k` values, from its first finite value to its
@@ -258,20 +258,50 @@ own = values[:, row, -len(series):]  # one per value of the row's series
 
 Integrated gradients keep a missing value missing along the whole path. The
 baseline of a column of items is the mean of the context's items, value by
-value, over the values that the context has.
+value, over the values that the context has. `explain` takes no gradient in
+the context: it reads the context through the encoders' `transform`, with
+their cache, and holds the items of the explained rows alone.
+
+A token of a text has no gradient, but the vector that a network looks it up
+as, its input embedding $e_j$, does. Every network of `lazy.text.Pretrained`
+takes the input embeddings of the tokens it reads of each text, padded on the
+right with `NaN` to the longest of the explained rows. The baseline of a
+text keeps its special tokens and the prefix, such as E5's `"query: "`, and
+puts the padding token's embedding $p$ in place of each of the text's own
+tokens. Token $j$ then gets one value, summed over its vector:
+
+$$
+\phi_j = \sum_{h} (e_{jh} - b_{jh}) \, \frac{1}{m} \sum_{k=1}^{m}
+\frac{\partial s}{\partial e_{jh}}\Big|_{b + \frac{k}{m}(e - b)},
+\qquad b_j = \begin{cases} p & \text{a token of the text} \\
+e_j & \text{a special or prefix token,} \end{cases}
+$$
+
+so a special or prefix token, which the baseline keeps, gets 0, and the
+values of the text's own tokens sum to the statistic's gain from the text of
+padding tokens, to the error of the Riemann sum. `item_values` has shape
+(n_statistics, n_rows, longest), in the order of the encoder's `token_spans`,
+which locates each token in the text. `word_values` sums a row's values over
+each word:
+
+```python
+encoder = model[0].encoders_["note"]
+values = explanation.item_values["note"]  # (n_statistics, n_rows, longest)
+words, sums = encoder.word_values(X_test["note"].iloc[row], values[0, row])
+```
 
 A step that is a barrier ends the attribution: its output columns become the
 features. `explain` warns with the step's name and the reason, and lists them
-in `explanation.barriers`. The encoders of text are barriers, since characters
-have no gradient, and so is Chronos-T5, which reads each value of a series as
-one of a set of tokens. The other networks of `lazy.time.Pretrained` pass the
-gradient to each value of a series, and every network of
-`lazy.image.Pretrained` passes it to each pixel of an image of one size. For
-an image that is not 8-bit, the gradient reaches its stretched values
-({doc}`encoders`); behind augmentations, whose forwards would run before the
-stretch, such a column is a barrier. The pretrained encoders of text are still barriers, whose
-networks lazy runs without gradients. A scikit-learn transformer that lazy
-does not know is a barrier too, although it still predicts as before.
+in `explanation.barriers`. The classical encoders of text are barriers, since
+characters have no gradient, and so is Chronos-T5, which reads each value of a
+series as one of a set of tokens. The other networks of `lazy.time.Pretrained`
+pass the gradient to each value of a series, those of `lazy.text.Pretrained`
+to each token of a text, and every network of `lazy.image.Pretrained` to each
+pixel of an image of one size. For an image that is not 8-bit, the gradient
+reaches its stretched values ({doc}`encoders`); behind augmentations, whose
+forwards would run before the stretch, such a column is a barrier. A
+scikit-learn transformer that lazy does not know is a barrier too, although it
+still predicts as before.
 
 ### Stages
 
@@ -299,8 +329,10 @@ methods take one backward pass from the pooled density, which gives each
 member's path its share: a feature's value is the sum over the members, and
 each member's barriers are reported under `<member>__<step>`. A member that
 stops at a barrier contributes that stage's columns as features of their own,
-named `<member>__<column>`.
-`pooling="quantile"` has no differentiable pass.
+named `<member>__<column>`. So does a column of items whose members' encoders
+read the items differently, such as two networks of text with other
+tokenizers, whose `item_values` would not line up; seeded copies of one
+pipeline share the column. `pooling="quantile"` has no differentiable pass.
 
 ## Groups of columns
 
