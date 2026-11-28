@@ -175,5 +175,6 @@ def test_a_model_pickled_before_max_features_keeps_its_parameters():
     old.__setstate__(state)
     assert old.get_params()["max_features"] is None
     np.testing.assert_array_equal(
-        old.predict(_features()), model.predict(_features())
+        old.predict(_features(), method="mode"),
+        model.predict(_features(), method="mode"),
     )

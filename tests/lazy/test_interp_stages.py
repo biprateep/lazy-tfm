@@ -394,7 +394,9 @@ def test_linear_pooling_has_a_finite_gradient_where_no_member_has_mass():
     levels = np.linspace(0.0, 1.0, 5)
     locs = torch.tensor([[3.0, 4.0, 4.5, 5.0, 6.0]], requires_grad=True)
     parts = [_differentiable.TorchQuantiles(levels, locs) for _ in range(2)]
-    grid = lazy.Grid.from_edges(np.linspace(0.0, 10.0, 21))
+    grid = lazy.Grid.from_edges(
+        np.linspace(0.0, 10.0, 21), normalization="trapezoid"
+    )
     pooled = _paths._pool(parts, np.array([0.5, 0.5]), "linear", grid)
     (gradient,) = torch.autograd.grad(pooled.mean().sum(), locs)
     assert torch.isfinite(gradient).all() and bool(gradient.abs().sum() > 0)

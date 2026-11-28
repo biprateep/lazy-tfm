@@ -529,7 +529,7 @@ class BaseDensityRegressor(
     def predict(  # noqa: GS030 - scikit-learn's X, y.
         self,
         X: _Features,
-        method: str = "mode",
+        method: str = _warnings.POINT_DEFAULT,
         y_grid: grid_lib.GridLike = None,
     ) -> _typing.FloatArray:
         """One value per row, reducing each density by ``method``.
@@ -549,7 +549,9 @@ class BaseDensityRegressor(
             X: Features, shape (n_samples, n_features).
             method: One of :data:`POINT_ESTIMATORS`: ``"mode"`` (the peak,
                 DC1's ``z_PEAK``), ``"peak_mean"`` (DC1's main-peak weighted
-                mean), ``"mean"`` or ``"median"``.
+                mean), ``"mean"`` or ``"median"``. The default is
+                ``"mode"`` until lazy 0.8.0, which changes it to
+                ``"median"``; leaving it out warns.
             y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
 
@@ -561,7 +563,9 @@ class BaseDensityRegressor(
             ValueError: If ``X`` has no rows.
         """
         validation.check_is_fitted(self)
-        method = _check_method(method)
+        method = _check_method(
+            _warnings.resolve_default(method, "method", "median")
+        )
         grid = self._resolve_grid(y_grid)
         X = self._check_features(X)
         return np.concatenate(
@@ -608,7 +612,7 @@ class BaseDensityRegressor(
         self,
         X: _Features,
         y: npt.ArrayLike,
-        method: str = "mode",
+        method: str = _warnings.POINT_DEFAULT,
         y_grid: grid_lib.GridLike = None,
         *,
         scale: metrics.Scale = "none",
@@ -624,7 +628,9 @@ class BaseDensityRegressor(
             X: Features, shape (n_samples, n_features).
             y: Finite true target values, shape (n_samples,).
             method: The point estimate to score, one of
-                :data:`POINT_ESTIMATORS`.
+                :data:`POINT_ESTIMATORS`. The default is ``"mode"`` until
+                lazy 0.8.0, which changes it to ``"median"``; leaving it
+                out warns.
             y_grid: The grid to evaluate on; ``None`` for this model's
                 default.
             scale: How the point metrics (bias, scatter, outlier rates)
@@ -643,7 +649,9 @@ class BaseDensityRegressor(
             ValueError: If ``X`` has no rows.
         """
         validation.check_is_fitted(self)
-        method = _check_method(method)
+        method = _check_method(
+            _warnings.resolve_default(method, "method", "median")
+        )
         if scale not in metrics.SCALES:
             raise ValueError(f"scale must be one of {metrics.SCALES}: {scale=}")
         grid = self._resolve_grid(y_grid)
@@ -964,7 +972,9 @@ def default_grid(low: float, high: float) -> grid_lib.Grid:
         :data:`DEFAULT_PADDING` of that range on each side.
     """
     pad = DEFAULT_PADDING * (high - low) or DEFAULT_PADDING
-    return grid_lib.Grid.linear(low - pad, high + pad, DEFAULT_N_BINS)
+    return grid_lib.Grid.linear(
+        low - pad, high + pad, DEFAULT_N_BINS, normalization="trapezoid"
+    )
 
 
 def _check_method(method: str) -> str:

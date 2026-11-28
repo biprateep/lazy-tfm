@@ -7,6 +7,8 @@ feature satisfies the same contract the real backends do, so it can carry the
 whole scikit-learn conformance suite.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,6 +21,11 @@ import standins
 import lazy
 
 GaussianDummy = standins.GaussianDummy
+
+
+def _point(method):
+    """The point-estimate argument that ``method`` needs, if any."""
+    return {"method": "mode"} if method == "evaluate" else {}
 
 
 @pytest.fixture
@@ -34,7 +41,12 @@ def _default_grid(y):
     """The grid a model without a native grid defaults to: over y's range."""
     low, high = float(np.min(y)), float(np.max(y))
     pad = lazy.base.DEFAULT_PADDING * (high - low)
-    return lazy.Grid.linear(low - pad, high + pad, lazy.base.DEFAULT_N_BINS)
+    return lazy.Grid.linear(
+        low - pad,
+        high + pad,
+        lazy.base.DEFAULT_N_BINS,
+        normalization="trapezoid",
+    )
 
 
 def test_fit_returns_self_and_sets_fitted_attributes(data):
@@ -63,7 +75,7 @@ def test_predict_pdf_is_an_alias_of_predict_proba(data):
 
 def test_predict_recovers_the_truth_for_a_well_specified_model(data):
     X, y = data
-    z = GaussianDummy(sigma=0.05).fit(X, y).predict(X)
+    z = GaussianDummy(sigma=0.05).fit(X, y).predict(X, method="mode")
     # One grid bin plus the peak's discreteness.
     assert np.abs(z - y).max() < 0.02
 
@@ -74,12 +86,6 @@ def test_every_point_estimate_method_is_usable(data, method):
     z = GaussianDummy().fit(X, y).predict(X, method=method)
     assert z.shape == (len(X),)
     assert np.isfinite(z).all()
-
-
-def test_z_peak_is_the_default_method(data):
-    X, y = data
-    est = GaussianDummy().fit(X, y)
-    assert np.array_equal(est.predict(X), est.predict(X, method="mode"))
 
 
 def test_unknown_method_names_the_alternatives(data):
@@ -97,6 +103,8 @@ def test_score_is_negated_cde_loss_so_higher_is_better(data):
     assert sharp > blunt
 
 
+# scikit-learn calls predict(X), which cannot pass method.
+@pytest.mark.filterwarnings("ignore:method was not passed:FutureWarning")
 def test_regressor_meta_estimators_accept_a_model(data):
     X, y = data
     stack = ensemble.StackingRegressor([("dummy", GaussianDummy())], cv=2)
@@ -115,7 +123,9 @@ def test_regressor_meta_estimators_accept_a_model(data):
 def test_a_grid_passed_at_call_time_is_used(data):
     X, y = data
     est = GaussianDummy().fit(X, y)
-    assert est.predict_proba(X, lazy.Grid.linear(0.0, 3.0, 37)).shape == (
+    assert est.predict_proba(
+        X, lazy.Grid.linear(0.0, 3.0, 37, normalization="trapezoid")
+    ).shape == (
         len(X),
         37,
     )
@@ -123,14 +133,24 @@ def test_a_grid_passed_at_call_time_is_used(data):
         len(X),
         30,
     )
-    assert est.predict(X, y_grid=np.linspace(0.05, 2.95, 30)).shape == (len(X),)
+    assert est.predict(
+        X, y_grid=np.linspace(0.05, 2.95, 30), method="mode"
+    ).shape == (len(X),)
 
 
 def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
     X, y = data
     est = GaussianDummy(sigma=0.05).fit(X, y)
-    coarse = est.predict(X, y_grid=lazy.Grid.linear(0.0, 2.0, 50))
-    fine = est.predict(X, y_grid=lazy.Grid.linear(0.0, 2.0, 400))
+    coarse = est.predict(
+        X,
+        y_grid=lazy.Grid.linear(0.0, 2.0, 50, normalization="trapezoid"),
+        method="mode",
+    )
+    fine = est.predict(
+        X,
+        y_grid=lazy.Grid.linear(0.0, 2.0, 400, normalization="trapezoid"),
+        method="mode",
+    )
     assert est.offset_ is not None  # nothing was refitted
     # Same estimator, coarser resolution.
     assert np.abs(coarse - fine).max() < 0.05
@@ -138,10 +158,14 @@ def test_one_fitted_model_answers_on_many_grids_without_refitting(data):
 
 def test_the_constructor_grid_is_the_default(data):
     X, y = data
-    est = GaussianDummy(y_grid=lazy.Grid.linear(0.0, 3.0, 37)).fit(X, y)
+    est = GaussianDummy(
+        y_grid=lazy.Grid.linear(0.0, 3.0, 37, normalization="trapezoid")
+    ).fit(X, y)
     assert est.predict_proba(X).shape == (len(X), 37)
     # ... and a call-time grid still wins
-    assert est.predict_proba(X, lazy.Grid.linear(0.0, 2.0, 11)).shape == (
+    assert est.predict_proba(
+        X, lazy.Grid.linear(0.0, 2.0, 11, normalization="trapezoid")
+    ).shape == (
         len(X),
         11,
     )
@@ -149,7 +173,9 @@ def test_the_constructor_grid_is_the_default(data):
 
 def test_predict_cdf_is_zero_below_and_one_above_the_distribution(data):
     X, y = data
-    wide = lazy.Grid.linear(-5.0, 7.0, 60)  # beyond the default grid's ends
+    wide = lazy.Grid.linear(
+        -5.0, 7.0, 60, normalization="trapezoid"
+    )  # beyond the default grid's ends
     cdf = GaussianDummy().fit(X, y).predict_cdf(X, wide)
     assert (np.diff(cdf, axis=1) >= 0.0).all()
     np.testing.assert_array_equal(cdf[:, [0, -1]], [[0.0, 1.0]] * len(X))
@@ -226,7 +252,7 @@ def test_point_estimates_returns_every_definition_at_once(data):
 
 def test_evaluate_returns_a_one_row_metric_table(data):
     X, y = data
-    table = GaussianDummy().fit(X, y).evaluate(X, y)
+    table = GaussianDummy().fit(X, y).evaluate(X, y, method="mode")
     assert len(table) == 1
     assert table["model"].iloc[0] == "GaussianDummy"
     assert table["point_estimate"].iloc[0] == "mode"
@@ -324,14 +350,14 @@ def test_as_grid_refuses_the_native_sentinel():
     [
         lambda est, X, y: est.predict_proba(X),
         lambda est, X, y: est.predict_cdf(X),
-        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict(X, method="mode"),
         lambda est, X, y: est.predict_pdf(X),
         lambda est, X, y: est.predict_quantiles(X),
         lambda est, X, y: est.predict_interval(X),
         lambda est, X, y: est.predict_pit(X, y),
         lambda est, X, y: est.predict_distribution(X),
         lambda est, X, y: est.score(X, y),
-        lambda est, X, y: est.evaluate(X, y),
+        lambda est, X, y: est.evaluate(X, y, method="mode"),
     ],
 )
 def test_no_rows_are_refused_before_the_model_runs(data, call):
@@ -407,7 +433,7 @@ def test_scoring_refuses_non_finite_targets_before_inference(data, method):
     y = y.copy()
     y[3] = np.nan
     with pytest.raises(ValueError, match="non-finite"):
-        getattr(est, method)(X, y)
+        getattr(est, method)(X, y, **_point(method))
     assert getattr(est, "calls_", 0) == 0
 
 
@@ -416,7 +442,7 @@ def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
     X, y = data
     est = _CountingDummy().fit(X, y)
     with pytest.raises(ValueError, match="rows but y has"):
-        getattr(est, method)(X, y[:-1])
+        getattr(est, method)(X, y[:-1], **_point(method))
     assert getattr(est, "calls_", 0) == 0
 
 
@@ -465,7 +491,7 @@ def test_a_failed_refit_leaves_the_model_unfitted(data, params, target, error):
     assert not _fitted_attributes(est)
     for features in (X, wider):
         with pytest.raises(exceptions.NotFittedError):
-            est.predict(features)
+            est.predict(features, method="mode")
 
 
 def test_fitting_no_rows_is_refused_like_scikit_learn(data):
@@ -481,12 +507,12 @@ def test_fitting_no_rows_is_refused_like_scikit_learn(data):
     "call",
     [
         lambda est, X, y: est.predict_proba(X),
-        lambda est, X, y: est.predict(X),
+        lambda est, X, y: est.predict(X, method="mode"),
         lambda est, X, y: est.predict_cdf(X),
         lambda est, X, y: est.predict_quantiles(X),
         lambda est, X, y: est.predict_pit(X, y),
         lambda est, X, y: est.score(X, y),
-        lambda est, X, y: est.evaluate(X, y),
+        lambda est, X, y: est.evaluate(X, y, method="mode"),
     ],
 )
 def test_feature_name_warnings_point_at_the_callers_line(data, call):
@@ -511,24 +537,24 @@ def test_blocked_scoring_matches_the_whole_array_on_a_trapezoid_grid(
     )
     assert est.score(X, y) == -lazy.metrics.cde_loss(y, grid, pdfs)
     pd.testing.assert_frame_equal(
-        est.evaluate(X, y),
-        lazy.metrics.summarize(y, grid, pdfs, label=est.name_),
+        est.evaluate(X, y, method="mode"),
+        lazy.metrics.summarize(y, grid, pdfs, label=est.name_, point="mode"),
     )
 
 
 def test_evaluate_scores_plain_residuals_by_default(data):
     X, y = data
     est = _CountingDummy().fit(X, y)
-    table = est.evaluate(X, y)
+    table = est.evaluate(X, y, method="mode")
     assert table["scale"].iloc[0] == "none"
-    assert table["bias"].iloc[0] == np.median(est.predict(X) - y)
-    scaled = est.evaluate(X, y, scale="1+y")
+    assert table["bias"].iloc[0] == np.median(est.predict(X, method="mode") - y)
+    scaled = est.evaluate(X, y, scale="1+y", method="mode")
     assert scaled["scale"].iloc[0] == "1+y"
-    expected = np.median((est.predict(X) - y) / (1 + y))
+    expected = np.median((est.predict(X, method="mode") - y) / (1 + y))
     assert scaled["bias"].iloc[0] == pytest.approx(expected)
     calls = est.calls_
     with pytest.raises(ValueError, match="scale must be one of"):
-        est.evaluate(X, y, scale="log")
+        est.evaluate(X, y, scale="log", method="mode")
     assert est.calls_ == calls
 
 
@@ -541,3 +567,39 @@ def test_every_warning_class_lazy_exports_is_a_lazy_warning():
     ]
     assert lazy.LazyWarning in classes
     assert [c for c in classes if not issubclass(c, lazy.LazyWarning)] == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda model, X, y: model.predict(X),
+        lambda model, X, y: model.evaluate(X, y),
+    ],
+    ids=["predict", "evaluate"],
+)
+def test_a_point_estimate_left_out_warns_once_and_stays_the_mode(data, call):
+    X, y = data
+    model = GaussianDummy().fit(X, y)
+    with pytest.warns(FutureWarning, match="lazy 0.8.0") as record:
+        result = call(model, X, y)
+    assert len(record) == 1
+    assert "method was not passed" in str(record[0].message)
+    assert "'mode' to 'median'" in str(record[0].message)
+    assert "method='mode' to keep" in str(record[0].message)
+    assert record[0].filename == __file__
+    expected = model.predict(X, method="mode")
+    if hasattr(result, "columns"):
+        assert result["point_estimate"].iloc[0] == "mode"
+    else:
+        np.testing.assert_array_equal(result, expected)
+
+
+@pytest.mark.parametrize("method", lazy.base.POINT_ESTIMATORS)
+def test_a_point_estimate_passed_does_not_warn(data, method):
+    X, y = data
+    model = GaussianDummy().fit(X, y)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model.predict(X, method=method)
+        model.evaluate(X, y, method=method)
+        lazy.metrics.density_scorer("crps")(model, X, y)

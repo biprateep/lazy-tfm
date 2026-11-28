@@ -7,7 +7,7 @@ of a usual regressor:
 | Method          | A usual scikit-learn estimator      | A LAZY model                                                                                       |
 | --------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `fit`           | Trains the model.                   | Stores the context and trains no weights (see [the FAQ](faq.md#what-does-fit-do)).                             |
-| `predict`       | The prediction.                     | The mode of each row's density by default; `method=` picks another point estimate.                 |
+| `predict`       | The prediction.                     | The mode of each row's density by default, with a `FutureWarning`: the default is the median from 0.8.0. `method=` picks another point estimate. |
 | `predict_proba` | A classifier's class probabilities. | Densities on a grid, shape `(n_samples, n_bins)`.                                                  |
 | `score`         | R² for a regressor.                 | The negative CDE loss, so higher is better.                                                        |
 
@@ -35,12 +35,12 @@ The table lists what each tool does with a LAZY model.
 | {class}`~sklearn.pipeline.Pipeline` | Works, with a caveat | `fit`, `predict`, `predict_proba` and `score` pass through. A pipeline has none of a model's other methods, takes `y_grid` and `method` by name only, and its `score` drops `y_grid`. Use {class}`~lazy.pipeline.LazyPipeline` instead (see [Pipelines](#pipelines)). |
 | {class}`~sklearn.compose.ColumnTransformer` | Works | As a pipeline step before the model. |
 | {class}`~sklearn.model_selection.GridSearchCV`, {func}`~sklearn.model_selection.cross_val_score`, default scoring | Works | They maximize `score`, the negative CDE loss, so they prefer the better densities. Each candidate is scored on its default grid; a `y_grid` in the constructor scores every candidate on one grid. |
-| The same, with `scoring=` | Works, with a caveat | A point scorer, such as `"neg_mean_absolute_error"`, scores `predict`, which is the mode. {func}`~lazy.metrics.density_scorer` scores the densities instead (see [Scorers](#scorers)). |
+| The same, with `scoring=` | Works, with a caveat | A point scorer, such as `"neg_mean_absolute_error"`, scores `predict`, which is the mode now, with a `FutureWarning`, and the median from 0.8.0. {func}`~lazy.metrics.density_scorer` scores the densities instead (see [Scorers](#scorers)). |
 | The same, with metadata routing | Works, with a caveat | `y_grid` is an option, not metadata, so routing never passes it on: a grid passed through a router raises `TypeError`. Set the grid in the constructor, `y_grid=...`, instead. `predict`'s `method` can still be requested with `set_predict_request`. |
 | The same, with `n_jobs` | Works | Each job runs in a process of its own (see [Parallel jobs](scaling.md#parallel-jobs)). |
-| {func}`~sklearn.model_selection.cross_val_predict` | Works, with a caveat | `method="predict"` returns the modes. `method="predict_proba"` does not work: scikit-learn treats it as a classifier's method and raises `AttributeError`. Loop over the folds instead. |
+| {func}`~sklearn.model_selection.cross_val_predict` | Works, with a caveat | `method="predict"` returns the modes, with a `FutureWarning`, and the medians from 0.8.0. `method="predict_proba"` does not work: scikit-learn treats it as a classifier's method and raises `AttributeError`. Loop over the folds instead. |
 | {class}`~sklearn.compose.TransformedTargetRegressor` | Works, with a caveat | Only `predict` is transformed back. It has no `predict_proba`. |
-| {class}`~sklearn.ensemble.StackingRegressor`, {class}`~sklearn.ensemble.VotingRegressor`, {class}`~sklearn.ensemble.BaggingRegressor` | Works, with a caveat | They combine `predict`, the modes, not the densities. {doc}`ensembles` pools densities. |
+| {class}`~sklearn.ensemble.StackingRegressor`, {class}`~sklearn.ensemble.VotingRegressor`, {class}`~sklearn.ensemble.BaggingRegressor` | Works, with a caveat | They combine `predict`, the modes now, with a `FutureWarning`, and the medians from 0.8.0, not the densities. {doc}`ensembles` pools densities. |
 | {func}`~sklearn.inspection.partial_dependence` | Works | On `predict`. |
 | {func}`~sklearn.utils.estimator_checks.check_estimator` | Fails two checks on purpose | `check_regressors_no_decision_function` fails because `predict_proba` returns densities. `check_dtype_object` fails because a non-numeric cell raises `ValueError`, not `TypeError`. Pass both in `expected_failed_checks`. The checks fit the model, so a real backend loads its checkpoint. |
 | {mod}`pickle`, `joblib` | Works | See {doc}`saving`. |

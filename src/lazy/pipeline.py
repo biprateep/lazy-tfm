@@ -46,6 +46,7 @@ from sklearn.utils import validation
 
 from lazy import _inputs
 from lazy import _typing
+from lazy import _warnings
 from lazy import distributions
 from lazy import grid as grid_lib
 from lazy import metrics
@@ -215,14 +216,16 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
     def predict(  # noqa: GS030 - scikit-learn's X, y.
         self,
         X: _Features,
-        method: str = "mode",
+        method: str = _warnings.POINT_DEFAULT,
         y_grid: grid_lib.GridLike = None,
     ) -> _typing.FloatArray:
         """One value per row, reducing each density by ``method``.
 
         Args:
             X: Features as the first step takes them, n_samples rows.
-            method: One of :data:`~lazy.base.POINT_ESTIMATORS`.
+            method: One of :data:`~lazy.base.POINT_ESTIMATORS`. The default
+                is ``"mode"`` until lazy 0.8.0, which changes it to
+                ``"median"``; leaving it out warns.
             y_grid: The grid to evaluate on; ``None`` for the model's
                 default.
 
@@ -374,7 +377,7 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
         self,
         X: _Features,
         y: npt.ArrayLike,
-        method: str = "mode",
+        method: str = _warnings.POINT_DEFAULT,
         y_grid: grid_lib.GridLike = None,
         *,
         scale: metrics.Scale = "none",
@@ -385,7 +388,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             X: Features as the first step takes them, n_samples rows.
             y: Finite true target values, shape (n_samples,).
             method: The point estimate to score, one of
-                :data:`~lazy.base.POINT_ESTIMATORS`.
+                :data:`~lazy.base.POINT_ESTIMATORS`. The default is
+                ``"mode"`` until lazy 0.8.0, which changes it to
+                ``"median"``; leaving it out warns.
             y_grid: The grid to evaluate on; ``None`` for the model's
                 default.
             scale: How the point metrics scale residuals; see

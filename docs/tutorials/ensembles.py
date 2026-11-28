@@ -95,7 +95,9 @@ train, test = order[:10_000], order[10_000:12_000]
 X_train, y_train = X.iloc[train], y[train]
 X_test, y_test = X.iloc[test], y[test]
 
-grid = lazy.Grid.linear(0.0, 21.0, 1_050)  # RMSD in [Å], 0.02 Å bins
+grid = lazy.Grid.linear(
+    0.0, 21.0, 1_050, normalization="trapezoid"
+)  # RMSD in [Å], 0.02 Å bins
 print(f"{len(train):,} context rows, {len(test):,} test rows")
 
 # %% [markdown]
@@ -201,7 +203,9 @@ for label in ["TabPFN-3.5", "LimiX-2", "TabFM"]:
 singles = ["TabPFN-3.5", "LimiX-2", "TabFM"]
 medians = np.stack([predicted[label].median() for label in singles])
 rows = np.argsort(np.ptp(medians, axis=0))[-3:]  # Most disagreement
-display = lazy.Grid.linear(0.0, 21.0, 210)  # 0.1 Å bins, for the eye
+display = lazy.Grid.linear(
+    0.0, 21.0, 210, normalization="trapezoid"
+)  # 0.1 Å bins, for the eye
 
 fig, axes = plt.subplots(1, 3, figsize=(7.5, 2.8), layout="constrained")
 for ax, row in zip(axes, rows, strict=True):

@@ -20,7 +20,7 @@ from lazy import datasets
 from lazy.models import _hub
 from lazy.models import tabfm
 
-GRID_25 = lazy.Grid.linear(0.0, 1.75, 25)
+GRID_25 = lazy.Grid.linear(0.0, 1.75, 25, normalization="trapezoid")
 """A grid of 25 bins over the targets of _problem."""
 
 GRID = {"n_coarse_bins": "grid", "n_fine_bins": "grid"}
@@ -195,7 +195,7 @@ def test_a_matched_grid_s_bins_are_the_classes(monkeypatch):
 def test_a_matched_grid_s_empty_bins_get_zero(monkeypatch):
     """No rows: zero; a group whose rows share one bin gives it all."""
     X, z, X_query = _problem(300)
-    grid = lazy.Grid.linear(0.0, 2.0, 20)
+    grid = lazy.Grid.linear(0.0, 2.0, 20, normalization="trapezoid")
     # Group 0 (bins 0-9, up to 1.0) loses bins 2-4; group 1 (bins 10-19)
     # keeps one bin's worth of rows, all in bin 11.
     keep = ((z < 0.2) | (z >= 0.5)) & (z < 1.0)
@@ -265,7 +265,7 @@ def test_a_pickle_fitted_with_the_em_prior_shift_is_refused(monkeypatch):
 
 def test_a_grid_of_ten_bins_or_fewer_is_one_classifier(monkeypatch):
     X, z, X_query = _problem(200)
-    grid = lazy.Grid.linear(0.0, 1.75, 7)
+    grid = lazy.Grid.linear(0.0, 1.75, 7, normalization="trapezoid")
     est = _fit(monkeypatch, X, z, y_grid=grid, **GRID)
     assert est.bins_ == "grid 7 bins in 1 groups"
     est.predict_distribution(X_query)
@@ -275,7 +275,7 @@ def test_a_grid_of_ten_bins_or_fewer_is_one_classifier(monkeypatch):
 
 def test_targets_outside_a_matched_grid_go_to_its_end_bins(monkeypatch):
     X, z, _ = _problem(300)
-    grid = lazy.Grid.linear(0.3, 1.3, 20)
+    grid = lazy.Grid.linear(0.3, 1.3, 20, normalization="trapezoid")
     with pytest.warns(UserWarning, match="outside the y_grid range"):
         est = _fit(monkeypatch, X, z, y_grid=grid, **GRID)
     edges = est._edges(est.y_context_, 0.0)[0]
@@ -351,7 +351,7 @@ def test_grid_bins_are_refused_where_they_cannot_be_built(
 
 def test_a_grid_of_100_bins_is_ten_groups_of_ten(monkeypatch):
     X, z, _ = _problem(300)
-    grid = lazy.Grid.linear(0.0, 1.75, 100)
+    grid = lazy.Grid.linear(0.0, 1.75, 100, normalization="trapezoid")
     est = _fit(monkeypatch, X, z, y_grid=grid, **GRID)
     assert (est.n_coarse_bins_, est.n_fine_bins_) == (10, 10)
     assert est.bins_ == "grid 100 bins in 10 groups"
@@ -401,7 +401,7 @@ def test_the_checkpoint_gives_auto_and_ten_by_ten_alike():
 def test_the_checkpoint_predicts_on_a_matched_grid():
     """Real class labels with gaps: the absent bins come back as zero."""
     X, z, X_query = _problem(200, n_query=20)
-    grid = lazy.Grid.linear(0.0, 2.0, 40)
+    grid = lazy.Grid.linear(0.0, 2.0, 40, normalization="trapezoid")
     est = tabfm.TabFMHistogram(
         n_estimators=1, device="cpu", progress=False, y_grid=grid, **GRID
     )

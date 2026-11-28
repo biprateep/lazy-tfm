@@ -139,12 +139,14 @@ for ax in axes:
 # convention.
 
 # %%
-table = metrics.summarize(z_test, grid, pdfs, label="TabPFN-3.5", scale="1+y")
+table = metrics.summarize(
+    z_test, grid, pdfs, point="mode", label="TabPFN-3.5", scale="1+y"
+)
 table.T
 
 # %%
 fig = plotting.diagnostic_panel(
-    z_test, grid, pdfs, label="TabPFN-3.5", scale="1+y"
+    z_test, grid, pdfs, point="mode", label="TabPFN-3.5", scale="1+y"
 )
 
 # %% [markdown]
@@ -177,7 +179,7 @@ pd.concat(
     [
         table,
         metrics.summarize(
-            z_test, grid, pdfs_tabicl, label="TabICL", scale="1+y"
+            z_test, grid, pdfs_tabicl, point="mode", label="TabICL", scale="1+y"
         ),
     ]
 ).set_index("model").T
@@ -293,7 +295,7 @@ print(
 )
 table_biased = pd.concat(
     [
-        metrics.summarize(z_rep, grid, p, label=name, scale="1+y")
+        metrics.summarize(z_rep, grid, p, point="mode", label=name, scale="1+y")
         for name, p in results.items()
     ]
 ).set_index("model")[["cde_loss", "sigma_iqr", "bias", "outlier_rate"]]

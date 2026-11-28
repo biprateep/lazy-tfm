@@ -168,10 +168,14 @@ def _call(case: str) -> Callable[[], object]:
     name, method = case.split(".")
     model = _model(name)
     _, _, X, y = _data(0)
-    if method in ("score", "evaluate"):
-        return lambda: getattr(model, method)(X, y)
+    if method == "score":
+        return lambda: model.score(X, y)
+    if method == "evaluate":
+        return lambda: model.evaluate(X, y, method="mode")
     if method == "predict_quantiles":
         return lambda: model.predict_quantiles(X, QUANTILES)
+    if method == "predict":
+        return lambda: model.predict(X, method="mode")
     return lambda: getattr(model, method)(X)
 
 

@@ -297,6 +297,25 @@ change the API.
   rows behind a prediction, for the CRPS, the NLL and the mean. It no longer
   needs the `shap` package.
 
+### Deprecated
+
+- Two defaults change in 0.8.0, and each now warns with a `FutureWarning`
+  when its argument is left out. The warning names the argument and how to
+  keep today's behaviour. Passing the argument gives no warning.
+  - The point estimate changes from `"mode"` to `"median"`. This covers
+    `predict(method=)` of every model and of `LazyPipeline`,
+    `evaluate(method=)`, `metrics.summarize(point=)` and
+    `metrics.evaluate_grid_pdfs(point=)`. Pass `method="mode"` (or
+    `point="mode"`) to keep the mode. scikit-learn's own tools, such as
+    `cross_val_predict`, call `predict(X)` and cannot pass `method`.
+  - `Grid(...)`, `Grid.linear` and `Grid.from_edges` change their default
+    `normalization` from `"trapezoid"` to `"histogram"`. Pass
+    `normalization="trapezoid"` to keep the trapezoid rule. The default grids
+    of the models are histogram grids already, so they do not change.
+    `Grid.from_centers`, and so a `y_grid` given as an array such as
+    `np.linspace(...)`, `lazy.base.default_grid` and
+    `lazy.datasets.DC1_GRID`, stay trapezoid in 0.8.0.
+
 ### Removed
 
 - `TabFMHistogram` no longer takes `prior_shift`, and `lazy.models.tabfm`

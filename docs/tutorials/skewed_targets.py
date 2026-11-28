@@ -225,8 +225,12 @@ def coverage(q: np.ndarray, y: np.ndarray) -> float:
 
 table = pd.concat(
     [
-        metrics.summarize(y_test, price_grid, pdf_lin, label="fit on price"),
-        metrics.summarize(y_test, price_grid, pdf_log, label="fit on log"),
+        metrics.summarize(
+            y_test, price_grid, pdf_lin, point="mode", label="fit on price"
+        ),
+        metrics.summarize(
+            y_test, price_grid, pdf_log, point="mode", label="fit on log"
+        ),
     ]
 ).set_index("model")
 table["coverage_68"] = [coverage(q, y_test) for q in (q_lin, q_log)]
@@ -312,7 +316,7 @@ print(f"Mean probability of a negative price: {below_zero.mean():.1e}")
 # diamond whose price is closest to 6,000 USD.
 
 # %%
-short_grid = lazy.Grid.linear(0.0, 5_000.0, 250)
+short_grid = lazy.Grid.linear(0.0, 5_000.0, 250, normalization="trapezoid")
 i = int(np.argmin(np.abs(y_test - 6_000)))
 one = X_test.iloc[[i]]
 

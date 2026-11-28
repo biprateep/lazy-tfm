@@ -14,7 +14,7 @@ rcParams::
     from lazy import plotting
 
     plotting.use_style()
-    fig = plotting.diagnostic_panel(y_true, est.grid_, pdfs)
+    fig = plotting.diagnostic_panel(y_true, est.grid_, pdfs, point="mode")
 
 The PDF plots take the grid the densities are on: a
 :class:`lazy.grid.Grid`, which says how they integrate (a
@@ -53,6 +53,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from lazy import _warnings
 from lazy import grid
 from lazy import metrics
 from lazy.plotting import style
@@ -716,7 +717,7 @@ def diagnostic_panel(
     y_grid: _GridLike,
     pdfs: npt.ArrayLike,
     *,
-    point: str = "mode",
+    point: str = _warnings.POINT_DEFAULT,
     label: str | None = None,
     bin_edges: npt.ArrayLike | None = None,
     scale: Literal["1+y", "none"] = "none",
@@ -736,7 +737,9 @@ def diagnostic_panel(
             densities are read as constant across their bins.
         pdfs: PDFs on ``y_grid``, shape (n_objects, n_grid).
         point: Point estimate to use, a key of
-            :func:`lazy.metrics.grid_point_estimates`.
+            :func:`lazy.metrics.grid_point_estimates`. The default
+            changes from ``"mode"`` to ``"median"`` in lazy 0.8.0, and
+            leaving it out warns.
         label: Legend label and figure title.
         bin_edges: With bare centers, the bin edges of histogram densities,
             shape (n_grid + 1,).
@@ -751,6 +754,7 @@ def diagnostic_panel(
         ValueError: If bare centers are not uniformly spaced; pass the Grid
             or ``bin_edges``.
     """
+    point = _warnings.resolve_default(point, "point", "median")
     y_true = np.asarray(y_true, dtype=float)
     centers, edges = _geometry(y_grid, bin_edges)
     y_pred = metrics.grid_point_estimates(centers, pdfs, bin_edges=edges)[point]
