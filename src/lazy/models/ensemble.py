@@ -112,7 +112,9 @@ SMALL_CONTEXT_ROWS = 3_000
 
 # A bagged member's mixture is inverted exactly on the union of its
 # components' edges, unless there are more than this many; it is then read
-# at the pooling grid's resolution, so that its quantiles fit in memory.
+# at the pooling grid's resolution, since the exact inverse costs time in
+# proportion to the components times the union's edges, which grows as the
+# square of the number of bags.
 _EXACT_PPF_MAX_EDGES = 20_000
 
 # The parameters the ensemble passes on to members that keep their default.
