@@ -250,6 +250,11 @@ change the API.
 
 ### Changed
 
+- A row of a `HistogramDistribution` with no mass is a uniform density over
+  its buckets, as `Grid.normalize` makes a row with no mass: each bucket's
+  probability is its share of the total width. It was uniform in
+  probability, the same in every bucket of positive width. The two differ
+  only on buckets of unequal widths.
 - `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
   `predict_quantiles`, `predict_interval`, `predict_pit` and
   `predict_distribution` raise `ValueError` for an `X` with no rows, before

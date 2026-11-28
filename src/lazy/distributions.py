@@ -416,9 +416,10 @@ def _quantile_mean(quants: _typing.FloatArray, locs: Any) -> Any:
 def _probabilities(masses: Any, widths: _typing.FloatArray) -> Any:
     """Histogram rows' masses renormalized to sum to one per row.
 
-    An empty row is uniform in probability over the buckets of positive
-    width, so that a zero-width bucket carries none; over every bucket if
-    none has a width.
+    An empty row is a uniform density over the buckets, as
+    :meth:`lazy.grid.Grid.normalize` makes an empty row: each bucket's
+    probability is its share of the total width, so that a zero-width
+    bucket carries none; uniform over every bucket if none has a width.
 
     Args:
         masses: Non-negative masses, shape (n_rows, n_buckets), a numpy
@@ -434,8 +435,10 @@ def _probabilities(masses: Any, widths: _typing.FloatArray) -> Any:
     probabilities = masses / xp.where(full, total, 1.0)
     if bool(xp.all(full)):
         return probabilities
-    wide = widths > 0
-    weights = wide if wide.any() else np.ones_like(wide)
+    # Over the widest bucket first, so that finite widths cannot sum to inf.
+    weights = (
+        widths / widths.max() if widths.max() > 0 else np.ones_like(widths)
+    )
     return _arrays.put(probabilities, ~full, weights / weights.sum())
 
 
@@ -784,9 +787,9 @@ class HistogramDistribution(_Base):
         bins: Bucket edges, shape (n_buckets + 1,), non-decreasing, finite.
         masses: Non-negative weight in each bucket, shape (n_rows,
             n_buckets), stored as given; every method treats each row as
-            renormalized to sum to one (an empty row as uniform over the
-            buckets of positive width). :attr:`probabilities` gives the
-            renormalized masses.
+            renormalized to sum to one (an empty row as a uniform density
+            over the buckets). :attr:`probabilities` gives the renormalized
+            masses.
         ancil: Optional per-row metadata, each value of length n_rows.
     """
 
@@ -827,10 +830,9 @@ class HistogramDistribution(_Base):
     def probabilities(self) -> _typing.FloatArray:
         """The masses renormalized to sum to one per row, (n_rows, n_buckets).
 
-        An empty row is uniform in probability over the buckets of positive
-        width, so that a zero-width bucket carries none; over every bucket
-        if none has a width. Each access returns a new array, which the
-        caller may modify.
+        An empty row is a uniform density over the buckets, as
+        :func:`_probabilities` explains. Each access returns a new array,
+        which the caller may modify.
         """
         return _probabilities(self.masses, self.widths)
 
