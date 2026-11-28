@@ -288,6 +288,12 @@ change the API.
 - `lazy.models.registry.register` refuses a backend whose constructor has a
   parameter without a default, since `cls()` could not build it. The five
   backends that ship are unaffected.
+- `LazyPipeline.fit` with a step that trains through the model, such as a
+  `Tabularizer` with an adaptive reducer, checks `y` before any training,
+  encodes each item of the context once, not twice, and, unless it is given
+  fit parameters, fits the model once, after the training, not also before
+  it. Outputs are unchanged, bit for bit; such a fit takes about 0.7 of
+  the time it took before.
 - `array-api-compat` 1.14 or later is a new dependency. The densities on a
   grid, the means and the grid metrics run one implementation for numpy
   arrays and torch tensors, so that a gradient can pass through them. Their

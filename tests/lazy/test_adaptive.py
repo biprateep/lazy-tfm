@@ -2,11 +2,15 @@
 # Copyright (c) 2025 Biprateep Dey
 """The Tabularizer's adaptive reducer, trained through a pipeline's model."""
 
+import pickle
+
 import fakes
 import numpy as np
 import pandas as pd
 import pytest
+import sklearn
 from sklearn import base as sklearn_base
+from sklearn import compose
 from sklearn import exceptions
 from sklearn import preprocessing
 import standins
@@ -159,6 +163,120 @@ def test_a_gradient_method_passes_the_trained_reducer(model, data):
     )
     assert explanation.feature_names == ("curve", "number")
     assert explanation.item_values["curve"].shape == (3, 4, 1, 1, 6)
+
+
+def test_a_trained_reducer_encodes_once_and_fits_on_the_support_then_after(
+    model, data, monkeypatch
+):
+    X, y = _as_images(data[0]), data[1]
+    calls = {"items": 0, "fits": 0}
+    transform, fit = lazy.image.Pixels.transform, type(model).fit
+
+    def counted_transform(self, items):
+        calls["items"] += len(items)
+        return transform(self, items)
+
+    def counted_fit(self, *args):
+        calls["fits"] += 1
+        return fit(self, *args)
+
+    monkeypatch.setattr(lazy.image.Pixels, "transform", counted_transform)
+    monkeypatch.setattr(type(model), "fit", counted_fit)
+    _pipeline(model, n_steps=2).fit(X, y)
+    # Once on the support rows for the training, once after it.
+    assert calls == {"items": len(X), "fits": 2}
+
+
+def test_a_cached_tabularizer_is_trained_as_a_fresh_one(model, data, tmp_path):
+    X, y, X_test = _as_images(data[0]), data[1], _as_images(data[2])
+    fresh = _pipeline(model, n_steps=3, learning_rate=1e-2).fit(X, y)
+    cached = sklearn_base.clone(fresh).set_params(memory=str(tmp_path))
+    cached.fit(X, y)
+    # The second fit takes the Tabularizer from the cache, so the training
+    # encodes the context itself.
+    cached.fit(X, y)
+    np.testing.assert_array_equal(
+        cached[0].transform(X_test), fresh[0].transform(X_test)
+    )
+    np.testing.assert_array_equal(cached[0].history_, fresh[0].history_)
+
+
+def test_the_embeddings_kept_for_training_are_never_pickled_or_kept_by_fit(
+    data,
+):
+    X = _as_images(data[0])
+    tab = lazy.Tabularizer(
+        {"curve": lazy.image.Pixels(size=1, n_channels=6)}, reducer="mlp"
+    )
+    tab.fit_transform(X)
+    assert "_context" in vars(tab)
+    assert "_context" not in vars(pickle.loads(pickle.dumps(tab)))
+    assert "_context" not in vars(tab.fit(X))
+
+
+def test_training_after_a_step_encodes_what_the_step_transform_gives(
+    model, data, monkeypatch
+):
+    X, y = _as_images(data[0]), data[1]
+    # Its fit_transform cross-fits, so it differs from its transform.
+    target = compose.ColumnTransformer(
+        [("number", preprocessing.TargetEncoder(), ["number"])],
+        remainder="passthrough",
+        verbose_feature_names_out=False,
+    ).set_output(transform="pandas")
+    pipe = lazy.make_pipeline(target, *_pipeline(model, n_steps=1))
+    seen = []
+    encoded = lazy.Tabularizer._encoded
+
+    def spy(self, X):
+        seen.append(X)
+        return encoded(self, X)
+
+    monkeypatch.setattr(lazy.Tabularizer, "_encoded", spy)
+    pipe.fit(X, y)
+    pd.testing.assert_frame_equal(seen[0], pipe[0].transform(X))
+
+
+def test_a_bad_target_is_refused_before_any_training(model, data, monkeypatch):
+    X, y = _as_images(data[0]), data[1]
+
+    def refused(*args):
+        raise AssertionError("trained")
+
+    monkeypatch.setattr(lazy.Tabularizer, "_fit_through", refused)
+    pipe = _pipeline(model, n_steps=1)
+    for bad, message in (
+        (None, "requires y"),
+        (y[:-1], "has 119 values"),
+        (np.where(np.arange(len(y)) == 3, np.inf, y), "non-finite"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            pipe.fit(X, bad)
+
+
+def test_routed_metadata_reaches_a_model_behind_a_trained_reducer(model, data):
+    X, y = _as_images(data[0]), data[1]
+    weights = np.arange(1.0, len(y) + 1.0)
+    seen = []
+
+    class _Weighted(lazy.LazyModel):
+        """A model whose fit takes sample weights, which it records."""
+
+        def fit(self, X, y, sample_weight=None):
+            seen.append(sample_weight)
+            return super().fit(X, y)
+
+    with sklearn.config_context(enable_metadata_routing=True):
+        weighted = _Weighted(**model.get_params()).set_fit_request(
+            sample_weight=True
+        )
+        pipe = lazy.make_pipeline(_pipeline(model, n_steps=1)[0], weighted)
+        pipe.fit(X, y, sample_weight=weights)
+    # With them before the training, without them on the support rows and
+    # after it.
+    np.testing.assert_array_equal(seen[0], weights)
+    assert seen[1:] == [None, None]
+    assert np.isfinite(pipe.predict(X)).all()
 
 
 def test_later_steps_are_trained_through_and_fitted_again(model, data):
@@ -373,15 +491,14 @@ def test_block_dropout_leaves_a_row_an_item_that_it_has(
     X, _ = _two_items(data)
     X.loc[range(0, 120, 2), "left"] = None
     seen = []
-    reduced = lazy.Tabularizer._reduced
+    mapped = lazy.Tabularizer._mapped
 
-    def spy(self, blocks, network=None, dropped=None):
+    def spy(self, scaled, absent, owner, network, dropped=None):
         if dropped is not None:
-            absent = torch.stack([b.isnan().any(dim=1) for b in blocks], dim=1)
             seen.append((absent | dropped).all(dim=1) & ~absent.all(dim=1))
-        return reduced(self, blocks, network, dropped)
+        return mapped(self, scaled, absent, owner, network, dropped)
 
-    monkeypatch.setattr(lazy.Tabularizer, "_reduced", spy)
+    monkeypatch.setattr(lazy.Tabularizer, "_mapped", spy)
     pixels = lazy.image.Pixels(size=1, n_channels=3)
     tab = lazy.Tabularizer(
         {"left": pixels, "right": pixels},
