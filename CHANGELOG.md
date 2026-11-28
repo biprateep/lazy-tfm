@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- `Explanation.smoothing_gap`: for a gradient method on a model that ranks
+  each query value among the context's values (TabPFN v3.5), each
+  statistic of the smoothed model that the values attribute minus the
+  model's own, at each row. It is `None` for other models.
 - `native_feature_shuffle`, a class attribute of `ContextEnsembleEstimator`
   for authors of a backend: a model that sets it shuffles the columns of a
   member that runs on its own, which the base class otherwise permutes.
@@ -369,6 +373,20 @@ change the API.
 
 ### Fixed
 
+- The gradient methods of `lazy.interp.explain` on TabPFN v3.5 (`"v3.5"`
+  and `"v3.5-fast"`). Its network ranks each cell among the context's
+  values, a step function of the query whose gradient is zero, so
+  integrated gradients missed 9% to 36% of the gain at any `n_steps`, and
+  more on tied data. The gradient methods now attribute a smoothed model,
+  whose ranks of the query values replace each step by a normal CDF that
+  narrows as `n_steps` grows; their values, `full_values`, `base_values`
+  and `sum_error` change, and `sum_error` now falls with `n_steps`.
+  `Explanation.smoothing_gap` reports how far the smoothed model is from
+  the model itself, and `explain` warns when one value fills at least a
+  tenth of a column's context rows, where the two differ most.
+  `explain_context`'s gradient still goes through the exact ranks, and
+  warns that it misses what they carry. `predict` and the golden densities
+  are unchanged.
 - `lazy.interp.explain` with `method="gradient"` or
   `"integrated_gradients"` works on a `Tabularizer` whose table holds only
   item columns. Before, it raised `ValueError` from a reshape of the empty

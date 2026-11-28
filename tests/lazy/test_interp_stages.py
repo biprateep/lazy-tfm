@@ -245,13 +245,18 @@ def test_an_ensembles_gradients_are_those_of_its_pooled_density(
     model.fit(*numbers[:2])
     explanation = _integrated(model, numbers)
     assert explanation.feature_names == ("a", "b", "c")
-    # The pass pools as predict does: its statistics are predict's.
+    # The pass pools as predict does: its statistics, unsmoothed, are
+    # predict's.
     X_context, y_context, X, y = numbers
     grid = lazy.base.default_grid(
         min(y.min(), y_context.min()), max(y.max(), y_context.max())
     )
     expected = interp._statistics(model, X, y, True, grid)
-    np.testing.assert_allclose(explanation.full_values, expected, rtol=1e-4)
+    np.testing.assert_allclose(
+        explanation.full_values - explanation.smoothing_gap,
+        expected,
+        rtol=1e-4,
+    )
 
 
 def test_an_ensemble_of_one_member_explains_as_the_member(backend, numbers):

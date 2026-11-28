@@ -104,6 +104,14 @@ instead, as it implements `_predict_members`; Kumo Tabular's fits upstream's
 recipe for its draws and makes its features again in torch, since the recipe
 changes its tensors in place.
 
+A network that ranks each query cell among the context's values of its
+column, as TabPFN v3.5 does, has a zero gradient in the query between those
+values. Its backend lists those versions in `ranking_versions`, and its
+`_forward_group` smooths the query rows' ranks while
+`_differentiable.rank_smoothing()` returns an `n_steps`, adding
+`_differentiable.soft_rank_offsets` to the exact counts. The interpretability
+guide gives the smoothed rank and its bandwidth.
+
 Every prediction reaches the model through those two methods. The base class
 cuts the queries into chunks, under one progress bar per call, and works
 every prediction method from the distributions that `_distribution_chunks`

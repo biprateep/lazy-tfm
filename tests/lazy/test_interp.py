@@ -16,6 +16,7 @@ from sklearn import exceptions
 import standins
 
 import lazy
+from lazy import _paths
 from lazy import interp
 
 
@@ -309,13 +310,12 @@ def test_half_a_context_and_no_rows_are_refused(data, model):
 # -- the gradient methods ----------------------------------------------------
 
 
-@pytest.fixture(name="differentiable")
-def _differentiable(monkeypatch):
-    """TabPFN's fake, fitted with a differentiable pass, and 20 rows.
+def _fitted_fake(monkeypatch, version):
+    """TabPFN's fake of ``version``, fitted with a differentiable pass.
 
     A batch holds 7 query points, so that "gradient" spans three batches.
-    Returns the model, the context's features and targets, then those of
-    the rows.
+    Returns the model, the context's 40 rows of features and targets, then
+    those of the 20 rows to explain.
     """
     pytest.importorskip("torch")
     monkeypatch.setattr(interp, "_QUERY_BUDGET", 7)
@@ -328,8 +328,21 @@ def _differentiable(monkeypatch):
         progress=False,
         transforms=("none",),
         outlier_threshold=None,
+        version=version,
     ).fit(X[:40], y[:40])
     return model, X[:40], y[:40], X[40:], y[40:]
+
+
+@pytest.fixture(name="differentiable")
+def _differentiable(monkeypatch):
+    """A fake whose network does not rank the cells: TabPFN v3."""
+    return _fitted_fake(monkeypatch, "v3")
+
+
+@pytest.fixture(name="ranking")
+def _ranking(monkeypatch):
+    """A fake whose network ranks each cell in the context: TabPFN v3.5."""
+    return _fitted_fake(monkeypatch, "v3.5")
 
 
 def test_integrated_gradients_sum_to_what_the_features_add(
@@ -356,6 +369,88 @@ def test_integrated_gradients_sum_to_what_the_features_add(
     # the fake's float32 logits add about 1e-6.
     assert errors[1] < errors[0] / 4
     assert errors[1] < 0.02 * np.abs(gap).max()
+
+
+def test_integrated_gradients_of_ranks_sum_to_the_smoothed_gain(
+    ranking, monkeypatch
+):
+    model, X_context, y_context, X, y = ranking
+    monkeypatch.setattr(interp, "_QUERY_BUDGET", 768)
+    errors = []
+    for n_steps in (32, 256):
+        explanation = interp.explain(
+            model,
+            X,
+            y,
+            X_context,
+            y_context,
+            method="integrated_gradients",
+            n_steps=n_steps,
+        )
+        gain = explanation.full_values - explanation.base_values
+        errors.append(np.abs(explanation.sum_error).max())
+    assert errors[1] < errors[0] / 4
+    assert errors[1] < 0.02 * np.abs(gain).max()
+
+
+def test_the_smoothing_gap_is_how_far_the_smoothed_statistics_are_from_predicts(
+    ranking, differentiable
+):
+    grid = lazy.Grid.linear(-4.0, 4.0, 200, normalization="trapezoid")
+    for fitted, smoothed in ((ranking, True), (differentiable, False)):
+        model, X_context, y_context, X, y = fitted
+        explanation = interp.explain(
+            model, X, y, X_context, y_context, method="gradient", y_grid=grid
+        )
+        if not smoothed:
+            assert explanation.smoothing_gap is None
+            continue
+        predicted = interp._statistics(model, X, y, True, grid)
+        np.testing.assert_allclose(
+            explanation.full_values - explanation.smoothing_gap,
+            predicted,
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        assert np.abs(explanation.smoothing_gap).max() > 1e-4
+
+
+def test_ties_in_the_context_warn_that_smoothed_ranks_depart_most(ranking):
+    model, X_context, y_context, X, y = ranking
+    options = {"method": "gradient"}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", lazy.LazyWarning)
+        interp.explain(model, X, y, X_context, y_context, **options)
+    tied = X_context.assign(b=X_context["b"].round())
+    model = sklearn_base.clone(model).fit(tied, y_context)
+    with pytest.warns(lazy.LazyWarning, match="smoothing_gap"):
+        interp.explain(model, X, y, tied, y_context, **options)
+
+
+def test_only_a_ranking_members_table_counts_its_ties_once(ranking):
+    torch = pytest.importorskip("torch")
+    model, X_context, y_context, X, y = ranking
+    tied = X_context.assign(b=X_context["b"].round())
+    members = [
+        sklearn_base.clone(model).set_params(version=version)
+        for version in ("v3", "v3.5", "v3.5")
+    ]
+    ensemble = lazy.LazyEnsembleModel(members, pooling="linear")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", lazy.EnsembleSizeWarning)
+        ensemble.fit(tied, y_context)
+    path = _paths.build(ensemble, X, tied, y_context, label="test")
+    tables = path.table([torch.tensor(leaf.context) for leaf in path.leaves])
+    assert [id(t) for t in path.ranked(tables)] == [id(t) for t in tables[1:]]
+    # The two v3.5 members share the tied column: it counts once.
+    with pytest.warns(lazy.LazyWarning, match=r"in 1 column\(s\)"):
+        interp.explain(ensemble, X, y, tied, y_context, method="gradient")
+
+
+def test_context_gradients_warn_that_they_miss_the_ranks(ranking):
+    model, X_context, y_context, X, y = ranking
+    with pytest.warns(lazy.LazyWarning, match="exact ranks"):
+        interp.explain_context(model, X[:2], y[:2], X_context, y_context)
 
 
 def test_gradient_times_input_is_the_derivative_times_the_offset(
@@ -517,6 +612,40 @@ def test_integrated_gradients_find_tabpfns_signal():
     # importance is near 2 and the others' near 0 (measured: 1.92 against
     # below 0.002), and a factor of 5 leaves room for a different seed.
     assert importance.loc["x0", "mean"] > 5 * importance["mean"][1:].max()
+
+
+@pytest.mark.checkpoint
+def test_integrated_gradients_sum_to_the_gain_through_tabpfns_ranks():
+    pytest.importorskip("torch")
+    # TabPFN v3.5 ranks each cell among the context's values, a step whose
+    # gradient is zero, which explain smooths.
+    rng = np.random.default_rng(0)
+    X = rng.lognormal(size=(206, 4))
+    y = X @ np.array([1.0, 0.5, -0.3, 0.0]) + 0.1 * rng.normal(size=206)
+    model = lazy.TabPFNBarDistribution(
+        n_estimators=1,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+        version="v3.5-fast",
+    ).fit(X[:200], y[:200])
+    explanation = interp.explain(
+        model,
+        X[200:],
+        y[200:],
+        X[:200],
+        y[:200],
+        method="integrated_gradients",
+        n_steps=128,
+    )
+    gain = np.abs(explanation.full_values - explanation.base_values).sum(1)
+    error = np.abs(explanation.sum_error).sum(1)
+    gap = np.abs(explanation.smoothing_gap).sum(1)
+    # Measured on a CPU, per statistic: errors of 0.2% to 1.2% of the gain,
+    # against 2.9% to 4.4% unsmoothed, and gaps below 0.05%.
+    assert (error < 0.02 * gain).all()
+    assert (gap < 0.005 * gain).all()
 
 
 # -- the context rows ---------------------------------------------------------

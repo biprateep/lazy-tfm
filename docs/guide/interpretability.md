@@ -141,6 +141,61 @@ $\sum_j \phi_{ij} \approx s(x_i) - s(b)$, with an error that falls as $1/m$.
 and `explanation.sum_error` their difference from the sum, which shows whether
 `n_steps` is enough. The cost is $m$ times that of `"gradient"`.
 
+### Models that rank their inputs
+
+TabPFN v3.5 (`version="v3.5"` and `"v3.5-fast"`) feeds its network, beside
+each standardized value, the value's midrank among the context's values of its
+column:
+
+$$
+r(v) = \operatorname{clip}\Bigl(\frac{1}{n}\sum_{k} m_k\,H(v - e_k),\;
+r_{\min},\; r_{\max}\Bigr), \qquad
+H(z) = \begin{cases} 0 & z < 0 \\ 1/2 & z = 0 \\ 1 & z > 0, \end{cases}
+$$
+
+where $e_k$ are the distinct context values of the column, $m_k$ the number of
+context rows at each, and $n$ the number of context rows. From tabpfn 9.2, a
+value outside the context's range is held at the midrank of the nearest
+extreme, $r_{\min} = m_1/(2n)$ and $r_{\max} = 1 - m_K/(2n)$ for the lowest
+and the highest distinct values; before, $r_{\min} = 0$ and $r_{\max} = 1$.
+The rank is a step function of the query: its gradient is zero between the
+context values, and it jumps at each of them. A gradient misses those jumps,
+and so does every step of integrated gradients. On TabPFN v3.5, integrated
+gradients missed 9% to 36% of the gain on continuous data, and more on data
+with many ties, at any `n_steps`.
+
+For such a model, the gradient methods attribute a smoothed model instead.
+Its rank of each query value replaces every step by a normal CDF $\Phi$:
+
+$$
+\tilde r(v) = \operatorname{clip}\Bigl(\frac{1}{n}\sum_{k} m_k\,
+\Phi\Bigl(\frac{v - e_k}{h}\Bigr),\; r_{\min},\; r_{\max}\Bigr),
+\qquad h = \min\Bigl(\frac{1}{2}, \frac{d}{2m}\Bigr)\,g,
+$$
+
+where $g$ is the median gap between consecutive distinct context values of the
+column, $d$ their number, and $m$ is `n_steps` (1 for `"gradient"`). The ranks
+of the context rows stay exact. A Riemann sum with spacing $s$ integrates a
+normal bump of width $h$ to within $2e^{-2\pi^2 h^2/s^2}$ of its mass, 1.4% at
+$h = s/2$. One step of the path crosses about $d/m$ gaps or fewer, so
+$h = dg/(2m)$ keeps $h \geq s/2$; at $h = g/2$ neighbouring steps overlap, and
+$\tilde r$ is linear between context values to 1.4%. As $m$ grows, $h$
+shrinks, and the smoothed model tends to the model itself.
+
+`explanation.full_values`, `base_values` and `sum_error` are then the smoothed
+model's, and `explanation.smoothing_gap` holds each statistic of the smoothed
+model minus the model's own at each row; `full_values - smoothing_gap` are the
+model's own statistics, those of `predict_distribution`. A value that many
+context rows share is a large step, around which the smoothed model departs
+most from the model itself, so `explain` warns when one value fills at least a
+tenth of a column's context rows.
+
+`explain_context` takes the gradient in the context rows, whose ranks set the
+steps themselves. Smoothing the context's ranks changed TabPFN's predictions
+by up to 1.29 standard deviations of the target on kin8nm, so it is not done:
+its gradients go through the exact ranks and miss what they carry, and it
+warns so.
+
 ### How far a gradient reaches
 
 A gradient passes from the predicted density back through the model, and then

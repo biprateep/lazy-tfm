@@ -302,6 +302,12 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         cpu_friendly_versions: Versions that run at a usable speed on a CPU
             although the model as a whole does not (a smaller checkpoint,
             say); they fit on a CPU without the warning, which suggests them.
+        ranking_versions: Versions whose network ranks each query cell
+            among the context's values of its column, a step function of
+            the query whose gradient is zero. Their :meth:`_forward_group`
+            smooths those ranks while
+            :func:`lazy.models._differentiable.smoothed_ranks` is in
+            effect, and computes them exactly otherwise.
         cpu_note: What the CPU warning adds after "runs slowly on CPU", as a
             clause starting with a space; empty for nothing.
         method_note: How the model gives a distribution, in one sentence,
@@ -337,6 +343,7 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
     native_categorical: ClassVar[bool | None] = None
     cpu_friendly: ClassVar[bool] = False
     cpu_friendly_versions: ClassVar[tuple[str, ...]] = ()
+    ranking_versions: ClassVar[tuple[str, ...]] = ()
     cpu_note: ClassVar[str] = ""
     method_note: ClassVar[str] = ""
     upstream_package: ClassVar[str] = ""
@@ -542,6 +549,14 @@ class ContextEnsembleEstimator(base.BaseDensityRegressor, abc.ABC):
         raise NotImplementedError(
             f"{type(self).__name__} has no differentiable forward pass"
         )
+
+    def _ranks_queries(self) -> bool:
+        """Whether the network ranks each query cell in the context.
+
+        Returns:
+            Whether ``version`` is one of ``ranking_versions``.
+        """
+        return self.version in self.ranking_versions
 
     def _forward_members(
         self,

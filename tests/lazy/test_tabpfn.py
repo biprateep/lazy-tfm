@@ -846,3 +846,39 @@ def test_the_differentiable_pass_matches_predict_on_the_checkpoint(
     )
     log_density.sum().backward()
     assert query.grad.isfinite().all()
+
+
+def _upstream_ranks(values, context, n_steps):
+    """Upstream's ranks of query values in one column, exact and smoothed.
+
+    Both run upstream's own ``_in_context_ecdf`` on the context rows then
+    the queries, as its network does; the smoothed one inside lazy's
+    smoothing, with the ``n_steps`` given.
+    """
+    torch = pytest.importorskip("torch")
+    architecture = pytest.importorskip("tabpfn.architectures.tabpfn_v3_5")
+    cells = torch.tensor(np.concatenate([context, values]), dtype=torch.float32)
+    cells = cells[None, :, None]
+    ecdf = architecture._build_ecdf_context(cells, len(context), 8192)
+    rows = slice(len(context), None)
+    exact = architecture._in_context_ecdf(cells, ecdf)[0, rows, 0]
+    with tabpfn._soft_query_ranks((len(context), len(values), n_steps)):
+        soft = architecture._in_context_ecdf(cells, ecdf)[0, rows, 0]
+    return exact.numpy(), soft.numpy()
+
+
+def test_soft_ranks_are_continuous_across_the_contexts_tied_extremes():
+    # Three rows tie at the minimum and four at the maximum.
+    context = np.array([0.0, 0, 0, 1, 2, 3, 4, 4, 4, 4])
+    values = np.arange(-2.0, 6.0, 0.001) + 0.0005
+    # 5 distinct values a gap of 1 apart: h = 1/2 at one step.
+    exact, soft = _upstream_ranks(values, context, 1)
+    # The steepest slope is (3 phi(0) / h) / 10 rows, below 0.25 a unit.
+    assert np.abs(np.diff(soft)).max() < 0.001
+    # Far beyond both extremes the smoothed rank is upstream's own.
+    far = (values < -1.5) | (values > 5.5)
+    np.testing.assert_allclose(soft[far], exact[far], atol=1e-6)
+    # As h goes to 0, it is upstream's everywhere, the extremes included.
+    values = np.concatenate([values, [0.0, 4.0]])
+    exact, soft = _upstream_ranks(values, context, 10**7)
+    np.testing.assert_allclose(soft, exact, atol=1e-5)

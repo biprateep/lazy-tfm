@@ -58,6 +58,10 @@ class AdaptiveReducer(sklearn_base.BaseEstimator):
     support rows, both mapped by the network. The step with the lowest
     validation NLL is kept, step 0 included.
 
+    A model that ranks each value among the support rows' values of its
+    column, as TabPFN v3.5 does, trains through its exact ranks, whose
+    gradient is zero: the network learns through the values alone.
+
     Attributes:
         network: ``"mlp"``, the principal components plus a residual
             multilayer perceptron (MLP) whose output layer starts at zero,

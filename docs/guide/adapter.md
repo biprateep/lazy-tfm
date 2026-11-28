@@ -119,4 +119,8 @@ each step, and `best_step_` the step kept.
   A step whose validation NLL is infinite is never kept.
 - The model's own limits hold for the new columns too. TabPFN, for example,
   refuses a differentiable pass over more columns than it reads per member.
+- TabPFN v3.5 also reads each value's rank among the support rows' values of
+  its column, whose gradient is zero ({doc}`interpretability`, "Models that
+  rank their inputs"). Training runs on the exact ranks, so the network
+  learns only through the values themselves, not through their ranks.
 - Parameters given to `fit` for a step reach the first fit of each step only.
