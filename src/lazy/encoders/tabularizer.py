@@ -404,10 +404,10 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
         if adaptive is None and sum(widths) <= target:
             return fitted
         starts = np.cumsum([0, *widths])
-        rows_of: list[_typing.FloatArray] = []
-        offsets: list[float] = []
+        fits: list[tuple[_typing.FloatArray, _typing.FloatArray]] = []
         scores: list[float] = []
         owners: list[int] = []
+        numbers: list[int] = []
         for index, (block, rows) in enumerate(
             zip(blocks, present, strict=True)
         ):
@@ -423,16 +423,15 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 # No embedding can keep more than all the columns asked.
                 min(widths[index], int(rows.sum()) - 1, target),
             )
-            for number, component in enumerate(components):
-                row = np.zeros(starts[-1])
-                row[starts[index] : starts[index + 1]] = component
-                rows_of.append(row)
-                offsets.append(float(mean @ component))
+            # A copy, which frees the rest of the decomposition.
+            fits.append((mean, components.copy()))
+            for number in range(len(components)):
                 # An embedding's first component is kept before any other.
                 first = number == 0 and target >= len(blocks)
                 value = variances[number] * factors[index] ** 2
                 scores.append(np.inf if first else value)
                 owners.append(index)
+                numbers.append(number)
         # Stable: components that tie keep their order.
         kept = np.sort(np.argsort(-np.array(scores), kind="stable")[:target])
         if len(kept) < min(target, sum(widths)):
@@ -442,9 +441,19 @@ class Tabularizer(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
                 f" {len(kept)} columns",
                 _warnings.LazyWarning,
             )
-        fitted["components_"] = np.array(rows_of)[kept]
-        fitted["offset_"] = np.array(offsets)[kept]
-        fitted["blocks_"] = np.array(owners)[kept]
+        # Only the kept components get a row over all the embeddings.
+        rows_of = np.zeros((len(kept), starts[-1]))
+        offsets = np.empty(len(kept))
+        blocks_kept = np.array(owners)[kept]
+        for row, (index, number) in enumerate(
+            zip(blocks_kept, np.array(numbers)[kept], strict=True)
+        ):
+            mean, components = fits[index]
+            rows_of[row, starts[index] : starts[index + 1]] = components[number]
+            offsets[row] = mean @ components[number]
+        fitted["components_"] = rows_of
+        fitted["offset_"] = offsets
+        fitted["blocks_"] = blocks_kept
         if adaptive is not None:
             fitted["network_"] = adaptive.initial(
                 fitted["components_"],
