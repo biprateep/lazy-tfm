@@ -22,7 +22,7 @@ an embedding as ``width``) and the import name of its ``package``, which
 from __future__ import annotations
 
 import abc
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from importlib import metadata
 import os
 from typing import Any, ClassVar
@@ -151,6 +151,28 @@ class PretrainedEncoder(_base.BaseEncoder):
         network = self._network()
         with torch.inference_mode():
             return np.asarray(self._embed(network, items), dtype=float)
+
+    def _in_passes(self, items: Any, embed: Callable[[Any], Any]) -> Any:
+        """``embed`` of items in passes of at most ``batch_size`` items.
+
+        Args:
+            items: The items, a sequence or a torch tensor of shape (n,
+                ...).
+            embed: What gives the embeddings of a slice of ``items``, a
+                torch tensor of shape (len(slice), width).
+
+        Returns:
+            The embeddings of all the items, shape (n, width).
+        """
+        import torch  # noqa: PLC0415 - an optional, heavy extra.
+
+        size = _base.positive_integer("batch_size", self.batch_size)
+        return torch.cat(
+            [
+                embed(items[start : start + size])
+                for start in range(0, len(items), size)
+            ]
+        )
 
     def _network(self) -> Any:
         """What :meth:`_load` returns, loaded once per process and device."""

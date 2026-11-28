@@ -181,6 +181,35 @@ images with general networks use. It keeps an image's contrast but not its
 brightness or its colour, so a flux or a colour that matters belongs in a
 table column of its own. A network reads one band (grey) or three.
 
+### How a network reads an image
+
+lazy prepares the square of pixels that a network reads in torch, with the
+settings of the processor saved with its weights, pinned in each network's
+recipe ({class}`lazy.image.Pretrained`'s `recipes`). A recipe resizes an
+image for its shorter side to have a set number of pixels and cuts the central
+square, as DINOv2's and CLIP's processors do; resizes the whole image, as
+SigLIP 2's does; or resizes the central square of a set share of the shorter
+side, as Zoobot's preprocessing does. Its filter is bilinear or bicubic.
+
+Each axis is resampled with the weights of Pillow's resampling. The span
+$[a, b)$ of an axis of $n$ pixels becomes $m$ pixels of width
+$s = (b - a) / m$, centred at $c_i = a + (i + \tfrac12) s$, and
+
+$$
+y_i = \frac{\sum_{j=0}^{n-1} K\big((j + \tfrac12 - c_i) / \max(s, 1)\big)
+    \, x_j}{\sum_{j=0}^{n-1} K\big((j + \tfrac12 - c_i) / \max(s, 1)\big)},
+$$
+
+where $K$ is the bilinear (triangle) or the bicubic kernel, so that the kernel
+widens and smooths as it shrinks an image. The rows are resampled, then the
+columns, each pass clipped to $[0, 255]$, as Pillow clips it. Unlike Pillow,
+lazy does not round the values to 8 bits between the passes. Last, the values
+are divided by 255 and normalized by the processor's mean and standard
+deviation of each channel. Each step is differentiable, so a gradient method
+of {doc}`interpretability` reaches each pixel of an 8-bit image. For an image
+that is not 8-bit, it reaches the stretched values, not the raw ones, such as
+fluxes.
+
 ### Rotated and flipped views
 
 The networks are not invariant to a rotation or a flip of an image.

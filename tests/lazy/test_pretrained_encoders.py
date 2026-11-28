@@ -284,19 +284,7 @@ def test_an_image_file_pillow_image_and_array_give_the_same_row(
     np.testing.assert_allclose(rows, rows[:1].repeat(4, axis=0))
 
 
-@pytest.fixture(name="corner")
-def _corner_processor(fakes, monkeypatch):
-    """The fake image processor, reading each image's top-left pixel only."""
-    import torch  # noqa: PLC0415 - the backends job's extra.
-
-    def corner(self, images, return_tensors):
-        pixels = [np.asarray(image, float)[0, 0] for image in images]
-        return {"pixel_values": torch.tensor(np.array(pixels))}
-
-    monkeypatch.setattr(fake_encoders.ImageProcessor, "__call__", corner)
-
-
-def test_an_augmentation_shows_the_network_another_view(corner):
+def test_an_augmentation_shows_the_network_another_view(fakes):
     rng = np.random.default_rng(2)
     images = [rng.integers(0, 256, (5, 4, 3), dtype=np.uint8) for _ in range(3)]
     table = pd.DataFrame({"cutout": images})
@@ -307,36 +295,96 @@ def test_an_augmentation_shows_the_network_another_view(corner):
     ).fit_transform(table)
     plain = encoder.fit_transform([np.rot90(image) for image in images])
     np.testing.assert_allclose(turned.to_numpy(), plain)
+    assert not np.allclose(plain, encoder.transform(images))
 
 
 def test_zoobot_reads_the_magnified_centre_in_the_unit_interval():
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
     # A grey square of 1/1.2 of the side, inside a red frame.
-    image = np.zeros((96, 120, 3), dtype=np.uint8)
+    image = np.zeros((96, 120, 3))
     image[:, :, 0] = 255
     image[8:88, 20:100] = 51
-    pixels = lazy.image._centred([Image.fromarray(image)], 224, 1.2).numpy()
-    assert pixels.shape == (1, 3, 224, 224)
-    np.testing.assert_allclose(pixels[..., 2:-2, 2:-2], 0.2, rtol=1e-6)
+    recipe = lazy.image.Pretrained.recipes["zoobot-encoder-convnext_nano"]
+    pixels = recipe.pixels(torch.from_numpy(image)[None])[0].numpy()
+    assert pixels.shape == (3, 224, 224)
+    np.testing.assert_allclose(pixels[..., 2:-2, 2:-2], 0.2, rtol=1e-12)
     # The square ends at the frame: only its outermost pixels, which the
     # bilinear filter reads across the edge, show the red.
-    red = pixels[0, 0]
+    red = pixels[0]
     for edge in (red[0], red[-1], red[:, 0], red[:, -1]):
         assert (edge > 0.25).all()
+
+
+def _dense_resampling(n_in, span, n_out, resample):
+    """The weights of :func:`lazy.image._resampling`, shape (n_out, n_in)."""
+    weights = np.zeros((n_out, n_in))
+    indices, values = lazy.image._resampling(n_in, *span, n_out, resample)
+    weights[tuple(indices)] = values
+    return weights
+
+
+@pytest.mark.parametrize("model", sorted(lazy.image.Pretrained.recipes))
+@pytest.mark.parametrize("shape", [(37, 90, 3), (300, 41)])
+def test_the_pixels_are_the_resampled_image_clipped_and_normalized(
+    model, shape
+):
+    torch = pytest.importorskip("torch")
+    recipe = lazy.image.Pretrained.recipes[model]
+    images = np.random.default_rng(8).uniform(0, 255, (2, *shape))
+    rgb = images if images.ndim == 4 else np.stack([images] * 3, axis=-1)
+    height, width = shape[:2]
+    rows, columns = (
+        _dense_resampling(
+            n, recipe.span(n, min(height, width)), 224, recipe.resample
+        )
+        for n in (height, width)
+    )
+    across = np.clip(rgb.transpose(0, 3, 1, 2) @ columns.T, 0, 255)
+    square = np.clip(rows @ across, 0, 255) / 255
+    mean, std = (np.array(v)[:, None, None] for v in (recipe.mean, recipe.std))
+    np.testing.assert_allclose(
+        recipe.pixels(torch.from_numpy(images)).numpy(),
+        (square - mean) / std,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("resample", ["bilinear", "bicubic"])
+@pytest.mark.parametrize(
+    "box", [(0, 0, 40, 48), (6.5, 9.625, 33.25, 41.5), (0, 12.5, 40, 30)]
+)
+def test_the_resampling_weights_are_pillows(resample, box):
+    """Pillow's float images keep its weights unrounded.
+
+    The spans are exact in float32, in which Pillow takes them; the rest
+    differs by Pillow's float32 storage between its two passes.
+    """
+    filters = {"bilinear": Image.Resampling.BILINEAR}
+    filters["bicubic"] = Image.Resampling.BICUBIC
+    image = np.random.default_rng(5).uniform(0, 255, (48, 40))
+    expected = Image.fromarray(image.astype(np.float32), "F").resize(
+        (224, 200), filters[resample], box=box
+    )
+    rows = _dense_resampling(48, box[1::2], 200, resample)
+    columns = _dense_resampling(40, box[::2], 224, resample)
+    np.testing.assert_allclose(
+        rows @ image @ columns.T, np.asarray(expected), rtol=0, atol=1e-4
+    )
 
 
 def test_an_image_that_is_not_8_bit_is_stretched_band_by_band():
     ramp = np.linspace(-1.0, 3.0, 101)
     image = np.stack([ramp, 10 * ramp, np.full(101, 5.0)], axis=-1)[None]
-    stretched = np.asarray(lazy.image._rgb(image))[0]
+    stretched = lazy.image._image(image)[0]
     low, high = np.percentile(ramp, [1, 99])
     x = (ramp - low) / (high - low)
-    expected = np.rint(np.clip(np.arcsinh(20 * x) / np.arcsinh(20), 0, 1) * 255)
-    np.testing.assert_array_equal(stretched[:, 0], expected)
-    np.testing.assert_array_equal(stretched[:, 1], expected)  # scale-free
+    expected = np.clip(np.arcsinh(20 * x) / np.arcsinh(20), 0, 1) * 255
+    np.testing.assert_allclose(stretched[:, 0], expected, rtol=1e-12)
+    np.testing.assert_allclose(stretched[:, 1], expected, rtol=1e-12)
     np.testing.assert_array_equal(stretched[:, 2], 0)  # no contrast
     grey = np.full((2, 2), 7, dtype=np.uint8)
-    np.testing.assert_array_equal(np.asarray(lazy.image._rgb(grey)), 7)
+    np.testing.assert_array_equal(lazy.image._image(grey), 7)
 
 
 @pytest.mark.parametrize(
@@ -348,7 +396,7 @@ def test_an_image_that_is_not_8_bit_is_stretched_band_by_band():
 )
 def test_what_a_network_cannot_read_as_rgb_is_refused(array, message):
     with pytest.raises(ValueError, match=message):
-        lazy.image._rgb(array)
+        lazy.image._image(array)
 
 
 @pytest.mark.parametrize("name", sorted(PRETRAINED))
@@ -393,6 +441,12 @@ def test_zoobot_is_cached_by_the_versions_of_transformers_and_timm():
         metadata.version("timm"),
         metadata.version("torch"),
     ]
+
+
+def test_an_image_is_cached_by_the_version_of_its_preprocessing():
+    pytest.importorskip("transformers")
+    identity = json.loads(lazy.image.Pretrained()._cache_identity())
+    assert f"preprocessing {lazy.image._PREPROCESSING}" in identity
 
 
 def test_tirex_without_its_package_names_its_own_extra(monkeypatch):
@@ -545,10 +599,18 @@ def test_long_texts_are_split_into_passes_under_the_token_budget(
 DIFFERENTIABLE = [
     _needing_its_package(key)
     for key in sorted(encoders.CHECKPOINTS)
-    if key.startswith("time:")
-    and not lazy.time.Pretrained.recipes[key.partition(":")[2]].quantized
+    if key.startswith("image:")
+    or (
+        key.startswith("time:")
+        and not lazy.time.Pretrained.recipes[key.partition(":")[2]].quantized
+    )
 ]
 """Each network whose embedding has a forward, as ``"<modality>:<model>"``."""
+
+DIFFERENTIABLE_SERIES = [
+    key for key in DIFFERENTIABLE if key.values[0].startswith("time:")
+]
+"""The networks of :data:`DIFFERENTIABLE` that read series."""
 
 
 def _forward_and_transform(encoder, items):
@@ -557,7 +619,7 @@ def _forward_and_transform(encoder, items):
     Returns:
         A tuple (forward, transform, gradient): the forward, a numpy array;
         the transform; and the gradient of a weighted sum of the forward
-        in the items, shape (n_items, length).
+        in the items, shape (n_items, ...).
     """
     torch = pytest.importorskip("torch")
     stacked = encoder.fit(items)._stacked(items)
@@ -570,13 +632,19 @@ def _forward_and_transform(encoder, items):
     return embedding.detach().numpy(), encoder.transform(items), tensor.grad
 
 
-def _series():
-    """Four series of one length: one constant, one constant at first.
+def _items(key):
+    """Items of one shape for the modality of ``key``.
 
-    The fourth opens with 40 equal values, more than a patch of TimesFM or
-    TiRex, which normalize by the values up to each patch.
+    Series: four of one length, one constant and one constant at first; the
+    fourth opens with 40 equal values, more than a patch of TimesFM or
+    TiRex, which normalize by the values up to each patch. Images: three
+    8-bit RGB, the last of them with each channel constant.
     """
     generator = np.random.default_rng(2)
+    if key.startswith("image:"):
+        images = generator.integers(0, 256, (3, 40, 52, 3), dtype=np.uint8)
+        images[2] = [[[10, 200, 90]]]
+        return list(images)
     t = np.arange(70)
     return [
         np.sin(2 * np.pi * t / 25) + 0.1 * generator.normal(size=70),
@@ -586,14 +654,26 @@ def _series():
     ]
 
 
+def _check_gradient(gradient):
+    """Asserts that each item's gradient is finite and not all zero."""
+    assert gradient.isfinite().all()
+    assert (gradient.reshape(len(gradient), -1).abs().sum(dim=1) > 0).all()
+
+
 @pytest.mark.parametrize("key", DIFFERENTIABLE)
 def test_a_forward_gives_what_transform_gives_and_has_gradients(fakes, key):
     forward, transform, gradient = _forward_and_transform(
-        _encoder(key), _series()
+        _encoder(key), _items(key)
     )
     np.testing.assert_allclose(forward, transform, rtol=1e-6, atol=1e-6)
-    assert gradient.isfinite().all()
-    assert (gradient.abs().sum(dim=1) > 0).all()
+    _check_gradient(gradient)
+
+
+def test_an_image_forward_refuses_a_tensor_that_is_not_grey_or_rgb(fakes):
+    torch = pytest.importorskip("torch")
+    encoder = _encoder("image:dinov2-with-registers-small")
+    with pytest.raises(steps.BarrierError, match="grey or RGB"):
+        encoder.forward(torch.zeros((2, 8, 8, 4), dtype=torch.float64))
 
 
 def _ragged():
@@ -610,7 +690,7 @@ def _ragged():
     return [gappy, generator.normal(size=45).cumsum(), trailing, steady]
 
 
-@pytest.mark.parametrize("key", DIFFERENTIABLE)
+@pytest.mark.parametrize("key", DIFFERENTIABLE_SERIES)
 def test_a_forward_reads_padding_and_gaps_as_missing_values(fakes, key):
     encoder = _encoder(key)
     stacked = encoder.fit(_ragged())._stacked(_ragged())
@@ -630,20 +710,24 @@ def _tensor(array):
     return pytest.importorskip("torch").from_numpy(array)
 
 
-def test_a_forward_runs_in_passes_of_at_most_batch_size_series(
-    fakes, monkeypatch
+@pytest.mark.parametrize(
+    "key", ["time:chronos-bolt-small", "image:dinov2-with-registers-small"]
+)
+def test_a_forward_runs_in_passes_of_at_most_batch_size_items(
+    fakes, monkeypatch, key
 ):
     torch = pytest.importorskip("torch")
-    encoder = _encoder("time:chronos-bolt-small", batch_size=3)
+    encoder = _encoder(key, batch_size=3)
     passes = []
     embedded = type(encoder)._embedded
 
-    def recorded(self, network, series):
-        passes.append(len(series))
-        return embedded(self, network, series)
+    def recorded(self, network, batch):
+        passes.append(len(batch))
+        return embedded(self, network, batch)
 
     monkeypatch.setattr(type(encoder), "_embedded", recorded)
-    items = [*_series(), *_series()[:3]]
+    some = _items(key)
+    items = [*some, *some, *some][:7]
     forward = encoder.fit(items).forward(torch.tensor(encoder._stacked(items)))
     assert passes == [3, 3, 1]
     np.testing.assert_allclose(forward.numpy(), encoder.transform(items))
@@ -662,13 +746,14 @@ def test_a_loaded_network_keeps_no_gradient_on_its_weights():
 
 def test_chronos_t5_is_a_barrier_to_gradients(fakes):
     torch = pytest.importorskip("torch")
-    encoder = _encoder("time:chronos-t5-tiny").fit(_series())
+    series = _items("time:chronos-t5-tiny")
+    encoder = _encoder("time:chronos-t5-tiny").fit(series)
     barrier = steps.barrier("chronos", encoder)
     assert "Chronos-T5 reads each value as one of a set of tokens" in (
         barrier.reason
     )
     with pytest.raises(steps.BarrierError, match="Chronos-T5"):
-        encoder.forward(torch.tensor(encoder._stacked(_series())))
+        encoder.forward(torch.tensor(encoder._stacked(series)))
 
 
 def test_tirex_scales_its_windows_as_its_tokenizer_does():
@@ -769,6 +854,53 @@ def test_padded_series_behind_an_augmentation_are_a_barrier(fakes):
     assert "its items are padded, or lack some elements" in barriers[0].reason
 
 
+@pytest.mark.parametrize(
+    ("augmentation", "flux"),
+    [("Crop", True), ("Mask", True), ("Rescale", False)],
+)
+def test_images_stretched_behind_an_augmentation_are_a_barrier(
+    fakes, augmentation, flux
+):
+    """The stretch, by percentiles, does not commute with the augmentation.
+
+    A flux image is stretched; an 8-bit image is too once ``Rescale``
+    makes it float.
+    """
+    generator = np.random.default_rng(9)
+    images = generator.integers(0, 256, (4, 12, 10, 3), dtype=np.uint8)
+    X = pd.DataFrame({"cutout": list(images / 7.0 if flux else images)})
+    tab = lazy.Tabularizer(
+        {
+            "cutout": [
+                getattr(lazy.augment, augmentation)(),
+                _encoder("image:dinov2-with-registers-small"),
+            ]
+        },
+        n_columns=None,
+        remainder="drop",
+    ).fit(X)
+    _, through, barriers = tab._leaves(X, X, True, "tabularizer")
+    assert through == [False]
+    assert "such as a stretch" in barriers[0].reason
+
+
+def test_8_bit_images_behind_a_crop_pass_the_gradient(fakes):
+    images = np.random.default_rng(9).integers(0, 256, (4, 12, 10, 3))
+    X = pd.DataFrame({"cutout": list(images.astype(np.uint8))})
+    tab = lazy.Tabularizer(
+        {
+            "cutout": [
+                lazy.augment.Crop(),
+                _encoder("image:dinov2-with-registers-small"),
+            ]
+        },
+        n_columns=None,
+        remainder="drop",
+    ).fit(X)
+    _, through, barriers = tab._leaves(X, X, True, "tabularizer")
+    assert (through, barriers) == ([True], [])
+
+
 def test_chronos_normalizes_as_its_instance_norm_without_nan_gradients():
     torch = pytest.importorskip("torch")
     chronos_bolt = pytest.importorskip("chronos.chronos_bolt")
@@ -815,18 +947,67 @@ def _series_pipeline(monkeypatch, tmp_path):
     return lazy.make_pipeline(tab, backend)
 
 
+def test_a_gradient_reaches_each_pixel_of_an_image_through_its_network(
+    monkeypatch, tmp_path
+):
+    pytest.importorskip("torch")
+    generator = np.random.default_rng(6)
+    images = generator.integers(0, 256, (30, 12, 10, 3), dtype=np.uint8)
+    X = pd.DataFrame({"cutout": list(images)})
+    y = images.mean(axis=(1, 2, 3)) / 255
+    backend = backend_fakes.install("tabpfn", monkeypatch)(
+        n_estimators=2,
+        device="cpu",
+        progress=False,
+        transforms=("none",),
+        outlier_threshold=None,
+    )
+    # After the backend's, whose download the encoders' replaces.
+    fake_encoders.install(monkeypatch, tmp_path)
+    tab = lazy.Tabularizer(
+        {"cutout": _encoder("image:dinov2-with-registers-small")},
+        n_columns=8,
+        remainder="drop",
+    )
+    model = lazy.make_pipeline(tab, backend).fit(X[:24], y[:24])
+    explanation = lazy.interp.explain(
+        model, X[24:], y[24:], X[:24], y[:24], method="gradient"
+    )
+    assert explanation.feature_names == ("cutout",)
+    assert explanation.barriers == ()
+    values = explanation.item_values["cutout"]
+    assert values.shape == (3, 6, 12, 10, 3)
+    np.testing.assert_allclose(
+        values.sum(axis=(-3, -2, -1)), explanation.values[..., 0]
+    )
+
+
+def _forward_cases():
+    """The networks with a forward, each with the items to check it on."""
+    cases = []
+    for keys, items in (
+        (DIFFERENTIABLE, "one shape"),
+        (DIFFERENTIABLE_SERIES, "ragged"),
+    ):
+        for key in keys:
+            name = key.values[0]
+            cases.append(
+                pytest.param(name, items, marks=key.marks, id=f"{name}-{items}")
+            )
+    return cases
+
+
 @pytest.mark.checkpoint
-@pytest.mark.parametrize("items", [_series, _ragged])
-@pytest.mark.parametrize("key", DIFFERENTIABLE)
+@pytest.mark.parametrize(("key", "items"), _forward_cases())
 def test_the_real_weights_give_a_forward_equal_to_transform(key, items):
     encoder = _encoder(key)
-    stacked = encoder.fit(items())._stacked(items())
+    items = _items(key) if items == "one shape" else _ragged()
+    stacked = encoder.fit(items)._stacked(items)
     with golden_data.pinned_threads():
-        forward, transform, gradient = _forward_and_transform(encoder, items())
+        forward, transform, gradient = _forward_and_transform(encoder, items)
     np.testing.assert_allclose(forward, transform, rtol=1e-5, atol=1e-5)
-    assert gradient.isfinite().all()
     assert (gradient[_tensor(np.isnan(stacked))] == 0).all()
-    assert (gradient.abs().sum(dim=1) > 0).all()
+    _check_gradient(gradient)
 
 
 @pytest.mark.checkpoint
@@ -834,7 +1015,7 @@ def test_the_real_weights_give_a_forward_equal_to_transform(key, items):
     "key",
     [
         key
-        for key in DIFFERENTIABLE
+        for key in DIFFERENTIABLE_SERIES
         if lazy.time.Pretrained.recipes[key.values[0][5:]].context <= 8192
     ],
 )
@@ -849,3 +1030,37 @@ def test_a_constant_window_of_a_varying_series_has_a_finite_gradient(key):
         )
     np.testing.assert_allclose(forward, transform, rtol=1e-5, atol=1e-5)
     assert gradient.isfinite().all()
+
+
+@pytest.mark.checkpoint
+@pytest.mark.parametrize(
+    "model",
+    [
+        model
+        for model, recipe in lazy.image.Pretrained.recipes.items()
+        if recipe.zoom is None
+    ],
+)
+def test_images_are_preprocessed_as_the_pinned_processor_does(model):
+    """It differs only by the processor's rounding to 8 bits.
+
+    Pillow rounds each of its two passes to 8 bits, by at most half a
+    level, and the bicubic kernel's weights of the second pass add up to
+    at most 1.25 in absolute value: at most 1.125 levels in all, and
+    float32 rounding.
+    """
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    path = encoders.CHECKPOINTS[f"image:{model}"].download()
+    processor = transformers.AutoImageProcessor.from_pretrained(
+        path, backend="pil"
+    )
+    recipe = lazy.image.Pretrained.recipes[model]
+    generator = np.random.default_rng(7)
+    for shape in [(48, 40, 3), (31, 97, 3), (300, 457, 3), (224, 224, 3)]:
+        image = generator.integers(0, 256, shape, dtype=np.uint8)
+        expected = processor(images=[image], return_tensors="pt")
+        pixels = recipe.pixels(torch.from_numpy(image[None] / 1.0))[0]
+        std = torch.tensor(recipe.std)[:, None, None]
+        levels = (pixels - expected["pixel_values"][0]) * std * 255
+        assert levels.abs().max() <= 1.13

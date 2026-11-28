@@ -227,6 +227,24 @@ class BaseEncoder(
         del item  # Unused: by default, an encoder has no forward.
         return None
 
+    def _keeps_values(self, item: Any) -> bool:
+        """Whether :meth:`_array` keeps the values of an item as it is read.
+
+        An encoder that maps an item through a function of all its values,
+        such as a stretch by its percentiles, says no for such an item. An
+        augmentation's forward, which runs on the arrays, then does not
+        give what the augmentation gives before the encoder, so a column
+        of such items behind augmentations is a barrier.
+
+        Args:
+            item: One item, not missing, as the encoder takes it.
+
+        Returns:
+            True by default.
+        """
+        del item  # Unused: by default, the array holds the item's values.
+        return True
+
     def _stacked(self, X: Any) -> _typing.FloatArray | None:  # noqa: GS030 - scikit-learn's X.
         """The items of a column as one array, for :meth:`forward`.
 

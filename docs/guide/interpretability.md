@@ -265,10 +265,13 @@ features. `explain` warns with the step's name and the reason, and lists them
 in `explanation.barriers`. The encoders of text are barriers, since characters
 have no gradient, and so is Chronos-T5, which reads each value of a series as
 one of a set of tokens. The other networks of `lazy.time.Pretrained` pass the
-gradient to each value of a series; the pretrained encoders of images and of
-text are still barriers, whose networks lazy runs without gradients. A
-scikit-learn transformer that lazy does not know is a barrier too, although it
-still predicts as before.
+gradient to each value of a series, and every network of
+`lazy.image.Pretrained` passes it to each pixel of an image of one size. For
+an image that is not 8-bit, the gradient reaches its stretched values
+({doc}`encoders`); behind augmentations, whose forwards would run before the
+stretch, such a column is a barrier. The pretrained encoders of text are still barriers, whose
+networks lazy runs without gradients. A scikit-learn transformer that lazy
+does not know is a barrier too, although it still predicts as before.
 
 ### Stages
 
