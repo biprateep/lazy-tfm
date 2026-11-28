@@ -345,6 +345,10 @@ change the API.
 
 ### Fixed
 
+- `lazy.interp.explain` with `method="gradient"` or
+  `"integrated_gradients"` works on a `Tabularizer` whose table holds only
+  item columns. Before, it raised `ValueError` from a reshape of the empty
+  remainder.
 - `predict_quantiles`, on a model and on a `LazyPipeline`, checks
   `quantiles` before it runs anything, and its `ValueError` names
   `quantiles`. Before, the check ran after the first chunk's forward pass and

@@ -1368,10 +1368,14 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
             )
         for start in range(0, len(y), chunk):
             rows = slice(start, start + chunk)
+            # Counted, not inferred: an empty leaf has no -1 to infer.
+            count = len(y[rows])
             points = []
             for origin, delta in zip(origins, deltas, strict=True):
                 steps = fractions.reshape(-1, *[1] * delta.ndim) * delta[rows]
-                line = (origin + steps).reshape(-1, *delta.shape[1:])
+                line = (origin + steps).reshape(
+                    n_steps * count, *delta.shape[1:]
+                )
                 points.append(torch.from_numpy(line).requires_grad_())
             density = path.density(path.table(points), context)
             statistics = _scores(density, np.tile(y[rows], n_steps), grid)
@@ -1395,7 +1399,7 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                     if gradient is not None:
                         held[index, rows] = (
                             gradient.numpy()
-                            .reshape(n_steps, -1, *delta.shape[1:])
+                            .reshape(n_steps, count, *delta.shape[1:])
                             .sum(axis=0)
                         )
             _check_context(method, y_context, full[-1, rows], predicted[rows])
