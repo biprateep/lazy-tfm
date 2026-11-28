@@ -64,15 +64,24 @@ see (see {doc}`augmentation`). A pipeline's entry in
 
 ## Three ways to pool
 
-All three pools weight the members equally, and the weights are recorded in
-`weights_`. For $K$ members with densities $p_k$ and quantile functions $Q_k$,
-the table defines each pool and when we would use it:
+The members are weighted equally by default, and `weights` gives each member
+a weight of its own, in the order of `models`. The weights used, which sum to
+one, are recorded in `weights_` and in `provenance_`. For $K$ members with densities $p_k$,
+quantile functions $Q_k$ and weights $w_k$ that sum to one ($w_k = 1/K$ by
+default), the table defines each pool and when we would use it:
 
-| `pooling`     | Pooled distribution                                                | When to use it                                                                   |
-| ------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `"geometric"` | $\prod_k p_k^{1/K}$, renormalized (also called a log pool).        | The default. Sharper where the members agree, and drops a mode only one predicts. |
-| `"linear"`    | $\frac{1}{K} \sum_k p_k$, the mixture of the members.              | Members that each miss part of the distribution; keeps every mode, but is wider.  |
-| `"quantile"`  | $\frac{1}{K} \sum_k Q_k$, the average quantile function (Vincentization). | Members that agree on the shape and differ in location or width.                 |
+| `pooling`     | Pooled distribution                                                 | When to use it                                                                   |
+| ------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `"geometric"` | $\prod_k p_k^{w_k}$, renormalized (also called a log pool).         | The default. Sharper where the members agree, and drops a mode only one predicts. |
+| `"linear"`    | $\sum_k w_k p_k$, the mixture of the members.                       | Members that each miss part of the distribution; keeps every mode, but is wider.  |
+| `"quantile"`  | $\sum_k w_k Q_k$, the average quantile function (Vincentization).   | Members that agree on the shape and differ in location or width.                 |
+
+```python
+model = lazy.LazyEnsembleModel(["tabpfn", "limix", "tabfm"], weights=[2, 1, 1])
+```
+
+A member of weight zero has no influence on the pool or its grid, but is still fitted and
+evaluated.
 
 ```{figure} ../figures/figs/pooling.svg
 :class: lazy-figure
@@ -98,9 +107,10 @@ the median bin of the finest member within that range, with between 200 and
 10,000 bins, and `pool_bins` sets their number by hand. Before taking
 logarithms, the geometric pool adds a floor of $10^{-10}$ times the uniform
 density over the grid to every member's density, so that a bin which one member
-rules out completely is suppressed by a factor of about $10^{-10/K}$ rather
-than excluded. The quantile pool averages the members' quantiles at the 1,001
-levels 0, 0.001, ..., 1, each clipped to the pooling grid (since the ends of a
+$k$ rules out completely is suppressed by a factor of about $10^{-10 w_k}$
+($10^{-10/K}$ for equal weights) rather than excluded. The quantile pool
+averages the members' quantiles at the 1,001 levels 0, 0.001, ..., 1, each
+clipped to the pooling grid (since the ends of a
 bar distribution reach far into the tails), and answers with a
 {class}`~lazy.distributions.QuantileDistribution` that lies within the grid.
 
@@ -147,7 +157,7 @@ cost about 50 to 100 times as much as TabPFN-3.5 alone. The pool predicts `chunk
 rows at a time (8,192 by default), calling each member once per chunk, and the
 members' distributions of one chunk set the peak memory.
 
-The weights are always equal. In the same runs, fitted exponents lowered the
+The default weights are equal, and lazy does not fit them. In the same runs, fitted exponents lowered the
 CDE loss of the geometric pool by 0.378 ± 0.025 relative to TabPFN-3.5, but
 they also made its densities too sharp: 12 var(PIT), which is 1 for
 calibrated densities, was 1.057 against 0.977 for the equal pool, and the

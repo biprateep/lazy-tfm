@@ -92,22 +92,6 @@ def _freeze(array: npt.ArrayLike) -> _typing.FloatArray:
     return out
 
 
-def _normalized(weights: npt.ArrayLike, n: int) -> _typing.FloatArray:
-    """``weights`` over their sum: n finite, non-negative values, sum > 0."""
-    weights = np.asarray(weights, dtype=np.float64)
-    if (
-        weights.shape != (n,)
-        or not np.isfinite(weights).all()
-        or np.any(weights < 0)
-        or not 0 < weights.sum() < np.inf
-    ):
-        raise ValueError(
-            f"weights must be {n} finite, non-negative values with a positive "
-            f"sum: {weights=}"
-        )
-    return weights / weights.sum()
-
-
 def _check_ancil(ancil: Ancil | None, n_rows: int) -> dict[str, Any] | None:
     """Validates that every metadata column has one entry per row."""
     if ancil is None:
@@ -1087,10 +1071,7 @@ class QuantileDistribution(_Base):
         quants = parts[0].quants
         if any(not np.array_equal(p.quants, quants) for p in parts):
             raise ValueError("every part must share the same levels")
-        if weights is None:
-            weight = np.full(len(parts), 1.0 / len(parts))
-        else:
-            weight = _normalized(weights, len(parts))
+        weight = _arrays.normalized_weights(weights, len(parts))
         locs = np.tensordot(weight, np.stack([p.locs for p in parts]), axes=1)
         return cls(quants, locs, parts[0].ancil)
 
@@ -1290,7 +1271,7 @@ class MixtureDistribution(_Base):
             raise TypeError("mixture components must be HistogramDistribution")
         if len({c.npdf for c in components}) != 1:
             raise ValueError("every component must have the same rows")
-        weights = _normalized(self.weights, len(components))
+        weights = _arrays.normalized_weights(self.weights, len(components))
         object.__setattr__(self, "components", components)
         object.__setattr__(self, "weights", _freeze(weights))
         object.__setattr__(

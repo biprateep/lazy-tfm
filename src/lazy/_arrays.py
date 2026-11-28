@@ -15,8 +15,45 @@ from typing import Any
 
 import array_api_compat
 import numpy as np
+import numpy.typing as npt
 
 from lazy import _typing
+
+
+def normalized_weights(
+    weights: npt.ArrayLike | None, n: int
+) -> _typing.FloatArray:
+    """``weights`` over their sum, or equal weights for ``None``.
+
+    Args:
+        weights: n finite, non-negative numbers with a positive, finite sum,
+            or ``None``.
+        n: The number of weights expected.
+
+    Returns:
+        A new float64 array, shape (n,), that sums to one.
+
+    Raises:
+        ValueError: If ``weights`` is not as described.
+    """
+    if weights is None:
+        return np.full(n, 1.0 / n)
+    try:
+        array = np.asarray(weights, dtype=np.float64)
+        valid = (
+            array.shape == (n,)
+            and np.isfinite(array).all()
+            and not np.any(array < 0)
+            and 0 < array.sum() < np.inf
+        )
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError(
+            f"weights must be {n} finite, non-negative values with a positive "
+            f"sum: {weights=}"
+        )
+    return array / array.sum()
 
 
 def weighted_sum(

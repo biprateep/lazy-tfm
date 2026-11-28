@@ -3,7 +3,8 @@
 """Pools of different models: one density from several backends.
 
 :class:`LazyEnsembleModel` fits several models on the same context and
-combines their predicted distributions into one, with equal weights::
+combines their predicted distributions into one, with equal weights unless
+``weights`` gives others::
 
     model = LazyEnsembleModel(["tabpfn", "limix", "tabfm"])
     model.fit(X_train, y_train)
@@ -43,6 +44,7 @@ import math
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from sklearn import base as sklearn_base
 from sklearn import utils as sklearn_utils
@@ -125,7 +127,8 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
     """Several models fitted on the same context, their densities pooled.
 
     Each member is cloned and fitted on the same rows at ``fit``, and
-    every prediction pools the members' distributions with equal weights.
+    every prediction pools the members' distributions, with equal weights
+    unless ``weights`` gives others.
     Construction stores the arguments and nothing else, as scikit-learn
     requires; the members are checked and built at ``fit``.
 
@@ -150,9 +153,14 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             codes of its categories.
         pooling: ``"geometric"``, the normalized product of the members'
             densities each raised to its weight (a log pool); ``"linear"``,
-            their mixture; or ``"quantile"``, the average of their quantile
-            functions at :data:`QUANTILE_LEVELS`, clipped to the pooling
-            grid.
+            their mixture, each weighted by its weight; or ``"quantile"``,
+            the weighted average of their quantile functions at
+            :data:`QUANTILE_LEVELS`, clipped to the pooling grid.
+        weights: Each member's weight in the pool, in the order of
+            ``models``: finite, non-negative numbers with a positive, finite
+            sum, which ``fit`` divides by it; ``None`` weights the members
+            equally. A member of weight zero has no influence on the pool or
+            its grid, but is still fitted and evaluated.
         pool_bins: The number of bins of the pooling grid, or ``None`` to
             choose it: as fine as the finest member's median bin width
             inside the grid's range, within :data:`MIN_POOL_BINS` and
@@ -187,8 +195,9 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             ``models``.
         named_estimators_: The same members by name, a
             :class:`sklearn.utils.Bunch`.
-        weights_: Each member's weight in the pool, shape (n_members,);
-            ``1 / n_members`` each.
+        weights_: Each member's weight in the pool, shape (n_members,),
+            summing to one: ``weights`` over its sum, or ``1 / n_members``
+            each.
         native_grid_: The pooling grid, a histogram-normalized
             :class:`~lazy.grid.Grid` of equal bins; for a constant target,
             the members' three bins about it.
@@ -218,6 +227,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         models: Sequence[Member],
         *,
         pooling: Pooling = "geometric",
+        weights: npt.ArrayLike | None = None,
         pool_bins: int | None = None,
         chunk_size: int = _ensemble.UNIFORM_DEFAULTS["chunk_size"],
         y_grid: grid_lib.GridLike = None,
@@ -227,6 +237,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
     ):
         self.models = models
         self.pooling = pooling
+        self.weights = weights
         self.pool_bins = pool_bins
         self.chunk_size = chunk_size
         self.y_grid = y_grid
@@ -320,11 +331,13 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
     def _fit(self, X: pd.DataFrame, y: _typing.FloatArray) -> None:
         pooling = _check_pooling(self.pooling)
         _check_options(self.pool_bins, self.chunk_size)
+        named = _check_models(self.models)
+        weights = _arrays.normalized_weights(self.weights, len(named))
         members = [
             (name, _configure(item, self.random_state, self.device, index))
-            for index, (name, item) in enumerate(_check_models(self.models))
+            for index, (name, item) in enumerate(named)
         ]
-        _warn_if_small(len(X), len(members))
+        _warn_if_small(len(X), int(np.count_nonzero(weights)))
         # Before any member fits, so that a column that only a pipeline can
         # read fails at once.
         contexts = self._member_features(X, [m for _, m in members])
@@ -337,7 +350,7 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
             member.fit(context, y)
         self.estimators_ = [member for _, member in members]
         self.named_estimators_ = sklearn_utils.Bunch(**dict(members))
-        self.weights_ = np.full(len(members), 1.0 / len(members))
+        self.weights_ = weights
         self.pooling_ = pooling
         if y.min() == y.max():
             # A pool would smear the point mass across a pooling bin, so
@@ -347,7 +360,13 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         else:
             self.native_grid_ = _pool_grid(
                 self.y_range_,
-                [_member_grid(_model(member)) for member in self.estimators_],
+                [
+                    _member_grid(_model(member))
+                    for member, weight in zip(
+                        self.estimators_, weights, strict=True
+                    )
+                    if weight > 0
+                ],
                 self.pool_bins,
             )
         self.provenance_ = self._provenance(members)
@@ -387,6 +406,8 @@ class LazyEnsembleModel(base.BaseDensityRegressor):
         Args:
             state: The pickled ``__dict__``.
         """
+        # Pickles from before ``weights`` existed hold equal weights.
+        state.setdefault("weights", None)
         super().__setstate__(state)
         if "provenance_" in state:
             self.provenance_ = {
@@ -660,7 +681,7 @@ def _warn_if_small(n_rows: int, n_members: int) -> None:
     if n_members < 2 or n_rows >= SMALL_CONTEXT_ROWS:
         return
     _warnings.warn(
-        f"The context has {n_rows:,} rows. On small contexts an equal pool "
+        f"The context has {n_rows:,} rows. On small contexts a pool "
         "can be dragged down by one weak member, and do no better than the "
         "best single model, or worse; 'Ensembles of models' in the "
         "documentation gives the measurements. Consider fewer members, or "

@@ -74,6 +74,15 @@ class Gaussian(base.BaseDensityRegressor):
         return super()._default_grid()
 
 
+class _Coarse(Gaussian):
+    """A Gaussian binned on 300 bins rather than 20,000."""
+
+    def _fit(self, X, y):
+        self.native_grid_ = grid_lib.Grid.linear(
+            -12.0, 12.0, 300, normalization="histogram"
+        )
+
+
 @pytest.fixture
 def gaussian_data():
     """One feature, the member means' offset; targets within [-3, 3]."""
@@ -144,6 +153,74 @@ def test_the_quantile_pool_of_two_gaussians_averages_mean_and_sd(
     grid = model.native_grid_
     ends = dist.ppf([0.0, 1.0])
     assert np.all((ends >= grid.y_min) & (ends <= grid.y_max))
+
+
+def test_weights_pool_two_gaussians_as_their_direct_formulas(gaussian_data):
+    """Weights 1 and 3 against each pool's closed form for two Gaussians."""
+    query = gaussian_data[2]
+    w_a, w_b = 0.25, 0.75
+    mean_a, mean_b = query[:, 0], query[:, 0] + 0.4
+
+    def fit(pooling):
+        model = _fit_gaussians(pooling, gaussian_data, weights=[1, 3])
+        np.testing.assert_array_equal(model.weights_, [w_a, w_b])
+        return model.predict_distribution(query)
+
+    # The geometric pool: a Gaussian of the weighted precisions.
+    precision_a, precision_b = w_a / 0.5**2, w_b / 0.8**2
+    mean = (precision_a * mean_a + precision_b * mean_b) / (
+        precision_a + precision_b
+    )
+    dist = fit("geometric")
+    # The log floor, raised to the narrow member's weight of 1/4, suppresses
+    # its tails by only 1e-10**0.25, which moves the mean by 2e-6 and the
+    # variance by 2e-5 of itself (both vanish with a floor of 1e-40).
+    np.testing.assert_allclose(dist.mean(), mean, atol=1e-5)
+    np.testing.assert_allclose(
+        dist.var(), 1 / (precision_a + precision_b), rtol=1e-4
+    )
+    # The linear pool: the mixture of weights 1/4 and 3/4.
+    dist = fit("linear")
+    mean = w_a * mean_a + w_b * mean_b
+    second = w_a * (0.5**2 + mean_a**2) + w_b * (0.8**2 + mean_b**2)
+    np.testing.assert_allclose(dist.mean(), mean, atol=1e-5)
+    # The grid cuts the wider member 4.9 sd from its mean; at weight 3/4,
+    # that narrows the mixture by up to 1.2e-5 of its variance.
+    np.testing.assert_allclose(dist.var(), second - mean**2, rtol=1e-4)
+    # The quantile pool: a Gaussian of the weighted means and sds.
+    levels = np.array([0.01, 0.16, 0.5, 0.84, 0.99])
+    expected = stats.norm.ppf(
+        levels[None, :], mean[:, None], w_a * 0.5 + w_b * 0.8
+    )
+    np.testing.assert_allclose(fit("quantile").ppf(levels), expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("pooling", ensemble.POOLINGS)
+def test_a_member_of_weight_zero_leaves_the_pool_unchanged(
+    gaussian_data, pooling
+):
+    X, y, query = gaussian_data
+    # The member of weight zero bins far more finely, so it would also
+    # change the pooling grid if it counted.
+    pair = lazy.LazyEnsembleModel(
+        [_Coarse(0.0, 0.5), Gaussian(0.4, 0.8)],
+        pooling=pooling,
+        weights=[2.0, 0.0],
+    ).fit(X, y)
+    alone = lazy.LazyEnsembleModel([_Coarse(0.0, 0.5)], pooling=pooling)
+    alone.fit(X, y)
+    assert np.array_equal(pair.predict_proba(query), alone.predict_proba(query))
+
+
+def test_a_pickle_from_before_weights_loads_with_equal_weights(
+    gaussian_data,
+):
+    state = _fit_gaussians("linear", gaussian_data).__getstate__()
+    del state["weights"]
+    model = ensemble.LazyEnsembleModel.__new__(ensemble.LazyEnsembleModel)
+    model.__setstate__(state)
+    assert model.get_params()["weights"] is None
+    sklearn_base.clone(model)
 
 
 def test_the_geometric_pool_follows_the_product_bin_by_bin(gaussian_data):
@@ -422,10 +499,12 @@ def test_clone_keeps_every_parameter(standin_backends):
         ["tabpfn", lazy.LazyModel("tabicl", n_estimators=3)],
         pooling="quantile",
         pool_bins=400,
+        weights=[1.0, 2.0],
     )
     copy = sklearn_base.clone(model)
     assert copy.get_params()["tabicl__n_estimators"] == 3
     assert copy.pooling == "quantile"
+    assert copy.weights == [1.0, 2.0]
     assert copy.models[1] is not model.models[1]
 
 
@@ -474,6 +553,12 @@ def test_sklearn_contract(check):
         ({"models": [3]}, TypeError, "int"),
         ({"models": ["tabpfn"], "pool_bins": 1}, ValueError, "pool_bins"),
         ({"models": ["tabpfn"], "chunk_size": -1}, ValueError, "chunk_size"),
+        ({"models": ["tabpfn"], "weights": [1, 2]}, ValueError, "weights"),
+        ({"models": ["tabpfn"], "weights": [[1]]}, ValueError, "weights"),
+        ({"models": ["tabpfn"], "weights": [-1]}, ValueError, "weights"),
+        ({"models": ["tabpfn"], "weights": [0]}, ValueError, "weights"),
+        ({"models": ["tabpfn"], "weights": [np.nan]}, ValueError, "weights"),
+        ({"models": ["tabpfn"], "weights": ["a"]}, ValueError, "weights"),
     ],
 )
 def test_invalid_parameters_fail_at_fit(
