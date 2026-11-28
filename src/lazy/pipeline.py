@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from sklearn import base as sklearn_base
@@ -190,8 +191,17 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
         return [name for name, _ in self.steps[:-1]]
 
     def _features(self, X: _Features) -> _Features:  # noqa: GS030 - scikit-learn's X, y.
-        """``X`` as the last step sees it, after every earlier step."""
+        """``X`` as the last step sees it, after every earlier step.
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
+        """
         validation.check_is_fitted(self)
+        if np.shape(X)[0] == 0:
+            raise ValueError(
+                f"Found array with 0 sample(s) (shape={np.shape(X)}) while a "
+                f"minimum of 1 is required by {type(self).__name__}."
+            )
         return self._through(X, len(self.steps) - 1)
 
     def _through(self, X: _Features, stop: int) -> _Features:  # noqa: GS030 - scikit-learn's X.
@@ -218,6 +228,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             Point estimates, shape (n_samples,).
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict(self._features(X), method, y_grid)
 
@@ -234,6 +247,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             Normalized densities, shape (n_samples, n_bins).
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict_proba(self._features(X), y_grid)
 
@@ -250,6 +266,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             Normalized densities, shape (n_samples, n_bins).
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict_pdf(self._features(X), y_grid)
 
@@ -266,6 +285,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             The probability below each bin center, shape (n_samples, n_bins).
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict_cdf(self._features(X), y_grid)
 
@@ -278,6 +300,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             One distribution per row of ``X``.
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict_distribution(self._features(X))
 
@@ -298,8 +323,8 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             The value at each level, shape (n_samples, k).
 
         Raises:
-            ValueError: If ``quantiles`` is not a scalar or 1-D array within
-                [0, 1]; no step has run.
+            ValueError: If ``X`` has no rows, or ``quantiles`` is not a
+                scalar or 1-D array within [0, 1]; no step has run.
         """
         validation.check_is_fitted(self)
         quantiles = _inputs.check_levels(quantiles, name="quantiles")
@@ -319,8 +344,8 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             The lower and upper bounds, shape (n_samples, 2).
 
         Raises:
-            ValueError: If ``coverage`` does not lie in (0, 1); no step has
-                run.
+            ValueError: If ``X`` has no rows, or ``coverage`` does not lie
+                in (0, 1); no step has run.
         """
         validation.check_is_fitted(self)
         _inputs.check_coverage(coverage, name="coverage")
@@ -338,6 +363,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             The PIT values, within [0, 1], shape (n_samples,).
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].predict_pit(self._features(X), y)
 
@@ -368,6 +396,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
             :meth:`BaseDensityRegressor.evaluate
             <lazy.base.BaseDensityRegressor.evaluate>`, labeled with the
             model's ``name_``.
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].evaluate(
             self._features(X), y, method, y_grid, scale=scale
@@ -386,6 +417,9 @@ class LazyPipeline(sklearn_pipeline.Pipeline):
 
         Returns:
             Minus :func:`lazy.metrics.cde_loss`.
+
+        Raises:
+            ValueError: If ``X`` has no rows; no step has run.
         """
         return self.steps[-1][1].score(self._features(X), y, y_grid)
 

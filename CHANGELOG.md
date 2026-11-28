@@ -241,6 +241,12 @@ change the API.
 
 ### Changed
 
+- `predict`, `predict_proba`, `predict_pdf`, `predict_cdf`,
+  `predict_quantiles`, `predict_interval`, `predict_pit` and
+  `predict_distribution` raise `ValueError` for an `X` with no rows, before
+  they run the model, as `fit`, `score` and `evaluate` do. They warned with a
+  `FutureWarning` and returned empty results in 0.6. A `LazyPipeline`
+  refuses it before any of its steps runs.
 - LimiX-2 without `triton` on a CUDA device raises a `ValueError`, as the
   other backends do for a device they cannot use, not a `RuntimeError`. The
   check runs when the device is resolved, at fit and at unpickling, before

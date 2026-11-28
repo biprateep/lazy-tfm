@@ -320,21 +320,6 @@ def test_as_grid_refuses_the_native_sentinel():
 
 
 @pytest.mark.parametrize(
-    ("call", "shape"),
-    [
-        (lambda est, X: est.predict_proba(X, lazy.datasets.DC1_GRID), (0, 200)),
-        (lambda est, X: est.predict(X, method="median"), (0,)),
-        (lambda est, X: est.predict_quantiles(X, [0.1, 0.5]), (0, 2)),
-    ],
-)
-def test_no_rows_give_empty_results_of_the_requested_shape(data, call, shape):
-    X, y = data
-    est = GaussianDummy().fit(X, y)
-    with pytest.warns(FutureWarning):
-        assert call(est, X.iloc[:0]).shape == shape
-
-
-@pytest.mark.parametrize(
     "call",
     [
         lambda est, X, y: est.predict_proba(X),
@@ -345,12 +330,14 @@ def test_no_rows_give_empty_results_of_the_requested_shape(data, call, shape):
         lambda est, X, y: est.predict_interval(X),
         lambda est, X, y: est.predict_pit(X, y),
         lambda est, X, y: est.predict_distribution(X),
+        lambda est, X, y: est.score(X, y),
+        lambda est, X, y: est.evaluate(X, y),
     ],
 )
-def test_predicting_no_rows_does_not_run_the_model(data, call):
+def test_no_rows_are_refused_before_the_model_runs(data, call):
     X, y = data
     est = _CountingDummy().fit(X, y)
-    with pytest.warns(FutureWarning):
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
         call(est, X.iloc[:0], y[:0])
     assert getattr(est, "calls_", 0) == 0
 
