@@ -79,6 +79,19 @@ def test_a_bad_level_is_refused_before_any_step_runs(
         getattr(piped, method)(X, argument)
 
 
+@pytest.mark.parametrize("method", [*FORWARDED, "score"])
+def test_an_empty_x_is_refused_before_any_step_runs(regression, method):
+    X, y = regression
+    piped = lazy.make_pipeline(
+        _Unreachable(), standins.HistogramStandIn(n_estimators=2)
+    )
+    piped.steps[-1][1].fit(X, y)
+    piped.steps[0][1].fit(X)
+    arguments = FORWARDED.get(method, lambda y: (y,))(y[:0])
+    with pytest.raises(ValueError, match="0 sample"):
+        getattr(piped, method)(X[:0], *arguments)
+
+
 @pytest.mark.parametrize("method", FORWARDED)
 def test_a_density_method_answers_as_the_model_on_transformed_features(
     regression, fitted, method

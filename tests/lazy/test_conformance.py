@@ -1477,16 +1477,16 @@ def test_only_uniform_layer_backends_can_register():
 
 
 @pytest.mark.parametrize(
-    ("call", "shape"),
+    "call",
     [
-        (lambda m, X, z: m.predict(X), (0,)),
-        (lambda m, X, z: m.predict_proba(X), "bins"),
-        (lambda m, X, z: m.predict_pdf(X), "bins"),
-        (lambda m, X, z: m.predict_cdf(X), "bins"),
-        (lambda m, X, z: m.predict_quantiles(X), (0, 3)),
-        (lambda m, X, z: m.predict_interval(X), (0, 2)),
-        (lambda m, X, z: m.predict_pit(X, z), (0,)),
-        (lambda m, X, z: m.predict_distribution(X), "distribution"),
+        lambda m, X, z: m.predict(X),
+        lambda m, X, z: m.predict_proba(X),
+        lambda m, X, z: m.predict_pdf(X),
+        lambda m, X, z: m.predict_cdf(X),
+        lambda m, X, z: m.predict_quantiles(X),
+        lambda m, X, z: m.predict_interval(X),
+        lambda m, X, z: m.predict_pit(X, z),
+        lambda m, X, z: m.predict_distribution(X),
     ],
     ids=[
         "predict",
@@ -1499,20 +1499,11 @@ def test_only_uniform_layer_backends_can_register():
         "predict_distribution",
     ],
 )
-def test_predicting_no_query_rows_warns_and_returns_an_empty_result(
-    cls, data, call, shape
-):
+def test_predicting_no_query_rows_is_refused(cls, data, call):
     X, z, X_test = data
     model = cls(n_estimators=2, progress=False).fit(X, z)
-    with pytest.warns(FutureWarning, match="zero rows of X") as record:
-        out = call(model, X_test[:0], z[:0])
-    assert len(record) == 1
-    if shape == "distribution":
-        assert len(out) == 0
-    elif shape == "bins":
-        assert out.shape == (0, model.grid_.n_bins)
-    else:
-        assert out.shape == shape
+    with pytest.raises(ValueError, match=r"Found array with 0 sample\(s\)"):
+        call(model, X_test[:0], z[:0])
 
 
 @pytest.mark.parametrize("method", ["score", "evaluate"])
