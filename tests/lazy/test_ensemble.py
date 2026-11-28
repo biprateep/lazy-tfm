@@ -378,6 +378,16 @@ def test_pooling_matches_a_plain_weighted_sum_to_the_bit(pooling):
     assert pooled.masses.tobytes() == expected.tobytes()
 
 
+def test_a_member_on_the_pooling_grid_keeps_a_tiny_bins_mass():
+    grid = grid_lib.Grid.linear(0.0, 1.0, 4, normalization="histogram")
+    # The last bin's mass is lost in the CDF's cumulative sums, 1 - (1 - e).
+    masses = np.array([[0.5, 0.25, 0.25, 1e-20], [0.0, 0.0, 0.0, 0.0]])
+    part = distributions.HistogramDistribution(grid.edges, masses)
+    pooled = ensemble._masses(part, grid.edges)
+    np.testing.assert_array_equal(pooled, part.probabilities)
+    assert pooled[0, -1] > 0
+
+
 def test_a_pooled_sum_of_negative_zeros_is_zero_as_with_sum():
     weights = np.array([0.3, 0.7])
     terms = [np.array([-0.0, -0.0, 1.0]), np.array([-0.0, 2.0, -0.0])]

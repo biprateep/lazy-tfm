@@ -264,6 +264,11 @@ change the API.
   an explicit CUDA device no longer loads on a machine without `triton`.
 - The embedding cache of `lazy.encoders` reads a cached embedding about 6
   times faster and writes one about twice as fast. Its files are unchanged.
+- `LazyEnsembleModel` pools a member whose histogram lies on the pooling grid,
+  such as a nested `LazyEnsembleModel` with the same `pool_bins`, from that
+  histogram's own masses, without the cumulative sums of its CDF. Its pooled
+  densities move by float rounding, which keeps the precision of small bins,
+  and the geometric and linear pools of such a member run faster.
 - A pandas `category` column whose categories are numbers was read as those
   numbers. If it is not ordered, it is now categorical, as
   `categorical_features="from_dtype"` says; pass `categorical_features=None`
