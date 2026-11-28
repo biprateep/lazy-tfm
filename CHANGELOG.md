@@ -9,6 +9,15 @@ change the API.
 
 ### Added
 
+- `weights=` on `LazyEnsembleModel`: one finite, non-negative weight per
+  member, normalized at `fit`. The geometric pool raises each member's
+  density to its weight, the linear pool mixes the members with these
+  weights, and the quantile pool takes the weighted average of their
+  quantile functions. The default, `None`, keeps equal weights, and its
+  outputs are unchanged. `weights_` and `provenance_` record the weights.
+  The weights of `MixtureDistribution` and `QuantileDistribution.average`
+  share its check, so input that is not numeric now raises `ValueError`
+  there, not `TypeError`.
 - Gradients from end to end. The gradient methods of `lazy.interp.explain`
   and `explain_context` now run on a `LazyPipeline` and on a
   `LazyEnsembleModel` that pools densities, and no longer only on a backend.
