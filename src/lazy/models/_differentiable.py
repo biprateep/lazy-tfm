@@ -18,7 +18,11 @@ Typical usage example:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+import contextlib
+import contextvars
 import dataclasses
+import functools
 import math
 from typing import Any
 
@@ -199,6 +203,182 @@ def standardized_members(
     )
     both = torch.cat([context, query]).clamp(-100, 100)
     return torch.stack([both[:, shuffle] for shuffle in shuffles]).float()
+
+
+# The n_steps of the rank smoothing of the passes run in this context, or
+# None for exact ranks: a context variable, so that a pass in another thread
+# or task is never smoothed by this one.
+_RANK_SMOOTHING: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "lazy_rank_smoothing", default=None
+)
+
+# The query cells times context values that one pass of the soft rank
+# holds at once, about.
+_SOFT_RANK_BUDGET = 1 << 24
+
+
+@contextlib.contextmanager
+def smoothed_ranks(n_steps: int) -> Iterator[None]:
+    """Smooths the ranks of query cells in the passes run inside.
+
+    A backend whose network ranks the query cells (its
+    ``ranking_versions``) reads :func:`rank_smoothing` in its forward pass
+    and adds :func:`soft_rank_offsets` to its exact counts; the others
+    ignore it.
+
+    Args:
+        n_steps: The points at which the gradient is taken on each path:
+            ``n_steps`` of integrated gradients, 1 for a gradient at one
+            point. It sets the bandwidth; see :func:`soft_rank_offsets`.
+
+    Yields:
+        Nothing; the smoothing ends when the block does.
+    """
+    token = _RANK_SMOOTHING.set(n_steps)
+    try:
+        yield
+    finally:
+        _RANK_SMOOTHING.reset(token)
+
+
+def rank_smoothing() -> int | None:
+    """The ``n_steps`` of the passes run now, or ``None`` for exact ranks."""
+    return _RANK_SMOOTHING.get()
+
+
+def soft_rank_offsets(
+    values: Any, edges: Any, below: Any, at_most: Any, n_steps: int
+) -> Any:
+    """What smoothing adds to the exact midrank count of each query value.
+
+    A network that ranks each query cell among the context's values of its
+    column, as TabPFN v3.5 does, is a step function of the query. The exact
+    count of a value ``v`` is the context rows strictly below it plus half
+    of those equal to it, interpolated linearly inside a bucket that holds
+    rows between two edges. Its steps are the ``m_k`` rows at each distinct
+    edge ``e_k``, ``m_k H(v - e_k)`` with ``H(0) = 1/2``. The smoothed count
+    replaces each step by ``m_k Phi((v - e_k) / h)``, so it is the exact
+    count plus ``sum_k m_k (Phi(z_k) - H(z_k))``, which this returns. Its
+    gradient is ``sum_k m_k phi(z_k) / h``, a kernel density of the
+    context; it tends to the exact count as ``h`` goes to 0.
+
+    The bandwidth is ``h = alpha * g``, where ``g`` is the median gap
+    between consecutive distinct edges of the column, ``d`` their number,
+    and ``alpha = min(1/2, d / (2 * n_steps))``. A Riemann sum with spacing
+    ``s`` integrates a normal bump of width ``h`` to within
+    ``2 exp(-2 pi^2 h^2 / s^2)`` of its mass, 1.4% at ``h = s / 2``. One of
+    ``n_steps`` steps of a path crosses at most about ``d / n_steps`` of the
+    column's gaps, so ``alpha = d / (2 n_steps)`` keeps ``h >= s / 2``; at
+    ``alpha = 1/2`` neighbouring steps overlap, and their sum is linear
+    between context values to 1.4%, whatever ``s``. A column of one
+    distinct value has no gap to scale ``h`` by, and stays exact.
+
+    The edges are constants: no gradient reaches them. The work is chunked
+    so that about ``_SOFT_RANK_BUDGET`` pairs of a value and an edge are
+    held at once, in the forward and in the backward pass.
+
+    Args:
+        values: The query values, a float torch tensor of shape
+            (..., n_queries).
+        edges: Each column's edges, sorted, a torch tensor of shape
+            (..., n_edges), with the leading shape of ``values``. An edge
+            may repeat.
+        below: The context rows strictly below each edge, of that shape.
+        at_most: The context rows at most equal to each edge, of that
+            shape.
+        n_steps: The points at which the gradient is taken on each path.
+
+    Returns:
+        The offsets, in context rows, of the shape and dtype of
+        ``values``.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    edges, below, at_most = (t.detach() for t in (edges, below, at_most))
+    distinct = torch.ones_like(edges, dtype=torch.bool)
+    distinct[..., 1:] = edges[..., 1:] != edges[..., :-1]
+    n_distinct = distinct.sum(dim=-1, keepdim=True)
+    # The gaps between consecutive distinct edges: a repeat's gap is 0.
+    gaps = edges[..., 1:] - edges[..., :-1]
+    median = torch.where(gaps > 0, gaps, torch.nan).nanmedian(
+        dim=-1, keepdim=True
+    )
+    alpha = (n_distinct / (2.0 * n_steps)).clamp(max=0.5)
+    # A column of one value has no gap: its weights go to 0 and its
+    # bandwidth to 1, so that its offset is 0 with a finite gradient.
+    smooth = n_distinct > 1
+    weights = torch.where(distinct & smooth, at_most - below, 0.0)
+    bandwidth = torch.where(smooth, alpha * median.values, 1.0)
+    return _soft_rank_function().apply(values, edges, weights, bandwidth)
+
+
+def _soft_rank_chunks(values: Any, edges: Any) -> Iterator[slice]:
+    """Slices of the last axis of ``values`` that fit the work budget."""
+    size = max(1, _SOFT_RANK_BUDGET // max(1, math.prod(edges.shape)))
+    for start in range(0, values.shape[-1], size):
+        yield slice(start, start + size)
+
+
+def _soft_rank_sums(
+    values: Any,
+    edges: Any,
+    weights: Any,
+    bandwidth: Any,
+    derivative: bool,
+) -> Any:
+    """``sum_k w_k (Phi(z_k) - H(z_k))``, or ``sum_k w_k phi(z_k)``, chunked.
+
+    Args:
+        values: Query values, shape (..., n_queries).
+        edges: Edges, shape (..., n_edges).
+        weights: Each edge's weight, shape (..., n_edges).
+        bandwidth: Each column's bandwidth, shape (..., 1).
+        derivative: Whether to sum ``phi(z)`` in place of the steps'
+            offsets.
+
+    Returns:
+        The sums, of the shape of ``values``.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    out = torch.empty_like(values)
+    for chunk in _soft_rank_chunks(values, edges):
+        z = values[..., chunk, None] - edges[..., None, :]
+        z /= bandwidth[..., None]
+        if derivative:
+            terms = torch.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+        else:
+            terms = torch.special.ndtr(z) - 0.5 * (torch.sign(z) + 1.0)
+        out[..., chunk] = (terms * weights[..., None, :]).sum(-1)
+    return out
+
+
+@functools.cache
+def _soft_rank_function() -> Any:
+    """The autograd function of :func:`soft_rank_offsets`, built once."""
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    class SoftRankOffsets(torch.autograd.Function):
+        """The offsets, chunked, without holding the pairs for backward."""
+
+        @staticmethod  # noqa: GS011 - torch's autograd API.
+        def forward(
+            ctx: Any, values: Any, edges: Any, weights: Any, bandwidth: Any
+        ) -> Any:
+            ctx.save_for_backward(values, edges, weights, bandwidth)
+            return _soft_rank_sums(
+                values, edges, weights, bandwidth, derivative=False
+            )
+
+        @staticmethod  # noqa: GS011 - torch's autograd API.
+        def backward(ctx: Any, grad: Any) -> tuple[Any, None, None, None]:
+            values, edges, weights, bandwidth = ctx.saved_tensors
+            slope = _soft_rank_sums(
+                values, edges, weights, bandwidth, derivative=True
+            )
+            return grad * slope / bandwidth, None, None, None
+
+    return SoftRankOffsets
 
 
 class _OnGrid:

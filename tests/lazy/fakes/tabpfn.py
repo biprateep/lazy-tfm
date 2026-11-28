@@ -4,11 +4,14 @@
 
 It accepts only the arguments upstream's constructor accepts. Its bucket
 borders are fixed in standardized units and stretched by the
-targets it is given, as upstream's are. It gets its "network" through
-upstream's loader, as the real regressor does. The fake loader builds one
-for a checkpoint path, counting them in ``recorder.loads``, and hands a model
-spec to upstream's own loader, which answers with the spec's network. Needs
-the tabpfn package.
+targets it is given, as upstream's are. The network of a version in
+``ranking_versions`` ranks each query value among the context's values of
+its column, as upstream's ``tabpfn_v3_5`` does, through upstream's own
+ranking functions; the mean rank moves the answer. It gets its "network"
+through upstream's loader, as the real regressor does. The fake loader
+builds one for a checkpoint path, counting them in ``recorder.loads``, and
+hands a model spec to upstream's own loader, which answers with the spec's
+network. Needs the tabpfn package.
 
 It replaces no private lazy name; ``tabpfn.base.initialize_tabpfn_model`` and
 ``tabpfn.TabPFNRegressor`` are upstream's.
@@ -23,6 +26,7 @@ import numpy as np
 import pytest
 
 import fakes
+from lazy.models import _hub
 from lazy.models import tabpfn
 
 LAZY_SEAMS = ()
@@ -32,6 +36,46 @@ SETTINGS = {"n_estimators": 2}
 """Small enough for the behavioral suite."""
 
 N_BUCKETS = 10
+
+RANK_WEIGHT = 0.5
+"""How far the mean rank of a query's values moves a v3.5 network's answer."""
+
+
+def _ranks(network, queries, context):
+    """The rank term of a network's answer for each query.
+
+    A v3.5 network (one with upstream's ``ecdf_num_buckets``) ranks every
+    cell among the context's values of its column through upstream's
+    ``_build_ecdf_context`` and ``_in_context_ecdf``, the context rows
+    first, as upstream's ``_preprocess_raw`` does, after filling the
+    missing values; the term is the mean
+    rank of the query's cells, centred. Other networks have none.
+
+    Args:
+        network: The fake network.
+        queries: Query features, a torch tensor of shape (n, n_features).
+        context: Context features, a torch tensor of shape
+            (n_rows, n_features).
+
+    Returns:
+        The term, a torch tensor of shape (n,).
+    """
+    import tabpfn.architectures.tabpfn_v3_5  # noqa: PLC0415 - optional extra.
+    import torch  # noqa: PLC0415 - optional extra.
+
+    architecture = tabpfn.architectures.tabpfn_v3_5
+
+    buckets = getattr(network, "ecdf_num_buckets", None)
+    if buckets is None:
+        return torch.zeros(len(queries), dtype=queries.dtype)
+
+    # Upstream ranks after filling a missing value with the context's mean.
+    fill = torch.nan_to_num(context.nanmean(dim=0))
+    cells = torch.cat([context, queries])
+    cells = torch.where(cells.isfinite(), cells, fill).to(torch.float32)[None]
+    edges = architecture._build_ecdf_context(cells, len(context), buckets)
+    ranks = architecture._in_context_ecdf(cells, edges)[0, len(context) :]
+    return RANK_WEIGHT * (ranks.mean(dim=1).to(queries.dtype) - 0.5)
 
 
 class Executor:
@@ -134,6 +178,7 @@ class Regressor:
         context = self.context_
         spread = context.std(correction=0)
         signal = torch.tanh((X.mean(dim=1) - context.mean()) / spread)
+        signal = signal + _ranks(self.models_[0], X, context)
         centres = torch.linspace(-1.0, 1.0, N_BUCKETS, dtype=X.dtype)
         logits = -4.0 * (centres - signal[:, None]) ** 2
         members = [logits] * self.kwargs["n_estimators"]
@@ -154,10 +199,32 @@ class Regressor:
         if None in (*self.models_, *self.executor_.models):
             raise RuntimeError("the regressor has no network")
         signal = fakes.response(X, self.context_)
+        signal = (
+            signal
+            + _ranks(
+                self.models_[0], torch.tensor(X), torch.tensor(self.context_)
+            ).numpy()
+        )
         return {
             "criterion": self.znorm_space_bardist_,
             "logits": torch.from_numpy(fakes.bucket_logits(signal, N_BUCKETS)),
         }
+
+
+def _version(path):
+    """The TabPFN version of a checkpoint path, or None if unknown.
+
+    The path is a pinned checkpoint's file, or, in some tests, a directory
+    named after the version.
+    """
+    name = os.path.basename(path)
+    for checkpoint in _hub.CHECKPOINTS.values():
+        if checkpoint.backend == "tabpfn" and name in (
+            checkpoint.filename,
+            checkpoint.version,
+        ):
+            return checkpoint.version
+    return None
 
 
 def install(monkeypatch, recorder, *, limit=None):
@@ -188,7 +255,12 @@ def install(monkeypatch, recorder, *, limit=None):
         config = inference_config.InferenceConfig.get_default(
             task_type="regression", model_version="v2"
         )
-        return [torch.nn.Module()], [{}], torch.nn.Module(), config
+        network = torch.nn.Module()
+        if _version(kwargs["model_path"]) in (
+            tabpfn.TabPFNBarDistribution.ranking_versions
+        ):
+            network.ecdf_num_buckets = 8192  # upstream's attribute
+        return [network], [{}], torch.nn.Module(), config
 
     monkeypatch.setattr(base, "initialize_tabpfn_model", load)
     monkeypatch.setattr(Regressor, "recorder", recorder)

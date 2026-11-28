@@ -42,8 +42,11 @@ it on the bag, as every other model does, and only the bag meets the limits.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+import contextlib
+import contextvars
 import copy
+import functools
 import inspect
 import io
 import itertools
@@ -483,6 +486,9 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     # Only the fast checkpoint is quick enough on a CPU, where upstream
     # allows 5,000 context rows.
     cpu_friendly_versions = ("v3.5-fast",)
+    # The v3.5 architecture feeds the network each cell's midrank among the
+    # context's values of its column (upstream's `_in_context_ecdf`).
+    ranking_versions = ("v3.5", "v3.5-fast")
     cpu_note = (
         " and refuses more than 5,000 context rows there (1,000 before v3)"
         " unless ignore_pretraining_limits=True"
@@ -871,11 +877,18 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
             ),
         )
         _differentiable.frozen(*regressor.models_)
+        n_steps = _differentiable.rank_smoothing()
+        smoothing = (
+            None
+            if n_steps is None or not self._ranks_queries()
+            else (len(X), len(query), n_steps)
+        )
         # use_inference_mode picks upstream's standard path; with
         # differentiable_input it keeps the graph.
-        _, outputs, _ = regressor.forward(
-            query.to(device, torch.float32), use_inference_mode=True
-        )
+        with _soft_query_ranks(smoothing):
+            _, outputs, _ = regressor.forward(
+                query.to(device, torch.float32), use_inference_mode=True
+            )
         # The members' probabilities are averaged, as predict does with
         # average_before_softmax=False.
         log_masses = _differentiable.mean_of_softmaxes(
@@ -897,6 +910,106 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     ) -> dict[str, Any]:
         del dist  # Unused: the bucket count is fixed at fit.
         return {"buckets": self.n_buckets_}
+
+
+# The forward passes' rank smoothing in this context: their numbers of
+# context and query rows and their n_steps, or None for exact ranks.
+_SOFT_RANKS: contextvars.ContextVar[tuple[int, int, int] | None] = (
+    contextvars.ContextVar("lazy_tabpfn_soft_ranks", default=None)
+)
+
+
+@contextlib.contextmanager
+def _soft_query_ranks(smoothing: tuple[int, int, int] | None) -> Iterator[None]:
+    """Makes the network rank the query cells softly inside the block.
+
+    Args:
+        smoothing: The numbers of context and query rows and the
+            ``n_steps`` of :func:`lazy.models._differentiable.smoothed_ranks`,
+            or None for exact ranks.
+
+    Yields:
+        Nothing.
+    """
+    if smoothing is not None:
+        _install_soft_ranks()
+    token = _SOFT_RANKS.set(smoothing)
+    try:
+        yield
+    finally:
+        _SOFT_RANKS.reset(token)
+
+
+@functools.cache
+def _install_soft_ranks() -> None:
+    """Wraps upstream's ranking function in :func:`_ranked`, once.
+
+    Upstream ranks every cell inside the network, through the module's
+    ``_in_context_ecdf``. The wrapper gives upstream's ranks unless this
+    context set :data:`_SOFT_RANKS`, so every other prediction is exact.
+    """
+    import tabpfn.architectures.tabpfn_v3_5  # noqa: PLC0415 - optional extra.
+
+    architecture = tabpfn.architectures.tabpfn_v3_5
+    upstream = architecture._in_context_ecdf  # noqa: SLF001 - see above.
+    architecture._in_context_ecdf = functools.partial(_ranked, upstream)  # noqa: SLF001 - see above.
+
+
+def _ranked(upstream: Callable[..., Any], cells: Any, ecdf_context: Any) -> Any:
+    """Upstream's ranks of every cell, the query rows' smoothed if asked.
+
+    Inside the context's range, upstream's exact count is the rows below
+    plus half those equal, as ``_differentiable.soft_rank_offsets``
+    assumes. Beyond the range it is 0 and the row count,
+    or, from tabpfn 9.2, held at the midrank of the nearest extreme. So
+    the smoothed rank adds the offsets to the count without that hold, 0
+    below the range and the row count above it, then holds the sum
+    between upstream's own ranks beyond both ends: continuous, with a
+    kink at a held extreme.
+
+    Args:
+        upstream: Upstream's ``_in_context_ecdf``.
+        cells: Every cell, shape (batch, rows, columns), the context rows
+            first.
+        ecdf_context: Upstream's edges, and the context rows below and at
+            most at each, stacked, shape (3, batch, columns, n_edges).
+
+    Returns:
+        The ranks in [0, 1], of the shape of ``cells``.
+
+    Raises:
+        RuntimeError: If the rows are not the context's and the queries'.
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    ranks = upstream(cells, ecdf_context)
+    smoothing = _SOFT_RANKS.get()
+    if smoothing is None:
+        return ranks
+    n_context, n_queries, n_steps = smoothing
+    if cells.shape[1] != n_context + n_queries:
+        raise RuntimeError(
+            "TabPFN ranked other rows than the context's and the queries':"
+            f" {cells.shape[1]} rows for {n_context} + {n_queries}"
+        )
+    edges, below, at_most = ecdf_context
+    first, last = edges[..., :1], edges[..., -1:]
+    beyond = torch.cat([first - first.abs() - 1, last + last.abs() + 1], -1)
+    held = upstream(beyond.transpose(1, 2), ecdf_context).transpose(1, 2)
+    values = cells[:, n_context:].transpose(1, 2).to(edges.dtype)
+    exact = ranks[:, n_context:].transpose(1, 2).to(edges.dtype)
+    unheld = torch.where(
+        values < first, 0.0, torch.where(values > last, 1.0, exact)
+    )
+    offsets = _differentiable.soft_rank_offsets(
+        values, edges, below, at_most, n_steps
+    )
+    soft = torch.clamp(
+        unheld + offsets / n_context, held[..., :1], held[..., 1:]
+    )
+    return torch.cat(
+        [ranks[:, :n_context], soft.transpose(1, 2).to(ranks.dtype)], dim=1
+    )
 
 
 def _with_bagging_remedy(

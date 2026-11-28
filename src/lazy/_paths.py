@@ -69,6 +69,12 @@ class Path:
             context, in the order of the fit, on the graph: a function of
             the two as ``table`` returns them. It raises ``ValueError`` if
             the model refuses the pass.
+        ranked: Of some rows' tables, as ``table`` returns them, those
+            that a backend reads whose network ranks each query cell among
+            the context's values (its ``ranking_versions``), a step
+            function of the query that it smooths under
+            :func:`lazy.models._differentiable.smoothed_ranks`: a list of
+            tensors, empty if no backend on the path ranks.
     """
 
     leaves: tuple[_steps.Leaf, ...]
@@ -76,6 +82,7 @@ class Path:
     barriers: tuple[_steps.Barrier, ...]
     table: _Table
     density: Callable[[Any, Any], differentiable.TorchDensity]
+    ranked: Callable[[Any], list[Any]]
 
 
 def build(  # noqa: GS030 - scikit-learn's X, y.
@@ -137,6 +144,7 @@ def build(  # noqa: GS030 - scikit-learn's X, y.
         (),
         lambda tensors: tensors[0][:, order],
         _pass(backend, label, y_context),
+        _ranked(backend),
     )
 
 
@@ -175,6 +183,12 @@ def _pass(
     return functools.partial(
         differentiable.density, backend, label, y_context=y_context
     )
+
+
+def _ranked(backend: Any) -> Callable[[Any], list[Any]]:
+    """A path's ``ranked`` for a table that ``backend`` reads."""
+    ranks = backend._ranks_queries()  # noqa: SLF001 - lazy's own backends.
+    return lambda table: [table] if ranks else []
 
 
 def _leaf(
@@ -416,12 +430,14 @@ def _piped(  # noqa: GS030 - scikit-learn's X, y.
             columns = _steps.forward(step, columns)
         return columns
 
+    backend = differentiable.backend(model, label)
     return Path(
         tuple(leaves),
         steps[start - 1][0] if start else None,
         tuple(barriers),
         table,
-        _pass(differentiable.backend(model, label), label, y_context),
+        _pass(backend, label, y_context),
+        _ranked(backend),
     )
 
 
@@ -500,6 +516,13 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
         ]
         return _pool(parts, model.weights_, model.pooling_, model.native_grid_)
 
+    def ranked(tables: list[Any]) -> list[Any]:
+        """The members' tables that a ranking backend reads."""
+        found = []
+        for path, member_table in zip(paths, tables, strict=True):
+            found.extend(path.ranked(member_table))
+        return found
+
     stages = {path.stage for path in paths}
     leaves: list[_steps.Leaf] = []
     for path in paths:
@@ -510,6 +533,7 @@ def _pooled(  # noqa: GS030 - scikit-learn's X, y.
         tuple(_named_barriers(model, paths)),
         table,
         density,
+        ranked,
     )
 
 

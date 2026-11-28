@@ -123,6 +123,13 @@ _IMPORTANCE_LABELS = {
 # The query points on one autograd graph at a time, about.
 _QUERY_BUDGET = 64
 
+# The share of a column's context rows on one value above which explain
+# warns that smoothed ranks are least accurate. Measured on TabPFN v3.5 at
+# 200 context rows: with at most 6% on one value (California housing),
+# the smoothed model's integrated gradients are within 1.6% of the gain of
+# the exact attribution; with 36% to 55% (concrete), within 28%.
+_TIED_SHARE = 0.1
+
 # From coalitions, shape (m, p) of bool, to every statistic of every explained
 # row, shape (m, n_statistics, n_rows).
 _ValueFunction = Callable[[npt.NDArray[np.bool_]], _typing.FloatArray]
@@ -165,6 +172,18 @@ class Explanation:
             gets 0: for series padded on the left, the attributions of a
             series of length ``k`` are the last ``k`` along the axis.
             ``None`` if no feature is a column of items.
+        smoothing_gap: For a gradient method on a model whose network
+            ranks each query value among the context's values of its
+            column (TabPFN v3.5), each statistic of the smoothed model
+            that the values attribute minus the model's own, at each row,
+            shape (n_statistics, n_rows), in the statistic's units.
+            ``full_values`` and ``base_values`` are the smoothed model's,
+            and ``full_values - smoothing_gap`` are the model's own
+            statistics, those of ``predict_distribution``. The gap also
+            holds the float32 rounding by which the forward pass differs
+            from ``predict_distribution``: on TabPFN v3.5-fast, up to
+            2e-6 of the target's units for the CRPS and the mean and 1e-5
+            nats for the NLL. ``None`` when nothing is smoothed.
     """
 
     method: str
@@ -176,6 +195,7 @@ class Explanation:
     stage: str | None = None
     barriers: tuple[Barrier, ...] = ()
     item_values: Mapping[str, _typing.FloatArray] | None = None
+    smoothing_gap: _typing.FloatArray | None = None
 
     @property
     def sum_error(self) -> _typing.FloatArray | None:
@@ -184,7 +204,9 @@ class Explanation:
         The values of ``"shapley"`` and of ``"integrated_gradients"`` sum
         over the features to ``full_values - base_values``: exactly for
         Shapley values, and to the error of the Riemann sum for integrated
-        gradients, which more ``n_steps`` lower.
+        gradients, which more ``n_steps`` lower. For a smoothed model,
+        both are the smoothed model's; :attr:`smoothing_gap` is how far it
+        is from the model's own.
 
         Returns:
             ``values.sum(axis=-1) - (full_values - base_values)``, shape
@@ -416,6 +438,19 @@ def explain(  # noqa: GS030 - scikit-learn's X, y.
     member's path its share, and a feature's attribution is the sum over
     the members.
 
+    A network that ranks each query value among the context's values of
+    its column, as TabPFN v3.5 does, is a step function of the query: its
+    gradient is zero between the context's values. The gradient methods
+    then attribute a smoothed model, whose rank replaces the step at each
+    context value by a normal CDF of width ``min(1/2, d / (2 n_steps))``
+    times the median gap between the column's ``d`` distinct context
+    values (``n_steps`` is 1 for ``"gradient"``); the ranks of the context
+    rows stay exact. ``Explanation.smoothing_gap`` reports how far the
+    smoothed model's statistics are from the model's own, at the cost of
+    one more pass per batch of 64 rows. A warning names the ties where
+    the smoothed model departs most: a column of the model's input in
+    which one value fills at least a tenth of the context rows.
+
     Args:
         model: An estimator with ``fit`` and ``predict_distribution``.
             ``"permutation"`` needs it fitted; the other methods fit clones
@@ -601,6 +636,9 @@ def explain_context(  # noqa: GS030 - scikit-learn's X, y.
     holds the
     context and one batch of rows, and ``values`` holds
     ``24 * n_rows * n_context`` bytes.
+    On a model that ranks each value among the context's values, as
+    TabPFN v3.5 does, the gradient goes through the exact ranks, whose
+    gradient is zero, and misses what they carry; it warns so.
 
     ``"loo"`` (leave one out) gives context row ``r`` the statistic of a
     clone of ``model`` fitted on the whole context minus that of a clone
@@ -1348,6 +1386,12 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
     differentiable.refuse_inference_mode(label)
+    with torch.no_grad():
+        context = path.table(
+            [torch.tensor(leaf.context) for leaf in path.leaves]
+        )
+    ranked = path.ranked(context)
+    _warn_of_ties(ranked, label)
     origins = _origins(path.leaves, baseline)
     columns: dict[str, None] = {}
     for leaf in path.leaves:
@@ -1363,13 +1407,24 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
     gradients = [np.zeros((len(STATISTICS), *delta.shape)) for delta in deltas]
     full = np.empty((len(STATISTICS), len(y)))
     base = np.empty_like(full)
-    predicted = model.predict_distribution(_table(X, named)).mean()
+    distribution = model.predict_distribution(_table(X, named))
+    predicted = distribution.mean()
+    exact = None
+    if ranked:
+        # The model's own statistics, which the smoothed ones depart from;
+        # its first batch, unsmoothed, checks the pass against predict.
+        exact = np.stack(_scores(distribution, y, grid))
+        rows = slice(0, _QUERY_BUDGET)
+        first = _pass_statistics(
+            path,
+            context,
+            [leaf.queries[rows] for leaf in path.leaves],
+            y[rows],
+            grid,
+        )
+        _check_context(method, y_context, first[-1], predicted[rows])
     # Inside torch.no_grad() too, which would build no graph.
-    with torch.enable_grad():
-        with torch.no_grad():
-            context = path.table(
-                [torch.tensor(leaf.context) for leaf in path.leaves]
-            )
+    with torch.enable_grad(), differentiable.smoothed_ranks(n_steps):
         for start in range(0, len(y), chunk):
             rows = slice(start, start + chunk)
             # Counted, not inferred: an empty leaf has no -1 to infer.
@@ -1406,30 +1461,28 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
                             .reshape(n_steps, count, *delta.shape[1:])
                             .sum(axis=0)
                         )
-            _check_context(method, y_context, full[-1, rows], predicted[rows])
+            if exact is None:
+                _check_context(
+                    method, y_context, full[-1, rows], predicted[rows]
+                )
         if method == "integrated_gradients":
             # The baseline is one point; each row scores it at its own
             # target.
             for start in range(0, len(y), _QUERY_BUDGET):
                 rows = slice(start, start + _QUERY_BUDGET)
-                with torch.no_grad():
-                    # An element a row lacks stays missing at its baseline.
-                    at_origin = path.table(
-                        [
-                            torch.tensor(
-                                np.where(
-                                    np.isnan(leaf.queries[rows]), np.nan, origin
-                                )
-                            )
-                            for leaf, origin in zip(
-                                path.leaves, origins, strict=True
-                            )
-                        ]
-                    )
-                    scores = _scores(
-                        path.density(at_origin, context), y[rows], grid
-                    )
-                base[:, rows] = torch.stack(scores).numpy()
+                # An element a row lacks stays missing at its baseline.
+                base[:, rows] = _pass_statistics(
+                    path,
+                    context,
+                    [
+                        np.where(np.isnan(leaf.queries[rows]), np.nan, origin)
+                        for leaf, origin in zip(
+                            path.leaves, origins, strict=True
+                        )
+                    ],
+                    y[rows],
+                    grid,
+                )
     for held, delta in zip(gradients, deltas, strict=True):
         held /= n_steps
         # A missing element, NaN on the whole line, gets 0.
@@ -1447,7 +1500,67 @@ def _gradient_explanation(  # noqa: GS030 - scikit-learn's X, y.
         path.stage,
         path.barriers,
         item_values or None,
+        None if exact is None else full - exact,
     )
+
+
+def _pass_statistics(
+    path: _paths.Path,
+    context: Any,
+    leaves: Sequence[npt.NDArray[np.float64]],
+    y: _typing.FloatArray,
+    grid: grid_lib.Grid,
+) -> _typing.FloatArray:
+    """Every statistic of some points, through a path's pass, without a graph.
+
+    Args:
+        path: The path.
+        context: The context's table, as ``path.table`` gives it.
+        leaves: Each leaf's points, with one row per row of ``y``.
+        y: The targets the points are scored at, shape (n,).
+        grid: The grid on which the CRPS and the NLL are computed.
+
+    Returns:
+        The statistics, shape (n_statistics, n).
+    """
+    import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
+
+    with torch.no_grad():
+        query = path.table([torch.tensor(points) for points in leaves])
+        return torch.stack(
+            _scores(path.density(query, context), y, grid)
+        ).numpy()
+
+
+def _warn_of_ties(tables: list[Any], label: str) -> None:
+    """Warns when the smoothed ranks meet a column with many ties.
+
+    The smoothed rank spreads the step at each distinct context value over
+    its neighbourhood. A value shared by many context rows is a large step,
+    and the smoothed model departs most from the exact one around it.
+
+    Args:
+        tables: The context's tables that a ranking backend reads, each a
+            tensor of shape (n_context, n_columns), as a path's ``ranked``
+            gives them. A column that several tables share counts once.
+        label: What smooths, for the warning.
+    """
+    shares: dict[bytes, float] = {}
+    for table in tables:
+        for column in table.detach().cpu().numpy().T:
+            counts = np.unique(column, return_counts=True)[1]
+            shares[column.tobytes()] = counts.max() / len(column)
+    tied = [share for share in shares.values() if share >= _TIED_SHARE]
+    if tied:
+        _warnings.warn(
+            f"{label} smooths the model's ranks of each query value among"
+            f" the context's values; in {len(tied)} column(s) of the"
+            f" model's input, one value fills at least {_TIED_SHARE:.0%} of"
+            f" the context rows (up to {max(tied):.0%}), and around such a"
+            " value the smoothed model departs most from the exact one, as"
+            " Explanation.smoothing_gap shows",
+            _warnings.LazyWarning,
+        )
 
 
 def _warn_of_barriers(path: _paths.Path, label: str) -> None:
@@ -1647,6 +1760,19 @@ def _context_gradients(  # noqa: GS030 - scikit-learn's X, y.
     import torch  # noqa: PLC0415 - torch is an optional, heavy extra.
 
     differentiable.refuse_inference_mode(label)
+    with torch.no_grad():
+        ranked = path.ranked(
+            path.table([torch.tensor(leaf.context) for leaf in path.leaves])
+        )
+    if ranked:
+        _warnings.warn(
+            f"{label} takes the gradient in the context rows through the"
+            " model's exact ranks of each value among the context's values,"
+            " whose gradient is zero: the attributions miss what the ranks"
+            " carry. Smoothing the context's ranks would change the model's"
+            " predictions too much",
+            _warnings.LazyWarning,
+        )
     origins = _origins(path.leaves, baseline)
     offsets = [
         # A missing element of a context row gets 0.

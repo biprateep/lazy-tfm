@@ -9,6 +9,7 @@ the base class's checks and the torch densities.
 import fakes
 import numpy as np
 import pytest
+from scipy import stats
 import standins
 
 from lazy import distributions
@@ -329,3 +330,73 @@ def test_a_context_that_moves_refuses_a_transform_fitted_on_the_context(
     model._differentiable_density(*tensors, y)
     with pytest.raises(ValueError, match="would not follow a context that"):
         model._differentiable_density(*tensors, y, context_moves=True)
+
+
+def _ranked_context():
+    """Two columns' edges, as upstream summarizes a context of five rows.
+
+    Column 0 holds 0, 1, 1, 2, 4, its edges 0, 1, 1, 2, 4, 4 (upstream
+    repeats an edge when it has more edges than distinct values); column 1
+    holds 3 five times. Returns the edges, the rows below and at most at
+    each edge, all of shape (1, 2, 6), and column 0's distinct values with
+    their multiplicities.
+    """
+    edges = torch.tensor(
+        [[[0.0, 1, 1, 2, 4, 4], [3.0] * 6]], dtype=torch.float64
+    )
+    below = torch.tensor(
+        [[[0.0, 1, 1, 3, 4, 4], [0.0] * 6]], dtype=torch.float64
+    )
+    at_most = torch.tensor(
+        [[[1.0, 3, 3, 4, 5, 5], [5.0] * 6]], dtype=torch.float64
+    )
+    return (
+        (edges, below, at_most),
+        np.array([0.0, 1, 2, 4]),
+        np.array([1, 2, 1, 1]),
+    )
+
+
+# Column 0 of _ranked_context has 4 distinct values and gaps 1, 1, 2, so its
+# bandwidth is min(1/2, 4 / (2 n_steps)) median gaps of 1.
+@pytest.mark.parametrize(("n_steps", "bandwidth"), [(1, 0.5), (16, 0.125)])
+def test_soft_ranks_are_a_normal_cdf_at_each_distinct_context_value(
+    n_steps, bandwidth
+):
+    (edges, below, at_most), distinct, counts = _ranked_context()
+    values = np.array([-1.0, 0.0, 0.7, 1.0, 3.0, 5.0])
+    queries = torch.tensor(np.stack([values, values])[None])
+    offsets = _differentiable.soft_rank_offsets(
+        queries, edges, below, at_most, n_steps
+    ).numpy()[0]
+    exact = ((values[:, None] > distinct) * counts).sum(1) + 0.5 * (
+        (values[:, None] == distinct) * counts
+    ).sum(1)
+    z = (values[:, None] - distinct) / bandwidth
+    soft = (stats.norm.cdf(z) * counts).sum(1)
+    np.testing.assert_allclose(exact + offsets[0], soft, atol=1e-12)
+    # Column 1 has one value, no gap to scale by: it stays exact.
+    np.testing.assert_array_equal(offsets[1], 0.0)
+
+
+def test_soft_ranks_have_the_gradient_of_their_values(monkeypatch):
+    ranked, _, _ = _ranked_context()
+    values = torch.tensor(
+        [[[-0.3, 0.2, 0.9, 1.6, 3.1], [2.0, 3.0, 3.5, 4.0, 9.0]]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+
+    def offsets(queries):
+        return _differentiable.soft_rank_offsets(queries, *ranked, 4)
+
+    assert torch.autograd.gradcheck(offsets, (values,))
+    whole = offsets(values)
+    (gradient,) = torch.autograd.grad(whole.sum(), values)
+    # One query value at a time, in the forward and the backward pass.
+    monkeypatch.setattr(_differentiable, "_SOFT_RANK_BUDGET", 1)
+    chunked = offsets(values)
+    np.testing.assert_array_equal(chunked.detach(), whole.detach())
+    np.testing.assert_array_equal(
+        torch.autograd.grad(chunked.sum(), values)[0], gradient
+    )

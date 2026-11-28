@@ -277,12 +277,13 @@ def test_a_cpu_friendly_version_does_not_warn():
         model._warn_if_slow_on_cpu()
 
 
-def test_cpu_friendly_versions_must_be_pinned(monkeypatch):
-    monkeypatch.setattr(
-        lazy.TabPFNBarDistribution, "cpu_friendly_versions", ("v9",)
-    )
+@pytest.mark.parametrize(
+    "listed", ["cpu_friendly_versions", "ranking_versions"]
+)
+def test_listed_versions_must_be_pinned(monkeypatch, listed):
+    monkeypatch.setattr(lazy.TabPFNBarDistribution, listed, ("v9",))
     problems = _conformance.problems(lazy.TabPFNBarDistribution, "tabpfn")
-    assert any("cpu_friendly_versions" in p for p in problems)
+    assert any(listed in p for p in problems)
 
 
 def test_the_tabpfn_cpu_warning_names_its_context_limit():
