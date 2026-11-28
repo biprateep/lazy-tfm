@@ -259,7 +259,6 @@ class TabICLQuantile(
     # float16 and the batch shapes change the kernels: both then agree to
     # float16 rounding, about 1e-3 of the spread.
     kv_cache_rtol = 1e-4
-    exact_chunking = False
     cpu_friendly = True
     recipes = _RECIPES
     outlier_threshold_key = "outlier_threshold"

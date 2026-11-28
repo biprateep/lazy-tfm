@@ -385,7 +385,6 @@ class TestTabFM:
             ).fit(X[:300], z[:300])
             return est.predict_proba(X[300:], grid)
 
-        assert not tabfm.TabFMHistogram.exact_chunking
         for precision, typical, worst in (
             (True, 0.06, 0.35),
             (False, 1e-4, 1e-4),
@@ -1387,9 +1386,8 @@ def test_chunking_the_query_rows_changes_only_rounding(monkeypatch):
     change results instead of only peak memory, so it is asserted rather than
     assumed. In float32 on a CPU the kernels round differently for different
     batch shapes (about 2e-6 of the peak density), so the comparison is to
-    float rounding, not bit for bit (``exact_chunking`` is False). The rows
-    each upstream call receives are recorded too, so the comparison cannot
-    pass by never chunking at all.
+    float rounding, not bit for bit. The rows each upstream call receives are
+    recorded too, so the comparison cannot pass by never chunking at all.
     """
     upstream = pytest.importorskip("tabfm")
     predict_proba = upstream.TabFMClassifier.predict_proba

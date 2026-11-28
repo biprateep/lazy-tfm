@@ -69,7 +69,6 @@ def test_the_pinned_output_keeps_the_members_upstream_trims():
         m.trim_fraction for m in _find(upstream.output, "AverageEstimators")
     }
     assert kumo.AUTO_TRIM_FRACTION in trims
-    assert kumo.KumoQuantile.member_trim_fraction == kumo.AUTO_TRIM_FRACTION
     assert _find(pinned.output, "SortQuantiles")
     assert not _find(pinned.output, "AverageEstimators")
 

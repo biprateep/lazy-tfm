@@ -627,8 +627,7 @@ def test_chunking_changes_nothing_but_rounding(cls, data):
     answers for a 7-row chunk and for the whole set differ by one ulp in
     a few bins (bit-identical on the Arm machines the suite is developed
     on), as blocked scoring did. The checkpoint tests check each real
-    backend on a CPU: bit for bit where it claims ``exact_chunking`` (none
-    does), and to float rounding otherwise.
+    backend on a CPU, to float rounding.
     """
     X, z, X_test = data
     whole = cls(chunk_size=0).fit(X, z).predict_proba(X_test)
@@ -895,17 +894,26 @@ def test_a_trimmed_combination_needs_its_hook_and_quantiles(monkeypatch):
         vars(_ensemble.ContextEnsembleEstimator)["_predict_members"],
     )
     monkeypatch.setattr(cls, "native_output", "histogram")
-    monkeypatch.setattr(cls, "member_trim_fraction", 0.5)
     problems = "\n".join(_conformance.problems(cls, "trimmed"))
     assert "needs _predict_members" in problems
     assert "needs native_output='quantiles'" in problems
-    assert "member_trim_fraction must be in [0, 0.5)" in problems
 
 
-def test_a_trim_fraction_needs_the_trimmed_combination(monkeypatch):
-    monkeypatch.setattr(standins.QuantileStandIn, "member_trim_fraction", 0.2)
-    problems = _conformance.problems(standins.QuantileStandIn, "quantile")
-    assert any("member_trim_fraction needs" in p for p in problems)
+def test_a_trim_needs_the_trimmed_combination(monkeypatch):
+    cls = standins.TrimmedQuantileStandIn
+    monkeypatch.setattr(cls, "member_combination", "quantile_average")
+    problems = "\n".join(_conformance.problems(cls, "trimmed"))
+    assert "_member_trim_fraction needs quantile_trimmed_average" in problems
+
+
+@pytest.mark.parametrize("removed", ["exact_chunking", "member_trim_fraction"])
+def test_an_attribute_removed_from_the_contract_is_refused(
+    monkeypatch, removed
+):
+    cls = standins.TrimmedQuantileStandIn
+    monkeypatch.setattr(cls, removed, 0.2, raising=False)
+    problems = "\n".join(_conformance.problems(cls, "trimmed"))
+    assert f"{removed} was removed" in problems
 
 
 def test_the_recipe_is_recorded_in_provenance(data):

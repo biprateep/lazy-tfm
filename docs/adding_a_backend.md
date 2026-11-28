@@ -41,7 +41,12 @@ or no clip.
 
 The base class splits the ensemble into groups of members that one call of
 the model can serve together (a member with a transform the model does not
-implement, or a bag the model cannot draw itself, is a group of its own).
+implement, a bag the model cannot draw itself, or its own subset of the
+columns under `max_features`, is a group of its own).
+The base class permutes the columns of such a member under
+`feature_shuffle=True`, unless the backend declares
+`native_feature_shuffle = True`, as LimiX-2 does: its model then shuffles that
+member's columns itself, as it shuffles the members that share a call.
 `_fit_group` receives one group's prepared context and returns a *handle*,
 which can be any object: the base class keeps it in `handles_` and passes it
 back, unchanged, to `_predict_group` for every chunk of queries. A fit may
@@ -77,11 +82,13 @@ otherwise. A query's answer must not depend on the other queries in its
 chunk, and a prediction must leave the handle as it found it, so that the
 cache and chunking tests can compare answers to float rounding. A model that
 combines its members by a trimmed mean of their quantiles
-(`member_combination="quantile_trimmed_average"`, with
-`member_trim_fraction`) also implements `_predict_members`, which returns
-each member's answer separately. The base class then trims over every member
-of the ensemble at once, so that a bagged ensemble, where every member is a
-group of its own, is trimmed the same way as one that runs in a single call.
+(`member_combination="quantile_trimmed_average"`) also implements
+`_predict_members`, which returns each member's answer separately, and
+`_member_trim_fraction`, which returns the fraction of members to drop from
+each tail (Kumo Tabular reads it from its recipe). The base class then trims
+over every member of the ensemble at once, so that a bagged ensemble, where
+every member is a group of its own, is trimmed the same way as one that runs
+in a single call.
 
 A backend may also implement `_forward_group`, its prediction on torch's
 autograd graph, for gradient attributions and adapters; its docstring states

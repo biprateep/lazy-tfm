@@ -39,8 +39,8 @@ for bit on some CPUs. A query predicted on its own takes a different
 matrix-multiply path and differs by about $10^{-6}$ of the quantiles' spread,
 and the cached and uncached forward passes differ by up to about
 $2\times 10^{-5}$ of the spread on an Intel CPU for a bagged member with
-missing values whose columns LAZY permutes. The backend therefore declares `exact_chunking = False`, and the
-conformance suite checks its chunking to that tolerance on a CPU (on a GPU
+missing values whose columns LAZY permutes. The conformance suite checks its
+chunking to that tolerance on a CPU, as it does every backend's (on a GPU
 under mixed precision, the backends agree only to float16 rounding; see
 {doc}`guide/reproducibility`). The package comes from PyPI with the `kumo`
 extra (see "Installing the package" below).
@@ -69,11 +69,12 @@ environment. The
 trimmed mean is new to the package, so it went into the base class as a third
 `member_combination`, `"quantile_trimmed_average"`, with a hook,
 `_predict_members`, that returns each member's quantiles separately so that
-the base class can trim over all of them at once. A refactor of an existing
-backend must not move its predictions, so we ran TabICL's checkpoint tests on
-a CPU, its golden file included, which compare the answers to float rounding,
-and the `lazy setup` tests, which check that TabFM's install commands and
-messages are unchanged.
+the base class can trim over all of them at once, and a hook,
+`_member_trim_fraction`, that gives the fraction to trim. A refactor of an
+existing backend must not move its predictions, so we ran TabICL's checkpoint
+tests on a CPU, its golden file included, which compare the answers to float
+rounding, and the `lazy setup` tests, which check that TabFM's install
+commands and messages are unchanged.
 
 ## The module
 
@@ -100,7 +101,6 @@ class KumoQuantile(
     auto_tokens = AUTO_TRANSFORMS
     supports_native_bagging = False
     member_combination = "quantile_trimmed_average"
-    member_trim_fraction = AUTO_TRIM_FRACTION
     kv_cache_modes = (True, False)
     has_softmax = False
     native_outlier_clipping = True
@@ -110,7 +110,6 @@ class KumoQuantile(
         "was pretrained on tables of up to {limit:,} rows, beyond which its "
         "accuracy has not been measured"
     )
-    exact_chunking = False
     kv_cache_rtol = 1e-3
     cpu_friendly_versions = ("v1-small",)
     recipes = _RECIPES
@@ -141,7 +140,9 @@ class's `recipes`, holds these settings for every version, and
 to. The recipe maps
 onto the uniform parameters: the members' transforms follow `transforms`, the
 Latin-square shuffle is present only when `feature_shuffle=True`, and the
-two-pass clip only when `outlier_threshold` resolves to a number. Its output
+two-pass clip only when `outlier_threshold` resolves to a number, and
+`_member_trim_fraction` returns the recipe's trim under `transforms="auto"`
+and none under an explicit `transforms`. Its output
 step sorts each member's quantiles and does not average them, since the
 average is LAZY's. A test compares the text of the pinned recipe with
 upstream's features recipe, step by step, so that a copy that drifts from

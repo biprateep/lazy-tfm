@@ -489,9 +489,6 @@ class TabPFNBarDistribution(_ensemble.ContextEnsembleEstimator):
     )
     kv_cache_modes = (True, False, "int8", "fp8")
     kv_cache_rtol = 1e-5
-    # Not bit for bit on every CPU: on a 4-core x86 machine, 7-row chunks
-    # and one pass differ in the last bits of most densities.
-    exact_chunking = False
     recipes = _RECIPES
     softmax_temperature_key = "SOFTMAX_TEMPERATURE"
     outlier_threshold_key = "OUTLIER_REMOVAL_STD"

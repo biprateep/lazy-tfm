@@ -66,7 +66,7 @@ Run the checks that `CONTRIBUTING.md` lists before every push.
 - Quantiles, intervals and PIT values come from the native distribution, never from a grid.
 - Each backend pins its recipe per checkpoint version (`_pinned_recipe`). Never take a setting that changes a prediction from the installed upstream package's defaults.
 - Randomness comes from `random_state`. Member `i` of an ensemble is seeded from `SeedSequence([random_state, i])`.
-- A query's answer does not depend on the other queries in its chunk, beyond float rounding where a backend does not claim exact chunking.
+- A query's answer does not depend on the other queries in its chunk, beyond float rounding.
 - A change for speed keeps outputs identical, or states the measured difference and why it is acceptable.
 
 ### Tests
