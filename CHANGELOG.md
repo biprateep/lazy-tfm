@@ -287,6 +287,12 @@ change the API.
 
 ### Fixed
 
+- `predict_quantiles`, on a model and on a `LazyPipeline`, checks
+  `quantiles` before it runs anything, and its `ValueError` names
+  `quantiles`. Before, the check ran after the first chunk's forward pass and
+  named `levels`. The same check, now shared by `Distribution.ppf` and
+  `metrics.pinball_loss`, refuses `NaN`. `LazyPipeline.predict_interval`
+  likewise checks `coverage` before any step runs.
 - A `Grid` that is copied, cloned or unpickled keeps its edges read-only, as
   a `Grid` that the constructor builds does. Pickles hold the same data as
   before, and pickles of earlier releases load read-only.

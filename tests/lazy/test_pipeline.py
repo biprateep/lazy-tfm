@@ -52,6 +52,33 @@ def _fitted(regression):
     return piped, model.fit(scaled, y), scaled
 
 
+class _Unreachable(sklearn_base.TransformerMixin, sklearn_base.BaseEstimator):
+    """A step that fits, and fails the test if anything transforms with it."""
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        raise AssertionError("a step ran before the arguments were checked")
+
+
+@pytest.mark.parametrize(
+    ("method", "argument"),
+    [("predict_quantiles", [0.5, 1.5]), ("predict_interval", 1.5)],
+)
+def test_a_bad_level_is_refused_before_any_step_runs(
+    regression, method, argument
+):
+    X, y = regression
+    piped = lazy.make_pipeline(
+        _Unreachable(), standins.HistogramStandIn(n_estimators=2)
+    )
+    piped.steps[-1][1].fit(X, y)
+    piped.steps[0][1].fit(X)
+    with pytest.raises(ValueError, match="must"):
+        getattr(piped, method)(X, argument)
+
+
 @pytest.mark.parametrize("method", FORWARDED)
 def test_a_density_method_answers_as_the_model_on_transformed_features(
     regression, fitted, method

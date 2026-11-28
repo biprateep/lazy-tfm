@@ -366,6 +366,48 @@ def check_target(
     return values
 
 
+def check_levels(levels: npt.ArrayLike, *, name: str) -> _typing.FloatArray:
+    """Validates cumulative probabilities, as a 1-D array.
+
+    Args:
+        levels: The probabilities, a scalar or shape (k,).
+        name: The argument's name, for the errors.
+
+    Returns:
+        The probabilities as float64, shape (k,); ``levels`` is not modified.
+
+    Raises:
+        ValueError: If they are not numbers, are not a scalar or 1-D, or one
+            is not finite or lies outside [0, 1].
+    """
+    message = f"{name} must be a scalar or 1-D array within [0, 1]"
+    try:
+        out = np.atleast_1d(np.asarray(levels, dtype=np.float64))
+    except (TypeError, ValueError):
+        raise ValueError(message) from None
+    if out.ndim != 1 or not np.all((out >= 0.0) & (out <= 1.0)):
+        raise ValueError(message)
+    return out
+
+
+def check_coverage(coverage: float, *, name: str) -> float:
+    """Validates the probability inside a central interval.
+
+    Args:
+        coverage: The probability, in (0, 1).
+        name: The argument's name, for the errors.
+
+    Returns:
+        ``coverage``, unchanged.
+
+    Raises:
+        ValueError: If it does not lie in (0, 1).
+    """
+    if not 0.0 < coverage < 1.0:
+        raise ValueError(f"{name} must lie in (0, 1): {name}={coverage!r}")
+    return coverage
+
+
 def check_rows(rows: npt.ArrayLike, n: int, *, name: str) -> _typing.IntArray:
     """Validates positions of rows of a table, flattened.
 

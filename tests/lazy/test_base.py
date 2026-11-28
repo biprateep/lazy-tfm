@@ -433,6 +433,17 @@ def test_scoring_refuses_a_length_mismatch_before_inference(data, method):
     assert getattr(est, "calls_", 0) == 0
 
 
+@pytest.mark.parametrize("quantiles", [[0.5, 1.5], [np.nan], [[0.5]], "a"])
+def test_predict_quantiles_refuses_bad_quantiles_before_inference(
+    data, quantiles
+):
+    X, y = data
+    est = _CountingDummy().fit(X, y)
+    with pytest.raises(ValueError, match="quantiles must be"):
+        est.predict_quantiles(X, quantiles)
+    assert getattr(est, "calls_", 0) == 0
+
+
 class _FailingDummy(GaussianDummy):
     """The stand-in, its fit failing after it has set attributes."""
 

@@ -89,6 +89,7 @@ import pandas as pd
 from scipy import stats
 
 from lazy import _arrays
+from lazy import _inputs
 from lazy import _typing
 from lazy import _warnings
 from lazy import grid as grid_lib
@@ -1266,12 +1267,12 @@ def pinball_loss(
     """
     truth = np.asarray(y_true, dtype=float)
     predicted = np.asarray(quantiles, dtype=float)
-    tau = np.atleast_1d(np.asarray(levels, dtype=float))
+    tau = _inputs.check_levels(levels, name="levels")
     if truth.ndim != 1:
         raise ValueError(f"y_true must be 1D: {truth.shape=}")
     if predicted.ndim == 1:
         predicted = predicted[:, None]
-    if tau.ndim != 1 or predicted.ndim != 2:
+    if predicted.ndim != 2:
         raise ValueError(
             "expected quantiles shape (n, k) or (n,) and levels shape (k,): "
             f"{predicted.shape=}, {tau.shape=}"
@@ -1283,8 +1284,6 @@ def pinball_loss(
         )
     if not (np.isfinite(truth).all() and np.isfinite(predicted).all()):
         raise ValueError("non-finite values supplied")
-    if not np.all((tau >= 0.0) & (tau <= 1.0)):
-        raise ValueError(f"levels must lie within [0, 1]: {tau=}")
     residual = truth[:, None] - predicted
     return float(np.mean(np.maximum(tau * residual, (tau - 1.0) * residual)))
 

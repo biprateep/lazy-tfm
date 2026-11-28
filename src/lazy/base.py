@@ -408,19 +408,23 @@ class BaseDensityRegressor(
         Args:
             X: Features with the columns ``fit`` saw, shape
                 (n_samples, n_features).
-            quantiles: Cumulative probabilities within [0, 1], shape (k,).
+            quantiles: Cumulative probabilities within [0, 1], a scalar or
+                shape (k,).
 
         Returns:
             The value at each level, shape (n_samples, k).
 
         Raises:
             sklearn.exceptions.NotFittedError: If the model is not fitted.
+            ValueError: If ``quantiles`` is not a scalar or 1-D array within
+                [0, 1]; the model has not run.
 
         Warns:
             FutureWarning: If ``X`` has no rows; from 0.7.0 that raises
                 ``ValueError``.
         """
         validation.check_is_fitted(self)
+        quantiles = _inputs.check_levels(quantiles, name="quantiles")
         return np.concatenate(
             [
                 dist.ppf(quantiles)
@@ -454,8 +458,7 @@ class BaseDensityRegressor(
                 ``ValueError``.
         """
         validation.check_is_fitted(self)
-        if not 0.0 < coverage < 1.0:
-            raise ValueError(f"coverage must lie in (0, 1): {coverage=}")
+        _inputs.check_coverage(coverage, name="coverage")
         return np.concatenate(
             [
                 dist.interval(coverage)
