@@ -170,17 +170,45 @@ Its rank of each query value replaces every step by a normal CDF $\Phi$:
 $$
 \tilde r(v) = \operatorname{clip}\Bigl(\frac{1}{n}\sum_{k} m_k\,
 \Phi\Bigl(\frac{v - e_k}{h}\Bigr),\; r_{\min},\; r_{\max}\Bigr),
-\qquad h = \min\Bigl(\frac{1}{2}, \frac{d}{2m}\Bigr)\,g,
+\qquad h = \max\Bigl(\min\Bigl(\frac{1}{2}, \frac{d}{2m}\Bigr)\,g,\;
+\frac{s_{\max}}{2}\Bigr),
 $$
 
 where $g$ is the median gap between consecutive distinct context values of the
-column, $d$ their number, and $m$ is `n_steps` (1 for `"gradient"`). The ranks
-of the context rows stay exact. A Riemann sum with spacing $s$ integrates a
-normal bump of width $h$ to within $2e^{-2\pi^2 h^2/s^2}$ of its mass, 1.4% at
-$h = s/2$. One step of the path crosses about $d/m$ gaps or fewer, so
+column, $d$ their number, $m$ is `n_steps` (1 for `"gradient"`), and
+$s_{\max}$ is the largest step that the row's path takes in the values of this
+column that the network ranks, between consecutive points from the baseline to
+the row (0 for `"gradient"`). The ranks of the context rows stay exact.
+
+A Riemann sum with spacing $s$ integrates a normal bump of width $h$ to within
+$2e^{-2\pi^2 h^2/s^2}$ of its mass, 1.4% at $h = s/2$. When the values that
+the network ranks are an affine function of the features, as when the features
+are the model's own columns with `transforms=("none",)`, the path moves each
+column in equal steps, and one step crosses about $d/m$ gaps or fewer, so
 $h = dg/(2m)$ keeps $h \geq s/2$; at $h = g/2$ neighbouring steps overlap, and
-$\tilde r$ is linear between context values to 1.4%. As $m$ grows, $h$
-shrinks, and the smoothed model tends to the model itself.
+$\tilde r$ is linear between context values to 1.4%. Anything nonlinear before
+the network, such as a step of a pipeline, an encoder, or a transform that
+lazy or the model's own package applies, makes the path straight in the
+features but not in the ranked values: a column can move in uneven steps, and
+one step can cross many context values. The term $s_{\max}/2$ keeps
+$h \geq s/2$ wherever the ranked values move smoothly along the path, and so
+$s_{\max}$ shrinks as $m$ grows. Each row has its own $h$ in each column, set by
+its own path alone, and the same at every point of the path, the baseline
+included. As $m$ grows, $h$ shrinks, and the smoothed model tends to the model
+itself.
+
+A column whose ranked values do not move smoothly does not converge. One case
+is a column of float rounding noise, as when a `Tabularizer` keeps more columns
+than its embeddings' rank: its values jump between neighbouring points of the
+path, and the network ranks that noise as any other column
+([#450](https://github.com/biprateep/lazy-tfm/issues/450)).
+
+The longer the path's steps, the wider $h$, so the smoothing gap grows with
+the baseline's distance from the context. A baseline far outside it, such as
+padding tokens for a text encoder, gives the widest. On the test fakes of a
+text encoder before TabPFN v3.5, from a baseline of padding tokens, the largest
+gap was 1.09%, 0.56% and 0.17% of the largest gain at 128, 512 and 2,048
+steps.
 
 `explanation.full_values`, `base_values` and `sum_error` are then the smoothed
 model's, and `explanation.smoothing_gap` holds each statistic of the smoothed

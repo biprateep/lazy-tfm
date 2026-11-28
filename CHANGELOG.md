@@ -419,12 +419,16 @@ change the API.
   values, a step function of the query whose gradient is zero, so
   integrated gradients missed 9% to 36% of the gain at any `n_steps`, and
   more on tied data. The gradient methods now attribute a smoothed model,
-  whose ranks of the query values replace each step by a normal CDF that
-  narrows as `n_steps` grows; their values, `full_values`, `base_values`
-  and `sum_error` change, and `sum_error` now falls with `n_steps`.
-  `Explanation.smoothing_gap` reports how far the smoothed model is from
-  the model itself, and `explain` warns when one value fills at least a
-  tenth of a column's context rows, where the two differ most.
+  whose ranks of the query values replace each step by a normal CDF; their
+  values, `full_values`, `base_values` and `sum_error` change, and
+  `sum_error` now falls with `n_steps`. The CDF's width is set by each
+  row's own path and narrows as `n_steps` grows, so this holds also behind
+  a step before the model, such as a pretrained encoder or a nonlinear
+  transform in a `LazyPipeline`: on the test fake of a text encoder,
+  `sum_error` is 2.1%, 1.2% and 0.54% of the largest gain at 128, 512 and
+  2,048 steps. `Explanation.smoothing_gap` reports how far the smoothed
+  model is from the model itself, and `explain` warns when one value fills
+  at least a tenth of a column's context rows, where the two differ most.
   `explain_context`'s gradient still goes through the exact ranks, and
   warns that it misses what they carry. `predict` and the golden densities
   are unchanged.

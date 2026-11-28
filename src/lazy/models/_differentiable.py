@@ -205,7 +205,7 @@ def standardized_members(
     return torch.stack([both[:, shuffle] for shuffle in shuffles]).float()
 
 
-# The n_steps of the rank smoothing of the passes run in this context, or
+# The n_points of the rank smoothing of the passes run in this context, or
 # None for exact ranks: a context variable, so that a pass in another thread
 # or task is never smoothed by this one.
 _RANK_SMOOTHING: contextvars.ContextVar[int | None] = contextvars.ContextVar(
@@ -218,7 +218,7 @@ _SOFT_RANK_BUDGET = 1 << 24
 
 
 @contextlib.contextmanager
-def smoothed_ranks(n_steps: int) -> Iterator[None]:
+def smoothed_ranks(n_points: int) -> Iterator[None]:
     """Smooths the ranks of query cells in the passes run inside.
 
     A backend whose network ranks the query cells (its
@@ -227,14 +227,17 @@ def smoothed_ranks(n_steps: int) -> Iterator[None]:
     ignore it.
 
     Args:
-        n_steps: The points at which the gradient is taken on each path:
-            ``n_steps`` of integrated gradients, 1 for a gradient at one
-            point. It sets the bandwidth; see :func:`soft_rank_offsets`.
+        n_points: The points of each path in every pass inside: the query
+            rows of a pass are ``n_points`` blocks of the same rows, block
+            ``k`` holding each row's ``k``-th point along its path. It is
+            ``n_steps + 1`` for integrated gradients, whose paths start at
+            the baseline, and 1 for a gradient at one point. It sets the
+            bandwidth; see :func:`soft_rank_offsets`.
 
     Yields:
         Nothing; the smoothing ends when the block does.
     """
-    token = _RANK_SMOOTHING.set(n_steps)
+    token = _RANK_SMOOTHING.set(n_points)
     try:
         yield
     finally:
@@ -242,12 +245,12 @@ def smoothed_ranks(n_steps: int) -> Iterator[None]:
 
 
 def rank_smoothing() -> int | None:
-    """The ``n_steps`` of the passes run now, or ``None`` for exact ranks."""
+    """The ``n_points`` of the passes run now, or ``None`` for exact ranks."""
     return _RANK_SMOOTHING.get()
 
 
 def soft_rank_offsets(
-    values: Any, edges: Any, below: Any, at_most: Any, n_steps: int
+    values: Any, edges: Any, below: Any, at_most: Any, n_points: int
 ) -> Any:
     """What smoothing adds to the exact midrank count of each query value.
 
@@ -262,31 +265,33 @@ def soft_rank_offsets(
     gradient is ``sum_k m_k phi(z_k) / h``, a kernel density of the
     context; it tends to the exact count as ``h`` goes to 0.
 
-    The bandwidth is ``h = alpha * g``, where ``g`` is the median gap
-    between consecutive distinct edges of the column, ``d`` their number,
-    and ``alpha = min(1/2, d / (2 * n_steps))``. A Riemann sum with spacing
-    ``s`` integrates a normal bump of width ``h`` to within
-    ``2 exp(-2 pi^2 h^2 / s^2)`` of its mass, 1.4% at ``h = s / 2``. One of
-    ``n_steps`` steps of a path crosses at most about ``d / n_steps`` of the
-    column's gaps, so ``alpha = d / (2 n_steps)`` keeps ``h >= s / 2``; at
-    ``alpha = 1/2`` neighbouring steps overlap, and their sum is linear
-    between context values to 1.4%, whatever ``s``. A column of one
-    distinct value has no gap to scale ``h`` by, and stays exact.
+    The bandwidth of a cell is ``h = max(min(1/2, d / (2 m)) g, s / 2)``,
+    where ``g`` is the median gap between consecutive distinct edges of the
+    column, ``d`` their number, ``m = max(1, n_points - 1)`` the steps of
+    the path, and ``s`` the largest step that the cell takes between
+    consecutive points of its own path. So it depends on the cell's own
+    path, is the same at each of its points, and depends on no other
+    query. The interpretability guide (``docs/guide/interpretability.md``)
+    gives the reason. A column of one distinct value has no gap to scale
+    ``h`` by, and stays exact.
 
-    The edges are constants: no gradient reaches them. The work is chunked
-    so that about ``_SOFT_RANK_BUDGET`` pairs of a value and an edge are
-    held at once, in the forward and in the backward pass.
+    The edges are constants, and so is the bandwidth: no gradient reaches
+    them. The work is chunked so that about ``_SOFT_RANK_BUDGET`` pairs of
+    a value and an edge are held at once, in the forward and in the
+    backward pass.
 
     Args:
         values: The query values, a float torch tensor of shape
-            (..., n_queries).
+            (..., n_queries), the ``n_points`` points of each path
+            ``n_queries / n_points`` apart, as :func:`smoothed_ranks`
+            states.
         edges: Each column's edges, sorted, a torch tensor of shape
             (..., n_edges), with the leading shape of ``values``. An edge
             may repeat.
         below: The context rows strictly below each edge, of that shape.
         at_most: The context rows at most equal to each edge, of that
             shape.
-        n_steps: The points at which the gradient is taken on each path.
+        n_points: The points of each path among the queries.
 
     Returns:
         The offsets, in context rows, of the shape and dtype of
@@ -303,13 +308,28 @@ def soft_rank_offsets(
     median = torch.where(gaps > 0, gaps, torch.nan).nanmedian(
         dim=-1, keepdim=True
     )
-    alpha = (n_distinct / (2.0 * n_steps)).clamp(max=0.5)
+    n_steps = max(1, n_points - 1)
+    # Each path's largest step, of shape (..., n_queries / n_points).
+    path = values.detach().unflatten(-1, (n_points, -1))
+    if n_points > 1:
+        step = path.diff(dim=-2).abs().amax(dim=-2)
+    else:
+        step = torch.zeros_like(path[..., 0, :])
+    # Both halves are the h >= s / 2 of the Riemann bound in the guide.
+    bandwidth = 0.5 * torch.maximum(
+        (n_distinct / n_steps).clamp(max=1.0) * median.values, step
+    )
     # A column of one value has no gap: its weights go to 0 and its
     # bandwidth to 1, so that its offset is 0 with a finite gradient.
     smooth = n_distinct > 1
     weights = torch.where(distinct & smooth, at_most - below, 0.0)
-    bandwidth = torch.where(smooth, alpha * median.values, 1.0)
-    return _soft_rank_function().apply(values, edges, weights, bandwidth)
+    bandwidth = torch.where(smooth, bandwidth, 1.0)
+    return _soft_rank_function().apply(
+        values,
+        edges,
+        weights,
+        bandwidth.unsqueeze(-2).expand(path.shape).flatten(-2),
+    )
 
 
 def _soft_rank_chunks(values: Any, edges: Any) -> Iterator[slice]:
@@ -332,7 +352,7 @@ def _soft_rank_sums(
         values: Query values, shape (..., n_queries).
         edges: Edges, shape (..., n_edges).
         weights: Each edge's weight, shape (..., n_edges).
-        bandwidth: Each column's bandwidth, shape (..., 1).
+        bandwidth: Each query value's bandwidth, shape (..., n_queries).
         derivative: Whether to sum ``phi(z)`` in place of the steps'
             offsets.
 
@@ -344,7 +364,7 @@ def _soft_rank_sums(
     out = torch.empty_like(values)
     for chunk in _soft_rank_chunks(values, edges):
         z = values[..., chunk, None] - edges[..., None, :]
-        z /= bandwidth[..., None]
+        z /= bandwidth[..., chunk, None]
         if derivative:
             terms = torch.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
         else:

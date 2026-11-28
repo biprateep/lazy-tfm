@@ -358,21 +358,36 @@ def _ranked_context():
 
 
 # Column 0 of _ranked_context has 4 distinct values and gaps 1, 1, 2, so its
-# bandwidth is min(1/2, 4 / (2 n_steps)) median gaps of 1.
-@pytest.mark.parametrize(("n_steps", "bandwidth"), [(1, 0.5), (16, 0.125)])
+# bandwidth is min(1/2, 4 / (2 m)) median gaps of 1, m = max(1, n_points -
+# 1), or half the largest step of the query's path if more.
+_SIX = [-1.0, 0.0, 0.7, 1.0, 3.0, 5.0]
+
+
+@pytest.mark.parametrize(
+    ("values", "n_points", "bandwidth"),
+    [
+        (_SIX, 1, [0.5] * 6),
+        # 3 paths: -1 to 1, 0 to 3 and 0.7 to 5.
+        (_SIX, 2, [1.0, 1.5, 2.15] * 2),
+        # One path, whose largest step is 2.
+        (_SIX, 6, [1.0] * 6),
+        # One path of 8 steps of 1/4: min(1/2, 4 / 16) = 1/4 is more.
+        (np.arange(9) / 4 - 0.5, 9, [0.25] * 9),
+    ],
+)
 def test_soft_ranks_are_a_normal_cdf_at_each_distinct_context_value(
-    n_steps, bandwidth
+    values, n_points, bandwidth
 ):
     (edges, below, at_most), distinct, counts = _ranked_context()
-    values = np.array([-1.0, 0.0, 0.7, 1.0, 3.0, 5.0])
+    values = np.asarray(values)
     queries = torch.tensor(np.stack([values, values])[None])
     offsets = _differentiable.soft_rank_offsets(
-        queries, edges, below, at_most, n_steps
+        queries, edges, below, at_most, n_points
     ).numpy()[0]
     exact = ((values[:, None] > distinct) * counts).sum(1) + 0.5 * (
         (values[:, None] == distinct) * counts
     ).sum(1)
-    z = (values[:, None] - distinct) / bandwidth
+    z = (values[:, None] - distinct) / np.array(bandwidth)[:, None]
     soft = (stats.norm.cdf(z) * counts).sum(1)
     np.testing.assert_allclose(exact + offsets[0], soft, atol=1e-12)
     # Column 1 has one value, no gap to scale by: it stays exact.
@@ -382,20 +397,23 @@ def test_soft_ranks_are_a_normal_cdf_at_each_distinct_context_value(
 def test_soft_ranks_have_the_gradient_of_their_values(monkeypatch):
     ranked, _, _ = _ranked_context()
     values = torch.tensor(
-        [[[-0.3, 0.2, 0.9, 1.6, 3.1], [2.0, 3.0, 3.5, 4.0, 9.0]]],
+        [[[-0.3, 0.2, 0.9, 1.6, 3.1, 3.6], [2.0, 3.0, 3.5, 4.0, 9.0, 9.5]]],
         dtype=torch.float64,
         requires_grad=True,
     )
 
-    def offsets(queries):
-        return _differentiable.soft_rank_offsets(queries, *ranked, 4)
+    def offsets(queries, n_points=1):
+        return _differentiable.soft_rank_offsets(queries, *ranked, n_points)
 
+    # The bandwidth of a path of several points moves with its values, and
+    # is held constant: gradcheck takes paths of one point.
     assert torch.autograd.gradcheck(offsets, (values,))
-    whole = offsets(values)
+    # 3 paths of 2 points per column, each with its own bandwidth.
+    whole = offsets(values, 2)
     (gradient,) = torch.autograd.grad(whole.sum(), values)
     # One query value at a time, in the forward and the backward pass.
     monkeypatch.setattr(_differentiable, "_SOFT_RANK_BUDGET", 1)
-    chunked = offsets(values)
+    chunked = offsets(values, 2)
     np.testing.assert_array_equal(chunked.detach(), whole.detach())
     np.testing.assert_array_equal(
         torch.autograd.grad(chunked.sum(), values)[0], gradient

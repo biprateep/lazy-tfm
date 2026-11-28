@@ -848,12 +848,12 @@ def test_the_differentiable_pass_matches_predict_on_the_checkpoint(
     assert query.grad.isfinite().all()
 
 
-def _upstream_ranks(values, context, n_steps):
+def _upstream_ranks(values, context, n_points):
     """Upstream's ranks of query values in one column, exact and smoothed.
 
     Both run upstream's own ``_in_context_ecdf`` on the context rows then
     the queries, as its network does; the smoothed one inside lazy's
-    smoothing, with the ``n_steps`` given.
+    smoothing, with the ``n_points`` given.
     """
     torch = pytest.importorskip("torch")
     architecture = pytest.importorskip("tabpfn.architectures.tabpfn_v3_5")
@@ -862,7 +862,7 @@ def _upstream_ranks(values, context, n_steps):
     ecdf = architecture._build_ecdf_context(cells, len(context), 8192)
     rows = slice(len(context), None)
     exact = architecture._in_context_ecdf(cells, ecdf)[0, rows, 0]
-    with tabpfn._soft_query_ranks((len(context), len(values), n_steps)):
+    with tabpfn._soft_query_ranks((len(context), len(values), n_points)):
         soft = architecture._in_context_ecdf(cells, ecdf)[0, rows, 0]
     return exact.numpy(), soft.numpy()
 
@@ -878,7 +878,8 @@ def test_soft_ranks_are_continuous_across_the_contexts_tied_extremes():
     # Far beyond both extremes the smoothed rank is upstream's own.
     far = (values < -1.5) | (values > 5.5)
     np.testing.assert_allclose(soft[far], exact[far], atol=1e-6)
-    # As h goes to 0, it is upstream's everywhere, the extremes included.
-    values = np.concatenate([values, [0.0, 4.0]])
-    exact, soft = _upstream_ranks(values, context, 10**7)
+    # As h goes to 0, it is upstream's everywhere, the extremes included:
+    # paths that stay put over 10**6 points have h = 5 / (2 (10**6 - 1)).
+    values = np.array([-1.0, 0.0, 0.5, 2.5, 4.0, 5.0])
+    exact, soft = _upstream_ranks(np.tile(values, 10**6), context, 10**6)
     np.testing.assert_allclose(soft, exact, atol=1e-5)
