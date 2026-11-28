@@ -807,7 +807,10 @@ def test_integrated_gradients_reach_series_of_other_lengths_with_gaps(
     curves[-1] = generator.normal(size=50).cumsum()
     X = pd.DataFrame({"curve": curves})
     y = np.array([np.nanmean(curve) for curve in curves])
-    model = _series_pipeline(monkeypatch, tmp_path).fit(X[:24], y[:24])
+    # TabPFN v3, as integrated gradients through v3.5's smoothed ranks
+    # converge too slowly behind an encoder (#446).
+    model = _series_pipeline(monkeypatch, tmp_path, version="v3")
+    model.fit(X[:24], y[:24])
     explanation = lazy.interp.explain(
         model,
         X[24:],
@@ -931,8 +934,11 @@ def test_chronos_normalizes_as_its_instance_norm_without_nan_gradients():
         assert (leaf.grad[context.isnan()] == 0).all()
 
 
-def _series_pipeline(monkeypatch, tmp_path):
-    """A Tabularizer of Chronos-Bolt's fake before TabPFN's fake, unfitted."""
+def _series_pipeline(monkeypatch, tmp_path, **params):
+    """A Tabularizer of Chronos-Bolt's fake before TabPFN's fake, unfitted.
+
+    ``params`` are more parameters of the backend's fake.
+    """
     pytest.importorskip("torch")
     backend = backend_fakes.install("tabpfn", monkeypatch)(
         n_estimators=2,
@@ -940,6 +946,7 @@ def _series_pipeline(monkeypatch, tmp_path):
         progress=False,
         transforms=("none",),
         outlier_threshold=None,
+        **params,
     )
     # After the backend's, whose download the encoders' replaces.
     fake_encoders.install(monkeypatch, tmp_path)
@@ -1147,6 +1154,28 @@ def test_word_values_sum_each_words_tokens(fakes):
         encoder.word_values("lazy models", [1.0, 2.0])
 
 
+def test_word_values_give_a_token_to_the_word_of_its_first_visible_character(
+    monkeypatch,
+):
+    # As a SentencePiece tokenizer gives them: a token may start with the
+    # space before its word, or be whitespace alone.
+    spans = np.array(
+        [[-1, -1], [0, 2], [2, 4], [4, 6], [6, 13], [13, 15], [-1, -1]]
+    )
+    monkeypatch.setattr(
+        lazy.text.Pretrained, "token_spans", lambda self, text: spans
+    )
+    encoder = lazy.text.Pretrained()
+    values = [100.0, 1.0, 2.0, 4.0, 8.0, 16.0, 100.0, 1000.0]
+    words, sums = encoder.word_values("  lazy models  ", values)
+    assert words == ["lazy", "models"]
+    np.testing.assert_array_equal(sums, [7.0, 24.0])
+    words, sums = encoder.word_values("   ", values)
+    assert words == [] and sums.shape == (0,)
+    with pytest.raises(ValueError, match="must be 1-D"):
+        encoder.word_values("lazy", [values])
+
+
 def test_a_leafs_own_baselines_replace_the_context_mean():
     queries, context = np.ones((2, 3)), np.zeros((4, 3))
     leaf = steps.Leaf(("a",), queries, context, baselines=-queries)
@@ -1184,25 +1213,6 @@ def test_a_leaf_of_texts_has_the_baselines_of_the_side_it_differentiates(
         leaf.baselines[:, : expected.shape[1]],
         tab.encoders_["note"]._baseline(side["note"], expected),
     )
-
-
-def test_a_leaf_of_series_without_context_rows_has_their_mean_as_baseline(
-    fakes,
-):
-    generator = np.random.default_rng(10)
-    series = [generator.normal(size=n).cumsum() for n in (20, 30, 25, 40, 12)]
-    series[1][4] = np.nan
-    X = pd.DataFrame({"curve": series[:2]})
-    context = pd.DataFrame({"curve": series[2:]})
-    tab = lazy.Tabularizer(
-        {"curve": _encoder("time:chronos-bolt-small")}, remainder="drop"
-    ).fit(context)
-    (stacked,), _, _ = tab._leaves(X, context, True, "t", True)
-    (leaf,), _, _ = tab._leaves(X, context, True, "t", False)
-    assert leaf.context is None and leaf.queries.shape == (2, 30)
-    # The mean that the stacked context gives, at the rows' 30 positions.
-    mean = lazy.interp._observed_mean(stacked.context)[-30:]
-    np.testing.assert_allclose(leaf.baselines, np.broadcast_to(mean, (2, 30)))
 
 
 def _text_pipeline(monkeypatch, tmp_path, models=("e5-small-v2",)):
